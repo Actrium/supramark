@@ -1,0 +1,47 @@
+[package]
+name = "mermaid-little"
+version = "11.14.0-1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Lightweight .mmd to .svg converter — byte-exact SVG parity with upstream Mermaid"
+homepage = "https://github.com/kookyleo/mermaid-little"
+repository = "https://github.com/kookyleo/mermaid-little"
+keywords = ["mermaid", "mmd", "svg", "diagram"]
+categories = ["graphics", "command-line-utilities"]
+exclude = [
+    "AGENTS.md",
+    "PLAN.md",
+    "*.log",
+    "*.svg",
+    "tests/",
+    "scripts/",
+    "docs/",
+    ".claude/",
+]
+
+[[bin]]
+name = "mermaid-little"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:env_logger"]
+
+[dependencies]
+thiserror = "1"
+log = "0.4"
+env_logger = { version = "0.11", optional = true }
+# Hierarchical directed graph layout. Pinned to a kookyleo fork until
+# dagre-rs has a published release that exposes intersectPolygon /
+# intersectRect helpers required by mermaid's edge-endpoint clipping.
+dagre = { git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
