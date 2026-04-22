@@ -1,0 +1,31 @@
+  ---
+  title: Merge feature to advanced main (bottom-to-top)
+  ---
+  gitGraph BT:
+  commit
+  branch newbranch
+  checkout newbranch
+  commit
+  checkout main
+  commit
+  merge newbranch
+  </pre
+>
+<h2>Two-way merges</h2>
+<pre class="mermaid">
+---
+title: Two-way merges (left-to-right)
+---
+gitGraph LR:
+commit
+branch develop
+checkout develop
+commit
+checkout main
+merge develop
+commit
+checkout develop
+merge main
+commit
+checkout main
+merge develop
