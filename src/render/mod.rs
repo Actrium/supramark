@@ -4,6 +4,7 @@
 
 pub mod edges;
 pub mod markers;
+pub mod rough;
 pub mod shapes;
 pub mod svg;
 pub mod svg_block;
