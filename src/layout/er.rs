@@ -45,6 +45,44 @@ pub const NODE_SPACING: f64 = 140.0;
 /// `config.er.rankSpacing`.
 pub const RANK_SPACING: f64 = 80.0;
 
+/// Per-attribute row — column widths + y placement, as computed by
+/// [`compute_attr_layout`]. Consumed by the rough-based entity
+/// renderer in `svg_er.rs` to emit column labels and row rects.
+#[derive(Debug, Clone, Default)]
+pub struct AttrRow {
+    pub type_text: String,
+    pub name_text: String,
+    pub keys_text: String,
+    pub comment_text: String,
+    pub type_width: f64,
+    pub name_width: f64,
+    pub keys_width: f64,
+    pub comment_width: f64,
+    pub row_height: f64,
+    /// y-offset from the top of the attribute area (not the entity origin).
+    pub y_offset: f64,
+}
+
+/// Aggregate per-entity attribute layout state — everything the
+/// renderer needs to reproduce upstream's `erBox.ts` attribute pass.
+#[derive(Debug, Clone, Default)]
+pub struct AttrLayout {
+    pub rows: Vec<AttrRow>,
+    pub name_bbox_width: f64,
+    /// `nameBBox.height + TEXT_PADDING` — matches upstream variable.
+    pub name_bbox_height: f64,
+    pub max_type_width: f64,
+    pub max_name_width: f64,
+    pub max_keys_width: f64,
+    pub max_comment_width: f64,
+    pub keys_present: bool,
+    pub comment_present: bool,
+    /// `PADDING * 1.25` when htmlLabels is falsy (ER default).
+    pub padding: f64,
+    /// `TEXT_PADDING * 1.25` when htmlLabels is falsy (ER default).
+    pub text_padding: f64,
+}
+
 /// One laid-out entity — renderer just copies `x/y/width/height` out.
 #[derive(Debug, Clone)]
 pub struct EntityLayout {
@@ -59,6 +97,8 @@ pub struct EntityLayout {
     pub css_classes: String,
     /// Whether this entity has attributes → needs the richer erBox path.
     pub has_attrs: bool,
+    /// Populated iff `has_attrs`. Holds per-row + per-column geometry.
+    pub attr_layout: Option<AttrLayout>,
 }
 
 /// One laid-out relationship (edge + label geometry).
@@ -123,6 +163,157 @@ fn entity_box_size(label_w: f64, label_h: f64) -> (f64, f64) {
     (width, height)
 }
 
+/// Port of upstream `erBox.ts`'s attribute-bearing layout pass.
+///
+/// Upstream flow (abbreviated):
+/// * `PADDING = config.er.diagramPadding` (20); `TEXT_PADDING = entityPadding` (15).
+/// * When `!config.htmlLabels`, both `PADDING *= 1.25` / `TEXT_PADDING *= 1.25`.
+///   Mermaid's default for the ER sub-config leaves `htmlLabels` unset (null-ish),
+///   so the 1.25 multiplier is applied — matches the reference output byte-for-byte.
+/// * For each attribute, measure `{type, name, keys, comment}` at the same 14 px
+///   sans-serif font as the rest of the ER renderer.
+/// * `max<col>Width = max(col_text_w + PADDING)` across rows.
+/// * `keysPresent` / `commentPresent` are **false** when the column's total max
+///   is `≤ PADDING` (i.e. every row's text was empty).
+/// * `rowHeight = max_column_text_height + TEXT_PADDING`.
+/// * `nameBBox.height = label_height + TEXT_PADDING` (upstream mutates in place).
+/// * `totalWidthSections = 4 - (keysPresent?0:1) - (commentPresent?0:1)`.
+///   If `nameBBox.width + PADDING*2 > sum(max*Width)`, distribute the diff.
+/// * `maxWidth = sum(maxTypeW + maxNameW + maxKeysW + maxCommentW)` (post-adjust).
+/// * `w = max(shapeBBox.w + PADDING*2, node.width || 0, maxWidth)`.
+/// * `h = max(totalShapeBBoxHeight + nameBBox.height, node.height || 0)`.
+///
+/// The returned layout is consumed by the renderer **and** contributes the
+/// entity's post-measure `(width, height)` used by dagre.
+pub(crate) fn compute_attr_layout(
+    name_label: &str,
+    attributes: &[crate::model::er::Attribute],
+) -> AttrLayout {
+    // ── 1. Base padding (htmlLabels-disabled branch) ────────────────
+    let padding = PADDING * 1.25; // = 25
+    let text_padding = 15.0_f64 * 1.25; // = 18.75 (entityPadding default)
+
+    let label_h = measure_label_height();
+    let name_w = measure_width(name_label);
+    // Upstream: nameBBox is the `<g class="name">`'s box → label-width/label-height.
+    // Then the code mutates `nameBBox.height += TEXT_PADDING;` — we apply that here.
+    let name_bbox_width = name_w;
+    let name_bbox_height = label_h + text_padding;
+
+    // ── 2. Per-row widths / heights ──────────────────────────────────
+    let mut rows: Vec<AttrRow> = Vec::with_capacity(attributes.len());
+    let mut max_type_w = 0.0_f64;
+    let mut max_name_w = 0.0_f64;
+    let mut max_keys_w = 0.0_f64;
+    let mut max_comment_w = 0.0_f64;
+    let mut y_offset = 0.0_f64;
+    for attr in attributes {
+        let keys_joined = attr.keys.join(",");
+        // Attribute type text goes through upstream's parseGenericTypes,
+        // turning `foo~Bar~` into `foo<Bar>` — the FO width used by the
+        // renderer is measured on the PROCESSED text (so it matches the
+        // reference SVG's `foreignObject width="…"` exactly).
+        let processed_type = crate::render::svg_er::parse_generic_types_pub(&attr.attr_type);
+        let type_w = measure_width(&processed_type);
+        let name_w = measure_width(&attr.name);
+        let keys_w = measure_width(&keys_joined);
+        let comment_w = measure_width(&attr.comment);
+        // `max<Col>Width = Math.max(max<Col>Width, box.width + PADDING);`
+        max_type_w = max_type_w.max(type_w + padding);
+        max_name_w = max_name_w.max(name_w + padding);
+        max_keys_w = max_keys_w.max(keys_w + padding);
+        max_comment_w = max_comment_w.max(comment_w + padding);
+        let row_h = label_h.max(label_h).max(label_h).max(label_h) + text_padding;
+        rows.push(AttrRow {
+            // Store the processed (generic-unwrapped) form — the
+            // renderer HTML-escapes this at emission time.
+            type_text: processed_type,
+            name_text: attr.name.clone(),
+            keys_text: keys_joined,
+            comment_text: attr.comment.clone(),
+            type_width: type_w,
+            name_width: name_w,
+            keys_width: keys_w,
+            comment_width: comment_w,
+            row_height: row_h,
+            y_offset,
+        });
+        y_offset += row_h;
+    }
+
+    // ── 3. keysPresent / commentPresent guards ───────────────────────
+    let mut total_sections = 4;
+    let mut keys_present = true;
+    let mut comment_present = true;
+    if max_keys_w <= padding {
+        keys_present = false;
+        max_keys_w = 0.0;
+        total_sections -= 1;
+    }
+    if max_comment_w <= padding {
+        comment_present = false;
+        max_comment_w = 0.0;
+        total_sections -= 1;
+    }
+
+    // ── 4. nameBBox.width +  2*PADDING vs sum adjustment ────────────
+    let sum_cols = max_type_w + max_name_w + max_keys_w + max_comment_w;
+    if name_bbox_width + padding * 2.0 - sum_cols > 0.0 {
+        let diff = name_bbox_width + padding * 2.0 - sum_cols;
+        max_type_w += diff / total_sections as f64;
+        max_name_w += diff / total_sections as f64;
+        if max_keys_w > 0.0 {
+            max_keys_w += diff / total_sections as f64;
+        }
+        if max_comment_w > 0.0 {
+            max_comment_w += diff / total_sections as f64;
+        }
+    }
+
+    AttrLayout {
+        rows,
+        name_bbox_width,
+        name_bbox_height,
+        max_type_width: max_type_w,
+        max_name_width: max_name_w,
+        max_keys_width: max_keys_w,
+        max_comment_width: max_comment_w,
+        keys_present,
+        comment_present,
+        padding,
+        text_padding,
+    }
+}
+
+/// Total post-layout (w, h) for an attribute-bearing entity.
+/// Mirrors `erBox.ts`'s:
+///   `w = max(shapeBBox.w + PADDING*2, node.width||0, maxWidth)`
+///   `h = max(totalShapeBBoxHeight + nameBBox.height, node.height||0)`
+pub(crate) fn attr_entity_bbox(a: &AttrLayout) -> (f64, f64) {
+    // totalShapeBBoxHeight = sum(row.rowHeight)
+    let total_rows_h: f64 = a.rows.iter().map(|r| r.row_height).sum();
+    // shapeBBox.width + PADDING*2 — union of text foreignObject widths at x=0.
+    // For our purposes upstream's `shapeBBox` never exceeds `maxWidth` in the
+    // attribute-bearing case (per-row widths are already accounted for in
+    // the column widths), so compute maxWidth and take the larger.
+    let max_w = a.max_type_width + a.max_name_width + a.max_keys_width + a.max_comment_width;
+    // Upstream evaluates `shapeBBox.width + PADDING*2` against the pre-existing
+    // `<g class="name">` + attribute labels. The conservative clamp below
+    // matches all fixtures we've probed: max(maxWidth, shapeBBoxWidth+padding*2)
+    // where shapeBBoxWidth is the wider of (name_bbox_width, per-col max text_w).
+    let mut shape_bbox_w = a.name_bbox_width;
+    for r in &a.rows {
+        shape_bbox_w = shape_bbox_w
+            .max(r.type_width)
+            .max(r.name_width)
+            .max(r.keys_width)
+            .max(r.comment_width);
+    }
+    let w = max_w.max(shape_bbox_w + a.padding * 2.0);
+    let h = total_rows_h + a.name_bbox_height;
+    (w, h)
+}
+
 pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     // ── 1. Build unified LayoutData ─────────────────────────────────
     let mut data = LayoutData::default();
@@ -143,10 +334,15 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
             entity.label.clone()
         };
         let label_w = measure_width(&rendered_label);
-        // For the no-attribute case we can pre-size the box here so dagre
-        // routes around the real geometry. Attribute-bearing entities
-        // need a richer measurement — handled as a partial for now.
-        let (w, h) = entity_box_size(label_w, label_h);
+        let (w, h) = if entity.attributes.is_empty() {
+            // No-attribute case: pre-size the box so dagre routes around
+            // the real geometry.
+            entity_box_size(label_w, label_h)
+        } else {
+            // Attribute-bearing case: compute full erBox geometry.
+            let a = compute_attr_layout(&rendered_label, &entity.attributes);
+            attr_entity_bbox(&a)
+        };
         let mut n = Node::default();
         n.id = entity.id.clone();
         n.label = Some(rendered_label);
@@ -211,6 +407,11 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
             entity.label.clone()
         };
         let label_w = measure_width(&rendered_label);
+        let attr_layout = if entity.attributes.is_empty() {
+            None
+        } else {
+            Some(compute_attr_layout(&rendered_label, &entity.attributes))
+        };
         out.entities.push(EntityLayout {
             id: entity.id.clone(),
             label: rendered_label,
@@ -222,6 +423,7 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
             y,
             css_classes: entity.css_classes.clone(),
             has_attrs: !entity.attributes.is_empty(),
+            attr_layout,
         });
     }
 
@@ -265,7 +467,14 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
-    let acc = |min_x: &mut f64, min_y: &mut f64, max_x: &mut f64, max_y: &mut f64, x: f64, y: f64, w: f64, h: f64| {
+    let acc = |min_x: &mut f64,
+               min_y: &mut f64,
+               max_x: &mut f64,
+               max_y: &mut f64,
+               x: f64,
+               y: f64,
+               w: f64,
+               h: f64| {
         *min_x = min_x.min(x);
         *min_y = min_y.min(y);
         *max_x = max_x.max(x + w);
@@ -273,11 +482,27 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     };
     for e in &out.entities {
         // rect at local (-w/2, -h/2, w, h)
-        acc(&mut min_x, &mut min_y, &mut max_x, &mut max_y,
-            -e.width / 2.0, -e.height / 2.0, e.width, e.height);
+        acc(
+            &mut min_x,
+            &mut min_y,
+            &mut max_x,
+            &mut max_y,
+            -e.width / 2.0,
+            -e.height / 2.0,
+            e.width,
+            e.height,
+        );
         // FO at (0, 0, label_w, label_h)
-        acc(&mut min_x, &mut min_y, &mut max_x, &mut max_y,
-            0.0, 0.0, e.label_width, e.label_height);
+        acc(
+            &mut min_x,
+            &mut min_y,
+            &mut max_x,
+            &mut max_y,
+            0.0,
+            0.0,
+            e.label_width,
+            e.label_height,
+        );
     }
     for e in &out.edges {
         // The reference `pathBBox` parses the emitted `d` attribute which
@@ -285,11 +510,28 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         // that rounding here so bounds match.
         let r3 = |v: f64| (v * 1000.0).round() / 1000.0;
         for (x, y) in &e.points {
-            acc(&mut min_x, &mut min_y, &mut max_x, &mut max_y, r3(*x), r3(*y), 0.0, 0.0);
+            acc(
+                &mut min_x,
+                &mut min_y,
+                &mut max_x,
+                &mut max_y,
+                r3(*x),
+                r3(*y),
+                0.0,
+                0.0,
+            );
         }
         // Edge label FO at (0, 0, label_w, label_h)
-        acc(&mut min_x, &mut min_y, &mut max_x, &mut max_y,
-            0.0, 0.0, e.label_width, e.label_height);
+        acc(
+            &mut min_x,
+            &mut min_y,
+            &mut max_x,
+            &mut max_y,
+            0.0,
+            0.0,
+            e.label_width,
+            e.label_height,
+        );
     }
     // Snapshot the pre-title bounds — renderer needs `bounds.x + w/2`
     // for the title's `x` attribute.
@@ -303,8 +545,9 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     if let Some(title) = d.meta.title.as_deref() {
         if !title.trim().is_empty() {
             let tw = measure_width(title);
-            acc(&mut min_x, &mut min_y, &mut max_x, &mut max_y,
-                0.0, 0.0, tw, label_h);
+            acc(
+                &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, tw, label_h,
+            );
         }
     }
 
@@ -340,7 +583,15 @@ mod tests {
         assert_eq!(l.entities.len(), 2);
         let cust = &l.entities[0];
         // Reference cypress/er/01 bbox for CUSTOMER: width 119.1328125 / height 76.296875.
-        assert!((cust.width - 119.1328125).abs() < 1e-6, "CUSTOMER width {}", cust.width);
-        assert!((cust.height - 76.296875).abs() < 1e-6, "CUSTOMER height {}", cust.height);
+        assert!(
+            (cust.width - 119.1328125).abs() < 1e-6,
+            "CUSTOMER width {}",
+            cust.width
+        );
+        assert!(
+            (cust.height - 76.296875).abs() < 1e-6,
+            "CUSTOMER height {}",
+            cust.height
+        );
     }
 }

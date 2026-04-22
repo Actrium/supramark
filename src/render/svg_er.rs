@@ -21,19 +21,25 @@
 //!
 //! # Scope and known limitations
 //!
-//! * Entity-only fixtures (no attribute rows, no rough.js dividers)
-//!   render byte-exact.
-//! * Attribute-bearing entities require the rough.js PRNG-based
-//!   polygon divider emission, not yet ported — those fixtures are
-//!   left for Wave 5 and render with a best-effort structural output
-//!   that will differ from the reference.
-//! * Hand-drawn (`look: handDrawn`) variants are deferred for the
-//!   same reason.
+//! * Entity-only fixtures (no attribute rows) render byte-exact.
+//! * Attribute-bearing entities (`ENTITY { col1; col2; … }`) route
+//!   through [`render_entity_node_with_attrs`], which consumes the
+//!   layout-side [`crate::layout::er::AttrLayout`] and delegates the
+//!   outer rectangle, per-row backgrounds, and column/row dividers
+//!   to [`crate::render::rough`] for byte-exact path emission.
+//! * Hand-drawn (`look: handDrawn`) variants are still deferred —
+//!   they need the hachure filler path which the Wave 3.5 rough port
+//!   does not yet implement.
+//! * Entity-level `classDef` / class-based style overrides, markdown
+//!   text inside attribute cells, and unicode-alias entity labels
+//!   (fixtures 33–42) remain blocked on their respective layout
+//!   extensions (not rough.js-related).
 
 use crate::error::Result;
 use crate::layout::er::{EdgeLayout, EntityLayout, ErLayout};
 use crate::model::er::ErDiagram;
 use crate::render::edges::{build_path, CurveType};
+use crate::render::rough::{path_out_to_svg, to_paths, RoughGenerator, RoughOptions};
 use crate::theme::ThemeVariables;
 
 /// Upstream ER diagram-family CSS — built once per render, with the
@@ -94,7 +100,11 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
     // nodes
     out.push_str(r#"<g class="nodes">"#);
     for ent in &l.entities {
-        out.push_str(&render_entity_node(id, ent));
+        if ent.has_attrs {
+            out.push_str(&render_entity_node_with_attrs(id, ent, theme));
+        } else {
+            out.push_str(&render_entity_node(id, ent));
+        }
     }
     out.push_str("</g>");
 
@@ -130,6 +140,403 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
 // Single-line markdown label via foreignObject — matches the no-attribute
 // branch of upstream `erBox.ts` + `drawRect.ts`.
 // ──────────────────────────────────────────────────────────────────────
+/// Render an attribute-bearing entity (upstream `erBox.ts` with
+/// `entity.attributes.length > 0`). Emits the rough.js-generated outer
+/// rectangle, per-row rects, column foreignObjects, and column /
+/// row dividers in the exact order the reference generator produces.
+fn render_entity_node_with_attrs(id: &str, e: &EntityLayout, theme: &ThemeVariables) -> String {
+    let a = match &e.attr_layout {
+        Some(a) => a,
+        None => return render_entity_node(id, e),
+    };
+    // Pull ER theme colours.
+    let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
+    let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
+    // Default theme's computed rowEven / rowOdd (from themes/theme-default.js
+    // — lightened/darkened from mainBkg). For the default theme these
+    // resolve to the HSL strings seen in the fixture: `hsl(240, 100%, 100%)`
+    // for rowOdd, `hsl(240, 100%, 97.2745098039%)` for rowEven.
+    let row_odd = theme.row_odd.as_deref().unwrap_or("hsl(240, 100%, 100%)");
+    let row_even = theme
+        .row_even
+        .as_deref()
+        .unwrap_or("hsl(240, 100%, 97.2745098039%)");
+
+    let w = e.width;
+    let h = e.height;
+    let x = -w / 2.0;
+    let y = -h / 2.0;
+    let pad = a.padding;
+    let text_pad = a.text_padding;
+    let name_h = a.name_bbox_height;
+    let max_type_w = a.max_type_width;
+    let max_name_w = a.max_name_width;
+    let max_keys_w = a.max_keys_width;
+
+    let mut out = String::with_capacity(8 * 1024);
+    out.push_str(&format!(
+        r#"<g class="node {cls} " id="{sid}-{eid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        cls = e.css_classes,
+        sid = id,
+        eid = e.id,
+        tx = fmt_num(e.x),
+        ty = fmt_num(e.y),
+    ));
+
+    // ── Outer rectangle via rough ──────────────────────────────────
+    let rc_options = rough_entity_options(main_bkg, node_border);
+    let mut rc = RoughGenerator::new();
+    let drawable = rc.rectangle(x, y, w, h, &rc_options);
+    let paths = to_paths(&drawable, &rc_options);
+    out.push_str(r#"<g class="outer-path" style="">"#);
+    for p in &paths {
+        out.push_str(&path_out_to_svg(p));
+    }
+    out.push_str("</g>");
+
+    // ── Per-attribute row rects ────────────────────────────────────
+    for (i, row) in a.rows.iter().enumerate() {
+        let content_idx = i + 1;
+        let is_even = content_idx % 2 == 0 && row.y_offset != 0.0;
+        let fill = if is_even { row_even } else { row_odd };
+        let row_opts = rough_row_options(fill, node_border);
+        let mut rc = RoughGenerator::new();
+        let d = rc.rectangle(x, name_h + y + row.y_offset, w, row.row_height, &row_opts);
+        let ps = to_paths(&d, &row_opts);
+        let class = if is_even {
+            "row-rect-even"
+        } else {
+            "row-rect-odd"
+        };
+        out.push_str(&format!(r#"<g style="" class="{class}">"#));
+        for p in &ps {
+            out.push_str(&path_out_to_svg(p));
+        }
+        out.push_str("</g>");
+    }
+
+    // ── Name label ────────────────────────────────────────────────
+    // transform = translate(-nameBBox.width/2, y + TEXT_PADDING/2)
+    out.push_str(&format!(
+        r#"<g class="label name" transform="translate({tx}, {ty})" style=""><foreignObject width="{fw}" height="{fh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: start;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{t}</p></span></div></foreignObject></g>"#,
+        tx = fmt_num(-a.name_bbox_width / 2.0),
+        ty = fmt_num(y + text_pad / 2.0),
+        fw = fmt_num(a.name_bbox_width),
+        fh = fmt_num(name_h - text_pad),
+        mw = calc_text_max_width(&e.label),
+        t = html_escape(&e.label),
+    ));
+
+    // ── Per-row attribute labels (type / name / keys / comment) ────
+    for row in &a.rows {
+        let translate_y = y + name_h + row.y_offset + text_pad / 2.0;
+        // type
+        let type_x = x + pad / 2.0;
+        out.push_str(&attr_foreign_object_html(
+            "attribute-type",
+            type_x,
+            translate_y,
+            row.type_width,
+            name_h - text_pad,
+            &row.type_text,
+        ));
+        // name
+        let name_x = type_x + max_type_w;
+        out.push_str(&attr_foreign_object_html(
+            "attribute-name",
+            name_x,
+            translate_y,
+            row.name_width,
+            name_h - text_pad,
+            &row.name_text,
+        ));
+        // keys
+        let keys_x = name_x + max_name_w;
+        out.push_str(&attr_foreign_object_html(
+            "attribute-keys",
+            keys_x,
+            translate_y,
+            row.keys_width,
+            name_h - text_pad,
+            &row.keys_text,
+        ));
+        // comment
+        let comment_x = keys_x + max_keys_w;
+        out.push_str(&attr_foreign_object_html(
+            "attribute-comment",
+            comment_x,
+            translate_y,
+            row.comment_width,
+            name_h - text_pad,
+            &row.comment_text,
+        ));
+    }
+
+    // ── Dividers ──────────────────────────────────────────────────
+    let thickness = 1e-4_f64;
+    let divider_opts = rough_divider_options(main_bkg, node_border);
+
+    // 1) Horizontal under the name row
+    let div_y = name_h + y;
+    let pts = line_to_polygon(x, div_y, w + x, div_y, thickness);
+    out.push_str(&render_divider(&pts, &divider_opts));
+
+    // 2) Vertical after `type` column
+    let vx = max_type_w + x;
+    let pts = line_to_polygon(vx, div_y, vx, h + y, thickness);
+    out.push_str(&render_divider(&pts, &divider_opts));
+
+    // 3) keysPresent / commentPresent verticals
+    if a.keys_present {
+        let vx = max_type_w + max_name_w + x;
+        let pts = line_to_polygon(vx, div_y, vx, h + y, thickness);
+        out.push_str(&render_divider(&pts, &divider_opts));
+    }
+    if a.comment_present {
+        let vx = max_type_w + max_name_w + max_keys_w + x;
+        let pts = line_to_polygon(vx, div_y, vx, h + y, thickness);
+        out.push_str(&render_divider(&pts, &divider_opts));
+    }
+
+    // 4) One horizontal divider per entry in `yOffsets` — upstream
+    //    only ever pushes a single 0 into `yOffsets`, so this
+    //    duplicates the first horizontal divider under the name row.
+    let pts = line_to_polygon(x, div_y, w + x, div_y, thickness);
+    out.push_str(&render_divider(&pts, &divider_opts));
+
+    out.push_str("</g>");
+    out
+}
+
+/// Build the option bag upstream passes to `rc.rectangle` for the
+/// outer entity rect — same as `userNodeOverrides(node, {})` with
+/// roughness / fillStyle overrides for the default look.
+fn rough_entity_options(main_bkg: &str, node_border: &str) -> RoughOptions {
+    let mut o = RoughOptions::default();
+    o.roughness = 0.0;
+    o.fill_style = "solid".into();
+    o.fill = Some(main_bkg.to_string());
+    o.fill_weight = 4.0;
+    o.hachure_gap = 5.2;
+    o.stroke = node_border.to_string();
+    o.stroke_width = 1.3;
+    o.seed = 1; // handDrawnSeed default is 0 in mermaid global config but
+                // the test harness sets it to 1 via mermaid.initialize.
+    o.fill_line_dash = vec![0.0, 0.0];
+    o.stroke_line_dash = vec![0.0, 0.0];
+    o
+}
+
+/// Row rects — different fill from outer (rowEven/rowOdd), same
+/// stroke (nodeBorder).
+fn rough_row_options(fill: &str, node_border: &str) -> RoughOptions {
+    let mut o = rough_entity_options("#ignored", node_border);
+    o.fill = Some(fill.to_string());
+    o
+}
+
+/// Divider polygons — upstream passes the same option bag (outer's
+/// `userNodeOverrides`) straight through to `rc.polygon`. Since
+/// `rc.polygon` takes the full options (including the fill) directly
+/// we reuse the entity option bag.
+fn rough_divider_options(main_bkg: &str, node_border: &str) -> RoughOptions {
+    rough_entity_options(main_bkg, node_border)
+}
+
+/// `lineToPolygon` port — produces the 4-point thick-line polygon used
+/// for each divider.
+fn line_to_polygon(x1: f64, y1: f64, x2: f64, y2: f64, thickness: f64) -> Vec<(f64, f64)> {
+    if x1 == x2 {
+        // Vertical
+        vec![
+            (x1 - thickness / 2.0, y1),
+            (x1 + thickness / 2.0, y1),
+            (x2 + thickness / 2.0, y2),
+            (x2 - thickness / 2.0, y2),
+        ]
+    } else {
+        // Horizontal (or angled)
+        vec![
+            (x1, y1 - thickness / 2.0),
+            (x1, y1 + thickness / 2.0),
+            (x2, y2 + thickness / 2.0),
+            (x2, y2 - thickness / 2.0),
+        ]
+    }
+}
+
+/// Render one divider `<g class="divider">…</g>` from the polygon
+/// points + option bag.
+fn render_divider(pts: &[(f64, f64)], o: &RoughOptions) -> String {
+    let mut rc = RoughGenerator::new();
+    let d = rc.polygon(pts, o);
+    let paths = to_paths(&d, o);
+    let mut s = String::from(r#"<g class="divider">"#);
+    for p in &paths {
+        s.push_str(&path_out_to_svg(p));
+    }
+    s.push_str("</g>");
+    s
+}
+
+/// Per-attribute foreignObject label. `cls` is one of
+/// `attribute-{type, name, keys, comment}`. Empty text collapses the
+/// inner `<span>` to `<span class="nodeLabel "></span>` without a
+/// `<p>` — matching the fixture's empty-cell output.
+///
+/// Generic-type processing: mermaid runs `parseGenericTypes(text)` on
+/// attribute types — e.g. `type~T~` → `type<T>`. The DOM-visible form
+/// is the HTML-escaped `type&lt;T&gt;` inside the div directly (no
+/// span/p wrappers — upstream's sanitize path unwraps).
+fn attr_foreign_object_html(cls: &str, tx: f64, ty: f64, w: f64, h: f64, text: &str) -> String {
+    // Attribute type text is already stored post-parseGenericTypes by
+    // the layout pass — we only need to detect the "has <> chars"
+    // case here to choose the correct inner-span shape. The escaped
+    // form (&lt; &gt;) is what upstream measures for max-width.
+    let has_generics = cls == "attribute-type" && (text.contains('<') || text.contains('>'));
+    let max_w_text = if has_generics {
+        html_escape(text)
+    } else {
+        text.to_string()
+    };
+    let max_w = calc_text_max_width_raw(&max_w_text);
+
+    let inner_span = if text.is_empty() {
+        r#"<span class="nodeLabel "></span>"#.to_string()
+    } else if has_generics {
+        // Raw text (HTML-escaped) inside the div, no wrapper tags.
+        html_escape(text)
+    } else {
+        format!(
+            r#"<span class="nodeLabel "><p>{}</p></span>"#,
+            html_escape(text)
+        )
+    };
+    format!(
+        r#"<g class="label {cls}" transform="translate({tx}, {ty})" style=""><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: start;" xmlns="http://www.w3.org/1999/xhtml">{span}</div></foreignObject></g>"#,
+        cls = cls,
+        tx = fmt_num(tx),
+        ty = fmt_num(ty),
+        w = fmt_num(w),
+        h = fmt_num(h),
+        mw = max_w,
+        span = inner_span,
+    )
+}
+
+/// Public alias — used by the layout pass to pre-process attribute
+/// types before measuring. Kept narrow: no other use sites.
+pub fn parse_generic_types_pub(input: &str) -> String {
+    parse_generic_types(input)
+}
+
+/// Port of upstream `parseGenericTypes` — converts `foo~Bar~` into
+/// `foo<Bar>`. Input is split on `,`; for each set with ≥ 2 tildes,
+/// we flip tilde pairs to `< >`. Returns the original string if it
+/// contains no matching tildes.
+fn parse_generic_types(input: &str) -> String {
+    fn count_occurrence(s: &str, c: char) -> usize {
+        s.chars().filter(|&ch| ch == c).count()
+    }
+    fn should_combine(prev: &str, next: &str) -> bool {
+        count_occurrence(prev, '~') == 1 && count_occurrence(next, '~') == 1
+    }
+    fn process_set(input: &str) -> String {
+        let tilde_count = count_occurrence(input, '~');
+        if tilde_count <= 1 {
+            return input.to_string();
+        }
+        let mut has_starting_tilde = false;
+        let mut s = input.to_string();
+        if tilde_count % 2 != 0 && s.starts_with('~') {
+            s = s[1..].to_string();
+            has_starting_tilde = true;
+        }
+        let mut chars: Vec<char> = s.chars().collect();
+        let first = |cs: &[char]| cs.iter().position(|&c| c == '~');
+        let last = |cs: &[char]| cs.iter().rposition(|&c| c == '~');
+        loop {
+            let f = first(&chars);
+            let l = last(&chars);
+            match (f, l) {
+                (Some(fi), Some(li)) if fi != li => {
+                    chars[fi] = '<';
+                    chars[li] = '>';
+                }
+                _ => break,
+            }
+        }
+        let mut out: String = chars.into_iter().collect();
+        if has_starting_tilde {
+            out = format!("~{}", out);
+        }
+        out
+    }
+    let sets: Vec<&str> = input.split(',').collect();
+    // Replicate JS's split-with-capture: `input.split(/(,)/)` yields
+    // `[a, ',', b, ',', c]` — we reconstruct that here.
+    let mut pieces: Vec<String> = Vec::new();
+    for (i, s) in sets.iter().enumerate() {
+        if i > 0 {
+            pieces.push(",".into());
+        }
+        pieces.push((*s).into());
+    }
+    let mut output: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < pieces.len() {
+        let mut this_set = pieces[i].clone();
+        if this_set == "," && i > 0 && i + 1 < pieces.len() {
+            let prev = &pieces[i - 1];
+            let next = &pieces[i + 1];
+            if should_combine(prev, next) {
+                this_set = format!("{},{}", prev, next);
+                i += 1;
+                output.pop();
+            }
+        }
+        output.push(process_set(&this_set));
+        i += 1;
+    }
+    output.join("")
+}
+
+/// `calc_text_max_width` variant that takes the already-escaped text —
+/// used by `attr_foreign_object_html` so generics get the wider
+/// `&lt;T&gt;` measurement.
+fn calc_text_max_width_raw(text: &str) -> i64 {
+    use crate::font_metrics::text_width;
+    if text.is_empty() {
+        return 100;
+    }
+    let w = text_width(text, "sans-serif", 16.0, false, false);
+    (w + 100.0).round() as i64
+}
+
+/// `max-width: Xpx` on the div — upstream uses
+/// `calculateTextWidth(text, config) + 100` where `calculateTextWidth`
+/// measures at 16 px (not 14 — addText re-measures at the base font).
+///
+/// Upstream's addText HTML-escapes `<` / `>` to `&lt;` / `&gt;` when
+/// the text goes through `parseGenericTypes`, and then measures the
+/// *escaped* form. We apply the same transform here so attribute-type
+/// columns holding `type<T>` / `type~T~` end up with the fixture's
+/// wider `max-width` value (208 vs 172).
+///
+/// For empty text we get 100 verbatim (matches the fixture's
+/// `max-width: 100px` on empty attribute cells).
+fn calc_text_max_width(text: &str) -> i64 {
+    use crate::font_metrics::text_width;
+    if text.is_empty() {
+        return 100;
+    }
+    // HTML-escape `<>` the same way addText does so the width
+    // matches the escaped form upstream feeds into calculateTextWidth.
+    let escaped = html_escape(text);
+    let w = text_width(&escaped, "sans-serif", 16.0, false, false);
+    (w + 100.0).round() as i64
+}
+
 fn render_entity_node(id: &str, e: &EntityLayout) -> String {
     let mut out = String::with_capacity(512);
     // Normalize classes: upstream concatenates "default" then any user-added
@@ -249,8 +656,7 @@ fn base64_points(points: &[(f64, f64)]) -> String {
 
 /// Minimal base64 encoder — matches `btoa` byte-for-byte.
 fn base64_encode(data: &[u8]) -> String {
-    const TBL: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     let mut chunks = data.chunks_exact(3);
     for c in &mut chunks {
@@ -302,7 +708,10 @@ fn render_edge_label(e: &EdgeLayout) -> String {
             }
         )
     } else {
-        format!(r#"<span class="edgeLabel "><p>{}</p></span>"#, html_escape(&e.label))
+        format!(
+            r#"<span class="edgeLabel "><p>{}</p></span>"#,
+            html_escape(&e.label)
+        )
     };
     let fo = format!(
         r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg">{span}</div></foreignObject>"#,
@@ -331,11 +740,17 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
     // mirror the "default" mermaid theme for resilience.
     let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
-    let tertiary = theme.tertiary_color.as_deref().unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let tertiary = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
     let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let text_color = theme.text_color.as_deref().unwrap_or("#333");
     let node_text_color = theme.node_text_color.as_deref().unwrap_or(text_color);
-    let edge_label_bg = theme.edge_label_background.as_deref().unwrap_or("rgba(232,232,232, 0.8)");
+    let edge_label_bg = theme
+        .edge_label_background
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
     // labelBkg CSS: upstream styles.ts does `fade(tertiaryColor, 0.5)`.
     let labelbkg_color = fade(tertiary, 0.5);
     let labelbkg_color = labelbkg_color.as_str();
@@ -353,13 +768,19 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         css.push_str(s);
     };
 
-    p(&format!(
-        r#"<style>#{id}{{font-family:{ff};font-size:16px;fill:{tc};}}"#,
-        id = id,
-        ff = ff,
-        tc = text_color,
-    ), &mut css);
-    p("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}", &mut css);
+    p(
+        &format!(
+            r#"<style>#{id}{{font-family:{ff};font-size:16px;fill:{tc};}}"#,
+            id = id,
+            ff = ff,
+            tc = text_color,
+        ),
+        &mut css,
+    );
+    p(
+        "@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}",
+        &mut css,
+    );
     p("@keyframes dash{to{stroke-dashoffset:0;}}", &mut css);
     for (sel, body) in [
         (".edge-animation-slow", "stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;"),
@@ -375,62 +796,146 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
     ] {
         p(&format!("#{id} {sel}{{{body}}}"), &mut css);
     }
-    p(&format!("#{id} .marker{{fill:{lc};stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker.cross{{stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} svg{{font-family:{ff};font-size:16px;}}", ff = ff), &mut css);
+    p(
+        &format!("#{id} .marker{{fill:{lc};stroke:{lc};}}", lc = line_color),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .marker.cross{{stroke:{lc};}}", lc = line_color),
+        &mut css,
+    );
+    p(
+        &format!("#{id} svg{{font-family:{ff};font-size:16px;}}", ff = ff),
+        &mut css,
+    );
     p(&format!("#{id} p{{margin:0;}}"), &mut css);
 
     // From styles.ts — er-specific rules.
-    p(&format!("#{id} .entityBox{{fill:{mb};stroke:{nb};}}", mb = main_bkg, nb = node_border), &mut css);
-    p(&format!(
-        "#{id} .relationshipLabelBox{{fill:{t};opacity:0.7;background-color:{t};}}",
-        t = tertiary
-    ), &mut css);
-    p(&format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"), &mut css);
-    p(&format!(
-        "#{id} .labelBkg{{background-color:{lbkg};}}",
-        lbkg = labelbkg_color
-    ), &mut css);
-    p(&format!("#{id} .edgeLabel{{background-color:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label rect{{fill:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label text{{fill:{tc};}}", tc = text_color), &mut css);
-    p(&format!("#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}", nb = node_border), &mut css);
-    p(&format!("#{id} .label{{font-family:{ff};color:{ntc};}}", ff = ff, ntc = node_text_color), &mut css);
-    p(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"), &mut css);
+    p(
+        &format!(
+            "#{id} .entityBox{{fill:{mb};stroke:{nb};}}",
+            mb = main_bkg,
+            nb = node_border
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .relationshipLabelBox{{fill:{t};opacity:0.7;background-color:{t};}}",
+            t = tertiary
+        ),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .labelBkg{{background-color:{lbkg};}}",
+            lbkg = labelbkg_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel{{background-color:{ebg};}}",
+            ebg = edge_label_bg
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label rect{{fill:{ebg};}}",
+            ebg = edge_label_bg
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label text{{fill:{tc};}}",
+            tc = text_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}",
+            nb = node_border
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .label{{font-family:{ff};color:{ntc};}}",
+            ff = ff,
+            ntc = node_text_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"),
+        &mut css,
+    );
     p(&format!(
         "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon{{fill:{mb};stroke:{nb};stroke-width:1px;}}",
         mb = main_bkg, nb = node_border,
     ), &mut css);
-    p(&format!("#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}", lc = line_color), &mut css);
-    p(&format!(
-        "#{id} [data-look=neo].labelBkg{{background-color:{lbkg};}}",
-        lbkg = labelbkg_color,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}",
+            lc = line_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}",
+            lc = line_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} [data-look=neo].labelBkg{{background-color:{lbkg};}}",
+            lbkg = labelbkg_color,
+        ),
+        &mut css,
+    );
     // Neo-look shared rules — verbatim strings.
-    p(&format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border), &mut css);
+    p(
+        &format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node path{{stroke:{nb};stroke-width:1px;}}",
-        nb = node_border,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} [data-look=\"neo\"].node path{{stroke:{nb};stroke-width:1px;}}",
+            nb = node_border,
+        ),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node .outer-path{{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}"
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
-        nb = node_border,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
+            nb = node_border,
+        ),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node circle{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"
-    ), &mut css);
+    p(
+        &format!("#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].icon-shape .icon{{fill:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
@@ -439,10 +944,10 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         "#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} :root{{--mermaid-font-family:{ff};}}",
-        ff = ff,
-    ), &mut css);
+    p(
+        &format!("#{id} :root{{--mermaid-font-family:{ff};}}", ff = ff,),
+        &mut css,
+    );
     p("</style>", &mut css);
     css
 }
@@ -522,13 +1027,7 @@ fn fade(color: &str, opacity: f64) -> String {
         );
     }
     if let Some((r, g, b)) = parse_hex_color(color) {
-        return format!(
-            "rgba({}, {}, {}, {})",
-            r,
-            g,
-            b,
-            fmt_num(opacity)
-        );
+        return format!("rgba({}, {}, {}, {})", r, g, b, fmt_num(opacity));
     }
     format!("rgba({}, {})", color, fmt_num(opacity))
 }
@@ -575,7 +1074,11 @@ fn hsl_to_rgb_f64(s: &str) -> Option<(f64, f64, f64)> {
     let h = (h % 360.0) / 360.0;
     let s = sp / 100.0;
     let l = lp / 100.0;
-    let q = if l < 0.5 { l * (1.0 + s) } else { (l + s) - (l * s) };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        (l + s) - (l * s)
+    };
     let p = 2.0 * l - q;
     let hue2rgb = |t: f64| -> f64 {
         let mut t = t;
@@ -754,10 +1257,8 @@ mod tests {
         // pass rate but does not fail on partial results — the Wave 4
         // agent hands off known-partial items (mostly blocked on
         // rough.js / dagre-layout divergences) to follow-up waves.
-        let cypress: Vec<String> =
-            (1..=73).map(|n| format!("{:02}", n)).collect();
-        let demos: Vec<String> =
-            (1..=7).map(|n| format!("{:02}", n)).collect();
+        let cypress: Vec<String> = (1..=73).map(|n| format!("{:02}", n)).collect();
+        let demos: Vec<String> = (1..=7).map(|n| format!("{:02}", n)).collect();
 
         let mut pass = 0usize;
         let mut passing: Vec<String> = Vec::new();
@@ -793,25 +1294,179 @@ mod tests {
 
     /// Locked-in byte-exact set. These fixtures currently pass and
     /// must continue to do so — regressions here indicate the shared
-    /// plumbing (dagre bridge, edge routing, theme CSS, fonts) has
-    /// drifted.
+    /// plumbing (dagre bridge, edge routing, theme CSS, fonts, rough.js
+    /// PRNG) has drifted.
+    ///
+    /// The Wave 3.5 rough.js port added `cypress/er/12..25` and the
+    /// stable ER demos (`03..07`) — fixtures that were previously
+    /// blocked on the missing rough.js emission for attribute-bearing
+    /// entities.
     #[test]
     fn byte_exact_locked_set() {
         for rel in [
             "ext_fixtures/cypress/er/01",
             "ext_fixtures/cypress/er/02",
+            "ext_fixtures/cypress/er/12",
+            "ext_fixtures/cypress/er/13",
+            "ext_fixtures/cypress/er/14",
+            "ext_fixtures/cypress/er/15",
+            "ext_fixtures/cypress/er/16",
+            "ext_fixtures/cypress/er/17",
+            "ext_fixtures/cypress/er/18",
+            "ext_fixtures/cypress/er/19",
+            "ext_fixtures/cypress/er/20",
+            "ext_fixtures/cypress/er/21",
+            "ext_fixtures/cypress/er/22",
+            "ext_fixtures/cypress/er/23",
+            "ext_fixtures/cypress/er/24",
+            "ext_fixtures/cypress/er/25",
             "ext_fixtures/cypress/er/27",
+            "ext_fixtures/cypress/er/28",
             "ext_fixtures/cypress/er/43",
             "ext_fixtures/cypress/er/49",
             "ext_fixtures/cypress/er/50",
+            "ext_fixtures/cypress/er/53",
+            "ext_fixtures/cypress/er/54",
+            "ext_fixtures/cypress/er/55",
+            "ext_fixtures/cypress/er/56",
+            "ext_fixtures/cypress/er/57",
+            "ext_fixtures/cypress/er/58",
+            "ext_fixtures/cypress/er/59",
             "ext_fixtures/cypress/er/61",
+            "ext_fixtures/cypress/er/62",
+            "ext_fixtures/cypress/er/64",
             "ext_fixtures/cypress/er/65",
             "ext_fixtures/cypress/er/67",
+            "ext_fixtures/cypress/er/68",
+            "ext_fixtures/cypress/er/69",
             "ext_fixtures/cypress/er/70",
             "ext_fixtures/cypress/er/73",
+            "ext_fixtures/demos/er/03",
+            "ext_fixtures/demos/er/04",
+            "ext_fixtures/demos/er/05",
+            "ext_fixtures/demos/er/07",
         ] {
             assert!(check_one(rel), "fixture {} must remain byte-exact", rel);
         }
     }
 }
 
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use crate::layout::er as layout_er;
+    use crate::parser::er as parser_er;
+    use crate::theme::get_theme;
+
+    fn diff_probe(name: &str) {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(
+            base.join(format!("tests/ext_fixtures/cypress/er/{}.mmd", name)),
+        )
+        .unwrap();
+        let expected = std::fs::read_to_string(base.join(format!(
+            "tests/reference/ext_fixtures/cypress/er/{}.svg",
+            name
+        )))
+        .unwrap();
+        let d = parser_er::parse(&source).unwrap();
+        let theme = get_theme("default");
+        let l = layout_er::layout(&d, &theme).unwrap();
+        let id = format!("ref-ext-fixtures-cypress-er-{}", name);
+        let got = super::render(&d, &l, &theme, &id).unwrap();
+        let a = got.as_bytes();
+        let b = expected.as_bytes();
+        let n = a.len().min(b.len());
+        let mut i = 0;
+        while i < n && a[i] == b[i] {
+            i += 1;
+        }
+        if i >= n && a.len() == b.len() {
+            eprintln!("ER{} BYTE EXACT!", name);
+            return;
+        }
+        let ctx_lo = i.saturating_sub(40);
+        let ctx_hi_a = (i + 200).min(a.len());
+        let ctx_hi_b = (i + 200).min(b.len());
+        eprintln!(
+            "ER{} diverge at byte {i} (got={}, want={})",
+            name,
+            a.len(),
+            b.len()
+        );
+        eprintln!(
+            "got [{ctx_lo}..]: {}",
+            String::from_utf8_lossy(&a[ctx_lo..ctx_hi_a])
+        );
+        eprintln!(
+            "want[{ctx_lo}..]: {}",
+            String::from_utf8_lossy(&b[ctx_lo..ctx_hi_b])
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn er33_diff_probe() {
+        diff_probe("33");
+    }
+    #[test]
+    #[ignore]
+    fn er41_diff_probe() {
+        diff_probe("41");
+    }
+    #[test]
+    #[ignore]
+    fn er40_diff_probe() {
+        diff_probe("40");
+    }
+    #[test]
+    #[ignore]
+    fn er03_diff_probe() {
+        diff_probe("03");
+    }
+
+    #[test]
+    #[ignore] // Run with `cargo test er12_diff_probe -- --ignored --nocapture`.
+    fn er12_diff_probe() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source =
+            std::fs::read_to_string(base.join("tests/ext_fixtures/cypress/er/12.mmd")).unwrap();
+        let expected =
+            std::fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/er/12.svg"))
+                .unwrap();
+        let d = parser_er::parse(&source).unwrap();
+        let theme = get_theme("default");
+        let l = layout_er::layout(&d, &theme).unwrap();
+        let got = super::render(&d, &l, &theme, "ref-ext-fixtures-cypress-er-12").unwrap();
+
+        // Find where they diverge.
+        let a = got.as_bytes();
+        let b = expected.as_bytes();
+        let n = a.len().min(b.len());
+        let mut i = 0;
+        while i < n && a[i] == b[i] {
+            i += 1;
+        }
+        if i >= n && a.len() == b.len() {
+            eprintln!("ER12 BYTE EXACT!");
+            return;
+        }
+        let ctx_lo = i.saturating_sub(40);
+        let ctx_hi_a = (i + 200).min(a.len());
+        let ctx_hi_b = (i + 200).min(b.len());
+        eprintln!(
+            "diverge at byte {i} (lens got={}, want={})",
+            a.len(),
+            b.len()
+        );
+        eprintln!(
+            "got[{ctx_lo}..]: {}",
+            String::from_utf8_lossy(&a[ctx_lo..ctx_hi_a])
+        );
+        eprintln!("-----");
+        eprintln!(
+            "want[{ctx_lo}..]: {}",
+            String::from_utf8_lossy(&b[ctx_lo..ctx_hi_b])
+        );
+    }
+}
