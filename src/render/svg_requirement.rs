@@ -27,6 +27,8 @@ use crate::error::Result;
 use crate::layout::requirement::{EdgeLabel, NodeLabels, RequirementLayout};
 use crate::layout::unified::{Edge as UEdge, Node as UNode};
 use crate::model::requirement::RequirementDiagram;
+use crate::render::unified_shell;
+use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 pub fn render(
@@ -45,43 +47,50 @@ pub fn render(
     let max_w = vb_w.max(1.0);
 
     let mut out = String::new();
-    out.push_str(&format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" class="requirementDiagram" style="max-width: {mw}px;" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" aria-roledescription="requirement">"#,
-        id = id,
-        mw = fmt_num(max_w),
-        vx = fmt_num(vb_x),
-        vy = fmt_num(vb_y),
-        vw = fmt_num(vb_w),
-        vh = fmt_num(vb_h),
+    out.push_str(&unified_shell::open_unified_svg(
+        id,
+        max_w,
+        (vb_x, vb_y, vb_w, vb_h),
+        Some("requirementDiagram"),
+        "requirement",
     ));
     out.push_str("<style>");
+    out.push_str(&theme_css::base_preamble(id, theme));
     out.push_str(&stylesheet(id, theme));
+    out.push_str(&theme_css::neo_look_block(id, theme));
     out.push_str("</style>");
-    out.push_str("<g></g>");
+    out.push_str(unified_shell::open_seed_group());
     // Markers.
     out.push_str(&marker_defs(id));
     // Root group.
-    out.push_str(r#"<g class="root">"#);
+    out.push_str(unified_shell::open_root_group());
+    // Upstream emits an empty clusters layer even when no clusters
+    // are present — matches the `<g class="root"><g class="clusters"></g>`
+    // anchor at the start of every Stratum 3 diagram's reference SVG.
+    out.push_str(&unified_shell::open_layer("clusters"));
+    out.push_str(unified_shell::close_layer());
     // Edges first — upstream draws them under nodes.
-    out.push_str(r#"<g class="edgePaths">"#);
+    out.push_str(&unified_shell::open_layer("edgePaths"));
     for (e, _el) in l.graph.edges.iter().zip(l.edge_labels.iter()) {
         out.push_str(&render_edge(id, e));
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
     // Edge labels.
-    out.push_str(r#"<g class="edgeLabels">"#);
+    out.push_str(&unified_shell::open_layer("edgeLabels"));
     for (e, el) in l.graph.edges.iter().zip(l.edge_labels.iter()) {
         out.push_str(&render_edge_label(e, el));
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
     // Nodes.
-    out.push_str(r#"<g class="nodes">"#);
+    out.push_str(&unified_shell::open_layer("nodes"));
     for (n, labels) in l.graph.nodes.iter().zip(l.node_labels.iter()) {
         out.push_str(&render_node(id, n, labels));
     }
-    out.push_str("</g>");
-    out.push_str("</g>");
-    out.push_str("</svg>");
+    out.push_str(unified_shell::close_layer());
+    out.push_str(unified_shell::close_root_group());
+    out.push_str(unified_shell::close_seed_group());
+    out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    out.push_str(unified_shell::close_unified_svg());
     Ok(out)
 }
 
@@ -171,7 +180,10 @@ fn render_edge(id_prefix: &str, e: &UEdge) -> String {
     );
     let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
     let mut attrs = String::new();
-    if e.arrow_type_start.as_deref().map_or(false, |s| !s.is_empty()) {
+    if e.arrow_type_start
+        .as_deref()
+        .map_or(false, |s| !s.is_empty())
+    {
         attrs.push_str(&format!(
             r#" marker-start="url(#{id}_requirement-requirement_containsStart)""#,
             id = id_prefix,
@@ -416,5 +428,40 @@ mod tests {
         // Byte-exact parity tracked as Wave 5 work; assert total>0 so
         // regressions in fixture discovery are caught.
         assert!(total > 0, "no fixtures discovered — check test data paths");
+    }
+
+    /// Diagnostic: reports shell+preamble alignment for one fixture.
+    /// Wave 3.5's unified-shell work aims to make the `<svg><style>`
+    /// prefix match the reference byte-for-byte, independent of any
+    /// layout differences in the diagram body.
+    #[test]
+    fn dump_requirement_01_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let rel = "ext_fixtures/cypress/requirement/01";
+        let Ok(mmd) = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))) else {
+            return;
+        };
+        let Ok(exp) = std::fs::read_to_string(base.join(format!("tests/reference/{}.svg", rel)))
+        else {
+            return;
+        };
+        let id = "ref-ext-fixtures-cypress-requirement-01";
+        let Ok(d) = parse(&mmd) else { return };
+        let theme = get_theme("default");
+        let Ok(l) = layout(&d, &theme) else { return };
+        let Ok(got) = render(&d, &l, &theme, id) else {
+            return;
+        };
+        let prefix = got
+            .bytes()
+            .zip(exp.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "[requirement-diag] got={} exp={} prefix={}",
+            got.len(),
+            exp.len(),
+            prefix
+        );
     }
 }

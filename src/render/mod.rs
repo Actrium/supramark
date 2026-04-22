@@ -5,7 +5,9 @@
 pub mod edges;
 pub mod markers;
 pub mod shapes;
+pub mod stylis;
 pub mod svg;
+pub mod unified_shell;
 pub mod svg_block;
 pub mod svg_class;
 pub mod svg_er;

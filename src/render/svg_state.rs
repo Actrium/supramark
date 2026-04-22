@@ -37,6 +37,8 @@ use crate::layout::unified::types::{Bounds, Edge, Node, Point};
 use crate::model::state::StateDiagram;
 use crate::render::edges::{self, CurveType};
 use crate::render::shapes::{self, types::fmt_num};
+use crate::render::unified_shell;
+use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 pub fn render(
@@ -54,31 +56,19 @@ pub fn render(
     let (vx, vy, vw, vh) = viewbox(bb, pad);
 
     // ── Opening <svg> — canonical attribute order -----------------
-    out.push_str(&format!(
-        concat!(
-            r#"<svg id="{id}""#,
-            r#" width="100%""#,
-            r#" xmlns="http://www.w3.org/2000/svg""#,
-            r#" class="statediagram""#,
-            r#" style="max-width: {w}px;""#,
-            r#" viewBox="{vx} {vy} {vw} {vh}""#,
-            r#" role="graphics-document document""#,
-            r#" aria-roledescription="stateDiagram""#,
-            r#">"#,
-        ),
-        id = id,
-        w = fmt_num(vw),
-        vx = fmt_num(vx),
-        vy = fmt_num(vy),
-        vw = fmt_num(vw),
-        vh = fmt_num(vh),
+    out.push_str(&unified_shell::open_unified_svg(
+        id,
+        vw,
+        (vx, vy, vw, vh),
+        Some("statediagram"),
+        "stateDiagram",
     ));
 
-    // ── <style> placeholder (non-minified; not byte-exact yet) ----
+    // ── <style> block — base preamble + state-specific rules + tail.
     out.push_str(&style_block(id, theme));
 
-    // ── Seed empty <g></g> (upstream always emits this) ----------
-    out.push_str("<g></g>");
+    // ── Seed <g> wrapping markers + root --------------------------
+    out.push_str(unified_shell::open_seed_group());
 
     // ── Markers -------------------------------------------------
     out.push_str(&format!(
@@ -94,7 +84,7 @@ pub fn render(
     ));
 
     // ── Root <g> with clusters, edges, labels, nodes ------------
-    out.push_str(r#"<g class="root">"#);
+    out.push_str(unified_shell::open_root_group());
 
     // Clusters (composite states) -------------------------------
     out.push_str(r#"<g class="clusters">"#);
@@ -129,22 +119,13 @@ pub fn render(
     }
     out.push_str("</g>");
 
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_root_group());
+    out.push_str(unified_shell::close_seed_group());
 
     // Drop-shadow filter defs (match upstream tail).
-    out.push_str(&format!(
-        concat!(
-            r##"<defs><filter id="{id}-drop-shadow" height="130%" width="130%">"##,
-            r##"<feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow>"##,
-            r##"</filter></defs>"##,
-            r##"<defs><filter id="{id}-drop-shadow-small" height="150%" width="150%">"##,
-            r##"<feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow>"##,
-            r##"</filter></defs>"##,
-        ),
-        id = id
-    ));
+    out.push_str(&unified_shell::emit_defs_shell(id, true, true));
 
-    out.push_str("</svg>");
+    out.push_str(unified_shell::close_unified_svg());
     let _ = d; // reserved for v1/v2-specific tweaks once wired.
     Ok(out)
 }
@@ -236,26 +217,45 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Placeholder `<style>` block — carries the bare minimum selectors the
-/// reference SVG includes. Not stylis-minified; not byte-exact yet.
-fn style_block(id: &str, _theme: &ThemeVariables) -> String {
-    format!(
-        concat!(
-            r#"<style>"#,
-            r#"#{id}{{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}}"#,
-            r#"#{id} .transition{{stroke:#333333;stroke-width:1;fill:none;}}"#,
-            r#"#{id} .node rect{{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}}"#,
-            r#"#{id} .node circle.state-start{{fill:#333333;stroke:#333333;}}"#,
-            r#"#{id} .node circle.state-end{{fill:#9370DB;stroke:white;stroke-width:1.5;}}"#,
-            r#"#{id} .node .fork-join{{fill:#333333;stroke:#333333;}}"#,
-            r#"#{id} .statediagram-cluster rect{{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}}"#,
-            r#"#{id} .statediagram-cluster rect.outer{{rx:5px;ry:5px;}}"#,
-            r#"#{id} .cluster-label,#{id} .nodeLabel{{color:#131300;}}"#,
-            r#"#{id} .marker{{fill:#333333;stroke:#333333;}}"#,
-            r#"</style>"#,
-        ),
-        id = id,
-    )
+/// `<style>` block — built from the shared base preamble + a slice of
+/// state-specific selectors + the shared neo-look tail. Still not
+/// byte-exact against upstream (the state CSS template has ~50 more
+/// rules than we emit), but the shell/preamble portion is now an
+/// exact match.
+fn style_block(id: &str, theme: &ThemeVariables) -> String {
+    let mut s = String::with_capacity(2048);
+    s.push_str("<style>");
+    s.push_str(&theme_css::base_preamble(id, theme));
+    // State-diagram specific subset — bare minimum for the rendered
+    // nodes / edges to look right. The full upstream CSS is ported in
+    // Wave 5.
+    s.push_str(&format!(
+        "#{id} .transition{{stroke:#333333;stroke-width:1;fill:none;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .node rect{{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .node circle.state-start{{fill:#333333;stroke:#333333;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .node circle.state-end{{fill:#9370DB;stroke:white;stroke-width:1.5;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .node .fork-join{{fill:#333333;stroke:#333333;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .statediagram-cluster rect{{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .statediagram-cluster rect.outer{{rx:5px;ry:5px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .cluster-label,#{id} .nodeLabel{{color:#131300;}}"
+    ));
+    s.push_str(&theme_css::neo_look_block(id, theme));
+    s.push_str("</style>");
+    s
 }
 
 #[cfg(test)]
@@ -265,6 +265,70 @@ mod tests {
     use crate::theme::get_theme;
     use std::fs;
     use std::path::PathBuf;
+
+    /// Diagnostic probe that reports alignment of the renderer's
+    /// `<svg>`-shell + `<style>` block against the reference. The
+    /// Wave 3.5 unified-shell work aims to minimise the post-viewBox
+    /// drift — with byte-exact layout we'd hit `prefix == exp.len()`.
+    /// Never asserts; use with `-- --nocapture` for a one-fixture diff.
+    #[test]
+    fn dump_state_01_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let rel = "ext_fixtures/cypress/state/01";
+        let Ok(mmd) = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))) else {
+            return;
+        };
+        let Ok(exp) = std::fs::read_to_string(base.join(format!("tests/reference/{}.svg", rel)))
+        else {
+            return;
+        };
+        let id = "ref-ext-fixtures-cypress-state-01";
+        let Ok(d) = parse(&mmd) else { return };
+        let theme = get_theme("default");
+        let Ok(l) = crate::layout::state::layout(&d, &theme) else {
+            return;
+        };
+        let Ok(got) = render(&d, &l, &theme, id) else {
+            return;
+        };
+        let prefix = got
+            .bytes()
+            .zip(exp.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "[state-diag] got={} exp={} prefix={}",
+            got.len(),
+            exp.len(),
+            prefix
+        );
+        // Substitute the reference viewBox back into `got` so we can
+        // measure *shell+style* alignment independently of the layout
+        // divergence.
+        if let (Some(got_vbox_end), Some(exp_vbox_end)) =
+            (got.find("\" role="), exp.find("\" role="))
+        {
+            let got_vbox_start = got.rfind("style=\"max-width").unwrap_or(0);
+            let exp_vbox_start = exp.rfind("style=\"max-width").unwrap_or(0);
+            let (gpre, gpost) = got.split_at(got_vbox_start);
+            let (_epre, epost) = exp.split_at(exp_vbox_start);
+            let got_tail = &gpost[gpost.find("\" role=").unwrap_or(0) + 2..];
+            let exp_tail = &epost[epost.find("\" role=").unwrap_or(0) + 2..];
+            // tail starts at `role="graphics-document…`
+            let tail_prefix = got_tail
+                .bytes()
+                .zip(exp_tail.bytes())
+                .take_while(|(a, b)| a == b)
+                .count();
+            eprintln!(
+                "[state-diag] post-viewBox shell+style prefix={} (got_tail_len={}, exp_tail_len={})",
+                tail_prefix,
+                got_tail.len(),
+                exp_tail.len()
+            );
+            let _ = (got_vbox_end, exp_vbox_end, gpre);
+        }
+    }
 
     #[test]
     fn renders_minimal_diagram_without_panicking() {
@@ -305,7 +369,9 @@ mod tests {
         let mut groups = vec![];
         for sub in ["cypress", "demos"] {
             let dir = base.join(format!("tests/ext_fixtures/{}/state", sub));
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
             let mut files: Vec<_> = entries.flatten().collect();
             files.sort_by_key(|e| e.file_name());
             for entry in files {
@@ -313,7 +379,11 @@ mod tests {
                 if p.extension().and_then(|s| s.to_str()) != Some("mmd") {
                     continue;
                 }
-                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                let stem = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
                 let rel = format!("ext_fixtures/{}/state/{}", sub, stem);
                 let mmd = match fs::read_to_string(&p) {
                     Ok(s) => s,
@@ -343,25 +413,39 @@ mod tests {
                 let got = match result {
                     Ok(Ok(s)) => s,
                     _ => {
-                        groups.push((rel, false, false));
+                        groups.push((rel, false, false, 0usize));
                         continue;
                     }
                 };
                 let exact = got == expected;
-                groups.push((rel, true, exact));
+                // Common-prefix length: load-bearing for tracking how
+                // much of the `<svg><style><g>…` shell aligns with the
+                // reference. The remainder is the diagram body diff
+                // (node/edge geometry, label markup).
+                let prefix = got
+                    .bytes()
+                    .zip(expected.bytes())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                groups.push((rel, true, exact, prefix));
             }
         }
         let total = groups.len();
-        let rendered = groups.iter().filter(|(_, r, _)| *r).count();
-        let exact = groups.iter().filter(|(_, _, e)| *e).count();
+        let rendered = groups.iter().filter(|(_, r, _, _)| *r).count();
+        let exact = groups.iter().filter(|(_, _, e, _)| *e).count();
+        let avg_prefix: usize = if rendered > 0 {
+            groups.iter().map(|(_, _, _, p)| *p).sum::<usize>() / rendered
+        } else {
+            0
+        };
         eprintln!(
-            "[state] fixtures={} rendered={} byte-exact={}",
-            total, rendered, exact
+            "[state] fixtures={} rendered={} byte-exact={} avg-common-prefix={}",
+            total, rendered, exact, avg_prefix
         );
         let failed: Vec<&String> = groups
             .iter()
-            .filter(|(_, r, _)| !*r)
-            .map(|(rel, _, _)| rel)
+            .filter(|(_, r, _, _)| !*r)
+            .map(|(rel, _, _, _)| rel)
             .collect();
         if !failed.is_empty() {
             eprintln!("[state] render-failures ({}):", failed.len());

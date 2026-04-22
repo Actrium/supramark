@@ -24,6 +24,8 @@
 use crate::error::Result;
 use crate::layout::block::{BlockLayout, NodeGeom, LABEL_HEIGHT};
 use crate::model::block::{BlockDiagram, BlockShape};
+use crate::render::unified_shell;
+use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 pub fn render(
@@ -44,20 +46,20 @@ pub fn render(
     let vb_h = bh + 10.0;
     let max_width = vb_w;
 
-    out.push_str(&format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" style="max-width: {mw}px;" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" aria-roledescription="block">"#,
-        id = id,
-        mw = fmt_num(max_width),
-        vx = fmt_num(vb_x),
-        vy = fmt_num(vb_y),
-        vw = fmt_num(vb_w),
-        vh = fmt_num(vb_h),
+    out.push_str(&unified_shell::open_unified_svg(
+        id,
+        max_width,
+        (vb_x, vb_y, vb_w, vb_h),
+        None,
+        "block",
     ));
 
     // ── <style> block ────────────────────────────────────────────────
     out.push_str(&build_style_block(id, theme));
     // Empty seed group that upstream d3 emits right after the <style>.
-    out.push_str("<g></g>");
+    // Block is an outlier — markers live *outside* this seed group
+    // (unlike ER / state / flowchart which wrap everything inside).
+    out.push_str(unified_shell::seed_group());
 
     // ── Markers (always emitted in block regardless of use). ─────────
     out.push_str(&build_markers(id));
@@ -105,7 +107,9 @@ fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
             // Upstream `stadium()` does NOT set a `class` on the rect —
             // the emitted tag is bare `<rect style rx ry x y w h>`.
             let h = n.text_height + crate::layout::block::PADDING;
-            let w = n.text_width + (n.text_height + crate::layout::block::PADDING) / 4.0 + crate::layout::block::PADDING;
+            let w = n.text_width
+                + (n.text_height + crate::layout::block::PADDING) / 4.0
+                + crate::layout::block::PADDING;
             out.push_str(&format!(
                 r#"<rect style="{s}" rx="{rxh}" ry="{rxh}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
                 s = node_style,
@@ -222,10 +226,15 @@ fn rx_ry_for(shape: BlockShape) -> (&'static str, &'static str) {
 
 fn format_node_style(styles: &[String]) -> String {
     // Upstream emits styles joined by `;` but empty string when none.
-    if styles.is_empty() { return String::new(); }
+    if styles.is_empty() {
+        return String::new();
+    }
     let mut s = String::new();
     for (i, st) in styles.iter().enumerate() {
-        if i > 0 { s.push(';'); s.push(' '); }
+        if i > 0 {
+            s.push(';');
+            s.push(' ');
+        }
         s.push_str(st);
     }
     s
@@ -259,24 +268,38 @@ fn build_markers(id: &str) -> String {
 // ─── <style> block — copy of the upstream block diagram stylesheet ─────
 
 fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
+    let mut s = String::with_capacity(4096);
+    s.push_str("<style>");
+    // Shared base preamble — root + keyframes + edge helpers + marker.
+    s.push_str(&theme_css::base_preamble(id, theme));
+    // Block-diagram specific CSS sandwiched between the preamble and
+    // the shared neo-look tail.
+    s.push_str(&block_specific_css(id, theme));
+    // Shared neo-look tail + :root variable.
+    s.push_str(&theme_css::neo_look_block(id, theme));
+    s.push_str("</style>");
+    s
+}
+
+fn block_specific_css(id: &str, theme: &ThemeVariables) -> String {
     let font_family_raw = theme
         .font_family
         .as_deref()
         .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
-    let ff = minify_font_family(font_family_raw);
-    let font_size = theme.font_size.as_deref().unwrap_or("16px");
+    let ff = crate::render::stylis::strip_comma_spaces(font_family_raw);
     let text_color = theme.text_color.as_deref().unwrap_or("#333");
-    let error_bkg = theme.error_bkg_color.as_deref().unwrap_or("#552222");
-    let error_text = theme.error_text_color.as_deref().unwrap_or("#552222");
-    let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let stroke_width = theme.stroke_width.unwrap_or(1);
     let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
+    let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let edge_label_background = theme
         .edge_label_background
         .as_deref()
         .unwrap_or("rgba(232,232,232, 0.8)");
-    let tertiary_color = theme.tertiary_color.as_deref().unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let tertiary_color = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
     let border2 = theme.border2.as_deref().unwrap_or("#aaaa33");
     let cluster_bkg_fade = theme
         .cluster_bkg
@@ -290,39 +313,13 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         .unwrap_or_else(|| "rgba(170, 170, 51, 0.2)".to_string());
     let title_color = theme.title_color.as_deref().unwrap_or(text_color);
     let node_text_color = theme.node_text_color.as_deref().unwrap_or(text_color);
-    let drop_shadow = theme
-        .drop_shadow
-        .as_deref()
-        .unwrap_or("drop-shadow(1px 2px 2px rgba(185, 185, 185, 1))");
 
-    let mut s = String::with_capacity(4096);
-    s.push_str(&format!(
-        "<style>#{id}{{font-family:{ff};font-size:{fs};fill:{tc};}}",
-        id = id, ff = ff, fs = font_size, tc = text_color,
-    ));
-    s.push_str("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}");
-    s.push_str("@keyframes dash{to{stroke-dashoffset:0;}}");
-    s.push_str(&format!("#{id} .edge-animation-slow{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}}"));
-    s.push_str(&format!("#{id} .edge-animation-fast{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}}"));
-    s.push_str(&format!("#{id} .error-icon{{fill:{error_bkg};}}"));
-    s.push_str(&format!("#{id} .error-text{{fill:{error_text};stroke:{error_text};}}"));
-    s.push_str(&format!("#{id} .edge-thickness-normal{{stroke-width:{stroke_width}px;}}"));
-    s.push_str(&format!("#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-solid{{stroke-dasharray:0;}}"));
-    s.push_str(&format!("#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"));
-    s.push_str(&format!("#{id} .marker{{fill:{line_color};stroke:{line_color};}}"));
-    s.push_str(&format!("#{id} .marker.cross{{stroke:{line_color};}}"));
-    s.push_str(&format!("#{id} svg{{font-family:{ff};font-size:{fs};}}", ff = ff, fs = font_size));
-    s.push_str(&format!("#{id} p{{margin:0;}}"));
+    let mut s = String::with_capacity(3072);
     s.push_str(&format!(
         "#{id} .label{{font-family:{ff};color:{ntc};}}",
         ntc = node_text_color,
     ));
-    s.push_str(&format!(
-        "#{id} .cluster-label text{{fill:{title_color};}}"
-    ));
+    s.push_str(&format!("#{id} .cluster-label text{{fill:{title_color};}}"));
     s.push_str(&format!(
         "#{id} .cluster-label span,#{id} p{{color:{title_color};}}"
     ));
@@ -334,7 +331,9 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon,#{id} .node path{{fill:{mbg};stroke:{nb};stroke-width:{sw}px;}}",
         mbg = main_bkg, nb = node_border, sw = stroke_width,
     ));
-    s.push_str(&format!("#{id} .flowchart-label text{{text-anchor:middle;}}"));
+    s.push_str(&format!(
+        "#{id} .flowchart-label text{{text-anchor:middle;}}"
+    ));
     s.push_str(&format!("#{id} .node .label{{text-align:center;}}"));
     s.push_str(&format!("#{id} .node.clickable{{cursor:pointer;}}"));
     s.push_str(&format!("#{id} .arrowheadPath{{fill:{line_color};}}"));
@@ -380,50 +379,7 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     s.push_str(&format!(
         "#{id} .node .label-icon path{{fill:currentColor;stroke:revert;stroke-width:revert;}}"
     ));
-    s.push_str(&format!("#{id} .node .neo-node{{stroke:{node_border};}}"));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node rect,#{id} [data-look="neo"].cluster rect,#{id} [data-look="neo"].node polygon{{stroke:{node_border};filter:{drop_shadow};}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node path{{stroke:{node_border};stroke-width:{stroke_width}px;}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node .outer-path{{filter:{drop_shadow};}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node .neo-line path{{stroke:{node_border};filter:none;}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node circle{{stroke:{node_border};filter:{drop_shadow};}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].node circle .state-start{{fill:#000000;}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].icon-shape .icon{{fill:{node_border};filter:{drop_shadow};}}"#
-    ));
-    s.push_str(&format!(
-        r#"#{id} [data-look="neo"].icon-shape .icon-neo path{{stroke:{node_border};filter:{drop_shadow};}}"#
-    ));
-    s.push_str(&format!("#{id} :root{{--mermaid-font-family:{ff};}}"));
-    s.push_str("</style>");
     s
-}
-
-fn minify_font_family(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_quote = false;
-    let mut prev_comma = false;
-    for c in s.chars() {
-        if c == '"' { in_quote = !in_quote; out.push(c); prev_comma = false; continue; }
-        if !in_quote {
-            if c == ',' { out.push(c); prev_comma = true; continue; }
-            if prev_comma && c == ' ' { prev_comma = false; continue; }
-        }
-        out.push(c);
-        prev_comma = false;
-    }
-    out
 }
 
 fn fade(color: &str, opacity: f64) -> String {
@@ -499,21 +455,26 @@ mod tests {
         let src = format!("tests/ext_fixtures/cypress/block/{}.mmd", num);
         let refp = format!("tests/reference/ext_fixtures/cypress/block/{}.svg", num);
         let id = format!("ref-ext-fixtures-cypress-block-{}", num);
-        let expected = std::fs::read_to_string(&refp)
-            .map_err(|e| format!("read ref: {e}"))?;
+        let expected = std::fs::read_to_string(&refp).map_err(|e| format!("read ref: {e}"))?;
         let got = render_fixture(&src, &id);
         let expected = expected.trim_end_matches('\n');
-        if got == expected { return Ok(()); }
+        if got == expected {
+            return Ok(());
+        }
         let mut at = 0usize;
         for (i, (a, b)) in got.bytes().zip(expected.bytes()).enumerate() {
-            if a != b { at = i; break; }
+            if a != b {
+                at = i;
+                break;
+            }
         }
         let ctx = 120;
         let g_end = (at + ctx).min(got.len());
         let e_end = (at + ctx).min(expected.len());
         Err(format!(
             "mismatch at {at}: got len={} ref len={}\n  got:...{}...\n  ref:...{}...",
-            got.len(), expected.len(),
+            got.len(),
+            expected.len(),
             &got[at.saturating_sub(ctx)..g_end],
             &expected[at.saturating_sub(ctx)..e_end],
         ))
@@ -522,7 +483,9 @@ mod tests {
     macro_rules! fixture_test {
         ($name:ident, $num:literal) => {
             #[test]
-            fn $name() { compare_fixture($num).unwrap(); }
+            fn $name() {
+                compare_fixture($num).unwrap();
+            }
         };
     }
 

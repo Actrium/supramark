@@ -34,6 +34,8 @@ use crate::error::Result;
 use crate::layout::er::{EdgeLayout, EntityLayout, ErLayout};
 use crate::model::er::ErDiagram;
 use crate::render::edges::{build_path, CurveType};
+use crate::render::unified_shell;
+use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 /// Upstream ER diagram-family CSS — built once per render, with the
@@ -55,20 +57,22 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
     let vh = bh + pad * 2.0;
 
     // ── 2. <svg ...> opening ────────────────────────────────────────
-    out.push_str(&format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" class="erDiagram" style="max-width: {maxw}px;" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" aria-roledescription="er">"#,
-        id = id,
-        maxw = fmt_num(vw),
-        vx = fmt_num(vx),
-        vy = fmt_num(vy),
-        vw = fmt_num(vw),
-        vh = fmt_num(vh),
+    out.push_str(&unified_shell::open_unified_svg(
+        id,
+        vw,
+        (vx, vy, vw, vh),
+        Some("erDiagram"),
+        "er",
     ));
 
     // ── 3. <style> block ───────────────────────────────────────────
     out.push_str(&style_block(id, theme));
 
     // ── 4. Top-level seed <g>…markers…root…</g> ────────────────────
+    // ER embeds its markers + root inside the seed <g> (upstream quirk —
+    // the erRenderer-unified appends them to the existing seed instead
+    // of emitting its own defs wrapper). Everything else sits before
+    // the terminal </g>.
     out.push_str("<g>");
 
     // Markers (8 ER cardinality markers, same text for every diagram).
@@ -102,7 +106,7 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
     out.push_str("</g>"); // </g top-level>
 
     // ── 6. Trailing drop-shadow filter <defs>s ───────────────────────
-    out.push_str(&drop_shadow_defs(id));
+    out.push_str(&unified_shell::emit_defs_shell(id, true, true));
 
     // Optional title text — emitted *after* the drop-shadow defs, as
     // upstream `utils.insertTitle` does.
@@ -244,42 +248,7 @@ fn base64_points(points: &[(f64, f64)]) -> String {
         json.push_str(&format!(r#"{{"x":{x},"y":{y}}}"#));
     }
     json.push(']');
-    base64_encode(json.as_bytes())
-}
-
-/// Minimal base64 encoder — matches `btoa` byte-for-byte.
-fn base64_encode(data: &[u8]) -> String {
-    const TBL: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
-    let mut chunks = data.chunks_exact(3);
-    for c in &mut chunks {
-        let n = ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32);
-        out.push(TBL[((n >> 18) & 0x3f) as usize] as char);
-        out.push(TBL[((n >> 12) & 0x3f) as usize] as char);
-        out.push(TBL[((n >> 6) & 0x3f) as usize] as char);
-        out.push(TBL[(n & 0x3f) as usize] as char);
-    }
-    let rem = chunks.remainder();
-    match rem.len() {
-        0 => {}
-        1 => {
-            let n = (rem[0] as u32) << 16;
-            out.push(TBL[((n >> 18) & 0x3f) as usize] as char);
-            out.push(TBL[((n >> 12) & 0x3f) as usize] as char);
-            out.push('=');
-            out.push('=');
-        }
-        2 => {
-            let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
-            out.push(TBL[((n >> 18) & 0x3f) as usize] as char);
-            out.push(TBL[((n >> 12) & 0x3f) as usize] as char);
-            out.push(TBL[((n >> 6) & 0x3f) as usize] as char);
-            out.push('=');
-        }
-        _ => unreachable!(),
-    }
-    out
+    unified_shell::base64_encode(json.as_bytes())
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -302,7 +271,10 @@ fn render_edge_label(e: &EdgeLayout) -> String {
             }
         )
     } else {
-        format!(r#"<span class="edgeLabel "><p>{}</p></span>"#, html_escape(&e.label))
+        format!(
+            r#"<span class="edgeLabel "><p>{}</p></span>"#,
+            html_escape(&e.label)
+        )
     };
     let fo = format!(
         r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg">{span}</div></foreignObject>"#,
@@ -322,128 +294,108 @@ fn render_edge_label(e: &EdgeLayout) -> String {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Style block — upstream `styles.ts` + diagram-api shared CSS, stylis-
-// minified. For reproducibility we hard-wire the output string with
-// theme variables interpolated into the ID-scoped selectors.
+// Style block — upstream `styles.ts` + er/styles.ts shared CSS, stylis-
+// minified. Split into three sections to share the base preamble and
+// the trailing neo-look block with every other Stratum-3 renderer via
+// [`crate::theme::css`]. The middle section is ER-specific.
 // ──────────────────────────────────────────────────────────────────────
 fn style_block(id: &str, theme: &ThemeVariables) -> String {
-    // Pull the specific theme values the ER CSS references. Defaults
-    // mirror the "default" mermaid theme for resilience.
+    let mut css = String::with_capacity(6000);
+    css.push_str("<style>");
+    // Shared preamble — root rule + keyframes + edge helpers + marker.
+    css.push_str(&theme_css::base_preamble(id, theme));
+    // ER-specific middle.
+    css.push_str(&er_specific_css(id, theme));
+    // Shared tail — neo-look rules + `:root` variable.
+    css.push_str(&theme_css::neo_look_block(id, theme));
+    css.push_str("</style>");
+    css
+}
+
+/// The ER-diagram slice of upstream `er/styles.ts` — sandwiched
+/// between the base preamble and the neo-look tail.
+fn er_specific_css(id: &str, theme: &ThemeVariables) -> String {
     let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
-    let tertiary = theme.tertiary_color.as_deref().unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let tertiary = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
     let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let text_color = theme.text_color.as_deref().unwrap_or("#333");
     let node_text_color = theme.node_text_color.as_deref().unwrap_or(text_color);
-    let edge_label_bg = theme.edge_label_background.as_deref().unwrap_or("rgba(232,232,232, 0.8)");
+    let edge_label_bg = theme
+        .edge_label_background
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
     // labelBkg CSS: upstream styles.ts does `fade(tertiaryColor, 0.5)`.
     let labelbkg_color = fade(tertiary, 0.5);
-    let labelbkg_color = labelbkg_color.as_str();
-    // stylis strips ", " → "," outside quoted strings during minification;
-    // apply that to the font-family list for parity with upstream.
+    // Font-family is needed for the `.label` rule; apply stylis' comma-
+    // space stripping to match upstream's minified output.
     let ff_raw = theme
         .font_family
         .as_deref()
         .unwrap_or("\"trebuchet ms\",verdana,arial,sans-serif");
-    let ff = stylis_minify_commas(ff_raw);
-    let ff = ff.as_str();
+    let ff = crate::render::stylis::strip_comma_spaces(ff_raw);
 
-    let mut css = String::with_capacity(6000);
-    let p = |s: &str, css: &mut String| {
-        css.push_str(s);
-    };
-
-    p(&format!(
-        r#"<style>#{id}{{font-family:{ff};font-size:16px;fill:{tc};}}"#,
-        id = id,
-        ff = ff,
-        tc = text_color,
-    ), &mut css);
-    p("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}", &mut css);
-    p("@keyframes dash{to{stroke-dashoffset:0;}}", &mut css);
-    for (sel, body) in [
-        (".edge-animation-slow", "stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;"),
-        (".edge-animation-fast", "stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;"),
-        (".error-icon", "fill:#552222;"),
-        (".error-text", "fill:#552222;stroke:#552222;"),
-        (".edge-thickness-normal", "stroke-width:1px;"),
-        (".edge-thickness-thick", "stroke-width:3.5px;"),
-        (".edge-pattern-solid", "stroke-dasharray:0;"),
-        (".edge-thickness-invisible", "stroke-width:0;fill:none;"),
-        (".edge-pattern-dashed", "stroke-dasharray:3;"),
-        (".edge-pattern-dotted", "stroke-dasharray:2;"),
-    ] {
-        p(&format!("#{id} {sel}{{{body}}}"), &mut css);
-    }
-    p(&format!("#{id} .marker{{fill:{lc};stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker.cross{{stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} svg{{font-family:{ff};font-size:16px;}}", ff = ff), &mut css);
-    p(&format!("#{id} p{{margin:0;}}"), &mut css);
-
-    // From styles.ts — er-specific rules.
-    p(&format!("#{id} .entityBox{{fill:{mb};stroke:{nb};}}", mb = main_bkg, nb = node_border), &mut css);
-    p(&format!(
+    let mut css = String::with_capacity(3000);
+    css.push_str(&format!(
+        "#{id} .entityBox{{fill:{mb};stroke:{nb};}}",
+        mb = main_bkg,
+        nb = node_border,
+    ));
+    css.push_str(&format!(
         "#{id} .relationshipLabelBox{{fill:{t};opacity:0.7;background-color:{t};}}",
-        t = tertiary
-    ), &mut css);
-    p(&format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"), &mut css);
-    p(&format!(
+        t = tertiary,
+    ));
+    css.push_str(&format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"));
+    css.push_str(&format!(
         "#{id} .labelBkg{{background-color:{lbkg};}}",
-        lbkg = labelbkg_color
-    ), &mut css);
-    p(&format!("#{id} .edgeLabel{{background-color:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label rect{{fill:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label text{{fill:{tc};}}", tc = text_color), &mut css);
-    p(&format!("#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}", nb = node_border), &mut css);
-    p(&format!("#{id} .label{{font-family:{ff};color:{ntc};}}", ff = ff, ntc = node_text_color), &mut css);
-    p(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"), &mut css);
-    p(&format!(
+        lbkg = labelbkg_color,
+    ));
+    css.push_str(&format!(
+        "#{id} .edgeLabel{{background-color:{ebg};}}",
+        ebg = edge_label_bg,
+    ));
+    css.push_str(&format!(
+        "#{id} .edgeLabel .label rect{{fill:{ebg};}}",
+        ebg = edge_label_bg,
+    ));
+    css.push_str(&format!(
+        "#{id} .edgeLabel .label text{{fill:{tc};}}",
+        tc = text_color,
+    ));
+    css.push_str(&format!(
+        "#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}",
+        nb = node_border,
+    ));
+    css.push_str(&format!(
+        "#{id} .label{{font-family:{ff};color:{ntc};}}",
+        ff = ff,
+        ntc = node_text_color,
+    ));
+    css.push_str(&format!(
+        "#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"
+    ));
+    css.push_str(&format!(
         "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon{{fill:{mb};stroke:{nb};stroke-width:1px;}}",
-        mb = main_bkg, nb = node_border,
-    ), &mut css);
-    p(&format!("#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}", lc = line_color), &mut css);
-    p(&format!(
+        mb = main_bkg,
+        nb = node_border,
+    ));
+    css.push_str(&format!(
+        "#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}",
+        lc = line_color,
+    ));
+    css.push_str(&format!(
+        "#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}",
+        lc = line_color,
+    ));
+    // Note the unquoted `neo` attribute selector here — matches the
+    // raw CSS in `er/styles.ts` (`[data-look=neo].labelBkg`).
+    css.push_str(&format!(
         "#{id} [data-look=neo].labelBkg{{background-color:{lbkg};}}",
         lbkg = labelbkg_color,
-    ), &mut css);
-    // Neo-look shared rules — verbatim strings.
-    p(&format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node path{{stroke:{nb};stroke-width:1px;}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node .outer-path{{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}"
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node circle{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].icon-shape .icon{{fill:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
-        nb = node_border,
-    ), &mut css);
-    p(&format!(
-        "#{id} :root{{--mermaid-font-family:{ff};}}",
-        ff = ff,
-    ), &mut css);
-    p("</style>", &mut css);
+    ));
     css
 }
 
@@ -488,15 +440,9 @@ fn markers_block(id: &str) -> String {
     s
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Trailing drop-shadow filter <defs>s — always present.
-// ──────────────────────────────────────────────────────────────────────
-fn drop_shadow_defs(id: &str) -> String {
-    format!(
-        r##"<defs><filter id="{id}-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs><defs><filter id="{id}-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"></feDropShadow></filter></defs>"##,
-        id = id,
-    )
-}
+// Drop-shadow filter <defs>s are emitted via
+// [`crate::render::unified_shell::emit_defs_shell`] — the call site is
+// above; this module no longer needs a local helper.
 
 // ──────────────────────────────────────────────────────────────────────
 // Local helpers
@@ -522,13 +468,7 @@ fn fade(color: &str, opacity: f64) -> String {
         );
     }
     if let Some((r, g, b)) = parse_hex_color(color) {
-        return format!(
-            "rgba({}, {}, {}, {})",
-            r,
-            g,
-            b,
-            fmt_num(opacity)
-        );
+        return format!("rgba({}, {}, {}, {})", r, g, b, fmt_num(opacity));
     }
     format!("rgba({}, {})", color, fmt_num(opacity))
 }
@@ -575,7 +515,11 @@ fn hsl_to_rgb_f64(s: &str) -> Option<(f64, f64, f64)> {
     let h = (h % 360.0) / 360.0;
     let s = sp / 100.0;
     let l = lp / 100.0;
-    let q = if l < 0.5 { l * (1.0 + s) } else { (l + s) - (l * s) };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        (l + s) - (l * s)
+    };
     let p = 2.0 * l - q;
     let hue2rgb = |t: f64| -> f64 {
         let mut t = t;
@@ -620,36 +564,6 @@ fn parse_hex_color(s: &str) -> Option<(u8, u8, u8)> {
         }
         _ => None,
     }
-}
-
-/// Strip space after commas **outside** double-quoted regions —
-/// matches stylis' CSS minification behaviour for font-family lists.
-fn stylis_minify_commas(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_quote = false;
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c == b'"' {
-            in_quote = !in_quote;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        if !in_quote && c == b',' {
-            out.push(',');
-            i += 1;
-            while i < bytes.len() && bytes[i] == b' ' {
-                i += 1;
-            }
-            continue;
-        }
-        // Keep char as-is (UTF-8 safe: we only skip after ASCII comma).
-        out.push(c as char);
-        i += 1;
-    }
-    out
 }
 
 fn fmt_num(v: f64) -> String {
@@ -748,16 +662,48 @@ mod tests {
         assert_byte_exact(&got, &expected, rel)
     }
 
+    /// Diagnostic: reports shell-style alignment for the first
+    /// non-passing ER fixture. Useful for tracking how close the
+    /// Wave 3.5 unification got us.
+    #[test]
+    fn dump_er_shell_alignment() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // Pick fixture 03 — it's in the failing set but renders fine.
+        let rel = "ext_fixtures/cypress/er/03";
+        let id = id_for_rel(rel);
+        let mmd = match std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let exp = match std::fs::read_to_string(base.join(format!("tests/reference/{}.svg", rel))) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let got = match std::panic::catch_unwind(|| render_fixture(&mmd, &id)) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let prefix = got
+            .bytes()
+            .zip(exp.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "[er-03-diag] got={} exp={} prefix={}",
+            got.len(),
+            exp.len(),
+            prefix
+        );
+    }
+
     #[test]
     fn byte_exact_sweep() {
         // Walk every cypress + demos ER fixture. This test reports the
         // pass rate but does not fail on partial results — the Wave 4
         // agent hands off known-partial items (mostly blocked on
         // rough.js / dagre-layout divergences) to follow-up waves.
-        let cypress: Vec<String> =
-            (1..=73).map(|n| format!("{:02}", n)).collect();
-        let demos: Vec<String> =
-            (1..=7).map(|n| format!("{:02}", n)).collect();
+        let cypress: Vec<String> = (1..=73).map(|n| format!("{:02}", n)).collect();
+        let demos: Vec<String> = (1..=7).map(|n| format!("{:02}", n)).collect();
 
         let mut pass = 0usize;
         let mut passing: Vec<String> = Vec::new();
@@ -814,4 +760,3 @@ mod tests {
         }
     }
 }
-

@@ -21,6 +21,8 @@ use crate::model::flowchart::FlowchartDiagram;
 use crate::render::edges;
 use crate::render::markers;
 use crate::render::shapes;
+use crate::render::unified_shell;
+use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 /// Render a flowchart diagram as SVG.
@@ -39,61 +41,58 @@ pub fn render(
     let vb_w = (l.bounds.width + 2.0 * padding).max(1.0);
     let vb_h = (l.bounds.height + 2.0 * padding).max(1.0);
 
-    // SVG root with attribute order matching mermaid's:
-    //   id → width → xmlns → class → style → viewBox → role → aria-roledescription
-    out.push_str(&format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" class="flowchart" style="max-width: {maxw}px;" viewBox="{vb}" role="graphics-document document" aria-roledescription="{aria}">"#,
-        id = id,
-        maxw = fmt_num(vb_w),
-        vb = format!(
-            "{} {} {} {}",
-            fmt_num(vb_x),
-            fmt_num(vb_y),
-            fmt_num(vb_w),
-            fmt_num(vb_h)
-        ),
-        aria = l.aria_kind,
+    // SVG root — canonical attribute order via the unified shell.
+    out.push_str(&unified_shell::open_unified_svg(
+        id,
+        vb_w,
+        (vb_x, vb_y, vb_w, vb_h),
+        Some("flowchart"),
+        l.aria_kind,
     ));
 
-    // <style> block — port of styles.ts → flowchart CSS.
+    // <style> block — shared preamble + flowchart slice + shared tail.
     out.push_str("<style>");
+    out.push_str(&theme_css::base_preamble(id, theme));
     out.push_str(&build_css(id, theme, d));
+    out.push_str(&theme_css::neo_look_block(id, theme));
     out.push_str("</style>");
 
-    // Marker defs. The flowchart kind varies by aria: v2 → "flowchart",
-    // elk → "flowchart-elk". We default to "flowchart-v2" markers.
-    out.push_str("<g>");
+    // Seed <g> wrapping markers + root — matches upstream's
+    // dagre-unified pipeline behaviour of appending directly into
+    // the seed group produced by appendDivSvgG.
+    out.push_str(unified_shell::open_seed_group());
+    // Marker defs — emitted as-is (diagram-specific wrapper).
     out.push_str(&markers::defs(l.aria_kind, id, theme));
 
     // Root container — `<g class="root">` with clusters, edgePaths,
     // edgeLabels, and nodes sub-groups.
-    out.push_str(r#"<g class="root">"#);
+    out.push_str(unified_shell::open_root_group());
 
     // Clusters (subgraphs).
-    out.push_str(r#"<g class="clusters">"#);
+    out.push_str(&unified_shell::open_layer("clusters"));
     for cluster in &l.clusters {
         if let Some(cnode) = l.nodes.iter().find(|n| n.id == cluster.id && n.is_group) {
             out.push_str(&render_cluster(cnode, cluster, theme));
         }
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
 
     // Edge paths.
-    out.push_str(r#"<g class="edgePaths">"#);
+    out.push_str(&unified_shell::open_layer("edgePaths"));
     for (i, e) in l.edges.iter().enumerate() {
         out.push_str(&render_edge_path(e, i, id, l.aria_kind));
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
 
     // Edge labels.
-    out.push_str(r#"<g class="edgeLabels">"#);
+    out.push_str(&unified_shell::open_layer("edgeLabels"));
     for e in l.edges.iter() {
         out.push_str(&render_edge_label(e));
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
 
     // Nodes.
-    out.push_str(r#"<g class="nodes">"#);
+    out.push_str(&unified_shell::open_layer("nodes"));
     for n in &l.nodes {
         if n.is_group {
             continue;
@@ -110,11 +109,12 @@ pub fn render(
             }
         }
     }
-    out.push_str("</g>");
+    out.push_str(unified_shell::close_layer());
 
-    out.push_str("</g>"); // .root
-    out.push_str("</g>"); // outer marker wrapper
-    out.push_str("</svg>");
+    out.push_str(unified_shell::close_root_group());
+    out.push_str(unified_shell::close_seed_group());
+    out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    out.push_str(unified_shell::close_unified_svg());
     Ok(out)
 }
 
@@ -171,15 +171,8 @@ fn render_edge_path(e: &UEdge, index: usize, svg_id: &str, aria_kind: &str) -> S
         " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-{thickness} edge-pattern-{pattern} flowchart-link"
     );
 
-    let style = e
-        .style
-        .as_ref()
-        .map(|v| v.join(";"))
-        .unwrap_or_default();
-    let edge_id = format!(
-        "{svg_id}-{id}",
-        id = e.id.clone(),
-    );
+    let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
+    let edge_id = format!("{svg_id}-{id}", id = e.id.clone(),);
     let marker_end = match e.arrow_type_end.as_deref() {
         Some("arrow_point") | Some("arrow") | None => {
             format!(" marker-end=\"url(#{svg_id}_{aria_kind}-pointEnd)\"",)
@@ -252,7 +245,11 @@ fn build_css(id: &str, theme: &ThemeVariables, _d: &FlowchartDiagram) -> String 
         .as_deref()
         .unwrap_or("\"trebuchet ms\",verdana,arial,sans-serif");
     let font_size = theme.font_size.as_deref().unwrap_or("16px");
-    let txt_color = theme.node_text_color.as_deref().or(theme.text_color.as_deref()).unwrap_or("#333");
+    let txt_color = theme
+        .node_text_color
+        .as_deref()
+        .or(theme.text_color.as_deref())
+        .unwrap_or("#333");
 
     format!(
         "#{id}{{font-family:{ff};font-size:{fs};fill:{fill};}}\
