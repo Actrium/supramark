@@ -34,10 +34,24 @@ cli = ["dep:env_logger"]
 thiserror = "1"
 log = "0.4"
 env_logger = { version = "0.11", optional = true }
+# Config / preprocess / detect pipeline (Wave 0).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `%%{init: {...}}%%` bodies are JSON-ish: unquoted keys, single quotes,
+# trailing commas. JSON5 matches that tolerance.
+json5 = "0.4"
+# YAML frontmatter parser (JSON-schema flavoured, which is what
+# upstream `js-yaml` requests via `{ schema: JSON_SCHEMA }`).
+serde_yml = "0.0.12"
+regex = "1"
 # Hierarchical directed graph layout. Pinned to a kookyleo fork until
 # dagre-rs has a published release that exposes intersectPolygon /
 # intersectRect helpers required by mermaid's edge-endpoint clipping.
 dagre = { git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
+
+[dev-dependencies]
+# SVG parser used by the structural-diff evaluator under `tests/eval/`.
+roxmltree = "0.20"
 
 [profile.release]
 opt-level = "z"
