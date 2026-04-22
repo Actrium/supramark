@@ -31,8 +31,9 @@ pub struct FlowchartLayout {
     pub bounds: Bounds,
     /// Padding applied around the bounds for the viewBox.
     pub diagram_padding: f64,
-    /// `aria-roledescription` — `flowchart-v2` or `flowchart-v1`.
-    pub aria_kind: &'static str,
+    /// `aria-roledescription` — derived from the header keyword:
+    /// `flowchart-elk`, `flowchart-v2`, or `flowchart-v1`.
+    pub aria_kind: String,
 }
 
 /// Font sizing defaults (upstream `flowchart.nodePadding=8, ranksep=50, nodesep=50`).
@@ -53,7 +54,13 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         clusters,
         bounds,
         diagram_padding: 8.0,
-        aria_kind: if d.is_v2 { "flowchart-v2" } else { "flowchart-v1" },
+        aria_kind: if d.header_keyword == "flowchart-elk" {
+            "flowchart-elk".to_string()
+        } else if d.is_v2 {
+            "flowchart-v2".to_string()
+        } else {
+            "flowchart-v1".to_string()
+        },
     })
 }
 
@@ -97,12 +104,16 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.padding = Some(NODE_PADDING_Y.max(NODE_PADDING_X));
         node.look = Some("classic".into());
         node.parent_id = parent_of.get(&v.id).cloned();
-        // CSS classes — use the flowchart convention: `"default " + classes`.
+        // CSS classes — upstream: `'default ' + vertex.classes.join(' ')`.
+        // The trailing space after "default" is intentional — it produces
+        // the double-space before the closing quote in `getNodeClasses`.
         let mut classes = String::from("default");
         for cls in &v.classes {
             classes.push(' ');
             classes.push_str(cls);
         }
+        // Always append trailing space — even when no extra classes.
+        classes.push(' ');
         node.css_classes = Some(classes);
         // Inline styles.
         let merged_styles = collect_styles(v, &class_map);

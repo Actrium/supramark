@@ -47,7 +47,7 @@ pub fn render(
         vb_w,
         (vb_x, vb_y, vb_w, vb_h),
         Some("flowchart"),
-        l.aria_kind,
+        &l.aria_kind,
     ));
 
     // <style> block — shared preamble + flowchart slice + shared tail.
@@ -62,7 +62,7 @@ pub fn render(
     // the seed group produced by appendDivSvgG.
     out.push_str(unified_shell::open_seed_group());
     // Marker defs — emitted as-is (diagram-specific wrapper).
-    out.push_str(&markers::defs(l.aria_kind, id, theme));
+    out.push_str(&markers::defs(&l.aria_kind, id, theme));
 
     // Root container — `<g class="root">` with clusters, edgePaths,
     // edgeLabels, and nodes sub-groups.
@@ -80,7 +80,7 @@ pub fn render(
     // Edge paths.
     out.push_str(&unified_shell::open_layer("edgePaths"));
     for (i, e) in l.edges.iter().enumerate() {
-        out.push_str(&render_edge_path(e, i, id, l.aria_kind));
+        out.push_str(&render_edge_path(e, i, id, &l.aria_kind));
     }
     out.push_str(unified_shell::close_layer());
 

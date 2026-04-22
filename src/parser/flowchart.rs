@@ -103,7 +103,7 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
     }
     diag.is_v2 = is_v2;
     diag.direction = dir;
-    let _ = header_keyword; // reserved for future aria differentiation
+    diag.header_keyword = header_keyword.to_string();
     i += 1;
 
     // --- body --------------------------------------------------------

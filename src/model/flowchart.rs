@@ -200,6 +200,9 @@ pub struct FlowchartDiagram {
     /// Did the source use `flowchart` (v2) or `graph` (v1)? Impacts
     /// `aria-roledescription` (`flowchart-v2` vs `flowchart-v1`).
     pub is_v2: bool,
+    /// The raw header keyword: `"flowchart"`, `"flowchart-elk"`, or `"graph"`.
+    /// Used by the renderer to determine `aria-roledescription` and marker IDs.
+    pub header_keyword: String,
 }
 
 impl FlowchartDiagram {
