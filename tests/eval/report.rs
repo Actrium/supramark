@@ -103,11 +103,7 @@ impl EvalReport {
             self.matching(),
             self.total()
         );
-        let _ = writeln!(
-            out,
-            "Errors:   {} fixtures",
-            self.with_errors()
-        );
+        let _ = writeln!(out, "Errors:   {} fixtures", self.with_errors());
         let _ = writeln!(
             out,
             "Warnings: {} fixtures (no errors)",

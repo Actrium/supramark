@@ -262,10 +262,7 @@ mod tests {
 
     #[test]
     fn detects_sequence() {
-        assert_eq!(
-            kind("sequenceDiagram\nA->>B: hi\n"),
-            DiagramKind::Sequence
-        );
+        assert_eq!(kind("sequenceDiagram\nA->>B: hi\n"), DiagramKind::Sequence);
     }
 
     #[test]

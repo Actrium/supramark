@@ -121,16 +121,14 @@ mod tests {
 
     #[test]
     fn ellipse_ray_from_centre_hits_radius_x() {
-        let hit =
-            ray_ellipse_intersection((0.0, 0.0), (1.0, 0.0), (0.0, 0.0), 2.0, 1.0).unwrap();
+        let hit = ray_ellipse_intersection((0.0, 0.0), (1.0, 0.0), (0.0, 0.0), 2.0, 1.0).unwrap();
         assert!(approx_eq(hit.0, 2.0));
         assert!(approx_eq(hit.1, 0.0));
     }
 
     #[test]
     fn ellipse_ray_from_centre_hits_radius_y() {
-        let hit =
-            ray_ellipse_intersection((0.0, 0.0), (0.0, 1.0), (0.0, 0.0), 2.0, 1.0).unwrap();
+        let hit = ray_ellipse_intersection((0.0, 0.0), (0.0, 1.0), (0.0, 0.0), 2.0, 1.0).unwrap();
         assert!(approx_eq(hit.0, 0.0));
         assert!(approx_eq(hit.1, 1.0));
     }
@@ -138,8 +136,6 @@ mod tests {
     #[test]
     fn ellipse_miss_returns_none() {
         // Ray parallel to x-axis starting well above the ellipse: never hits.
-        assert!(
-            ray_ellipse_intersection((5.0, 10.0), (1.0, 0.0), (0.0, 0.0), 2.0, 1.0).is_none()
-        );
+        assert!(ray_ellipse_intersection((5.0, 10.0), (1.0, 0.0), (0.0, 0.0), 2.0, 1.0).is_none());
     }
 }

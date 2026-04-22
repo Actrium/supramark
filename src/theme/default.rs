@@ -282,7 +282,10 @@ pub fn variables() -> ThemeVariables {
     v.xy_chart = Some(XyChartVars {
         background_color: Some("white".into()),
         data_label_color: Some("#131300".into()),
-        plot_color_palette: Some("#ECECFF,#8493A6,#FFC3A0,#DCDDE1,#B8E994,#D1A36F,#C3CDE6,#FFB6C1,#496078,#F8F3E3".into()),
+        plot_color_palette: Some(
+            "#ECECFF,#8493A6,#FFC3A0,#DCDDE1,#B8E994,#D1A36F,#C3CDE6,#FFB6C1,#496078,#F8F3E3"
+                .into(),
+        ),
         title_color: Some("#131300".into()),
         x_axis_label_color: Some("#131300".into()),
         x_axis_line_color: Some("#131300".into()),

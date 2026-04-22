@@ -289,7 +289,9 @@ pub fn variables() -> ThemeVariables {
     v.xy_chart = Some(XyChartVars {
         background_color: Some("#ffffff".into()),
         data_label_color: Some("#111111".into()),
-        plot_color_palette: Some("#EEE,#6BB8E4,#8ACB88,#C7ACD6,#E8DCC2,#FFB2A8,#FFF380,#7E8D91,#FFD8B1,#FAF3E0".into()),
+        plot_color_palette: Some(
+            "#EEE,#6BB8E4,#8ACB88,#C7ACD6,#E8DCC2,#FFB2A8,#FFF380,#7E8D91,#FFD8B1,#FAF3E0".into(),
+        ),
         title_color: Some("#111111".into()),
         x_axis_label_color: Some("#111111".into()),
         x_axis_line_color: Some("#111111".into()),

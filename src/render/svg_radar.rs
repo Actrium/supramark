@@ -233,7 +233,10 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     // whitespace / attribute ordering / trailing semicolon habits;
     // upstream itself hard-codes the template string.
 
-    let font_family = theme_str(&theme.font_family, "\"trebuchet ms\", verdana, arial, sans-serif");
+    let font_family = theme_str(
+        &theme.font_family,
+        "\"trebuchet ms\", verdana, arial, sans-serif",
+    );
     let font_size = theme_str(&theme.font_size, "16px");
     let primary_text_color = theme_str(&theme.title_color, "#333");
 

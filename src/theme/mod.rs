@@ -52,17 +52,17 @@ pub struct RadarVars {
 /// XY chart theme subgroup (upstream: `theme.xyChart = { ... }`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct XyChartVars {
-    pub background_color: Option<String>,   // xyChart.backgroundColor
-    pub data_label_color: Option<String>,   // xyChart.dataLabelColor
+    pub background_color: Option<String>, // xyChart.backgroundColor
+    pub data_label_color: Option<String>, // xyChart.dataLabelColor
     pub plot_color_palette: Option<String>, // xyChart.plotColorPalette
-    pub title_color: Option<String>,        // xyChart.titleColor
+    pub title_color: Option<String>,      // xyChart.titleColor
     pub x_axis_label_color: Option<String>, // xyChart.xAxisLabelColor
-    pub x_axis_line_color: Option<String>,  // xyChart.xAxisLineColor
-    pub x_axis_tick_color: Option<String>,  // xyChart.xAxisTickColor
+    pub x_axis_line_color: Option<String>, // xyChart.xAxisLineColor
+    pub x_axis_tick_color: Option<String>, // xyChart.xAxisTickColor
     pub x_axis_title_color: Option<String>, // xyChart.xAxisTitleColor
     pub y_axis_label_color: Option<String>, // xyChart.yAxisLabelColor
-    pub y_axis_line_color: Option<String>,  // xyChart.yAxisLineColor
-    pub y_axis_tick_color: Option<String>,  // xyChart.yAxisTickColor
+    pub y_axis_line_color: Option<String>, // xyChart.yAxisLineColor
+    pub y_axis_tick_color: Option<String>, // xyChart.yAxisTickColor
     pub y_axis_title_color: Option<String>, // xyChart.yAxisTitleColor
 }
 
@@ -85,29 +85,29 @@ pub struct PacketVars {
 /// instances, use [`ThemeVariables::merge`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ThemeVariables {
-    pub theme_color_limit: Option<i64>,                  // THEME_COLOR_LIMIT
-    pub activation_bkg_color: Option<String>,            // activationBkgColor
-    pub activation_border_color: Option<String>,         // activationBorderColor
-    pub active_task_bkg_color: Option<String>,           // activeTaskBkgColor
-    pub active_task_border_color: Option<String>,        // activeTaskBorderColor
-    pub actor_bkg: Option<String>,                       // actorBkg
-    pub actor_border: Option<String>,                    // actorBorder
-    pub actor_line_color: Option<String>,                // actorLineColor
-    pub actor_text_color: Option<String>,                // actorTextColor
-    pub alt_background: Option<String>,                  // altBackground
-    pub alt_section_bkg_color: Option<String>,           // altSectionBkgColor
-    pub arch_edge_arrow_color: Option<String>,           // archEdgeArrowColor
-    pub arch_edge_color: Option<String>,                 // archEdgeColor
-    pub arch_edge_width: Option<String>,                 // archEdgeWidth
-    pub arch_group_border_color: Option<String>,         // archGroupBorderColor
-    pub arch_group_border_width: Option<String>,         // archGroupBorderWidth
-    pub arrowhead_color: Option<String>,                 // arrowheadColor
+    pub theme_color_limit: Option<i64>,           // THEME_COLOR_LIMIT
+    pub activation_bkg_color: Option<String>,     // activationBkgColor
+    pub activation_border_color: Option<String>,  // activationBorderColor
+    pub active_task_bkg_color: Option<String>,    // activeTaskBkgColor
+    pub active_task_border_color: Option<String>, // activeTaskBorderColor
+    pub actor_bkg: Option<String>,                // actorBkg
+    pub actor_border: Option<String>,             // actorBorder
+    pub actor_line_color: Option<String>,         // actorLineColor
+    pub actor_text_color: Option<String>,         // actorTextColor
+    pub alt_background: Option<String>,           // altBackground
+    pub alt_section_bkg_color: Option<String>,    // altSectionBkgColor
+    pub arch_edge_arrow_color: Option<String>,    // archEdgeArrowColor
+    pub arch_edge_color: Option<String>,          // archEdgeColor
+    pub arch_edge_width: Option<String>,          // archEdgeWidth
+    pub arch_group_border_color: Option<String>,  // archGroupBorderColor
+    pub arch_group_border_width: Option<String>,  // archGroupBorderWidth
+    pub arrowhead_color: Option<String>,          // arrowheadColor
     pub attribute_background_color_even: Option<String>, // attributeBackgroundColorEven
-    pub attribute_background_color_odd: Option<String>,  // attributeBackgroundColorOdd
-    pub background: Option<String>,                      // background
-    pub border1: Option<String>,                         // border1
-    pub border2: Option<String>,                         // border2
-    pub branch_label_color: Option<String>,              // branchLabelColor
+    pub attribute_background_color_odd: Option<String>, // attributeBackgroundColorOdd
+    pub background: Option<String>,               // background
+    pub border1: Option<String>,                  // border1
+    pub border2: Option<String>,                  // border2
+    pub branch_label_color: Option<String>,       // branchLabelColor
 
     pub c_scale0: Option<String>,  // cScale0
     pub c_scale1: Option<String>,  // cScale1
@@ -278,47 +278,47 @@ pub struct ThemeVariables {
     pub primary_color: Option<String>,        // primaryColor
     pub primary_text_color: Option<String>,   // primaryTextColor
 
-    pub quadrant1_fill: Option<String>,                       // quadrant1Fill
-    pub quadrant1_text_fill: Option<String>,                  // quadrant1TextFill
-    pub quadrant2_fill: Option<String>,                       // quadrant2Fill
-    pub quadrant2_text_fill: Option<String>,                  // quadrant2TextFill
-    pub quadrant3_fill: Option<String>,                       // quadrant3Fill
-    pub quadrant3_text_fill: Option<String>,                  // quadrant3TextFill
-    pub quadrant4_fill: Option<String>,                       // quadrant4Fill
-    pub quadrant4_text_fill: Option<String>,                  // quadrant4TextFill
+    pub quadrant1_fill: Option<String>,      // quadrant1Fill
+    pub quadrant1_text_fill: Option<String>, // quadrant1TextFill
+    pub quadrant2_fill: Option<String>,      // quadrant2Fill
+    pub quadrant2_text_fill: Option<String>, // quadrant2TextFill
+    pub quadrant3_fill: Option<String>,      // quadrant3Fill
+    pub quadrant3_text_fill: Option<String>, // quadrant3TextFill
+    pub quadrant4_fill: Option<String>,      // quadrant4Fill
+    pub quadrant4_text_fill: Option<String>, // quadrant4TextFill
     pub quadrant_external_border_stroke_fill: Option<String>, // quadrantExternalBorderStrokeFill
     pub quadrant_internal_border_stroke_fill: Option<String>, // quadrantInternalBorderStrokeFill
-    pub quadrant_point_fill: Option<String>,                  // quadrantPointFill
-    pub quadrant_point_text_fill: Option<String>,             // quadrantPointTextFill
-    pub quadrant_title_fill: Option<String>,                  // quadrantTitleFill
-    pub quadrant_x_axis_text_fill: Option<String>,            // quadrantXAxisTextFill
-    pub quadrant_y_axis_text_fill: Option<String>,            // quadrantYAxisTextFill
+    pub quadrant_point_fill: Option<String>, // quadrantPointFill
+    pub quadrant_point_text_fill: Option<String>, // quadrantPointTextFill
+    pub quadrant_title_fill: Option<String>, // quadrantTitleFill
+    pub quadrant_x_axis_text_fill: Option<String>, // quadrantXAxisTextFill
+    pub quadrant_y_axis_text_fill: Option<String>, // quadrantYAxisTextFill
 
-    pub radius: Option<i64>,                          // radius
-    pub relation_color: Option<String>,               // relationColor
-    pub relation_label_background: Option<String>,    // relationLabelBackground
-    pub relation_label_color: Option<String>,         // relationLabelColor
-    pub requirement_background: Option<String>,       // requirementBackground
-    pub requirement_border_color: Option<String>,     // requirementBorderColor
-    pub requirement_border_size: Option<String>,      // requirementBorderSize
-    pub requirement_text_color: Option<String>,       // requirementTextColor
-    pub row_even: Option<String>,                     // rowEven
-    pub row_odd: Option<String>,                      // rowOdd
-    pub scale_label_color: Option<String>,            // scaleLabelColor
-    pub second_bkg: Option<String>,                   // secondBkg
-    pub secondary_border_color: Option<String>,       // secondaryBorderColor
-    pub secondary_color: Option<String>,              // secondaryColor
-    pub secondary_text_color: Option<String>,         // secondaryTextColor
-    pub section_bkg_color: Option<String>,            // sectionBkgColor
-    pub section_bkg_color2: Option<String>,           // sectionBkgColor2
-    pub sequence_number_color: Option<String>,        // sequenceNumberColor
-    pub signal_color: Option<String>,                 // signalColor
-    pub signal_text_color: Option<String>,            // signalTextColor
-    pub special_state_color: Option<String>,          // specialStateColor
-    pub state_bkg: Option<String>,                    // stateBkg
-    pub state_border: Option<String>,                 // stateBorder
-    pub state_label_color: Option<String>,            // stateLabelColor
-    pub stroke_width: Option<i64>,                    // strokeWidth
+    pub radius: Option<i64>,                       // radius
+    pub relation_color: Option<String>,            // relationColor
+    pub relation_label_background: Option<String>, // relationLabelBackground
+    pub relation_label_color: Option<String>,      // relationLabelColor
+    pub requirement_background: Option<String>,    // requirementBackground
+    pub requirement_border_color: Option<String>,  // requirementBorderColor
+    pub requirement_border_size: Option<String>,   // requirementBorderSize
+    pub requirement_text_color: Option<String>,    // requirementTextColor
+    pub row_even: Option<String>,                  // rowEven
+    pub row_odd: Option<String>,                   // rowOdd
+    pub scale_label_color: Option<String>,         // scaleLabelColor
+    pub second_bkg: Option<String>,                // secondBkg
+    pub secondary_border_color: Option<String>,    // secondaryBorderColor
+    pub secondary_color: Option<String>,           // secondaryColor
+    pub secondary_text_color: Option<String>,      // secondaryTextColor
+    pub section_bkg_color: Option<String>,         // sectionBkgColor
+    pub section_bkg_color2: Option<String>,        // sectionBkgColor2
+    pub sequence_number_color: Option<String>,     // sequenceNumberColor
+    pub signal_color: Option<String>,              // signalColor
+    pub signal_text_color: Option<String>,         // signalTextColor
+    pub special_state_color: Option<String>,       // specialStateColor
+    pub state_bkg: Option<String>,                 // stateBkg
+    pub state_border: Option<String>,              // stateBorder
+    pub state_label_color: Option<String>,         // stateLabelColor
+    pub stroke_width: Option<i64>,                 // strokeWidth
 
     pub surface0: Option<String>,      // surface0
     pub surface1: Option<String>,      // surface1
@@ -331,27 +331,27 @@ pub struct ThemeVariables {
     pub surface_peer3: Option<String>, // surfacePeer3
     pub surface_peer4: Option<String>, // surfacePeer4
 
-    pub tag_label_background: Option<String>,      // tagLabelBackground
-    pub tag_label_border: Option<String>,          // tagLabelBorder
-    pub tag_label_color: Option<String>,           // tagLabelColor
-    pub tag_label_font_size: Option<String>,       // tagLabelFontSize
-    pub task_bkg_color: Option<String>,            // taskBkgColor
-    pub task_border_color: Option<String>,         // taskBorderColor
+    pub tag_label_background: Option<String>, // tagLabelBackground
+    pub tag_label_border: Option<String>,     // tagLabelBorder
+    pub tag_label_color: Option<String>,      // tagLabelColor
+    pub tag_label_font_size: Option<String>,  // tagLabelFontSize
+    pub task_bkg_color: Option<String>,       // taskBkgColor
+    pub task_border_color: Option<String>,    // taskBorderColor
     pub task_text_clickable_color: Option<String>, // taskTextClickableColor
-    pub task_text_color: Option<String>,           // taskTextColor
-    pub task_text_dark_color: Option<String>,      // taskTextDarkColor
-    pub task_text_light_color: Option<String>,     // taskTextLightColor
-    pub task_text_outside_color: Option<String>,   // taskTextOutsideColor
-    pub tertiary_border_color: Option<String>,     // tertiaryBorderColor
-    pub tertiary_color: Option<String>,            // tertiaryColor
-    pub tertiary_text_color: Option<String>,       // tertiaryTextColor
-    pub text: Option<String>,                      // text
-    pub text_color: Option<String>,                // textColor
-    pub title_color: Option<String>,               // titleColor
-    pub today_line_color: Option<String>,          // todayLineColor
-    pub transition_color: Option<String>,          // transitionColor
-    pub transition_label_color: Option<String>,    // transitionLabelColor
-    pub use_gradient: Option<bool>,                // useGradient
+    pub task_text_color: Option<String>,      // taskTextColor
+    pub task_text_dark_color: Option<String>, // taskTextDarkColor
+    pub task_text_light_color: Option<String>, // taskTextLightColor
+    pub task_text_outside_color: Option<String>, // taskTextOutsideColor
+    pub tertiary_border_color: Option<String>, // tertiaryBorderColor
+    pub tertiary_color: Option<String>,       // tertiaryColor
+    pub tertiary_text_color: Option<String>,  // tertiaryTextColor
+    pub text: Option<String>,                 // text
+    pub text_color: Option<String>,           // textColor
+    pub title_color: Option<String>,          // titleColor
+    pub today_line_color: Option<String>,     // todayLineColor
+    pub transition_color: Option<String>,     // transitionColor
+    pub transition_label_color: Option<String>, // transitionLabelColor
+    pub use_gradient: Option<bool>,           // useGradient
 
     pub venn1: Option<String>,                 // venn1
     pub venn2: Option<String>,                 // venn2

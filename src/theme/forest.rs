@@ -193,8 +193,10 @@ pub fn variables() -> ThemeVariables {
     v.quadrant3_text_fill = Some("#28115d".into());
     v.quadrant4_fill = Some("#dcf3a7".into());
     v.quadrant4_text_fill = Some("#230c58".into());
-    v.quadrant_external_border_stroke_fill = Some("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)".into());
-    v.quadrant_internal_border_stroke_fill = Some("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)".into());
+    v.quadrant_external_border_stroke_fill =
+        Some("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)".into());
+    v.quadrant_internal_border_stroke_fill =
+        Some("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)".into());
     v.quadrant_point_fill = Some("hsl(78.1578947368, 58.4615384615%, NaN%)".into());
     v.quadrant_point_text_fill = Some("#321b67".into());
     v.quadrant_title_fill = Some("#321b67".into());
@@ -290,7 +292,10 @@ pub fn variables() -> ThemeVariables {
     v.xy_chart = Some(XyChartVars {
         background_color: Some("white".into()),
         data_label_color: Some("#321b67".into()),
-        plot_color_palette: Some("#CDE498,#FF6B6B,#A0D2DB,#D7BDE2,#F0F0F0,#FFC3A0,#7FD8BE,#FF9A8B,#FAF3E0,#FFF176".into()),
+        plot_color_palette: Some(
+            "#CDE498,#FF6B6B,#A0D2DB,#D7BDE2,#F0F0F0,#FFC3A0,#7FD8BE,#FF9A8B,#FAF3E0,#FFF176"
+                .into(),
+        ),
         title_color: Some("#321b67".into()),
         x_axis_label_color: Some("#321b67".into()),
         x_axis_line_color: Some("#321b67".into()),

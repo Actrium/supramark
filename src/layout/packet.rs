@@ -75,7 +75,11 @@ pub fn layout(d: &PacketDiagram, _theme: &ThemeVariables) -> Result<PacketLayout
     //   svgWidth  = bitWidth * bitsPerRow + 2
     let title_text = d.meta.title.as_deref().unwrap_or("").to_owned();
     let svg_width = cfg.bit_width * f64::from(cfg.bits_per_row) + 2.0;
-    let title_allowance = if title_text.is_empty() { cfg.row_height } else { 0.0 };
+    let title_allowance = if title_text.is_empty() {
+        cfg.row_height
+    } else {
+        0.0
+    };
     let svg_height = total_row_height * (words.len() as f64 + 1.0) - title_allowance;
 
     // Even an empty title is emitted in the reference SVGs (`<text ...
@@ -196,7 +200,11 @@ mod tests {
         d.meta.title = title.map(String::from);
         d.fields = fields
             .into_iter()
-            .map(|(s, e, l)| PacketField { start: s, end: e, label: l.into() })
+            .map(|(s, e, l)| PacketField {
+                start: s,
+                end: e,
+                label: l.into(),
+            })
             .collect();
         d
     }

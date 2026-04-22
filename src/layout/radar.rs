@@ -105,8 +105,8 @@ pub fn layout(d: &RadarDiagram, _theme: &ThemeVariables) -> Result<RadarLayout> 
     // multiplication order so that floating rounding matches.
     let mut axes_angles = Vec::with_capacity(num_axes);
     for i in 0..num_axes {
-        let angle = 2.0 * i as f64 * std::f64::consts::PI / num_axes as f64
-            - std::f64::consts::PI / 2.0;
+        let angle =
+            2.0 * i as f64 * std::f64::consts::PI / num_axes as f64 - std::f64::consts::PI / 2.0;
         axes_angles.push(angle);
     }
 

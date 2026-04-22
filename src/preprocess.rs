@@ -168,7 +168,8 @@ mod tests {
     #[test]
     fn init_directive_overrides_frontmatter() {
         // Merge order: default ← frontmatter ← init. Init must win.
-        let src = "---\nconfig:\n  theme: forest\n---\n%%{init: {theme: \"dark\"}}%%\nflowchart TD\n";
+        let src =
+            "---\nconfig:\n  theme: forest\n---\n%%{init: {theme: \"dark\"}}%%\nflowchart TD\n";
         let out = preprocess(src).unwrap();
         assert_eq!(out.config.theme.as_deref(), Some("dark"));
         assert!(!out.cleaned_source.contains("%%{"));

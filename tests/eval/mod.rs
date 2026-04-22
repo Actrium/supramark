@@ -39,6 +39,6 @@ pub mod structural_diff;
 
 pub use report::{EvalReport, FixtureReport};
 pub use structural_diff::{
-    compare, compare_structures, compare_with_config, CheckConfig, Diff, Issue, Level,
-    ShapeCounts, SvgStructure,
+    compare, compare_structures, compare_with_config, CheckConfig, Diff, Issue, Level, ShapeCounts,
+    SvgStructure,
 };

@@ -208,7 +208,7 @@ impl<'s> Parser<'s> {
                     // skip_inline_ws only consumed spaces/tabs on the current line we can
                     // reset col from save.
                     self.col -= self.pos - save; // inverse only when we did bump on same line
-                    // Simpler: recompute line/col by linear scan from file start (rare).
+                                                 // Simpler: recompute line/col by linear scan from file start (rare).
                     self.recompute_line_col();
                     break;
                 }
@@ -521,8 +521,7 @@ impl<'s> Parser<'s> {
             let save_line = self.line;
             let save_col = self.col;
             let first = self.peek_byte();
-            let is_ident_start =
-                matches!(first, Some(b) if b.is_ascii_alphabetic() || b == b'_');
+            let is_ident_start = matches!(first, Some(b) if b.is_ascii_alphabetic() || b == b'_');
             if is_ident_start {
                 let name = self.parse_ident()?;
                 self.skip_inline_ws();
@@ -555,9 +554,7 @@ impl<'s> Parser<'s> {
         }
         if has_keyed {
             if axes.is_empty() {
-                return Err(self.err(
-                    "axes must be declared before keyed curve entries".into(),
-                ));
+                return Err(self.err("axes must be declared before keyed curve entries".into()));
             }
             let mut ordered: Vec<f64> = Vec::with_capacity(axes.len());
             for axis in axes {
@@ -567,9 +564,7 @@ impl<'s> Parser<'s> {
                         Entry::Keyed(n, v) if n == &axis.name => Some(*v),
                         _ => None,
                     })
-                    .ok_or_else(|| {
-                        self.err(format!("missing entry for axis {}", axis.label))
-                    })?;
+                    .ok_or_else(|| self.err(format!("missing entry for axis {}", axis.label)))?;
                 ordered.push(v);
             }
             Ok(ordered)
@@ -591,7 +586,8 @@ mod tests {
 
     #[test]
     fn parse_minimal() {
-        let src = "radar-beta\n    title Best Radar Ever\n    axis A, B, C\n    curve c1{1, 2, 3}\n";
+        let src =
+            "radar-beta\n    title Best Radar Ever\n    axis A, B, C\n    curve c1{1, 2, 3}\n";
         let d = parse(src).expect("parse");
         assert_eq!(d.meta.title.as_deref(), Some("Best Radar Ever"));
         assert_eq!(d.axes.len(), 3);

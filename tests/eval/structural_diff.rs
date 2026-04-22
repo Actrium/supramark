@@ -215,8 +215,7 @@ const EDGE_CLASSES: &[&str] = &["edge", "relation", "transition", "relationship"
 impl SvgStructure {
     /// Parse an SVG string and extract its structure.
     pub fn from_svg(svg: &str) -> Result<Self, String> {
-        let doc =
-            Document::parse(svg).map_err(|e| format!("Failed to parse SVG: {}", e))?;
+        let doc = Document::parse(svg).map_err(|e| format!("Failed to parse SVG: {}", e))?;
 
         let root = doc.root_element();
         if root.tag_name().name() != "svg" {
@@ -554,7 +553,9 @@ fn parse_dimensions(root: &Node) -> (f64, f64) {
 }
 
 fn count_elements(doc: &Document, tag: &str) -> usize {
-    doc.descendants().filter(|n| n.tag_name().name() == tag).count()
+    doc.descendants()
+        .filter(|n| n.tag_name().name() == tag)
+        .count()
 }
 
 fn count_shapes(doc: &Document) -> ShapeCounts {
@@ -776,7 +777,11 @@ mod tests {
     #[test]
     fn identical_svgs_have_no_diff() {
         let diff = compare(MINIMAL_SVG, MINIMAL_SVG).unwrap();
-        assert!(diff.is_empty(), "expected empty diff, got: {}", diff.report_text());
+        assert!(
+            diff.is_empty(),
+            "expected empty diff, got: {}",
+            diff.report_text()
+        );
     }
 
     #[test]

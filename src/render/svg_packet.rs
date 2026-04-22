@@ -72,7 +72,9 @@ pub fn render(
         height: l.height,
     };
     let mut out = String::with_capacity(
-        PACKET_CSS_TEMPLATE.len() + 512 + 200 * l.words.iter().map(|w| w.blocks.len()).sum::<usize>(),
+        PACKET_CSS_TEMPLATE.len()
+            + 512
+            + 200 * l.words.iter().map(|w| w.blocks.len()).sum::<usize>(),
     );
 
     out.push_str(&open_svg(id, "packet", vb));
@@ -203,10 +205,7 @@ mod tests {
     use std::fs;
 
     fn run_fixture(n: &str) {
-        let src = fs::read_to_string(format!(
-            "tests/ext_fixtures/cypress/packet/{n}.mmd"
-        ))
-        .unwrap();
+        let src = fs::read_to_string(format!("tests/ext_fixtures/cypress/packet/{n}.mmd")).unwrap();
         let expected = fs::read_to_string(format!(
             "tests/reference/ext_fixtures/cypress/packet/{n}.svg"
         ))

@@ -135,7 +135,11 @@ fn extract_init_directives(source: &str, d: &mut PieDiagram) -> String {
             }
         }
         out.push(source[i..].chars().next().unwrap_or('\0'));
-        i += source[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        i += source[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
     }
     out
 }

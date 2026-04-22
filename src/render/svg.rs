@@ -24,7 +24,13 @@ pub struct ViewBox {
 impl ViewBox {
     pub fn to_attr(&self) -> String {
         // mermaid's formatting: no superfluous trailing zeroes, space-separated
-        format!("{} {} {} {}", fmt(self.min_x), fmt(self.min_y), fmt(self.width), fmt(self.height))
+        format!(
+            "{} {} {} {}",
+            fmt(self.min_x),
+            fmt(self.min_y),
+            fmt(self.width),
+            fmt(self.height)
+        )
     }
 }
 
@@ -131,7 +137,12 @@ mod tests {
 
     #[test]
     fn open_svg_matches_upstream_attr_order() {
-        let vb = ViewBox { min_x: -38.0, min_y: -23.0, width: 76.0, height: 47.296875 };
+        let vb = ViewBox {
+            min_x: -38.0,
+            min_y: -23.0,
+            width: 76.0,
+            height: 47.296875,
+        };
         let got = open_svg("ref-x", "pie", vb);
         assert!(got.starts_with(r#"<svg id="ref-x" width="100%" xmlns="http://www.w3.org/2000/svg" viewBox="-38 -23 76 47.296875""#));
         assert!(got.contains(r#"aria-roledescription="pie""#));

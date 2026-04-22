@@ -32,16 +32,16 @@ pub enum Diagram {
     Pie(pie::PieDiagram),
     Packet(packet::PacketDiagram),
     Radar(radar::RadarDiagram),
-    Ishikawa(()),
-    Journey(()),
-    Timeline(()),
-    Quadrant(()),
-    Xychart(()),
-    Wardley(()),
+    Ishikawa(ishikawa::IshikawaDiagram),
+    Journey(journey::JourneyDiagram),
+    Timeline(timeline::TimelineDiagram),
+    Quadrant(quadrant::QuadrantDiagram),
+    Xychart(xychart::XychartDiagram),
+    Wardley(wardley::WardleyDiagram),
     Gantt(()),
-    Sankey(()),
-    Treemap(()),
-    Kanban(()),
+    Sankey(sankey::SankeyDiagram),
+    Treemap(treemap::TreemapDiagram),
+    Kanban(kanban::KanbanDiagram),
     Er(()),
     Requirement(()),
     Class(()),
@@ -87,3 +87,12 @@ impl Diagram {
         }
     }
 }
+pub mod ishikawa;
+pub mod journey;
+pub mod kanban;
+pub mod quadrant;
+pub mod sankey;
+pub mod timeline;
+pub mod treemap;
+pub mod wardley;
+pub mod xychart;

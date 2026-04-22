@@ -169,9 +169,7 @@ fn strip_frontmatter(source: &str) -> (Option<String>, Option<PacketConfig>, Str
     let mut title: Option<String> = None;
     let mut packet_config: Option<PacketConfig> = None;
 
-    if let Ok(serde_yml::Value::Mapping(map)) =
-        serde_yml::from_str::<serde_yml::Value>(body)
-    {
+    if let Ok(serde_yml::Value::Mapping(map)) = serde_yml::from_str::<serde_yml::Value>(body) {
         if let Some(t) = map.get(serde_yml::Value::String("title".into())) {
             title = yaml_to_string(t);
         }
@@ -297,7 +295,9 @@ fn parse_block_line(line: &str, last_end: i64) -> std::result::Result<PacketFiel
             .parse()
             .map_err(|_| format!("invalid bit-count in {line:?}"))?;
         if bits == 0 {
-            return Err(format!("Packet block {head} is invalid. Cannot have a zero bit field."));
+            return Err(format!(
+                "Packet block {head} is invalid. Cannot have a zero bit field."
+            ));
         }
         let start = (last_end + 1) as u32;
         let end = start + bits - 1;

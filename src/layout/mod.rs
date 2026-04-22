@@ -4,19 +4,48 @@
 
 pub mod dagre_bridge;
 pub mod intersect;
-pub mod routing;
-pub mod unified;
-pub mod radar;
 pub mod packet;
 pub mod pie;
+pub mod radar;
+pub mod routing;
+pub mod unified;
 
 /// Dispatch enum — parallel to `model::Diagram`. Each variant holds
 /// the post-layout geometry for one diagram kind.
 #[derive(Debug, Clone)]
 pub enum DiagramLayout {
-    Pie(pie::PieLayout), Packet(packet::PacketLayout), Radar(radar::RadarLayout), Ishikawa(()), Journey(()),
-    Timeline(()), Quadrant(()), Xychart(()), Wardley(()), Gantt(()),
-    Sankey(()), Treemap(()), Kanban(()), Er(()), Requirement(()),
-    Class(()), State(()), Flowchart(()), Block(()), Mindmap(()),
-    Sequence(()), C4(()), GitGraph(()), Architecture(()), Venn(()),
+    Pie(pie::PieLayout),
+    Packet(packet::PacketLayout),
+    Radar(radar::RadarLayout),
+    Ishikawa(ishikawa::IshikawaLayout),
+    Journey(journey::JourneyLayout),
+    Timeline(timeline::TimelineLayout),
+    Quadrant(quadrant::QuadrantLayout),
+    Xychart(xychart::XychartLayout),
+    Wardley(wardley::WardleyLayout),
+    Gantt(()),
+    Sankey(sankey::SankeyLayout),
+    Treemap(treemap::TreemapLayout),
+    Kanban(kanban::KanbanLayout),
+    Er(()),
+    Requirement(()),
+    Class(()),
+    State(()),
+    Flowchart(()),
+    Block(()),
+    Mindmap(()),
+    Sequence(()),
+    C4(()),
+    GitGraph(()),
+    Architecture(()),
+    Venn(()),
 }
+pub mod ishikawa;
+pub mod journey;
+pub mod kanban;
+pub mod quadrant;
+pub mod sankey;
+pub mod timeline;
+pub mod treemap;
+pub mod wardley;
+pub mod xychart;

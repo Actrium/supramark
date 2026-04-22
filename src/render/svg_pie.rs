@@ -183,13 +183,19 @@ fn style_block(id: &str, d: &PieDiagram, theme: &ThemeVariables) -> String {
     css.push_str(&format!(
         "#{id} .edge-thickness-normal{{stroke-width:{stroke_width}px;}}"
     ));
-    css.push_str(&format!("#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"));
+    css.push_str(&format!(
+        "#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"
+    ));
     css.push_str(&format!("#{id} .edge-pattern-solid{{stroke-dasharray:0;}}"));
     css.push_str(&format!(
         "#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}"
     ));
-    css.push_str(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"));
-    css.push_str(&format!("#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"));
+    css.push_str(&format!(
+        "#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"
+    ));
+    css.push_str(&format!(
+        "#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"
+    ));
     css.push_str(&format!(
         "#{id} .marker{{fill:{line_color};stroke:{line_color};}}"
     ));
@@ -343,9 +349,7 @@ mod tests {
         let got = run(source, id);
         if got != expected {
             let (idx, gw, ew) = first_diff(&got, expected);
-            panic!(
-                "{label}: mismatch at byte {idx}\n got: ...{gw}...\n exp: ...{ew}...\n",
-            );
+            panic!("{label}: mismatch at byte {idx}\n got: ...{gw}...\n exp: ...{ew}...\n",);
         }
     }
 

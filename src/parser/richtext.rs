@@ -261,8 +261,8 @@ where
                 match name_owned.as_str() {
                     "b" | "strong" => {
                         let inner = parse_until(it, Some("b")); // accept </b> close for <strong> as well? upstream is lax
-                        // Actually upstream requires matching close. We
-                        // retry with the actual name:
+                                                                // Actually upstream requires matching close. We
+                                                                // retry with the actual name:
                         let _ = attrs_owned;
                         out.push(TextSpan::Bold(inner));
                     }
@@ -279,9 +279,9 @@ where
                     "code" => {
                         // Collapse inner content to plain text for Monospace (which is flat String).
                         let inner = parse_until(it, Some("code"));
-                        out.push(TextSpan::Monospace(
-                            crate::model::richtext::plain_text(&inner),
-                        ));
+                        out.push(TextSpan::Monospace(crate::model::richtext::plain_text(
+                            &inner,
+                        )));
                     }
                     "sub" => out.push(TextSpan::Subscript(parse_until(it, Some("sub")))),
                     "sup" => out.push(TextSpan::Superscript(parse_until(it, Some("sup")))),
@@ -347,7 +347,9 @@ fn attr_value(attrs: &str, key: &str) -> Option<String> {
         let end = rest2.find('\'')?;
         Some(rest2[..end].to_string())
     } else {
-        let end = trimmed.find(|c: char| c.is_whitespace()).unwrap_or(trimmed.len());
+        let end = trimmed
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(trimmed.len());
         Some(trimmed[..end].to_string())
     }
 }

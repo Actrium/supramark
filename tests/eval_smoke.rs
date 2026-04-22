@@ -49,7 +49,11 @@ fn parses_real_reference_svg() {
 
     // Self-compare yields no diff.
     let diff = structural_diff::compare(&svg, &svg).unwrap();
-    assert!(diff.is_empty(), "self-diff non-empty: {}", diff.report_text());
+    assert!(
+        diff.is_empty(),
+        "self-diff non-empty: {}",
+        diff.report_text()
+    );
 }
 
 #[test]
