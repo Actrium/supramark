@@ -1,6 +1,6 @@
-  ---
+---
   title: Merge from main onto undeveloped branch (bottom-to-top)
-  ---
+---
   gitGraph BT:
   commit
   branch develop
@@ -9,19 +9,3 @@
   commit
   checkout develop
   merge main
-  </pre
->
-<h2>Merge from main onto developed branch graph</h2>
-<pre class="mermaid">
----
-title: Merge from main onto developed branch (left-to-right)
----
-gitGraph LR:
-commit
-branch develop
-commit
-checkout main
-commit
-checkout develop
-commit
-merge main

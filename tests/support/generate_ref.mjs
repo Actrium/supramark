@@ -82,6 +82,68 @@ for (const k of [
 }
 if (!globalThis.screen) globalThis.screen = { availWidth: 1024, availHeight: 768, width: 1024, height: 768 };
 
+// Pin Date.now() only. Gantt fixtures with explicit dates (the vast
+// majority) are unaffected; the handful that use `today`-relative
+// arithmetic stay deterministic because Date.now() is frozen. We do
+// NOT override the `Date` constructor — dayjs and d3-scale rely on
+// the genuine prototype chain, and a Proxy-wrapped Date breaks how
+// mermaid's gantt computes its time-axis domain (seen empirically:
+// replacing Date collapses gantt viewBox width to 0).
+const FROZEN_EPOCH_MS = Date.parse('2024-01-01T00:00:00Z');
+Date.now = () => FROZEN_EPOCH_MS;
+W.Date.now = () => FROZEN_EPOCH_MS;
+
+// mermaid's sequence parser has a color-validation path that checks
+// `window?.CSS.supports('color', str)`. If CSS.supports is missing or
+// false, it falls back to `new Option().style` — `Option` is a browser
+// global alias for HTMLOptionElement that jsdom does NOT expose, so the
+// fallback crashes with `ReferenceError: Option is not defined`, taking
+// out every sequence fixture that uses `box <color> <title>`.
+// Easiest fix: install a permissive CSS.supports so the first branch
+// is always taken. This preserves color parsing fidelity: mermaid just
+// accepts whatever CSS color string it was given.
+if (!globalThis.CSS) globalThis.CSS = {};
+if (!globalThis.CSS.supports) globalThis.CSS.supports = () => true;
+if (!W.CSS) W.CSS = globalThis.CSS;
+else if (!W.CSS.supports) W.CSS.supports = globalThis.CSS.supports;
+// Also expose Option as a constructor that returns a detached
+// <option> element — belt and braces for any other mermaid code path
+// that reaches for it.
+if (!globalThis.Option && W.document) {
+  globalThis.Option = function OptionShim(text = '', value = '') {
+    const el = W.document.createElement('option');
+    el.text = text;
+    el.value = value;
+    return el;
+  };
+}
+
+// cytoscape (used by mindmap-cose-bilkent) queries container geometry
+// via getComputedStyle(el).getPropertyValue('padding-*') and subtracts
+// those from clientWidth/clientHeight. jsdom returns '' for unset
+// padding, which parseFloat turns into NaN — cytoscape then produces
+// bb = makeBoundingBox({x1:0,y1:0,w:NaN,h:NaN}) = undefined, and the
+// next statement crashes with "Cannot read properties of undefined
+// (reading 'h')" inside GridLayout.run (cytoscape.esm.mjs:22168).
+//
+// Shim getComputedStyle so any blank value is reported as '0px'.
+// This also forces containerBB / padding terms to parse as 0, which
+// is what we want: our pipeline doesn't need cytoscape pixel
+// fidelity, only non-NaN numbers so cose-bilkent can run.
+const __origGetComputedStyle = W.getComputedStyle.bind(W);
+W.getComputedStyle = function patchedGetComputedStyle(el, pseudo) {
+  const cs = __origGetComputedStyle(el, pseudo);
+  if (!cs || cs.__paddingShimmed) return cs;
+  const origGet = cs.getPropertyValue.bind(cs);
+  cs.getPropertyValue = (name) => {
+    const v = origGet(name);
+    return v === '' || v == null ? '0px' : v;
+  };
+  try { Object.defineProperty(cs, '__paddingShimmed', { value: true }); } catch {}
+  return cs;
+};
+globalThis.getComputedStyle = W.getComputedStyle;
+
 // jsdom ships HTMLCanvasElement but throws on getContext unless the
 // native `canvas` npm package is installed. cytoscape (used by
 // architecture + mindmap-cose-bilkent + some flowchart code paths)
@@ -96,6 +158,7 @@ if (!globalThis.screen) globalThis.screen = { availWidth: 1024, availHeight: 768
 // RENDER_TIMEOUT_MS guard, it wastes real time per fixture.
 if (W.HTMLImageElement) {
   Object.defineProperty(W.HTMLImageElement.prototype, 'src', {
+    configurable: true,
     set(_v) {
       // Drop the URL on the floor; fire synthetic error so any
       // onload/onerror observer wakes up.
@@ -107,6 +170,34 @@ if (W.HTMLImageElement) {
       return '';
     },
   });
+  // ! Critical for avoiding hangs on fixtures like
+  // cypress/flowchart/166.mmd (`<img src="https://..."/>` inside
+  // labels). mermaid's configureLabelImages() and addText2() wait on
+  // `await Promise.all(images.map(img => new Promise(res => {
+  //   setTimeout(() => { if (img.complete) setupImage(); });
+  //   img.addEventListener('error', setupImage);
+  //   img.addEventListener('load',  setupImage);
+  // })))`. For <img> elements parsed from innerHTML, jsdom never
+  // fires load/error (no real network fetch) AND `complete` stays
+  // false — so the Promise never settles. Meanwhile, mermaid's own
+  // `executionQueue` is serial: one stuck render wedges every
+  // subsequent render in the same process. A single unresolved img
+  // promise was the root cause of all 62 "render timeout" failures.
+  //
+  // Override `complete` to always return true so the setTimeout
+  // branch runs immediately and resolves the promise.
+  Object.defineProperty(W.HTMLImageElement.prototype, 'complete', {
+    configurable: true,
+    get() { return true; },
+  });
+  // mermaid's imageSquare (src/rendering-util/rendering-elements/
+  // shapes/imageSquare.ts) calls `await img.decode()` after assigning
+  // `.src`. jsdom does not implement HTMLImageElement.decode — stub
+  // it to resolve immediately. Without this, any diagram using the
+  // `image-shape` node type would throw synchronously.
+  if (typeof W.HTMLImageElement.prototype.decode !== 'function') {
+    W.HTMLImageElement.prototype.decode = function () { return Promise.resolve(); };
+  }
 }
 
 // Block fetch globally in the jsdom env — another avenue mermaid can
@@ -246,6 +337,124 @@ const NON_VISIBLE_TAGS = new Set([
   'filter',
 ]);
 
+// SVG path `d` attribute parser. Returns {x,y,width,height} as the
+// axis-aligned envelope of all anchor + control points (M/L/H/V/C/S/Q/T/A/Z).
+// We approximate curves by the polygon their control points span, which
+// is a superset of the exact curve bbox — good enough for dagre node
+// sizing (mermaid uses paths primarily for rough.js rectangles and
+// createRoundedRectPathD output, where endpoints-only already gives the
+// true bbox within a couple of pixels).
+function pathBBox(d) {
+  if (!d) return { x: 0, y: 0, width: 0, height: 0 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let cx = 0, cy = 0, startX = 0, startY = 0;
+  const add = (x, y) => {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  };
+  const tok = d.match(/[MmLlHhVvZzCcSsQqTtAa]|-?\d*\.?\d+(?:[eE][-+]?\d+)?/g) ?? [];
+  let i = 0;
+  let cmd = '';
+  const read = () => parseFloat(tok[i++]);
+  while (i < tok.length) {
+    const t = tok[i];
+    if (/^[A-Za-z]$/.test(t)) {
+      cmd = t;
+      i++;
+    }
+    const rel = cmd === cmd.toLowerCase();
+    switch (cmd) {
+      case 'M': case 'm': {
+        let x = read(), y = read();
+        if (rel) { x += cx; y += cy; }
+        cx = x; cy = y; startX = x; startY = y;
+        add(x, y);
+        cmd = rel ? 'l' : 'L'; // subsequent pairs are implicit lineto
+        break;
+      }
+      case 'L': case 'l': {
+        let x = read(), y = read();
+        if (rel) { x += cx; y += cy; }
+        cx = x; cy = y; add(x, y);
+        break;
+      }
+      case 'H': case 'h': {
+        let x = read();
+        if (rel) x += cx;
+        cx = x; add(x, cy);
+        break;
+      }
+      case 'V': case 'v': {
+        let y = read();
+        if (rel) y += cy;
+        cy = y; add(cx, y);
+        break;
+      }
+      case 'C': case 'c': {
+        let x1 = read(), y1 = read(), x2 = read(), y2 = read(), x = read(), y = read();
+        if (rel) { x1 += cx; y1 += cy; x2 += cx; y2 += cy; x += cx; y += cy; }
+        add(x1, y1); add(x2, y2); add(x, y);
+        cx = x; cy = y;
+        break;
+      }
+      case 'S': case 's': {
+        let x2 = read(), y2 = read(), x = read(), y = read();
+        if (rel) { x2 += cx; y2 += cy; x += cx; y += cy; }
+        add(x2, y2); add(x, y);
+        cx = x; cy = y;
+        break;
+      }
+      case 'Q': case 'q': {
+        let x1 = read(), y1 = read(), x = read(), y = read();
+        if (rel) { x1 += cx; y1 += cy; x += cx; y += cy; }
+        add(x1, y1); add(x, y);
+        cx = x; cy = y;
+        break;
+      }
+      case 'T': case 't': {
+        let x = read(), y = read();
+        if (rel) { x += cx; y += cy; }
+        add(x, y);
+        cx = x; cy = y;
+        break;
+      }
+      case 'A': case 'a': {
+        read(); read(); read(); read(); read(); // rx ry x-axis-rotation large-arc sweep
+        let x = read(), y = read();
+        if (rel) { x += cx; y += cy; }
+        add(x, y);
+        cx = x; cy = y;
+        break;
+      }
+      case 'Z': case 'z':
+        cx = startX; cy = startY;
+        break;
+      default:
+        i++; // unknown token, skip
+    }
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function polyBBox(pointsAttr) {
+  if (!pointsAttr) return { x: 0, y: 0, width: 0, height: 0 };
+  const parts = pointsAttr.trim().split(/[\s,]+/).filter(Boolean).map(parseFloat);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const x = parts[i], y = parts[i + 1];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 function intrinsicBox(el) {
   // Per-tag bbox without descending. For <g>, returns null so the
   // caller recurses into children.
@@ -276,6 +485,12 @@ function intrinsicBox(el) {
       x: Math.min(x1, x2), y: Math.min(y1, y2),
       width: Math.abs(x2 - x1), height: Math.abs(y2 - y1),
     };
+  }
+  if (tag === 'polygon' || tag === 'polyline') {
+    return polyBBox(el.getAttribute?.('points') ?? '');
+  }
+  if (tag === 'path') {
+    return pathBBox(el.getAttribute?.('d') ?? '');
   }
   if (tag === 'foreignobject') {
     // Use explicit width/height if set, else fall back to the HTML
@@ -345,8 +560,55 @@ W.SVGElement.prototype.getComputedTextLength = textLen;
 if (W.HTMLElement) W.HTMLElement.prototype.getBBox = textBBox;
 if (W.Element && !W.Element.prototype.getBBox) W.Element.prototype.getBBox = textBBox;
 
+// jsdom's native getBoundingClientRect returns {0,0,0,0} because it
+// has no layout engine. Mermaid's labelHelper / addHtmlSpan relies on
+// this to measure HTML labels inside <foreignObject> — and feeds the
+// width back into dagre as the node's width/height. Returning zero
+// there collapses nodes and dagre then emits zero-length edges, which
+// makes calcLabelPosition throw "Could not find a suitable point for
+// the given distance". Delegate to our font-aware elementBBox shim so
+// HTML labels carry real dimensions.
+function boundingClientRectShim() {
+  const b = elementBBox.call(this);
+  return {
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
+    top: b.y,
+    left: b.x,
+    right: b.x + b.width,
+    bottom: b.y + b.height,
+    toJSON() {
+      return { x: b.x, y: b.y, width: b.width, height: b.height, top: b.y, left: b.x, right: b.x + b.width, bottom: b.y + b.height };
+    },
+  };
+}
+if (W.HTMLElement) W.HTMLElement.prototype.getBoundingClientRect = boundingClientRectShim;
+if (W.Element) W.Element.prototype.getBoundingClientRect = boundingClientRectShim;
+
+// Deterministic Math.random. Mermaid's shape renderers call rough.js
+// even when look != "handDrawn" (with roughness:0 + fillStyle:'solid'),
+// and rough.js falls back to Math.random whenever `seed` is missing
+// from its options. Without a fixed PRNG the emitted bezier control
+// points drift on every invocation — breaking byte-exact references
+// on every class / er / requirement / flowchart shape that routes
+// through rc.path() instead of <rect>. Reseed per render inside
+// renderOne() so cross-fixture ordering does not leak between
+// successive renders in the same process.
+let __rngState = 0x12345678;
+function __mulberry32() {
+  __rngState = (__rngState + 0x6d2b79f5) | 0;
+  let t = __rngState;
+  t = Math.imul(t ^ (t >>> 15), 1 | t);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+Math.random = __mulberry32;
+W.Math.random = __mulberry32;
+
 const mermaid = (await import('mermaid')).default;
-mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', handDrawnSeed: 1 });
 
 // ---------- render one source ----------
 // Guarded against mermaid.render() promises that never settle (seen
@@ -365,11 +627,60 @@ async function renderOne(source, id) {
     // foreignObject labels) that accumulate across renders.
     const body = W.document.body;
     while (body.firstChild) body.removeChild(body.firstChild);
+    // Reseed the PRNG so cross-render order does not affect output.
+    // Any fixed starting state works; using a derived-from-id seed
+    // makes single-file and batch runs produce the same bytes for
+    // the same fixture regardless of the surrounding batch slice.
+    __rngState = 0x12345678;
     const { svg } = await Promise.race([mermaid.render(id, source), timeout]);
-    return svg;
+    return normaliseSvg(svg);
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Post-render normaliser: strips/rewrites parts of mermaid's SVG that
+// are intrinsically non-deterministic in our Node env so repeated
+// runs produce byte-identical output. The Rust-side renderer must
+// apply the equivalent normalisation — or simply not emit these
+// counter suffixes / wall-clock markers in the first place.
+function normaliseSvg(svg) {
+  // 1. Gantt "today" marker: x derived from wall-clock outside our
+  // Date.now() freeze. Wipe the body.
+  svg = svg.replace(/<g class="today">[\s\S]*?<\/g>/g, '<g class="today"></g>');
+
+  // 2. Module-level counters in mermaid (`var classCounter`, etc.)
+  // never reset across renders. In single-file mode they start at 0;
+  // in a batch worker they start at some N. Renumber per-SVG by
+  // first-appearance so the output is stable regardless of where in
+  // a batch the fixture renders.
+  // Each rule = (pattern, join). Pattern captures `(id)(counter)` in
+  // that order; join is the separator used to splice them back.
+  // classDiagram uses `classId-A-N` (sep '-'); sequenceDiagram uses
+  // `actor7` (no sep). Add more tuples when new counter leaks
+  // surface during Rust-side diffing.
+  const counterRules = [
+    [/(classId-\w+)-(\d+)/g, '-'],
+    // `(?<![a-zA-Z])` avoids matching mid-word; \b would fail here
+    // because `_` is a word char (e.g. `actor2_popup` must match).
+    [/(?<![a-zA-Z])(actor)(\d+)/g, ''],
+    [/(-msg)(\d+)/g, ''],
+    [/(?<![a-zA-Z])(state)(\d+)(?![a-zA-Z])/g, ''],
+    [/(?<![a-zA-Z])(root)-(\d+)/g, '-'],  // sequenceDiagram participant roots
+    [/(actor-[a-z]+-[a-z]+)(\d+)/g, ''],       // sequenceDiagram svg-sprite body parts
+  ];
+  for (const [re, sep] of counterRules) svg = renumberCounterIds(svg, re, sep);
+  return svg;
+}
+
+function renumberCounterIds(svg, pattern, sep) {
+  const map = new Map();
+  let next = 0;
+  return svg.replace(pattern, (_m, id, counter) => {
+    const uniq = id + ':' + counter;
+    if (!map.has(uniq)) map.set(uniq, next++);
+    return id + sep + map.get(uniq);
+  });
 }
 
 // ---------- mode dispatch ----------

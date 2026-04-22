@@ -1,6 +1,6 @@
-  ---
+---
   title: Cherry-pick from main (bottom-to-top)
-  ---
+---
   gitGraph BT:
   commit
   branch develop
@@ -10,22 +10,3 @@
   checkout develop
   commit
   cherry-pick id: "A"
-  </pre
->
-<h2>Cherry-pick then merge graph</h2>
-<pre class="mermaid">
----
-title: Cherry-pick then merge (left-to-right)
----
-gitGraph LR:
-commit
-branch newbranch
-checkout newbranch
-commit id: "Pick me"
-checkout main
-commit
-checkout newbranch
-commit
-checkout main
-cherry-pick id: "Pick me"
-merge newbranch

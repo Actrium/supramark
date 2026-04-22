@@ -1,6 +1,6 @@
 classDiagram
   Class01 "1" <|--|> "*" AveryLongClass : Cool
-  &lt;&lt;interface&gt;&gt; Class01
+  <<interface>> Class01
   Class03 "1" *-- "*" Class04
   Class05 "1" o-- "many" Class06
   Class07 "1" .. "*" Class08
@@ -14,7 +14,7 @@ classDiagram
   Class01  : int gorilla
   Class08 "1" <--> "*" C2: Cool label
   class Class10 {
-    &lt;&lt;service&gt;&gt;
+    <<service>>
     int id
     test()
   }

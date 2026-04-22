@@ -1,6 +1,6 @@
-  ---
+---
   title: Merge from main onto developed branch (bottom-to-top)
-  ---
+---
   gitGraph BT:
   commit
   branch develop
@@ -10,21 +10,3 @@
   checkout develop
   commit
   merge main
-  </pre
->
-<h2>Two branches from same commit graph</h2>
-<pre class="mermaid">
----
-title: Two branches from same commit (left-to-right)
----
-gitGraph LR:
-commit
-commit
-branch feature-001
-commit
-commit
-checkout main
-branch feature-002
-commit
-checkout feature-001
-merge feature-002

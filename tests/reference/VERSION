@@ -6,7 +6,7 @@ generator_node:   v20.19.4
 generator_jsdom:  25.0.1
 generator_opentype: 1.3.4
 generator_os:     Linux 6.8.0-106-generic x86_64
-generated_at:     2026-04-22T07:06:18Z
+generated_at:     2026-04-22T08:25:56Z
 
 # Font metric anchor (both sides of the pipeline consume these TTFs)
 fonts:
@@ -14,22 +14,29 @@ fonts:
   - tests/support/fonts/DejaVuSans-Bold.ttf
 rust_font_data: src/font_data.rs (vendored from plantuml-little b32d6aa)
 
-# Counts from this snapshot
+# Coverage
 total_fixtures: 1396
-rendered_ok:    1089
-known_failures: 307
+rendered_ok:    1394
+known_failures: 2
 
-# Failure categories (see _failures.log for per-fixture detail)
-# All of these are ref-pipeline limitations in Node+jsdom, NOT port
-# defects — the Rust renderer does not yet exist. They'll be
-# revisited during Phase 4 as each diagram type comes online.
-161  "Could not find a suitable point for the given distance"  (shim bbox still gives degenerate paths in some class/flowchart cases; likely needs <path d=...> or transform-aware bbox)
- 62  render timeout after 3000ms                               (mermaid async paths that never settle in jsdom: fa icons, htmlLabels:false, compact @{...} syntax, elk)
- 35  parse error on line 3                                     (YAML frontmatter / cypress-only extraction edge cases)
- 24  "Cannot read properties of undefined (reading 'h')"       (mindmap cose-bilkent; architecture-adjacent)
-  6  parse error on line 5
-  4  "Option is not defined"
- 15  other parse / lexer errors
+# The 2 known failures are real mermaid grammar/feature limitations,
+# not ref-pipeline defects:
+#   ext_fixtures/cypress/flowchart/46.mmd  — `flowchart-elk LR`, opt-in ELK layout MVP does not target
+#   ext_fixtures/demos/class/08.mmd        — `class People List~List~Person~~` unsupported class grammar
+# See tests/reference/_failures.log for the current manifest.
 
-# Determinism: same fixture path -> byte-identical SVG across runs AND
-# between --batch and single-file invocation. Verified on Node 20.19.4.
+# Determinism
+# - Two consecutive `--batch` runs produce byte-identical reference trees.
+# - `node generate_ref.mjs <fixture.mmd>` single-file output is
+#   byte-identical to its matching reference/.svg entry.
+# Achieved via:
+#   - DejaVu-backed text metrics shared with src/font_metrics.rs
+#   - Shape-aware getBBox (rect/circle/ellipse/line/foreignObject/polygon/path)
+#   - Recursive <g>/<svg> bbox skipping <style>/<defs>/<marker>/… non-visible tags
+#   - jsdom DOM shims: CSS.supports, Option ctor, HTMLCanvasElement ctx,
+#     HTMLImageElement.{complete,decode,src}, getComputedStyle empty→"0px"
+#   - Math.random → mulberry32 reseeded per render with handDrawnSeed:1
+#   - Date.now() pinned to 2024-01-01Z
+#   - Post-render normalisation: <g class="today"> wiped; module-scoped
+#     counters (classId-, actor, root-, actor-man-…, -msg, state)
+#     renumbered per-SVG by first appearance.
