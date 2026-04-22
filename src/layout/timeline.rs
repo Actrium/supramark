@@ -25,7 +25,12 @@ use crate::theme::ThemeVariables;
 pub(crate) const LR_NODE_WIDTH: f64 = 150.0;
 pub(crate) const LR_NODE_PADDING: f64 = 20.0;
 pub(crate) const LR_SECTION_Y: f64 = 50.0;
-pub(crate) const LR_LEFT_MARGIN: f64 = 50.0;
+pub(crate) const LR_LEFT_MARGIN: f64 = 150.0;
+/// Upstream `drawEvents` builds each event node with `maxHeight: 50`,
+/// which `drawNode` floors the computed height against
+/// (`node.height = max(node.height, node.maxHeight)`). Single-line
+/// text would otherwise yield ~45 px.
+pub(crate) const LR_EVENT_MIN_HEIGHT: f64 = 50.0;
 
 // ── Upstream constants (TD / vertical renderer) ──────────────────
 pub(crate) const TD_NODE_WIDTH: f64 = 200.0;
@@ -118,7 +123,15 @@ pub fn layout(d: &TimelineDiagram, theme: &ThemeVariables) -> Result<TimelineLay
         .clone()
         .or_else(|| theme.font_size.clone())
         .unwrap_or_else(|| "16px".to_string());
-    let font_size_px = parse_px(&font_size_css).unwrap_or(16.0);
+    // `font_size_px` here drives node-height and wrap arithmetic.
+    // Upstream reads it from `conf.fontSize` (global config, default
+    // 16) — NOT from `themeVariables.fontSize`, even when a fixture
+    // overrides the latter. That second value only styles the CSS
+    // `font-size` attribute of the SVG. `cypress/timeline/12.mmd`
+    // exercises that split: `themeVariables.fontSize: 17px` flows
+    // into `font_size_css` (for the `<style>` block) while
+    // dimensional math stays pinned to 16.
+    let font_size_px = 16.0_f64;
 
     match d.direction {
         TimelineDirection::LR => layout_lr(d, font_family_css, font_size_css, font_size_px),
@@ -171,6 +184,10 @@ fn layout_lr(
         .fold(0.0f64, f64::max);
 
     // maxEventLineLength: per task, sum event heights + spacing.
+    // NOTE: upstream calls `getVirtualNodeHeight` directly here — that
+    // returns the un-clamped height (the `maxHeight: 50` floor only
+    // takes effect later inside `drawNode`), so we must NOT apply the
+    // event min-height here.
     let mut max_event_line_length: f64 = 0.0;
     for t in &d.tasks {
         let mut sum = 0.0;
@@ -199,14 +216,28 @@ fn layout_lr(
     };
     let mut master_x = 50.0 + left_margin; // 100 for default.
     let section_begin_y = LR_SECTION_Y;
-    let master_y_tasks = section_begin_y + max_section_height + 50.0;
-    let events_y = master_y_tasks + 100.0;
+    let has_sections = !d.sections.is_empty();
+    // Upstream: `masterY = 50`. Only bumped by `maxSectionHeight + 50`
+    // inside the section loop; for the no-sections branch it stays 50.
+    let master_y_tasks = if has_sections {
+        section_begin_y + max_section_height + 50.0
+    } else {
+        section_begin_y
+    };
+    // Upstream `drawTasks` bumps `masterY += 100` before calling
+    // `drawEvents`, which ITSELF adds another `masterY += 100` before
+    // laying out events. So the first event sits 200 below the task.
+    let events_y = master_y_tasks + 200.0;
 
     let mut node_id = 0usize;
-    let has_sections = !d.sections.is_empty();
 
     if has_sections {
-        let mut section_index: i32 = 0;
+        // Upstream `drawNode` maps `fullSection` → CSS class via
+        // `(fullSection % THEME_COLOR_LIMIT) - 1`, so the first
+        // section lands in the `.section--1` slot. We encode the
+        // already-shifted index here so the renderer can stringify it
+        // directly.
+        let mut section_index: i32 = -1;
         for sname in &d.sections {
             let tasks_for_section: Vec<_> =
                 d.tasks.iter().filter(|t| &t.section == sname).collect();
@@ -281,7 +312,8 @@ fn layout_lr(
                         LR_NODE_PADDING,
                         &font_family_css,
                         font_size_px,
-                    );
+                    )
+                    .max(LR_EVENT_MIN_HEIGHT);
                     l.nodes.push(LaidNode {
                         kind: LaidNodeKind::Event,
                         x: task_x,
@@ -293,7 +325,8 @@ fn layout_lr(
                         node_id,
                     });
                     node_id += 1;
-                    ey += 10.0 + eh;
+                    // L-to-R to match JS `masterY = masterY + 10 + eh`.
+                    ey = ey + 10.0 + eh;
                 }
             }
 
@@ -344,7 +377,8 @@ fn layout_lr(
                     LR_NODE_PADDING,
                     &font_family_css,
                     font_size_px,
-                );
+                )
+                .max(LR_EVENT_MIN_HEIGHT);
                 l.nodes.push(LaidNode {
                     kind: LaidNodeKind::Event,
                     x: task_x,
@@ -365,13 +399,16 @@ fn layout_lr(
         }
     }
 
-    // BBox of the laid-out nodes (approximates svg.getBBox behaviour).
-    let (bbox_x, bbox_y, bbox_w, bbox_h) = compute_bbox(&l.nodes, &l.lines);
+    // Pre-title bbox — upstream calls `svg.getBBox()` before appending
+    // the title + axis line. The jsdom shim ignores `<g transform>` on
+    // task/event/section wrappers, so nodes contribute only their local
+    // `(0, 0, width, height)` envelope; dashed lines sit at the SVG
+    // root and contribute their world coords.
+    let (_pre_x, _pre_y, pre_w, _pre_h) = shim_bbox(&l.nodes, &l.lines);
 
-    // Title placement (at the time of upstream's title append: box comes
-    // from pre-title SVG nodes only).
+    // Title placement (uses pre-title box.width).
     if l.has_title {
-        let title_x = bbox_w / 2.0 - left_margin;
+        let title_x = pre_w / 2.0 - left_margin;
         l.title_xy = Some((title_x, 20.0));
     }
 
@@ -381,29 +418,32 @@ fn layout_lr(
     } else {
         max_task_height + 100.0
     };
-    l.axis = Some(LaidLine {
+    let axis_line = LaidLine {
         x1: left_margin,
         y1: depth_y,
-        x2: bbox_w + 3.0 * left_margin,
+        x2: pre_w + 3.0 * left_margin,
         y2: depth_y,
         stroke_width: 4.0,
         dashed: false,
-    });
+    };
+    l.axis = Some(axis_line.clone());
 
-    // Final bbox including axis + title.
-    let final_w = (bbox_x + bbox_w).max(l.axis.as_ref().map(|a| a.x2).unwrap_or(0.0));
-    let final_h = (bbox_y + bbox_h).max(l.axis.as_ref().map(|a| a.y2).unwrap_or(0.0));
+    // Final bbox = pre-title bbox ∪ axis line ∪ title text. Title text
+    // contributes negligible width because the `font-size="4ex"` attr
+    // parses as "4" in the jsdom shim → a 4px font height, so title
+    // width stays well inside the dashed-line / axis envelope for every
+    // fixture we care about.
+    let mut all_lines: Vec<LaidLine> = l.lines.clone();
+    all_lines.push(axis_line);
+    let (fx, fy, fw, fh) = shim_bbox(&l.nodes, &all_lines);
     let padding = 50.0;
-    // setupGraphViewbox expands the BBox by `padding` on every side and
-    // uses the SVG's natural bounds (starting at 0,0 because node Y's
-    // are positive).
     l.viewbox = [
-        -padding,
-        -padding,
-        final_w + 2.0 * padding,
-        final_h + 2.0 * padding,
+        fx - padding,
+        fy - padding,
+        fw + 2.0 * padding,
+        fh + 2.0 * padding,
     ];
-    l.max_width_px = final_w + 2.0 * padding;
+    l.max_width_px = fw + 2.0 * padding;
     Ok(l)
 }
 
@@ -500,7 +540,9 @@ fn layout_td(
 
     let mut node_id = 0usize;
     if has_sections {
-        let mut section_index: i32 = 0;
+        // `(fullSection % THEME_COLOR_LIMIT) - 1` — see note on the
+        // LR branch. First section → `.section--1`.
+        let mut section_index: i32 = -1;
         for sname in &d.sections {
             let tasks_for_section: Vec<_> =
                 d.tasks.iter().filter(|t| &t.section == sname).collect();
@@ -580,7 +622,11 @@ fn layout_td(
                         stroke_width: 2.0,
                         dashed: true,
                     });
-                    ey += eh + TD_EVENT_SPACING;
+                    // Upstream uses left-to-right `currentY + eh + 10`;
+                    // writing the Rust as `ey += eh + 10` groups the
+                    // non-exact-in-f64 `eh + 10` first, drifting the
+                    // 17th significant digit. Expand to match JS.
+                    ey = ey + eh + TD_EVENT_SPACING;
                 }
                 task_y += task_spacing;
             }
@@ -651,7 +697,9 @@ fn layout_td(
                     stroke_width: 2.0,
                     dashed: true,
                 });
-                ey += eh + TD_EVENT_SPACING;
+                // Match upstream's L-to-R `currentY + eh + 10` for
+                // byte-exact parity at the 17th sig-digit.
+                ey = ey + eh + TD_EVENT_SPACING;
             }
             task_y += task_spacing;
             if !d.disable_multicolor {
@@ -660,45 +708,95 @@ fn layout_td(
         }
     }
 
-    // BBox.
-    let (bbox_x, bbox_y, bbox_w, bbox_h) = compute_bbox(&l.nodes, &l.lines);
-
-    // Axis placement (vertical line at `timeline_x`).
-    let arrow_top_offset = font_size_px * 2.0;
-    let arrow_bottom_padding = font_size_px * 0.5 + 20.0;
-    let axis_y1 = content_top_y - arrow_top_offset;
-    let axis_y2 = bbox_y + bbox_h + arrow_bottom_padding;
+    // Pre-title / pre-axis bbox for the `title x = box.width/2 - leftMargin`
+    // placement. jsdom shim: nodes → local `(0, 0, width, height)`,
+    // dashed event-lines → world coords.
+    let (_pre_x, pre_y, pre_w, pre_h) = shim_bbox(&l.nodes, &l.lines);
 
     if l.has_title {
-        let title_x = bbox_w / 2.0 - left_margin;
+        let title_x = pre_w / 2.0 - left_margin;
         l.title_xy = Some((title_x, 20.0));
     }
 
-    l.axis = Some(LaidLine {
+    // TD axis: the renderer takes `box = svg.getBBox()` AFTER appending
+    // the title, then sets `axis.y2 = box.y + box.height + bottomPad`.
+    // The title text is ≈0-width (font-size="4ex" → 4px in shim) so the
+    // post-title box equals the pre-title box for our purposes.
+    let arrow_top_offset = font_size_px * 2.0;
+    let arrow_bottom_padding = font_size_px * 0.5 + 20.0;
+    let axis_y1 = content_top_y - arrow_top_offset;
+    let axis_y2 = pre_y + pre_h + arrow_bottom_padding;
+
+    let axis_line = LaidLine {
         x1: timeline_x,
         y1: axis_y1,
         x2: timeline_x,
         y2: axis_y2,
         stroke_width: 4.0,
         dashed: false,
-    });
+    };
+    l.axis = Some(axis_line.clone());
 
     let _ = section_begin_x;
-    let _ = (bbox_x, bbox_y);
 
-    let final_w = (bbox_x + bbox_w).max(timeline_x);
-    let final_h = (bbox_y + bbox_h).max(axis_y2);
+    // Final bbox = pre-title ∪ axis line. Title width is negligible.
+    let mut all_lines: Vec<LaidLine> = l.lines.clone();
+    all_lines.push(axis_line);
+    let (fx, fy, fw, fh) = shim_bbox(&l.nodes, &all_lines);
     let padding = 50.0;
     l.viewbox = [
-        -padding,
-        -padding,
-        final_w + 2.0 * padding,
-        final_h + 2.0 * padding,
+        fx - padding,
+        fy - padding,
+        fw + 2.0 * padding,
+        fh + 2.0 * padding,
     ];
-    l.max_width_px = final_w + 2.0 * padding;
+    l.max_width_px = fw + 2.0 * padding;
     Ok(l)
 }
 
+/// Mirror the jsdom bbox shim used by `tests/support/generate_ref.mjs`:
+/// transforms on `<g>` wrappers are ignored, so wrapped task/event/
+/// section nodes contribute only their *local* intrinsic box
+/// `(0, 0, width, height)` — not the translated `(x, y, x+w, y+h)`.
+/// Dashed lines and the axis line live at the SVG root (no parent
+/// transform) and contribute their world coordinates directly.
+///
+/// Upstream's `timelineRenderer.ts` calls `svg.getBBox()` at two points:
+/// once before appending the title + axis (used to position title and
+/// to set `axis.x2 = box.width + 3*leftMargin` on LR) and once after
+/// (used to size the viewBox in `setupGraphViewbox`). Callers select
+/// which subset of lines to include to match each phase.
+pub(crate) fn shim_bbox(nodes: &[LaidNode], lines: &[LaidLine]) -> (f64, f64, f64, f64) {
+    let mut x0 = f64::INFINITY;
+    let mut y0 = f64::INFINITY;
+    let mut x1 = f64::NEG_INFINITY;
+    let mut y1 = f64::NEG_INFINITY;
+    for n in nodes {
+        // Transform-ignoring: node's intrinsic `(0, 0, width, height)`.
+        x0 = x0.min(0.0);
+        y0 = y0.min(0.0);
+        x1 = x1.max(n.width);
+        y1 = y1.max(n.height);
+    }
+    for l in lines {
+        let lx0 = l.x1.min(l.x2);
+        let ly0 = l.y1.min(l.y2);
+        let lx1 = l.x1.max(l.x2);
+        let ly1 = l.y1.max(l.y2);
+        x0 = x0.min(lx0);
+        y0 = y0.min(ly0);
+        x1 = x1.max(lx1);
+        y1 = y1.max(ly1);
+    }
+    if !x0.is_finite() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    (x0, y0, x1 - x0, y1 - y0)
+}
+
+/// Retained for callers that still want the pre-shim world-coord bbox.
+/// Kept private — new code should call [`shim_bbox`].
+#[allow(dead_code)]
 pub(crate) fn compute_bbox(nodes: &[LaidNode], _lines: &[LaidLine]) -> (f64, f64, f64, f64) {
     let mut x0 = f64::INFINITY;
     let mut y0 = f64::INFINITY;
@@ -730,9 +828,17 @@ pub(crate) fn parse_px(s: &str) -> Option<f64> {
 pub(crate) fn wrap_text(
     text: &str,
     width: f64,
-    font_family: &str,
-    font_size_px: f64,
+    _font_family: &str,
+    _font_size_px: f64,
 ) -> Vec<String> {
+    // Upstream `wrap` uses d3's `tspan.node().getComputedTextLength()`,
+    // which the jsdom shim resolves at the DOM default 14px / sans-
+    // serif because timeline's `<text>` tags carry no font attrs. We
+    // mirror that so wrap decisions agree byte-for-byte.
+    wrap_text_shim(text, width)
+}
+
+fn wrap_text_shim(text: &str, width: f64) -> Vec<String> {
     // Step 1: tokenise preserving whitespace runs + `<br>` markers.
     let tokens = tokenise(text);
     let mut out_lines: Vec<String> = Vec::new();
@@ -745,8 +851,20 @@ pub(crate) fn wrap_text(
             continue;
         }
         line.push(token.clone());
+        // Upstream writes the trimmed line into the tspan BEFORE
+        // measuring: `tspan.text(line.join(' ').trim())` then
+        // `tspan.node().getComputedTextLength()`. We must match — an
+        // un-trimmed trailing whitespace token would otherwise push
+        // the measurement over the width bound and wrap prematurely.
         let joined = line.join(" ");
-        let w = text_width(&joined, font_family, font_size_px, false, false);
+        let trimmed = joined.trim();
+        let w = text_width(
+            trimmed,
+            SHIM_TEXT_FONT_FAMILY,
+            SHIM_TEXT_FONT_SIZE_PX,
+            false,
+            false,
+        );
         if w > width {
             // Pop the last word, flush the current line, start fresh.
             line.pop();
@@ -758,8 +876,6 @@ pub(crate) fn wrap_text(
     if !line.is_empty() || out_lines.is_empty() {
         out_lines.push(line.join(" ").trim().to_string());
     }
-    // Upstream behaviour on a `<br>` as the FIRST token: the initial
-    // empty-string tspan comes back as `""`; keep it for parity.
     out_lines
 }
 
@@ -824,22 +940,45 @@ fn tokenise(text: &str) -> Vec<String> {
     out
 }
 
+/// Upstream's timeline `<text>` elements carry no `font-size` /
+/// `font-family` attributes, so the byte-exact reference harness
+/// (`tests/support/generate_ref.mjs`) resolves them via its jsdom
+/// `resolveFont` helper, which defaults to `14px` / `"sans-serif"`.
+/// `getComputedTextLength` (used by `wrap`) and `getBBox` (used by
+/// `getVirtualNodeHeight`) both go through that same resolution, so
+/// every width/height measurement upstream uses these constants even
+/// though the *visible* rendering uses the configured 16px.
+pub(crate) const SHIM_TEXT_FONT_FAMILY: &str = "sans-serif";
+pub(crate) const SHIM_TEXT_FONT_SIZE_PX: f64 = 14.0;
+
 /// Height a wrap'd node ends up with, matching
 /// `svgDraw.getVirtualNodeHeight`:
 ///   `bbox.height + fontSize * 1.1 * 0.5 + node.padding`
-/// where `bbox.height = font_line_height * n_lines`.
+///
+/// Upstream wrap emits *multiple `<tspan>`s* under a single `<text>`,
+/// but the jsdom `getBBox` shim (`tests/support/generate_ref.mjs`)
+/// measures `el.textContent` via `measureTextBlock`, which only splits
+/// on `\n`. Concatenated tspan text contains no newlines — so upstream
+/// sees single-line height regardless of wrap count.
+///
+/// `font_size_px` is the CONFIGURED renderer font size (typically 16);
+/// it governs the `fontSize * 1.1 * 0.5` term. The actual `bbox.height`
+/// term uses the jsdom-shim defaults (14px / sans-serif) — see
+/// [`SHIM_TEXT_FONT_SIZE_PX`].
 pub(crate) fn node_height(
-    text: &str,
-    width: f64,
+    _text: &str,
+    _width: f64,
     padding: f64,
-    font_family: &str,
+    _font_family: &str,
     font_size_px: f64,
 ) -> f64 {
-    let lines = wrap_text(text, width, font_family, font_size_px);
-    // jsdom's measureTextBlock reports `lineHeight * n_lines` for the
-    // bbox height. mermaid adds `fontSize * 1.1 * 0.5 + padding` to it.
-    let lh = crate::font_metrics::line_height(font_family, font_size_px, false, false);
-    lh * lines.len().max(1) as f64 + font_size_px * 1.1 * 0.5 + padding
+    let lh = crate::font_metrics::line_height(
+        SHIM_TEXT_FONT_FAMILY,
+        SHIM_TEXT_FONT_SIZE_PX,
+        false,
+        false,
+    );
+    lh + font_size_px * 1.1 * 0.5 + padding
 }
 
 #[cfg(test)]

@@ -97,32 +97,26 @@ fn assert_byte_exact(rel: &str) {
 }
 
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn cypress_01() {
     assert_byte_exact("ext_fixtures/cypress/timeline/01");
 }
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn cypress_02() {
     assert_byte_exact("ext_fixtures/cypress/timeline/02");
 }
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn cypress_13() {
     assert_byte_exact("ext_fixtures/cypress/timeline/13");
 }
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn cypress_14() {
     assert_byte_exact("ext_fixtures/cypress/timeline/14");
 }
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn demo_01() {
     assert_byte_exact("ext_fixtures/demos/timeline/01");
 }
 #[test]
-#[ignore = "timeline post-integration dimension divergence; tracked in PROGRESS.md"]
 fn demo_02() {
     assert_byte_exact("ext_fixtures/demos/timeline/02");
 }

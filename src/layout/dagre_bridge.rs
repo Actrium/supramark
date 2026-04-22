@@ -28,7 +28,7 @@ use crate::layout::unified::{Bounds, Cluster, Edge, LayoutData, LayoutResult, No
 use crate::theme::ThemeVariables;
 
 use dagre::graph::{Graph, GraphOptions};
-use dagre::layout::types::{EdgeLabel, LayoutOptions, NodeLabel, RankDir};
+use dagre::layout::types::{EdgeLabel, LabelPos, LayoutOptions, NodeLabel, RankDir};
 
 /// Default node box size when a diagram failed to size-measure its label
 /// before handing us a `LayoutData`. Matches upstream's fallback where
@@ -95,11 +95,35 @@ fn make_node_label(node: &Node) -> NodeLabel {
 /// layout proper (`minlen`, `weight`, `width`, `height`, `labelpos`);
 /// everything else rides back on the user-facing `Edge`.
 fn make_edge_label(edge: &Edge) -> EdgeLabel {
+    // Diagrams (ER in particular) stash `label_width` / `label_height`
+    // into `Edge::extra` before calling the bridge so dagre reserves a
+    // rank row for the edge label. Fall back to 0 — unchanged default
+    // behaviour — when the keys are absent.
+    let w = edge
+        .extra
+        .get("label_width")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let h = edge
+        .extra
+        .get("label_height")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    // labelpos — upstream `Edge.labelpos` is `'l' | 'r' | 'c'`; default 'r'
+    // in dagre, but mermaid's flowchart / ER renderers use 'c' (centre) so
+    // the edge label sits ON the spline, not offset to the side.
+    let labelpos = match edge.labelpos.as_deref() {
+        Some("l") => LabelPos::Left,
+        Some("c") => LabelPos::Center,
+        Some("r") => LabelPos::Right,
+        _ => LabelPos::Right,
+    };
     EdgeLabel {
         minlen: edge.minlen.unwrap_or(1),
         weight: 1,
-        width: 0.0,
-        height: 0.0,
+        width: w,
+        height: h,
+        labelpos,
         ..EdgeLabel::default()
     }
 }

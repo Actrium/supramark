@@ -87,11 +87,17 @@ impl Diagram {
         }
     }
 }
+pub mod block;
+pub mod class;
+pub mod er;
+pub mod flowchart;
 pub mod ishikawa;
 pub mod journey;
 pub mod kanban;
 pub mod quadrant;
+pub mod requirement;
 pub mod sankey;
+pub mod state;
 pub mod timeline;
 pub mod treemap;
 pub mod wardley;

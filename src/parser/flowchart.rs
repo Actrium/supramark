@@ -1,0 +1,1405 @@
+//! Flowchart parser — hand-rolled recursive descent that mirrors the
+//! upstream `flow.jison` grammar closely enough for the common
+//! subset of flowchart syntax.
+//!
+//! Upstream reference:
+//! `/ext/mermaid-official-stable-v11.14.0/packages/mermaid/src/diagrams/flowchart/parser/flow.jison`
+//! `/ext/mermaid-official-stable-v11.14.0/packages/mermaid/src/diagrams/flowchart/flowDb.ts`
+//!
+//! The parser operates line-by-line, but understands multi-line
+//! subgraph blocks. Within a line it uses a small char-cursor that
+//! can peek/pop tokens, matching upstream's lexer states loosely.
+
+use crate::config::frontmatter;
+use crate::config::directive;
+use crate::error::{MermaidError, Result};
+use crate::model::flowchart::{
+    ArrowType, ClassDef, Direction, Edge, EdgeStroke, FlowchartDiagram, Label, LinkStyle,
+    Subgraph, Vertex,
+};
+
+/// Parse a flowchart / graph source.
+pub fn parse(source: &str) -> Result<FlowchartDiagram> {
+    // --- preprocess ---------------------------------------------------
+    let (fm, body) = frontmatter::parse_frontmatter(source);
+    let body = directive::remove_directives(body);
+
+    let mut diag = FlowchartDiagram::default();
+    if let Some(fm) = fm {
+        diag.meta.title = fm.title.clone();
+        if let Some(cfg) = fm.config.as_ref() {
+            if let Some(t) = cfg.theme.as_ref() {
+                diag.theme_override = Some(t.clone());
+            }
+        }
+    }
+
+    // --- normalise body lines ----------------------------------------
+    // Strip whole-line `%%` comments, keep everything else (we DO want
+    // to preserve `%%{init:...}%%` directives content, but they were
+    // already removed above).
+    let mut lines: Vec<String> = Vec::new();
+    for raw in body.split('\n') {
+        let t = raw.trim_end_matches('\r');
+        // Skip whole-line `%%` comments.
+        if t.trim_start().starts_with("%%") && !t.trim_start().starts_with("%%{") {
+            continue;
+        }
+        lines.push(t.to_string());
+    }
+
+    // --- header: `flowchart TD` / `graph LR` / `flowchart-elk RL` ----
+    let mut i = 0usize;
+    while i < lines.len() && lines[i].trim().is_empty() {
+        i += 1;
+    }
+    if i >= lines.len() {
+        return Err(MermaidError::Parse {
+            line: 0,
+            col: 0,
+            message: "flowchart: empty source".into(),
+        });
+    }
+    let header = lines[i].trim();
+    let is_v2;
+    let mut dir = Direction::TB;
+    let header_keyword;
+    if let Some(rest) = header.strip_prefix("flowchart-elk") {
+        is_v2 = true;
+        header_keyword = "flowchart-elk";
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            if let Some(d) = Direction::parse(rest) {
+                dir = d;
+            }
+        }
+    } else if let Some(rest) = header.strip_prefix("flowchart") {
+        is_v2 = true;
+        header_keyword = "flowchart";
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            if let Some(d) = Direction::parse(rest) {
+                dir = d;
+            }
+        }
+    } else if let Some(rest) = header.strip_prefix("graph") {
+        is_v2 = false;
+        header_keyword = "graph";
+        let rest = rest.trim();
+        if !rest.is_empty() {
+            if let Some(d) = Direction::parse(rest) {
+                dir = d;
+            }
+        }
+    } else {
+        return Err(MermaidError::Parse {
+            line: 0,
+            col: 0,
+            message: format!(
+                "flowchart: expected `flowchart` or `graph` header, got `{}`",
+                header
+            ),
+        });
+    }
+    diag.is_v2 = is_v2;
+    diag.direction = dir;
+    let _ = header_keyword; // reserved for future aria differentiation
+    i += 1;
+
+    // --- body --------------------------------------------------------
+    // We join continuation lines: the flowchart grammar treats `;` and
+    // `\n` as statement separators, and a statement can stretch over
+    // multiple lines when it ends mid-edge or inside a bracketed label.
+    // We preserve newlines here and parse one logical statement at a
+    // time, allowing the cursor to peek across lines when inside a
+    // subgraph block.
+    let mut parser = LineParser {
+        lines,
+        i,
+        current_subgraph: Vec::new(),
+        diag: &mut diag,
+        acc_title: None,
+        acc_descr: None,
+    };
+    parser.parse_body()?;
+
+    Ok(diag)
+}
+
+struct LineParser<'a> {
+    lines: Vec<String>,
+    i: usize,
+    /// Stack of subgraph ids currently being parsed (innermost last).
+    current_subgraph: Vec<String>,
+    diag: &'a mut FlowchartDiagram,
+    acc_title: Option<String>,
+    acc_descr: Option<String>,
+}
+
+impl<'a> LineParser<'a> {
+    fn parse_body(&mut self) -> Result<()> {
+        while self.i < self.lines.len() {
+            self.parse_line()?;
+        }
+        if let Some(t) = self.acc_title.take() {
+            self.diag.meta.acc_title = Some(t);
+        }
+        if let Some(d) = self.acc_descr.take() {
+            self.diag.meta.acc_descr = Some(d);
+        }
+        // If the title is absent and we got one from accTitle, surface
+        // it as the meta title.
+        if self.diag.meta.title.is_none() {
+            self.diag.meta.title = self.diag.meta.acc_title.clone();
+        }
+        Ok(())
+    }
+
+    fn current_line(&self) -> &str {
+        &self.lines[self.i]
+    }
+
+    fn advance(&mut self) {
+        self.i += 1;
+    }
+
+    fn parse_line(&mut self) -> Result<()> {
+        let raw = self.current_line().to_string();
+        let line = raw.trim();
+        if line.is_empty() {
+            self.advance();
+            return Ok(());
+        }
+
+        // accTitle / accDescr
+        if let Some(rest) = line.strip_prefix("accTitle") {
+            let rest = rest.trim_start();
+            if let Some(v) = rest.strip_prefix(':') {
+                self.acc_title = Some(v.trim().to_string());
+                self.advance();
+                return Ok(());
+            }
+        }
+        if let Some(rest) = line.strip_prefix("accDescr") {
+            let rest = rest.trim_start();
+            if let Some(v) = rest.strip_prefix(':') {
+                self.acc_descr = Some(v.trim().to_string());
+                self.advance();
+                return Ok(());
+            }
+            // Multi-line form `accDescr { ... }`
+            if rest.starts_with('{') {
+                let mut collected = String::new();
+                let mut s = rest.strip_prefix('{').unwrap().to_string();
+                loop {
+                    if let Some(end) = s.find('}') {
+                        collected.push_str(&s[..end]);
+                        self.advance();
+                        break;
+                    } else {
+                        collected.push_str(&s);
+                        collected.push('\n');
+                        self.advance();
+                        if self.i >= self.lines.len() {
+                            break;
+                        }
+                        s = self.current_line().to_string();
+                    }
+                }
+                self.acc_descr = Some(collected.trim().to_string());
+                return Ok(());
+            }
+        }
+
+        // `direction X` (inside a subgraph)
+        if let Some(rest) = line.strip_prefix("direction") {
+            let rest = rest.trim();
+            if let Some(d) = Direction::parse(rest) {
+                if let Some(sid) = self.current_subgraph.last().cloned() {
+                    if let Some(sg) = self.diag.subgraphs.iter_mut().find(|s| s.id == sid) {
+                        sg.dir = Some(d);
+                    }
+                } else {
+                    self.diag.direction = d;
+                }
+                self.advance();
+                return Ok(());
+            }
+        }
+
+        // `subgraph`
+        if line == "subgraph" || line.starts_with("subgraph ") || line.starts_with("subgraph\t") {
+            return self.parse_subgraph_open(&raw);
+        }
+        if line == "end" || line.starts_with("end ") || line == "end;" {
+            // Close current subgraph
+            self.current_subgraph.pop();
+            self.advance();
+            return Ok(());
+        }
+
+        // classDef
+        if let Some(rest) = line.strip_prefix("classDef ") {
+            self.parse_class_def(rest.trim());
+            self.advance();
+            return Ok(());
+        }
+
+        // class  (`class id1,id2 className`)
+        if let Some(rest) = line.strip_prefix("class ") {
+            self.parse_class_stmt(rest.trim());
+            self.advance();
+            return Ok(());
+        }
+
+        // style
+        if let Some(rest) = line.strip_prefix("style ") {
+            self.parse_style_stmt(rest.trim());
+            self.advance();
+            return Ok(());
+        }
+
+        // linkStyle
+        if let Some(rest) = line.strip_prefix("linkStyle ") {
+            self.parse_link_style(rest.trim());
+            self.advance();
+            return Ok(());
+        }
+
+        // click
+        if let Some(rest) = line.strip_prefix("click ") {
+            self.parse_click(rest.trim());
+            self.advance();
+            return Ok(());
+        }
+
+        // vertex statement / edge statement — may span multiple lines
+        // (e.g. bracketed labels split over lines). We'll gather a
+        // full "statement" by concatenating until we've closed all
+        // brackets or hit a newline at balanced depth.
+        let stmt = self.collect_statement();
+        if stmt.trim().is_empty() {
+            return Ok(());
+        }
+        // Split on `;` (statement separator) at depth 0.
+        for piece in split_semis(&stmt) {
+            let piece = piece.trim();
+            if piece.is_empty() {
+                continue;
+            }
+            self.parse_vertex_statement(piece)?;
+        }
+        Ok(())
+    }
+
+    /// Collect a statement that may span multiple physical lines.
+    /// Consumes lines until bracket depth is balanced *and* the current
+    /// line ends at depth 0. Returns the concatenated text.
+    fn collect_statement(&mut self) -> String {
+        let mut out = String::new();
+        let mut depth_paren = 0i32;
+        let mut depth_sq = 0i32;
+        let mut depth_cu = 0i32;
+        let mut in_str = false;
+        let mut in_md = false;
+        while self.i < self.lines.len() {
+            let line = self.lines[self.i].clone();
+            let mut chars = line.chars().peekable();
+            while let Some(c) = chars.next() {
+                out.push(c);
+                if in_md {
+                    // closed by `"
+                    if c == '`' && chars.peek() == Some(&'"') {
+                        in_md = false;
+                        if let Some(n) = chars.next() { out.push(n); }
+                    }
+                    continue;
+                }
+                if in_str {
+                    if c == '"' {
+                        in_str = false;
+                    }
+                    continue;
+                }
+                match c {
+                    '"' => {
+                        // Check for `"` opener
+                        if chars.peek() == Some(&'`') {
+                            in_md = true;
+                            if let Some(n) = chars.next() { out.push(n); }
+                        } else {
+                            in_str = true;
+                        }
+                    }
+                    '(' => depth_paren += 1,
+                    ')' => depth_paren -= 1,
+                    '[' => depth_sq += 1,
+                    ']' => depth_sq -= 1,
+                    '{' => depth_cu += 1,
+                    '}' => depth_cu -= 1,
+                    _ => {}
+                }
+            }
+            self.advance();
+            if depth_paren <= 0 && depth_sq <= 0 && depth_cu <= 0 && !in_str && !in_md {
+                break;
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn parse_subgraph_open(&mut self, raw: &str) -> Result<()> {
+        // Formats:
+        //   subgraph
+        //   subgraph TITLE
+        //   subgraph id
+        //   subgraph id[Title]
+        //   subgraph id ["Title"]
+        let line = raw.trim().trim_start_matches("subgraph").trim();
+        let order = self.diag.subgraphs.len();
+        let (id, title_opt) = if line.is_empty() {
+            (format!("subGraph{}", order), None)
+        } else {
+            // Try to pick out `id[Title]` or `id [Title]`.
+            if let Some(br) = line.find('[') {
+                let id = line[..br].trim().to_string();
+                let rest = &line[br..];
+                // Title is inside balanced `[...]`
+                if let Some(close) = rest.rfind(']') {
+                    let title_text = &rest[1..close];
+                    let label = parse_label_text(title_text);
+                    if id.is_empty() {
+                        (format!("subGraph{}", order), Some(label))
+                    } else {
+                        (id, Some(label))
+                    }
+                } else {
+                    (line.to_string(), None)
+                }
+            } else {
+                // Maybe just a title without brackets — use as id+title.
+                let label = parse_label_text(line);
+                (line.to_string(), Some(label))
+            }
+        };
+        // Register subgraph
+        let sg = Subgraph {
+            id: id.clone(),
+            title: title_opt,
+            members: Vec::new(),
+            children: Vec::new(),
+            dir: None,
+            order,
+        };
+        // If nested, register parent->child
+        if let Some(parent) = self.current_subgraph.last().cloned() {
+            if let Some(p) = self.diag.subgraphs.iter_mut().find(|s| s.id == parent) {
+                p.children.push(id.clone());
+            }
+        }
+        self.diag.subgraphs.push(sg);
+        self.current_subgraph.push(id);
+        self.advance();
+        Ok(())
+    }
+
+    fn parse_class_def(&mut self, rest: &str) {
+        // `classDef name style1,style2`
+        let (name, styles) = split_once_ws(rest);
+        let styles: Vec<String> = styles
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let def = ClassDef {
+            name: name.to_string(),
+            styles,
+            text_styles: Vec::new(),
+        };
+        self.diag.class_defs.push(def);
+    }
+
+    fn parse_class_stmt(&mut self, rest: &str) {
+        // `class id1,id2 cls`
+        let (ids, cls) = split_once_ws(rest);
+        for id in ids.split(',') {
+            let id = id.trim();
+            if id.is_empty() {
+                continue;
+            }
+            self.ensure_vertex(id);
+            if let Some(v) = self.diag.find_vertex_mut(id) {
+                v.classes.push(cls.to_string());
+            }
+        }
+    }
+
+    fn parse_style_stmt(&mut self, rest: &str) {
+        // `style id a:b,c:d`
+        let (id, styles) = split_once_ws(rest);
+        self.ensure_vertex(id);
+        if let Some(v) = self.diag.find_vertex_mut(id) {
+            for s in styles.split(',') {
+                let s = s.trim();
+                if !s.is_empty() {
+                    v.styles.push(s.to_string());
+                }
+            }
+        }
+    }
+
+    fn parse_link_style(&mut self, rest: &str) {
+        // `linkStyle N,M stroke:...` or `linkStyle default ...`
+        let (head, styles) = split_once_ws(rest);
+        let is_default = head == "default";
+        let indices: Vec<usize> = if is_default {
+            Vec::new()
+        } else {
+            head.split(',').filter_map(|s| s.trim().parse::<usize>().ok()).collect()
+        };
+        // Check for `interpolate X` sub-keyword
+        let mut interpolate: Option<String> = None;
+        let mut styles_str = styles.to_string();
+        if let Some(idx) = styles_str.find("interpolate ") {
+            let after = &styles_str[idx + "interpolate ".len()..];
+            let (name, remainder) = split_once_ws(after.trim());
+            interpolate = Some(name.to_string());
+            styles_str = remainder.trim().to_string();
+        }
+        let styles: Vec<String> = styles_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        self.diag.link_styles.push(LinkStyle {
+            indices,
+            is_default,
+            styles,
+            interpolate,
+        });
+    }
+
+    fn parse_click(&mut self, rest: &str) {
+        // `click id callback(args) "tooltip"` OR `click id href "url" "tooltip"`
+        // OR `click id "url" "tooltip"`
+        // We'll do a simplified parse.
+        let (id, tail) = split_once_ws(rest);
+        self.ensure_vertex(id);
+        let tail = tail.trim();
+        let v = match self.diag.find_vertex_mut(id) {
+            Some(v) => v,
+            None => return,
+        };
+        if let Some(rest) = tail.strip_prefix("href") {
+            let rest = rest.trim_start();
+            let (url, after_url) = pop_quoted(rest);
+            v.link = Some(url);
+            let (tooltip_or_target, after_t) = pop_quoted(after_url.trim_start());
+            if !tooltip_or_target.is_empty() {
+                // Could be tooltip. Then target might follow.
+                v.tooltip = Some(tooltip_or_target);
+                let target = after_t.trim_start();
+                if is_link_target(target) {
+                    v.link_target = Some(target.to_string());
+                }
+            } else {
+                // Maybe a link target was directly after url.
+                let target = after_url.trim_start();
+                if is_link_target(target) {
+                    v.link_target = Some(target.to_string());
+                }
+            }
+        } else if tail.starts_with('"') {
+            let (url, after) = pop_quoted(tail);
+            v.link = Some(url);
+            let (tooltip, after_t) = pop_quoted(after.trim_start());
+            if !tooltip.is_empty() {
+                v.tooltip = Some(tooltip);
+            }
+            let target = after_t.trim_start();
+            if is_link_target(target) {
+                v.link_target = Some(target.to_string());
+            }
+        } else {
+            // Callback form: click id functionName [(args)] ["tooltip"]
+            let mut name = String::new();
+            let mut args: Option<String> = None;
+            let mut rest = tail;
+            // Extract name up to '(' or whitespace.
+            let mut chars = rest.char_indices();
+            let mut end = rest.len();
+            while let Some((idx, c)) = chars.next() {
+                if c == '(' || c.is_whitespace() {
+                    end = idx;
+                    break;
+                }
+            }
+            name.push_str(&rest[..end]);
+            rest = rest[end..].trim_start();
+            // Optional (args)
+            if let Some(after_paren) = rest.strip_prefix('(') {
+                if let Some(close) = after_paren.find(')') {
+                    args = Some(after_paren[..close].to_string());
+                    rest = after_paren[close + 1..].trim_start();
+                }
+            }
+            let (tooltip, _) = pop_quoted(rest);
+            v.callback = Some(name);
+            v.callback_args = args;
+            if !tooltip.is_empty() {
+                v.tooltip = Some(tooltip);
+            }
+        }
+    }
+
+    fn ensure_vertex(&mut self, id: &str) {
+        if self.diag.find_vertex(id).is_none() {
+            let order = self.diag.vertices.len();
+            self.diag.vertices.push(Vertex {
+                id: id.to_string(),
+                order,
+                ..Vertex::default()
+            });
+            // Register into current subgraph if any.
+            if let Some(sid) = self.current_subgraph.last().cloned() {
+                if let Some(s) = self.diag.subgraphs.iter_mut().find(|s| s.id == sid) {
+                    if !s.members.contains(&id.to_string()) {
+                        s.members.push(id.to_string());
+                    }
+                }
+            }
+        } else {
+            // Still register membership if not yet present.
+            if let Some(sid) = self.current_subgraph.last().cloned() {
+                if let Some(s) = self.diag.subgraphs.iter_mut().find(|s| s.id == sid) {
+                    if !s.members.contains(&id.to_string()) {
+                        s.members.push(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_vertex_statement(&mut self, stmt: &str) -> Result<()> {
+        // Walk along the string, producing a chain:
+        //   nodeGroup LINK nodeGroup LINK nodeGroup ...
+        // `nodeGroup` is one or more vertices joined by `&`.
+        let mut cursor: String = stmt.to_string();
+        let mut prev_group: Option<Vec<String>> = None;
+        let mut prev_link: Option<ParsedLink> = None;
+        loop {
+            let trimmed = cursor.trim_start().to_string();
+            if trimmed.is_empty() {
+                break;
+            }
+            // Parse a node group
+            let (group, consumed) = match self.parse_node_group(&trimmed) {
+                Some(x) => x,
+                None => break,
+            };
+            if let Some(link) = prev_link.take() {
+                if let Some(prev) = prev_group.take() {
+                    for s in &prev {
+                        for e in &group {
+                            let idx = self.diag.edges.len();
+                            let edge = Edge {
+                                id: link.id.clone(),
+                                start: s.clone(),
+                                end: e.clone(),
+                                stroke: link.stroke,
+                                length: link.length,
+                                arrow_end: link.arrow_end,
+                                arrow_start: link.arrow_start,
+                                label: link.label.clone(),
+                                index: idx,
+                            };
+                            self.diag.edges.push(edge);
+                        }
+                    }
+                }
+            }
+            prev_group = Some(group);
+            let rest = trimmed[consumed..].trim_start().to_string();
+            if rest.is_empty() {
+                break;
+            }
+            // Try to parse a link.
+            match parse_link(&rest) {
+                Some((link, rem_len)) => {
+                    prev_link = Some(link);
+                    cursor = rest[rem_len..].to_string();
+                }
+                None => {
+                    // No link — we're done (or it's just spaces).
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse a `node [& node]*` group. Returns (ids, consumed-byte-count)
+    /// or `None` if nothing parseable at the head.
+    fn parse_node_group(&mut self, s: &str) -> Option<(Vec<String>, usize)> {
+        let mut ids: Vec<String> = Vec::new();
+        let mut pos: usize = 0;
+        loop {
+            // Skip leading spaces
+            let tail = &s[pos..];
+            let lead = tail.chars().take_while(|c| c.is_whitespace()).map(|c| c.len_utf8()).sum::<usize>();
+            pos += lead;
+            let cur_tail = &s[pos..];
+            if cur_tail.is_empty() {
+                break;
+            }
+            let (id, shape_opt, label_opt, class_suffix, consumed) = parse_one_vertex(cur_tail)?;
+            pos += consumed;
+            self.ensure_vertex(&id);
+            // Apply shape / label
+            if shape_opt.is_some() || label_opt.is_some() {
+                if let Some(v) = self.diag.find_vertex_mut(&id) {
+                    if let Some(sh) = shape_opt {
+                        v.shape = Some(sh);
+                    }
+                    if let Some(lbl) = label_opt {
+                        v.label = Some(lbl);
+                    }
+                }
+            }
+            if let Some(cls) = class_suffix {
+                if let Some(v) = self.diag.find_vertex_mut(&id) {
+                    v.classes.push(cls);
+                }
+            }
+            ids.push(id);
+            // Look for `&` joiner
+            let lead2 = s[pos..].chars().take_while(|c| c.is_whitespace()).map(|c| c.len_utf8()).sum::<usize>();
+            pos += lead2;
+            if s[pos..].starts_with('&') {
+                pos += 1;
+                continue;
+            }
+            break;
+        }
+        if ids.is_empty() {
+            None
+        } else {
+            Some((ids, pos))
+        }
+    }
+}
+
+// ─── helpers ────────────────────────────────────────────────────────
+
+fn split_once_ws(s: &str) -> (&str, &str) {
+    let s = s.trim_start();
+    if let Some(idx) = s.find(char::is_whitespace) {
+        (&s[..idx], s[idx..].trim_start())
+    } else {
+        (s, "")
+    }
+}
+
+fn pop_quoted(s: &str) -> (String, &str) {
+    let s = s.trim_start();
+    if let Some(rest) = s.strip_prefix('"') {
+        if let Some(end) = rest.find('"') {
+            return (rest[..end].to_string(), &rest[end + 1..]);
+        }
+    }
+    (String::new(), s)
+}
+
+fn is_link_target(s: &str) -> bool {
+    matches!(s.trim(), "_self" | "_blank" | "_parent" | "_top")
+}
+
+fn parse_label_text(raw: &str) -> Label {
+    let trimmed = raw.trim();
+    if let Some(inner) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+        return Label::string(inner);
+    }
+    if trimmed.starts_with("\"`") && trimmed.ends_with("`\"") {
+        let inner = &trimmed[2..trimmed.len() - 2];
+        return Label::markdown(inner);
+    }
+    Label::text(trimmed)
+}
+
+fn split_semis(s: &str) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    let mut depth_paren = 0i32;
+    let mut depth_sq = 0i32;
+    let mut depth_cu = 0i32;
+    let mut in_str = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_str {
+            current.push(c);
+            if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_str = true;
+                current.push(c);
+            }
+            '(' => {
+                depth_paren += 1;
+                current.push(c);
+            }
+            ')' => {
+                depth_paren -= 1;
+                current.push(c);
+            }
+            '[' => {
+                depth_sq += 1;
+                current.push(c);
+            }
+            ']' => {
+                depth_sq -= 1;
+                current.push(c);
+            }
+            '{' => {
+                depth_cu += 1;
+                current.push(c);
+            }
+            '}' => {
+                depth_cu -= 1;
+                current.push(c);
+            }
+            ';' if depth_paren == 0 && depth_sq == 0 && depth_cu == 0 => {
+                pieces.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.trim().is_empty() {
+        pieces.push(current);
+    }
+    pieces
+}
+
+#[derive(Debug, Clone)]
+struct ParsedLink {
+    id: Option<String>,
+    stroke: EdgeStroke,
+    length: usize,
+    arrow_end: ArrowType,
+    arrow_start: ArrowType,
+    label: Option<Label>,
+}
+
+/// Parse a link at the head of `s`, return (link, consumed-byte-count).
+fn parse_link(s: &str) -> Option<(ParsedLink, usize)> {
+    let head = s.trim_start();
+    // Optional LINK_ID: `id@` prefix when followed by arrow chars.
+    let (link_id, after_id) = if let Some(pos) = head.find('@') {
+        // Only treat as link-id if preceded by non-arrow ident chars and
+        // followed by non-`{` (brace = shape data).
+        let before = &head[..pos];
+        let after = &head[pos + 1..];
+        let valid_ident = !before.is_empty()
+            && before
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        // `after` must begin with an arrow char.
+        let starts_arrow = after
+            .chars()
+            .next()
+            .map(|c| "-=.<>xo".contains(c) || c.is_whitespace())
+            .unwrap_or(false);
+        if valid_ident && starts_arrow && !after.starts_with('{') {
+            (Some(before.to_string()), after.trim_start())
+        } else {
+            (None, head)
+        }
+    } else {
+        (None, head)
+    };
+
+    // Scan the arrow. Recognised patterns:
+    //   -->           solid  arrow
+    //   ---           solid  none (line only, length 1)
+    //   ----          solid  none (line only, length 2)
+    //   -->           arrow end
+    //   ==>           thick  arrow
+    //   -.->          dotted arrow
+    //   <-->          both-ends arrow
+    //   ~~~           invisible
+    //   -- text -->
+    //   == text ==>
+    //   -. text .->
+    let first_non_ws = after_id.find(|c: char| !c.is_whitespace()).unwrap_or(after_id.len());
+    let arrow_start = &after_id[first_non_ws..];
+    if arrow_start.is_empty() {
+        return None;
+    }
+
+    // Identify arrow body chars.
+    let first = arrow_start.chars().next()?;
+    // Check for `|label|` attached arrow-text (after arrow). We first
+    // find the arrow span, then see if `|...|` follows.
+    let (arrow_body, rem_after_arrow) = scan_arrow(arrow_start)?;
+
+    // Some forms embed the label inside the arrow itself:
+    //   `-- text -->`, `== text ==>`, `-. text .->`
+    // scan_arrow handles those by returning the whole span.
+
+    let (stroke, length, arrow_end, arrow_start_ty, inner_label) = classify_arrow(arrow_body)?;
+
+    // Consume optional `|label|` immediately after
+    let mut label = inner_label;
+    let mut rem = rem_after_arrow;
+    let rem_tr = rem.trim_start();
+    if let Some(bar_rest) = rem_tr.strip_prefix('|') {
+        if let Some(end) = bar_rest.find('|') {
+            let text = &bar_rest[..end];
+            label = Some(parse_label_text(text));
+            rem = &bar_rest[end + 1..];
+        }
+    }
+
+    let _ = first;
+    // Compute how many bytes of `s` we consumed by measuring the
+    // remaining tail's byte length.
+    let consumed = s.len() - rem.len();
+    Some((
+        ParsedLink {
+            id: link_id,
+            stroke,
+            length,
+            arrow_end,
+            arrow_start: arrow_start_ty,
+            label,
+        },
+        consumed,
+    ))
+}
+
+/// Scan the arrow span starting at `s`. Returns `(arrow_body, remainder)`.
+/// The arrow body is the full span of arrow characters + any embedded
+/// label text (between two arrow-body segments separated by spaces).
+///
+/// Handles:
+///   `-->`, `---`, `----`, `<-->`, `x--x`, `o--o`
+///   `==>`, `===`, `<==>`, `x==x`
+///   `-.->`, `-..->`, `<-.->`, `-.- ` (no arrow)
+///   `-- text -->` / `== text ==>` / `-. text .->`
+///   `~~~` (invisible)
+fn scan_arrow(s: &str) -> Option<(&str, &str)> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let b0 = bytes[0];
+    if !is_arrow_boundary_byte(b0) {
+        return None;
+    }
+    // `~~~[~]*` invisible.
+    if b0 == b'~' {
+        let mut i = 0;
+        while i < bytes.len() && bytes[i] == b'~' {
+            i += 1;
+        }
+        if i >= 3 {
+            return Some((&s[..i], &s[i..]));
+        } else {
+            return None;
+        }
+    }
+    let mut i = 0;
+    // Optional start-arrow char.
+    if matches!(b0, b'<' | b'x' | b'o') {
+        i += 1;
+    }
+    // Determine body type.
+    if i >= bytes.len() || !matches!(bytes[i], b'-' | b'=' | b'.') {
+        return None;
+    }
+    // Dotted is `-.` or `<-.` etc. — after an optional `-`, comes `.`.
+    let mut is_dotted = false;
+    if bytes[i] == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'.' {
+        is_dotted = true;
+    } else if bytes[i] == b'.' {
+        is_dotted = true;
+    }
+    let body_ch = if is_dotted { b'.' } else { bytes[i] };
+
+    // Consume body. For dotted, the body is a mix of `.` and `-`.
+    let body_pred = |b: u8| -> bool {
+        if is_dotted {
+            b == b'-' || b == b'.'
+        } else {
+            b == body_ch
+        }
+    };
+    while i < bytes.len() && body_pred(bytes[i]) {
+        i += 1;
+    }
+    let after_first_body = i;
+
+    // Possibly absorb embedded label `space TEXT space BODY-RUN`.
+    if i < bytes.len() && bytes[i] == b' ' {
+        let rest = &s[i..];
+        if let Some(pos) = find_next_arrow_segment(rest, if is_dotted { b'.' } else { body_ch }) {
+            let next_seg_start = i + pos;
+            i = next_seg_start;
+            while i < bytes.len() && body_pred(bytes[i]) {
+                i += 1;
+            }
+        } else {
+            i = after_first_body;
+        }
+    }
+    // Optional arrow-end: `>`, `x`, `o`.
+    if i < bytes.len() && matches!(bytes[i], b'>' | b'x' | b'o') {
+        i += 1;
+    }
+    Some((&s[..i], &s[i..]))
+}
+
+fn find_next_arrow_segment(s: &str, body_ch: u8) -> Option<usize> {
+    // Look for whitespace + body_ch after at least 1 non-body char.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b' ' {
+            // Lookahead: if next non-space is the body-char run, we've found it.
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] == b' ' {
+                j += 1;
+            }
+            if j < bytes.len() && (bytes[j] == body_ch || (body_ch == b'-' && bytes[j] == b'.')) {
+                return Some(j);
+            }
+        }
+        // Must not hit `|` — that breaks the arrow.
+        if bytes[i] == b'|' {
+            return None;
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_arrow_boundary_byte(b: u8) -> bool {
+    matches!(b, b'-' | b'=' | b'.' | b'<' | b'x' | b'o' | b'~')
+}
+
+/// Classify an arrow span: returns (stroke, length, arrow_end, arrow_start, embedded_label).
+fn classify_arrow(
+    arrow: &str,
+) -> Option<(EdgeStroke, usize, ArrowType, ArrowType, Option<Label>)> {
+    if arrow.chars().all(|c| c == '~') {
+        return Some((EdgeStroke::Invisible, 1, ArrowType::None, ArrowType::None, None));
+    }
+    // Extract optional start-arrow.
+    let mut span = arrow;
+    let arrow_start = match span.chars().next()? {
+        '<' => {
+            span = &span[1..];
+            ArrowType::Arrow
+        }
+        'x' => {
+            span = &span[1..];
+            ArrowType::Cross
+        }
+        'o' => {
+            span = &span[1..];
+            ArrowType::Circle
+        }
+        _ => ArrowType::None,
+    };
+
+    // Determine stroke from body pattern.
+    let span_bytes = span.as_bytes();
+    if span_bytes.is_empty() {
+        return None;
+    }
+    let stroke = if span.contains('.') {
+        EdgeStroke::Dotted
+    } else if span_bytes[0] == b'=' {
+        EdgeStroke::Thick
+    } else if span_bytes[0] == b'-' {
+        EdgeStroke::Normal
+    } else {
+        return None;
+    };
+
+    // Strip trailing arrow-end char.
+    let mut span_rest = span;
+    let tail_char = span_rest.chars().last()?;
+    let arrow_end = match tail_char {
+        '>' => {
+            let cut = span_rest.len() - 1;
+            span_rest = &span_rest[..cut];
+            ArrowType::Arrow
+        }
+        'x' => {
+            let cut = span_rest.len() - 1;
+            span_rest = &span_rest[..cut];
+            ArrowType::Cross
+        }
+        'o' => {
+            let cut = span_rest.len() - 1;
+            span_rest = &span_rest[..cut];
+            ArrowType::Circle
+        }
+        _ => ArrowType::None,
+    };
+
+    // Detect embedded label: a space somewhere inside span_rest.
+    let (body_chars, embedded_label) = if let Some(sp_idx) = span_rest.find(' ') {
+        // Everything between the first and last body-run.
+        let before = &span_rest[..sp_idx];
+        let after = &span_rest[sp_idx..];
+        // Find where the trailing body-run starts in `after`.
+        let body_predicate = |c: char| match stroke {
+            EdgeStroke::Thick => c == '=',
+            EdgeStroke::Dotted => c == '-' || c == '.',
+            EdgeStroke::Normal => c == '-',
+            _ => false,
+        };
+        let after_b = after.as_bytes();
+        let mut run_start = after.len();
+        // Walk backwards to find start of trailing body run.
+        let chars: Vec<(usize, char)> = after.char_indices().collect();
+        for (idx, c) in chars.iter().rev() {
+            if body_predicate(*c) {
+                run_start = *idx;
+            } else if run_start != after.len() {
+                break;
+            }
+        }
+        let label_text = after[..run_start].trim();
+        let trail = &after[run_start..];
+        let body_len = before.chars().filter(|c| body_predicate(*c)).count()
+            + trail.chars().filter(|c| body_predicate(*c)).count();
+        let label = if label_text.is_empty() {
+            None
+        } else {
+            Some(parse_label_text(label_text))
+        };
+        let _ = after_b;
+        (body_len, label)
+    } else {
+        let body_predicate = |c: char| match stroke {
+            EdgeStroke::Thick => c == '=',
+            EdgeStroke::Dotted => c == '-' || c == '.',
+            EdgeStroke::Normal => c == '-',
+            _ => false,
+        };
+        (span_rest.chars().filter(|c| body_predicate(*c)).count(), None)
+    };
+
+    // Length: mermaid's convention is `length = max(1, count - 1)`.
+    let length = body_chars.saturating_sub(1).max(1);
+    Some((stroke, length, arrow_end, arrow_start, embedded_label))
+}
+
+/// Parse one vertex expression at the head of `s`:
+///   idString                              — bare
+///   idString[label]                       — rect
+///   idString(label)                       — round
+///   idString((label))                     — circle
+///   idString(((label)))                   — doublecircle
+///   idString([label])                     — stadium
+///   idString[[label]]                     — subroutine
+///   idString[(label)]                     — cylinder
+///   idString{label}                       — diamond
+///   idString{{label}}                     — hexagon
+///   idString>label]                       — odd (rect_left_inv_arrow)
+///   idString[/label/]                     — parallelogram (lean_right)
+///   idString[\label\]                     — lean_left
+///   idString[/label\]                     — trapezoid
+///   idString[\label/]                     — inv_trapezoid
+///   idString(-label-)                     — ellipse
+///   idString:::className                  — class suffix
+///
+/// Returns (id, shape, label, class_suffix, bytes_consumed).
+fn parse_one_vertex(
+    s: &str,
+) -> Option<(String, Option<String>, Option<Label>, Option<String>, usize)> {
+    // Read id up to a shape-starter / whitespace / `&` / link-starter.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'[' || c == b'(' || c == b'{' || c == b'>' {
+            break;
+        }
+        // End of id if whitespace or `&` or link-start `-`/`=`/`.`/`<`/`x`/`o`/`~` or `:`.
+        if c == b' ' || c == b'\t' || c == b'\n' || c == b'&' {
+            break;
+        }
+        if c == b'-' || c == b'=' || c == b'.' || c == b'~' {
+            // Could be part of id (e.g. `foo-bar`). Only treat as
+            // link start if followed by arrow-body char.
+            // For simplicity: allow `-` / `.` / `=` to continue id if
+            // next char is alphanumeric.
+            let next = bytes.get(i + 1).copied();
+            if matches!(next, Some(b'-' | b'=' | b'.' | b'>' | b'<' | b'o' | b'x' | b'~')) {
+                break;
+            }
+            if c == b'=' && matches!(next, Some(b'=')) {
+                break;
+            }
+            if c == b'-' && matches!(next, Some(b'-') | Some(b'>')) {
+                break;
+            }
+            if c == b'.' && matches!(next, Some(b'-')) {
+                break;
+            }
+        }
+        if c == b':' && bytes.get(i + 1) == Some(&b':') && bytes.get(i + 2) == Some(&b':') {
+            break;
+        }
+        i += 1;
+    }
+    if i == 0 {
+        return None;
+    }
+    let id = s[..i].trim().to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let rest = &s[i..];
+    let (shape, label, remainder) = if let Some(after) = rest.strip_prefix("[[") {
+        // subroutine
+        let (text, r) = take_until(after, "]]")?;
+        (Some("subroutine".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("[(") {
+        let (text, r) = take_until(after, ")]")?;
+        (Some("cylinder".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("([") {
+        let (text, r) = take_until(after, "])")?;
+        (Some("stadium".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("(((") {
+        let (text, r) = take_until(after, ")))")?;
+        (Some("doublecircle".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("((") {
+        let (text, r) = take_until(after, "))")?;
+        (Some("circle".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("(-") {
+        let (text, r) = take_until(after, "-)")?;
+        (Some("ellipse".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("(") {
+        let (text, r) = take_until(after, ")")?;
+        (Some("round".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("{{") {
+        let (text, r) = take_until(after, "}}")?;
+        (Some("hexagon".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("{") {
+        let (text, r) = take_until(after, "}")?;
+        (Some("diamond".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix(">") {
+        let (text, r) = take_until(after, "]")?;
+        (Some("odd".to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("[/") {
+        // Try trapezoid `[/...\]`, lean_right `[/.../]`, inv_trapezoid `[/...\]` (dup), or lean_right.
+        // Prefer to look for `\]` first (trapezoid), else `/]` (lean_right).
+        let has_trap = after.contains("\\]");
+        let has_lean = after.contains("/]");
+        let (text, r, shape) = if has_trap && (!has_lean || after.find("\\]") < after.find("/]")) {
+            let (t, r) = take_until(after, "\\]")?;
+            (t, r, "trapezoid")
+        } else {
+            let (t, r) = take_until(after, "/]")?;
+            (t, r, "lean_right")
+        };
+        (Some(shape.to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("[\\") {
+        let has_inv = after.contains("/]");
+        let has_left = after.contains("\\]");
+        let (text, r, shape) = if has_inv && (!has_left || after.find("/]") < after.find("\\]")) {
+            let (t, r) = take_until(after, "/]")?;
+            (t, r, "inv_trapezoid")
+        } else {
+            let (t, r) = take_until(after, "\\]")?;
+            (t, r, "lean_left")
+        };
+        (Some(shape.to_string()), Some(parse_label_text(text)), r)
+    } else if let Some(after) = rest.strip_prefix("[") {
+        let (text, r) = take_until(after, "]")?;
+        (Some("rect".to_string()), Some(parse_label_text(text)), r)
+    } else {
+        (None, None, rest)
+    };
+
+    // Optional `:::className` suffix
+    let (class_suffix, remainder) = if let Some(after) = remainder.strip_prefix(":::") {
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == '&' || c == '-' || c == '=' || c == '.' || c == ';')
+            .unwrap_or(after.len());
+        (Some(after[..end].to_string()), &after[end..])
+    } else {
+        (None, remainder)
+    };
+
+    // Also handle `@{...}` shape-data immediately after id/shape.
+    let remainder = if let Some(after) = remainder.strip_prefix("@{") {
+        if let Some(end) = after.find('}') {
+            if let Some(v) = None::<&mut Vertex> {
+                let _ = v;
+            }
+            let _data = &after[..end];
+            // Store it on the vertex — caller does it; for now we
+            // attach via class_suffix? We'll ignore here and let the
+            // renderer handle the raw shape data later.
+            &after[end + 1..]
+        } else {
+            remainder
+        }
+    } else {
+        remainder
+    };
+
+    let consumed = s.len() - remainder.len();
+    Some((id, shape, label, class_suffix, consumed))
+}
+
+fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
+    let end = s.find(tok)?;
+    Some((&s[..end], &s[end + tok.len()..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_simple_td() {
+        let src = "flowchart TD\nA --> B\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.direction, Direction::TB);
+        assert_eq!(d.vertices.len(), 2);
+        assert_eq!(d.edges.len(), 1);
+        assert_eq!(d.edges[0].start, "A");
+        assert_eq!(d.edges[0].end, "B");
+    }
+
+    #[test]
+    fn parses_graph_lr() {
+        let src = "graph LR\nid1(Start)-->id2(Stop)\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.direction, Direction::LR);
+        assert!(!d.is_v2);
+        assert_eq!(d.vertices.len(), 2);
+        let v = d.find_vertex("id1").unwrap();
+        assert_eq!(v.shape.as_deref(), Some("round"));
+        assert_eq!(v.label.as_ref().unwrap().text, "Start");
+    }
+
+    #[test]
+    fn parses_shapes_diamond_hexagon_stadium() {
+        let src = "flowchart TD\nA[rect]-->B(round)-->C{diamond}-->D{{hex}}-->E([pill])\n";
+        let d = parse(src).unwrap();
+        let names: Vec<_> = d
+            .vertices
+            .iter()
+            .map(|v| v.shape.clone().unwrap_or_default())
+            .collect();
+        assert!(names.contains(&"rect".to_string()));
+        assert!(names.contains(&"round".to_string()));
+        assert!(names.contains(&"diamond".to_string()));
+        assert!(names.contains(&"hexagon".to_string()));
+        assert!(names.contains(&"stadium".to_string()));
+    }
+
+    #[test]
+    fn parses_subgraph_with_title() {
+        let src = "flowchart TD\nsubgraph s1 [Title]\n  A-->B\nend\nA-->C\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.subgraphs.len(), 1);
+        assert_eq!(d.subgraphs[0].id, "s1");
+        assert_eq!(d.subgraphs[0].title.as_ref().unwrap().text, "Title");
+        assert!(d.subgraphs[0].members.contains(&"A".to_string()));
+        assert!(d.subgraphs[0].members.contains(&"B".to_string()));
+    }
+
+    #[test]
+    fn parses_class_def_and_class_stmt() {
+        let src = "flowchart TD\nclassDef red fill:#f00,stroke:#000\nA-->B\nclass A red\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.class_defs.len(), 1);
+        assert_eq!(d.class_defs[0].name, "red");
+        let a = d.find_vertex("A").unwrap();
+        assert_eq!(a.classes, vec!["red".to_string()]);
+    }
+
+    #[test]
+    fn parses_link_with_label() {
+        let src = "flowchart TD\nA-->|go|B\nA --> |via| C\nA-- walk -->D\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges.len(), 3);
+        assert_eq!(d.edges[0].label.as_ref().unwrap().text, "go");
+        assert_eq!(d.edges[1].label.as_ref().unwrap().text, "via");
+        assert_eq!(d.edges[2].label.as_ref().unwrap().text, "walk");
+    }
+
+    #[test]
+    fn parses_amp_expansion() {
+        let src = "flowchart TD\nA & B --> C\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges.len(), 2);
+        assert_eq!(d.edges[0].start, "A");
+        assert_eq!(d.edges[1].start, "B");
+        assert_eq!(d.edges[0].end, "C");
+    }
+
+    #[test]
+    fn parses_thick_and_dotted_edges() {
+        let src = "flowchart LR\nA==>B\nA-.->C\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges[0].stroke, EdgeStroke::Thick);
+        assert_eq!(d.edges[1].stroke, EdgeStroke::Dotted);
+    }
+
+    #[test]
+    fn parses_class_suffix_triple_colon() {
+        let src = "flowchart TD\nclassDef red fill:#f00\nA:::red --> B\n";
+        let d = parse(src).unwrap();
+        let a = d.find_vertex("A").unwrap();
+        assert!(a.classes.contains(&"red".to_string()));
+    }
+
+    #[test]
+    fn parses_linkstyle() {
+        let src = "flowchart LR\nA-->B\nA-->C\nlinkStyle 0 stroke:red\nlinkStyle default stroke:blue\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.link_styles.len(), 2);
+        assert_eq!(d.link_styles[0].indices, vec![0]);
+        assert!(d.link_styles[1].is_default);
+    }
+
+    #[test]
+    fn parses_style_stmt() {
+        let src = "flowchart LR\nA-->B\nstyle A fill:#f9f\n";
+        let d = parse(src).unwrap();
+        let a = d.find_vertex("A").unwrap();
+        assert_eq!(a.styles, vec!["fill:#f9f".to_string()]);
+    }
+
+    #[test]
+    fn parses_click_callback_and_href() {
+        let src = "flowchart LR\nA-->B\nclick A callback \"tip\"\nclick B href \"https://example.com\" \"link tip\"\n";
+        let d = parse(src).unwrap();
+        let a = d.find_vertex("A").unwrap();
+        assert_eq!(a.callback.as_deref(), Some("callback"));
+        assert_eq!(a.tooltip.as_deref(), Some("tip"));
+        let b = d.find_vertex("B").unwrap();
+        assert_eq!(b.link.as_deref(), Some("https://example.com"));
+        assert_eq!(b.tooltip.as_deref(), Some("link tip"));
+    }
+
+    #[test]
+    fn rejects_non_flowchart() {
+        let err = parse("pie\n").unwrap_err();
+        assert!(matches!(err, MermaidError::Parse { .. }));
+    }
+}

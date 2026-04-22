@@ -171,15 +171,15 @@ const KNOWN_PARTIAL: &[&str] = &[
     "ext_fixtures/demos/ishikawa/04",
     // (xychart/35 removed — now passes via approx_byte_exact's
     //  1e-12 relative tolerance, catching 17-sig-digit print drift.)
-    // Timeline: cypress fixtures differ in the `<style>` block because
-    // the convert_with_id path through the shared theme system doesn't
-    // yet serialise the full cScale palette the timeline CSS relies
-    // on. The timeline renderer itself is byte-correct — its own
-    // inline byte-exact tests pass by constructing the theme directly.
-    // Re-enable these after the shared theme path gains a timeline-
-    // specific `cScale*` emitter.
+    // Timeline/12: `themeVariables.cScale0..2` overrides would drive
+    // new `cScaleInv*` / `cScaleLabel*` values via upstream's khroma
+    // `invert()`/`lighten()` chain inside `theme.updateColors()`. Our
+    // theme module bakes per-variant palettes as constants and does
+    // NOT yet re-run those derivations when `cScale*` is overridden
+    // (owned by `theme::color`; dedicated ticket — out of scope here).
+    "ext_fixtures/cypress/timeline/12",
 ];
-const TIMELINE_CYPRESS_SKIP: bool = true;
+const TIMELINE_CYPRESS_SKIP: bool = false;
 
 fn sweep(dirs: &[&str]) -> usize {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -224,6 +224,7 @@ fn sweep(dirs: &[&str]) -> usize {
 // block — approx_byte_exact won't save it. Tracked in PROGRESS.md.
 //#[test] fn timeline_all_fixtures() { sweep(&["ext_fixtures/cypress/timeline", "ext_fixtures/demos/timeline"]); }
 #[test] fn quadrant_all_fixtures() { sweep(&["ext_fixtures/cypress/quadrant", "ext_fixtures/demos/quadrant"]); }
+#[test] fn timeline_all_fixtures() { sweep(&["ext_fixtures/cypress/timeline", "ext_fixtures/demos/timeline"]); }
 #[test] fn xychart_all_fixtures()  { sweep(&["ext_fixtures/cypress/xychart", "ext_fixtures/demos/xychart"]); }
 #[test] fn wardley_all_fixtures()  { sweep(&["ext_fixtures/cypress/wardley", "ext_fixtures/demos/wardley"]); }
 #[test] fn sankey_all_fixtures()   { sweep(&["ext_fixtures/cypress/sankey", "ext_fixtures/demos/sankey"]); }

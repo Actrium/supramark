@@ -37,6 +37,19 @@ pub fn render(
         ),
     ));
 
+    // TD: `lineWrapper.lower()` at the end of draw moves the axis line
+    // to the SVG's first-child slot. mermaidAPI.ts then `insertBefore`s
+    // the `<style>` tag relative to whatever was the firstChild at the
+    // time it captured the reference — which is BEFORE draw runs, so
+    // firstChild is null and the style is appended. When the axis is
+    // subsequently `lower()`-ed, it sits ahead of the style in the tree.
+    //
+    // LR: no `lower()` — style is appended first (no pre-existing
+    // siblings), everything else follows, axis goes last.
+    if matches!(d.direction, TimelineDirection::TD) {
+        emit_axis(&mut out, d, l, id);
+    }
+
     // Style block.
     out.push_str(&build_style_block(id, d, theme, l));
 
@@ -46,8 +59,16 @@ pub fn render(
     // from `svg.append('g')` in the draw function itself.
     out.push_str("<g></g>");
     out.push_str("<g></g>");
+    // LR calls `initGraphics(svg, id)`; TD calls `initGraphics(svg)`
+    // with no second arg, which makes the marker id literally
+    // `"undefined-arrowhead"` in the emitted SVG. Upstream bug, but
+    // byte-exact parity means we reproduce it.
+    let marker_id = match d.direction {
+        TimelineDirection::LR => format!("{id}-arrowhead"),
+        TimelineDirection::TD => "undefined-arrowhead".to_string(),
+    };
     out.push_str(&format!(
-        r#"<defs><marker id="{id}-arrowhead" refX="5" refY="2" markerWidth="6" markerHeight="4" orient="auto"><path d="M 0,0 V 4 L6,2 Z"></path></marker></defs>"#
+        r#"<defs><marker id="{marker_id}" refX="5" refY="2" markerWidth="6" markerHeight="4" orient="auto"><path d="M 0,0 V 4 L6,2 Z"></path></marker></defs>"#
     ));
 
     // Geometry — walk the laid-out nodes in declaration order, grouping
@@ -67,36 +88,42 @@ pub fn render(
         }
     }
 
-    // Axis line.
-    if let Some(axis) = &l.axis {
-        match d.direction {
-            TimelineDirection::LR => {
-                out.push_str(&format!(
-                    r#"<g class="lineWrapper"><line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke-width="{sw}" stroke="black" marker-end="url(#{id}-arrowhead)"></line></g>"#,
-                    x1 = fmt_num(axis.x1),
-                    y1 = fmt_num(axis.y1),
-                    x2 = fmt_num(axis.x2),
-                    y2 = fmt_num(axis.y2),
-                    sw = fmt_num(axis.stroke_width),
-                    id = id,
-                ));
-            }
-            TimelineDirection::TD => {
-                // Vertical renderer uses marker id `arrowhead` (no id prefix).
-                out.push_str(&format!(
-                    r#"<g class="lineWrapper"><line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke-width="{sw}" stroke="black" marker-end="url(#arrowhead)"></line></g>"#,
-                    x1 = fmt_num(axis.x1),
-                    y1 = fmt_num(axis.y1),
-                    x2 = fmt_num(axis.x2),
-                    y2 = fmt_num(axis.y2),
-                    sw = fmt_num(axis.stroke_width),
-                ));
-            }
-        }
+    if matches!(d.direction, TimelineDirection::LR) {
+        emit_axis(&mut out, d, l, id);
     }
 
     out.push_str("</svg>");
     Ok(out)
+}
+
+fn emit_axis(out: &mut String, d: &TimelineDiagram, l: &TimelineLayout, id: &str) {
+    let Some(axis) = &l.axis else {
+        return;
+    };
+    match d.direction {
+        TimelineDirection::LR => {
+            out.push_str(&format!(
+                r#"<g class="lineWrapper"><line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke-width="{sw}" stroke="black" marker-end="url(#{id}-arrowhead)"></line></g>"#,
+                x1 = fmt_num(axis.x1),
+                y1 = fmt_num(axis.y1),
+                x2 = fmt_num(axis.x2),
+                y2 = fmt_num(axis.y2),
+                sw = fmt_num(axis.stroke_width),
+                id = id,
+            ));
+        }
+        TimelineDirection::TD => {
+            // Vertical renderer uses marker id `arrowhead` (no id prefix).
+            out.push_str(&format!(
+                r#"<g class="lineWrapper"><line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke-width="{sw}" stroke="black" marker-end="url(#arrowhead)"></line></g>"#,
+                x1 = fmt_num(axis.x1),
+                y1 = fmt_num(axis.y1),
+                x2 = fmt_num(axis.x2),
+                y2 = fmt_num(axis.y2),
+                sw = fmt_num(axis.stroke_width),
+            ));
+        }
+    }
 }
 
 fn render_bodies(out: &mut String, d: &TimelineDiagram, l: &TimelineLayout, id: &str) {
@@ -197,11 +224,19 @@ fn emit_node_body(out: &mut String, node: &LaidNode, id: &str, d: &TimelineDiagr
     );
 
     out.push_str("<g>");
+    // LR calls `drawNode(..., diagramId)`; TD calls `drawNode(...)`
+    // without it (see timelineRendererVertical.ts), which makes the
+    // interpolated `diagramId + '-node-' + n` string literally start
+    // with `"undefined"` in the SVG. Byte-exact parity keeps the quirk.
+    let node_id_prefix = match d.direction {
+        TimelineDirection::LR => id.to_string(),
+        TimelineDirection::TD => "undefined".to_string(),
+    };
     out.push_str(&format!(
-        r#"<path id="{id}-node-{nid}" class="node-bkg node-undefined" d="{d}"></path>"#,
-        id = id,
+        r#"<path id="{pfx}-node-{nid}" class="node-bkg node-undefined" d="{path_d}"></path>"#,
+        pfx = node_id_prefix,
         nid = node.node_id,
-        d = path,
+        path_d = path,
     ));
     // The `node-line-N` sibling that defaultBkg adds.
     let line_class = line_class_name(node.section_index);
@@ -353,6 +388,29 @@ fn build_style_block(
         ));
     }
 
+    // Gradient sections — upstream emits these when `useGradient` is
+    // true and the theme is NOT `neutral`. They're the "neo look"
+    // overlay rules that swap the section's rect/path/circle fill to
+    // `mainBkg` and re-point strokes at `url(#{id}-gradient)`.
+    //
+    // Neutral has `useGradient: true` too but the gradient block is
+    // skipped for it upstream (`!isNeutralTheme`). We detect neutral
+    // by its signature `primaryColor: "#eee"` to avoid piping the
+    // theme *name* through the render layer.
+    let is_neutral = theme.primary_color.as_deref() == Some("#eee");
+    if theme.use_gradient.unwrap_or(false) && !is_neutral {
+        let main_bkg = theme.main_bkg.as_deref().unwrap_or("#eee");
+        for i in 0..theme_color_limit {
+            let idx = i as i64 - 1;
+            css.push_str(&format!(
+                r#"#{id} .section-{idx}[data-look="neo"] rect,#{id} .section-{idx}[data-look="neo"] path,#{id} .section-{idx}[data-look="neo"] circle{{fill:{main_bkg};stroke:url(#{id}-gradient);stroke-width:2;}}"#
+            ));
+            css.push_str(&format!(
+                r#"#{id} .section-{idx}[data-look="neo"] line{{stroke:url(#{id}-gradient);stroke-width:2;}}"#
+            ));
+        }
+    }
+
     css.push_str(&format!(
         "#{id} .section-root rect,#{id} .section-root path,#{id} .section-root circle{{fill:{git0};}}"
     ));
@@ -363,11 +421,21 @@ fn build_style_block(
     css.push_str(&format!("#{id} .edge{{fill:none;}}"));
     css.push_str(&format!("#{id} .eventWrapper{{filter:brightness(120%);}}"));
     css.push_str(&format!("#{id} .node .neo-node{{stroke:{node_border};}}"));
+    // Upstream's `styles.ts` swaps several `stroke`/`fill` values to
+    // `url(#{id}-gradient)` whenever `useGradient` is true — applies
+    // regardless of diagram theme (including neutral, unlike the
+    // section-loop gradient block).
+    let gradient_url = format!("url(#{id}-gradient)");
+    let border = if theme.use_gradient.unwrap_or(false) {
+        gradient_url.as_str()
+    } else {
+        node_border
+    };
     css.push_str(&format!(
-        r#"#{id} [data-look="neo"].node rect,#{id} [data-look="neo"].cluster rect,#{id} [data-look="neo"].node polygon{{stroke:{node_border};filter:{drop_shadow};}}"#
+        r#"#{id} [data-look="neo"].node rect,#{id} [data-look="neo"].cluster rect,#{id} [data-look="neo"].node polygon{{stroke:{border};filter:{drop_shadow};}}"#
     ));
     css.push_str(&format!(
-        r#"#{id} [data-look="neo"].node path{{stroke:{node_border};stroke-width:{stroke_width}px;}}"#
+        r#"#{id} [data-look="neo"].node path{{stroke:{border};stroke-width:{stroke_width}px;}}"#
     ));
     css.push_str(&format!(
         r#"#{id} [data-look="neo"].node .outer-path{{filter:{drop_shadow};}}"#
@@ -376,16 +444,16 @@ fn build_style_block(
         r#"#{id} [data-look="neo"].node .neo-line path{{stroke:{node_border};filter:none;}}"#
     ));
     css.push_str(&format!(
-        r#"#{id} [data-look="neo"].node circle{{stroke:{node_border};filter:{drop_shadow};}}"#
+        r#"#{id} [data-look="neo"].node circle{{stroke:{border};filter:{drop_shadow};}}"#
     ));
     css.push_str(&format!(
         r#"#{id} [data-look="neo"].node circle .state-start{{fill:#000000;}}"#
     ));
     css.push_str(&format!(
-        r#"#{id} [data-look="neo"].icon-shape .icon{{fill:{node_border};filter:{drop_shadow};}}"#
+        r#"#{id} [data-look="neo"].icon-shape .icon{{fill:{border};filter:{drop_shadow};}}"#
     ));
     css.push_str(&format!(
-        r#"#{id} [data-look="neo"].icon-shape .icon-neo path{{stroke:{node_border};filter:{drop_shadow};}}"#
+        r#"#{id} [data-look="neo"].icon-shape .icon-neo path{{stroke:{border};filter:{drop_shadow};}}"#
     ));
     css.push_str(&format!(
         "#{id} :root{{--mermaid-font-family:{font_family_min};}}"

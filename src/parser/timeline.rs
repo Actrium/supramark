@@ -17,7 +17,12 @@ use crate::model::timeline::{TimelineDiagram, TimelineDirection, TimelineTask};
 
 pub fn parse(source: &str) -> Result<TimelineDiagram> {
     let mut d = TimelineDiagram {
-        left_margin: 50.0,
+        // Upstream schema default (`schemas/config.schema.yaml`
+        // → `TimelineDiagramConfig.leftMargin: 150`). The renderer's
+        // nullish-coalesce fallback `?? 50` is only hit when the
+        // config object omits the field entirely, which normal
+        // flows never do because schema defaults populate it.
+        left_margin: 150.0,
         ..TimelineDiagram::default()
     };
 
@@ -89,10 +94,20 @@ pub fn parse(source: &str) -> Result<TimelineDiagram> {
         // Event vs period distinction: jison rule
         //   event  := ':' \s (?:[^:\n]|':'(?!\s))+
         //   period := [^#:\n]+
-        // An event line starts with ':' followed by a space.
+        // An event line starts with ':' followed by a space. Subsequent
+        // `": "` segments on the same line each produce their own
+        // `event` token, same as on a period line.
         if let Some(ev) = strip_event(line) {
             if let Some(task) = d.tasks.last_mut() {
-                task.events.push(ev.to_string());
+                // Split additional `": "` segments — e.g. cypress/11
+                // continuation lines like
+                //   `: Research and Development : Purchasing Activities`
+                // must yield TWO events, not one.
+                let (first, extras) = split_event_line(ev);
+                if !first.is_empty() {
+                    task.events.push(first.to_string());
+                }
+                task.events.extend(extras);
             }
             continue;
         }
@@ -208,6 +223,14 @@ fn apply_yaml_body(body: &str, d: &mut TimelineDiagram) {
             if let Some(idx) = c_scale_index(key) {
                 if idx < d.theme_overrides.c_scale.len() {
                     d.theme_overrides.c_scale[idx] = Some(val.to_string());
+                }
+            } else {
+                // Upstream accepts `fontFamily` / `fontSize` inside
+                // `themeVariables` as well — e.g. cypress/timeline/12.
+                match key {
+                    "fontFamily" => d.font_family = Some(val.to_string()),
+                    "fontSize" => d.font_size = Some(val.to_string()),
+                    _ => {}
                 }
             }
             continue;
@@ -366,6 +389,14 @@ fn strip_event(line: &str) -> Option<&str> {
     // The jison regex forbids unescaped `\n`; our input was line-split.
     // Keep the content trimmed of trailing whitespace.
     Some(after_space.trim_end())
+}
+
+/// Split an event-continuation line's body (everything after `: `) on
+/// further `": "` boundaries. Reuses [`split_period_and_events`]'s
+/// scanner so cypress/timeline/11's wrap-around events parse into the
+/// same 9-event shape upstream produces.
+fn split_event_line(body: &str) -> (&str, Vec<String>) {
+    split_period_and_events(body)
 }
 
 /// Split a period line like `2004 : Facebook : Google` into the leading

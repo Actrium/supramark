@@ -84,8 +84,36 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
         }
         detect::DiagramKind::Timeline => {
             let d = parser::timeline::parse(source)?;
-            let l = layout::timeline::layout(&d, &theme)?;
-            render::svg_timeline::render(&d, &l, &theme, id)
+            // Honour theme overrides captured by the timeline parser:
+            // — `theme_name` (from frontmatter `config.theme` or a
+            //   `%%{init: { theme: ... }}%%` directive),
+            // — `theme_overrides.c_scale*` (from `themeVariables`).
+            let mut effective_theme = if let Some(name) = d.theme_name.as_deref() {
+                theme::get_theme(name)
+            } else {
+                theme.clone()
+            };
+            for (i, v) in d.theme_overrides.c_scale.iter().enumerate() {
+                if let Some(s) = v {
+                    match i {
+                        0 => effective_theme.c_scale0 = Some(s.clone()),
+                        1 => effective_theme.c_scale1 = Some(s.clone()),
+                        2 => effective_theme.c_scale2 = Some(s.clone()),
+                        3 => effective_theme.c_scale3 = Some(s.clone()),
+                        4 => effective_theme.c_scale4 = Some(s.clone()),
+                        5 => effective_theme.c_scale5 = Some(s.clone()),
+                        6 => effective_theme.c_scale6 = Some(s.clone()),
+                        7 => effective_theme.c_scale7 = Some(s.clone()),
+                        8 => effective_theme.c_scale8 = Some(s.clone()),
+                        9 => effective_theme.c_scale9 = Some(s.clone()),
+                        10 => effective_theme.c_scale10 = Some(s.clone()),
+                        11 => effective_theme.c_scale11 = Some(s.clone()),
+                        _ => {}
+                    }
+                }
+            }
+            let l = layout::timeline::layout(&d, &effective_theme)?;
+            render::svg_timeline::render(&d, &l, &effective_theme, id)
         }
         detect::DiagramKind::Quadrant => {
             let d = parser::quadrant::parse(source)?;
@@ -112,8 +140,38 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
             let l = layout::kanban::layout(&d, &theme)?;
             render::svg_kanban::render(&d, &l, &theme, id)
         }
+        detect::DiagramKind::Er => {
+            let d = parser::er::parse(source)?;
+            let l = layout::er::layout(&d, &theme)?;
+            render::svg_er::render(&d, &l, &theme, id)
+        }
+        detect::DiagramKind::Block => {
+            let d = parser::block::parse(source)?;
+            let l = layout::block::layout(&d, &theme)?;
+            render::svg_block::render(&d, &l, &theme, id)
+        }
+        detect::DiagramKind::Requirement => {
+            let d = parser::requirement::parse(source)?;
+            let l = layout::requirement::layout(&d, &theme)?;
+            render::svg_requirement::render(&d, &l, &theme, id)
+        }
+        detect::DiagramKind::Class => {
+            let d = parser::class::parse(source)?;
+            let l = layout::class::layout(&d, &theme)?;
+            render::svg_class::render(&d, &l, &theme, id)
+        }
+        detect::DiagramKind::State => {
+            let d = parser::state::parse(source)?;
+            let l = layout::state::layout(&d, &theme)?;
+            render::svg_state::render(&d, &l, &theme, id)
+        }
+        detect::DiagramKind::Flowchart => {
+            let d = parser::flowchart::parse(source)?;
+            let l = layout::flowchart::layout(&d, &theme)?;
+            render::svg_flowchart::render(&d, &l, &theme, id)
+        }
         other => Err(MermaidError::Unsupported(format!(
-            "diagram kind '{}' not yet implemented — Wave 4 scope: er/class/state/flowchart/block; Wave 7: sequence/c4/gitgraph; gantt/mindmap TBD",
+            "diagram kind '{}' not yet implemented — Wave 7: sequence/c4/gitgraph; gantt/mindmap TBD",
             other.id()
         ))),
     }
