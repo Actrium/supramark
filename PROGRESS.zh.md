@@ -1,6 +1,6 @@
 # 阶段进展
 
-截至 Wave 4（Stratum 3 六个 consumer diagram + timeline 集成回归）完成。
+截至 Wave 3.5（unified render shell / foreignObject label / roughjs port 三路并行 + PR merge）完成。
 
 > 本项目只维护中文版 PROGRESS。
 
@@ -9,13 +9,13 @@
 | 指标 | 值 |
 |---|---:|
 | Diagram 完整 byte-exact 已落地 | **13 / 23** |
-| Diagram 结构落地（parse + layout，render 部分/结构可用） | **19 / 23**（+6 Stratum 3） |
-| Wave 4 byte-exact fixtures（单独 fixture 口径） | **27 / 759**（er 11 + block 16） |
-| Lib unit 测试 | 464 passed / 0 failed |
-| Integration sweep（convert_with_id） | 12 组全绿（timeline 已回收；er/class/state/flowchart/block/requirement 各自 inline sweep 在 lib tests） |
-| 总测试数 | 567 passed / 0 failed / 2 ignored |
-| Cargo check warnings | 5（4 在 block 内部 dead_code，1 xychart pre-existing，timeline parse_px pre-existing） |
-| 项目代码总行数 | ~42,500 行（含测试；Wave 4 新增 12.5K） |
+| Diagram 结构落地（parse + layout，render 部分/结构可用） | **19 / 23** |
+| 结构中 Stratum 3 byte-exact fixtures（单独 fixture 口径） | **57 / 759**（er **41** + block 16） |
+| Lib unit 测试 | 511 passed / 0 failed / 5 ignored |
+| Integration sweep（convert_with_id） | 12 组全绿 |
+| 总测试数 | 614 passed / 0 failed / 7 ignored |
+| Cargo check warnings | 5（全部 pre-existing 或 block 内部 dead_code） |
+| 项目代码总行数 | ~47,000 行（Wave 3.5 新增 ~4.5K） |
 
 ## 已完整 byte-exact 的 diagram（13/23）
 
@@ -38,16 +38,16 @@
 
 ## Wave 4（Stratum 3）结构落地 · byte-exact 部分进行中
 
-| Diagram | LoC | 结构（parser+layout） | Byte-exact |
+| Diagram | LoC | 结构（parser+layout） | Byte-exact（Wave 4 → 3.5） |
 |---|---:|:-:|:-:|
-| er | 2057 | ✓ 80/80 | **11 / 80** |
+| er | 2057 | ✓ 80/80 | 11/80 → **41/80**（+30，rough.js 解 divider） |
 | block | 2189 | ✓ 33/33 | **16 / 33** |
 | class | 2170 | ✓ 239/239 | 0 / 240（render 诚实 stub） |
-| state | 1503 | ✓ 82/82 (69 不 panic) | 0 / 82 |
+| state | 1503 | ✓ 82/82 (69 不 panic) | 0 / 82（shell 对齐 1552 B） |
 | flowchart | 2642 | ✓ 280/280（无 panic） | 0 / 280（无 elk） |
 | requirement | 1852 | ✓ 44/44 | 0 / 44 |
 
-**Wave 4 小计：12,413 LoC，27 fixtures byte-exact。**
+**Wave 4 结构小计：12,413 LoC。Wave 3.5 收益：ER +30 byte-exact；shell + label 管道对所有 Stratum 3 就位。**
 
 六家共同的 render 墙（Wave 3.5 unified render shell 的 scope）：
 
@@ -100,30 +100,48 @@ Wave 3 作为"shapes/markers/edges/clusters 隔离组件库"已就绪，但**外
 
 ## 下一步建议
 
-### Wave 3.5（unified render shell）—— 最大回报
+### Wave 3.5 完成（3 worktree agents + 1 resolver）
 
-六个 Stratum 3 共享的外壳，完成后 er/block 再补关键 quirks 就能快速从"部分"到"完整" byte-exact。Scope：
+三条独立落地：
 
-- `src/render/unified_shell.rs` —— SVG 外壳 + `<g>` 层级 + stylis block + data-attrs + drop-shadow filters
-- `src/render/foreign_object.rs` —— `<foreignObject><div><span><p>` label 栈 + getBBox shim
-- `src/render/rough.rs` —— mulberry32 PRNG + basis-spline 路径（port roughjs 核心 ~500 LoC）
-- `src/theme/color.rs` 扩展 —— khroma hue2rgb / invert / lighten / darken / adjust（10 位精度）
-- `src/layout/dagre_stability.rs` —— init-order sort / tie-break patch，把 dagre-rs 输出与 dagre-d3 对齐
+- **`src/render/rough.rs`**（1165 LoC）—— mulberry32 + Lehmer LCG（Math.imul 精确 32-bit）+ RoughOptions + Op/OpSet/Drawable + RoughGenerator（rectangle / polygon / line）+ ops_to_path + path_out_to_svg。ER attribute-row divider 直接受益：**11 → 41 byte-exact fixtures**
+- **`src/render/foreign_object.rs`**（523 LoC）+ 14 shape files 切换 —— `<g class="label"><foreignObject><div><span><p>` 标签栈 + `measure_html_label` 匹配 jsdom 14 px sans-serif 默认 + CSS-aware override 路径。classbox / requirement / 所有 rect-like shape 的 label emission 切换到 foreignObject
+- **`src/render/unified_shell.rs`**（321 LoC）+ **`src/render/stylis.rs`**（336 LoC）+ **`src/theme/css.rs`**（287 LoC）—— SVG 外壳 open/close + 种子组 + root/clusters/edgePaths/edgeLabels/nodes 层级 helpers + drop-shadow defs + data_edge_attrs (base64 JSON) + stylis 压缩 + 共享 base_preamble / neo_look_block。state/01 post-viewBox 对齐从 0 B → **1552 B**
 
-预计 3-4 个 agent 并行（worktree 隔离，PR 模式）。
+**Merge**：rough.js 先 landed 到 main（conflict-free），foreignObject + unified-shell 两个 worktree 分支由 resolver worktree agent 解冲突后 `--no-ff` 合入（resolver 自己 rebase + 解 svg_er.rs label 分发 + svg_block/svg_requirement 的 preamble 提取）。3 个 merge commit：2c9758b / 736074e / 30f74f1。
+
+## 剩余 blockers（Wave 5 scope）
+
+- state/class/flowchart/requirement 的 **diagram-specific CSS** 未进 theme::css（unified-shell 留了接口；每个需各自 port ~100-300 行 styles.ts）
+- **rough.js hachure filler**（`look: handDrawn`）—— scan-line-hachure.js 未 port，ishikawa/04 仍 known_partial
+- **dagre-rs vs @dagrejs/dagre 数值 tie-break** ≤2 px —— class / flowchart / state / er 仍部分受影响
+- **markdown emoji / classDef style override / data-color-id** —— ER 剩 39/80 的具体 blockers
+- **`d3-shape` arc 精确 emitter** —— state-start / history 的 36 段 cubic polyline
+
+### Wave 5（下一步）
+
+- **class / state / flowchart / requirement byte-exact 收尾** —— 每个 port 对应 styles.ts（~100-300 行）进 theme::css，补 dagre tie-break 对齐 patch，其余细节；预计 4 agent 并行 worktree
+- **ER 剩 39 fixture** —— 单独 1 个 agent 负责 markdown emoji / classDef style / data-color-id
 
 ### 之后
 
-- **Wave 5**：class / state / flowchart / requirement byte-exact 收尾（在 Wave 3.5 基础上补各自 CSS + 细节）
 - **Wave 6**：gantt（chrono 依赖） / mindmap（tidy-tree layout）
 - **Wave 7**：sequence / c4 / gitGraph（bespoke，sequence 是 4K+ 行最大单个 port）
 - **venn**：600 行 MDS，可 port 或保持 known_ignored
 - **architecture**：cytoscape-fcose，保持 known_ignored
 
-## 本阶段（Wave 4）产出摘要
+## 本阶段（Wave 4 + 3.5）产出摘要
 
-- **Agent 数 × 7 并行**（6 Stratum 3 + 1 timeline-fix；第二轮改用 worktree isolation PR 模式）
-- **12,500 LoC** 新增代码
-- **27 fixtures** 新增 byte-exact，**16 timeline** 回收进 sweep
-- **16+ 条 upstream quirks** 文档化（六家合力挖出）
-- **累计 13 / 23 完整 byte-exact，19 / 23 结构落地，57%→约 82%（结构口径）**
+- **Agent 数 × 11 并行**（7 Wave4 + 3 Wave3.5 worktree + 1 resolver worktree）
+- **~17,000 LoC** 新增代码（Wave 4 12.5K + Wave 3.5 4.5K）
+- Byte-exact fixture 增量：
+  - Wave 4：27 新增 + 16 timeline 回收 = 43
+  - Wave 3.5：+30 ER（11→41）
+- **21+ 条 upstream quirks** 文档化
+- **累计 13 / 23 完整 byte-exact，19 / 23 结构落地；总 pass 测试 614**
+
+## Wave 3.5 协作协议演进
+
+- **worktree isolation + PR 模式** 初次全面启用：每 subagent 在独立 worktree 分支工作，完成后 branch 成为可合并的 PR
+- **主 agent ≠ 冲突解决者**：三路并行的 merge 冲突由一个额外派发的 **resolver worktree agent** 解决（资源等价于一轮子 agent），主 agent 只做 fast-forward 合并
+- 一个 agent（rough.js）意外在主树工作绕过了 worktree 隔离 —— 未来 prompt 强化 `cd <worktree-path>` 指令
