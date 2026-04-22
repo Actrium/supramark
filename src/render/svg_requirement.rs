@@ -118,30 +118,67 @@ fn render_node(id_prefix: &str, n: &UNode, labels: &NodeLabels) -> String {
         x2 = fmt_num(-hx),
         y = fmt_num(divider_y),
     ));
-    // Header text rows (kind, name).
+    // Header rows (kind, name) — upstream uses foreignObject HTML
+    // labels (`markdown-node-label` class) centred in the header band.
+    use crate::render::foreign_object::{
+        foreign_object_body, measure_html_label, HtmlLabelFont, LabelOpts,
+    };
     let line_h = 24.0;
     let mut ty = hy + 20.0 + 12.0;
-    s.push_str(&format!(
-        r#"<text class="reqLabel" x="0" y="{y}" text-anchor="middle">{t}</text>"#,
-        y = fmt_num(ty),
-        t = xml_escape(&labels.kind_header),
-    ));
+    // Kind header — "<<Requirement>>" etc.
+    {
+        let esc = xml_escape(&labels.kind_header);
+        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 280.0, true);
+        let opts = LabelOpts {
+            extra_span_classes: "markdown-node-label",
+            max_width: 280.0,
+            ..LabelOpts::default()
+        };
+        s.push_str(&format!(
+            r#"<g class="label" style="" transform="translate({tx}, {ty2})">"#,
+            tx = fmt_num(-fw / 2.0),
+            ty2 = fmt_num(ty - fh / 2.0),
+        ));
+        s.push_str(&foreign_object_body(&esc, fw, fh, &opts));
+        s.push_str("</g>");
+    }
     ty += line_h;
-    s.push_str(&format!(
-        r#"<text class="reqTitle" x="0" y="{y}" text-anchor="middle" font-weight="bold">{t}</text>"#,
-        y = fmt_num(ty),
-        t = xml_escape(&labels.name),
-    ));
-    // Body rows — left-aligned.
+    // Name — bold.
+    {
+        let esc = xml_escape(&labels.name);
+        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 280.0, true);
+        let opts = LabelOpts {
+            extra_span_classes: "markdown-node-label",
+            max_width: 280.0,
+            label_style: Some(""),
+            ..LabelOpts::default()
+        };
+        s.push_str(&format!(
+            r#"<g class="label" style="; font-weight: bold;" transform="translate({tx}, {ty2})">"#,
+            tx = fmt_num(-fw / 2.0),
+            ty2 = fmt_num(ty - fh / 2.0),
+        ));
+        s.push_str(&foreign_object_body(&esc, fw, fh, &opts));
+        s.push_str("</g>");
+    }
+    // Body rows — left-aligned, each wrapped in foreignObject too.
     let body_x = hx + 10.0;
     let mut by = divider_y + 20.0;
     for row in &labels.body {
+        let esc = xml_escape(row);
+        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 280.0, true);
+        let opts = LabelOpts {
+            extra_span_classes: "markdown-node-label",
+            max_width: 280.0,
+            ..LabelOpts::default()
+        };
         s.push_str(&format!(
-            r#"<text class="reqLabel" x="{x}" y="{y}">{t}</text>"#,
-            x = fmt_num(body_x),
-            y = fmt_num(by),
-            t = xml_escape(row),
+            r#"<g class="label" style="" transform="translate({tx}, {ty2})">"#,
+            tx = fmt_num(body_x),
+            ty2 = fmt_num(by - fh / 2.0),
         ));
+        s.push_str(&foreign_object_body(&esc, fw, fh, &opts));
+        s.push_str("</g>");
         by += line_h;
     }
     s.push_str("</g>");
@@ -171,7 +208,10 @@ fn render_edge(id_prefix: &str, e: &UEdge) -> String {
     );
     let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
     let mut attrs = String::new();
-    if e.arrow_type_start.as_deref().map_or(false, |s| !s.is_empty()) {
+    if e.arrow_type_start
+        .as_deref()
+        .map_or(false, |s| !s.is_empty())
+    {
         attrs.push_str(&format!(
             r#" marker-start="url(#{id}_requirement-requirement_containsStart)""#,
             id = id_prefix,
@@ -195,18 +235,25 @@ fn render_edge(id_prefix: &str, e: &UEdge) -> String {
 }
 
 fn render_edge_label(e: &UEdge, el: &EdgeLabel) -> String {
+    // Requirement edge labels wrap text like "<<satisfies>>" in a
+    // foreignObject span with labelBkg class — matching upstream's
+    // `insertEdgeLabel` + `addHtmlSpan(addBackground=true)`. The `<<`
+    // and `>>` angle brackets are HTML-escaped to `&lt;&lt;…&gt;&gt;`.
+    use crate::render::foreign_object::{render_edge_label as fo_edge, LabelOpts};
     let x = e.label_x.unwrap_or(0.0);
     let y = e.label_y.unwrap_or(0.0);
-    format!(
-        r#"<g class="edgeLabel" transform="translate({x}, {y})"><g class="label"><rect class="labelBkg" x="{rx}" y="{ry}" width="{rw}" height="{rh}"/><text text-anchor="middle" y="4">{t}</text></g></g>"#,
-        x = fmt_num(x),
-        y = fmt_num(y),
-        rx = fmt_num(-el.width / 2.0),
-        ry = fmt_num(-el.height / 2.0),
-        rw = fmt_num(el.width),
-        rh = fmt_num(el.height),
-        t = xml_escape(&el.text),
-    )
+    let esc = xml_escape(&el.text);
+    let data_id = format!(
+        "{}-{}-0",
+        xml_escape(e.source.as_deref().unwrap_or("")),
+        xml_escape(e.target.as_deref().unwrap_or("")),
+    );
+    let opts = LabelOpts {
+        data_id: Some(&data_id),
+        group_style: None,
+        ..LabelOpts::default()
+    };
+    fo_edge(&esc, x, y, el.width, el.height, opts)
 }
 
 fn marker_defs(id_prefix: &str) -> String {
@@ -416,5 +463,40 @@ mod tests {
         // Byte-exact parity tracked as Wave 5 work; assert total>0 so
         // regressions in fixture discovery are caught.
         assert!(total > 0, "no fixtures discovered — check test data paths");
+    }
+
+    /// Structural parity: after wiring foreignObject, requirement node
+    /// + edge labels should use the HTML label stack rather than bare
+    /// `<text>` elements — matching upstream's
+    /// `<foreignObject><div>...<span class="nodeLabel markdown-node-label">`.
+    #[test]
+    fn node_and_edge_labels_use_foreign_object() {
+        let src = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/ext_fixtures/demos/requirement/01.mmd"),
+        )
+        .expect("read fixture");
+        let d = parse(&src).expect("parse");
+        let theme = get_theme("default");
+        let l = layout(&d, &theme).expect("layout");
+        let svg = render(&d, &l, &theme, "structural-test").expect("render");
+        // Node labels — kind header and name:
+        assert!(
+            svg.contains(r#"<span class="nodeLabel markdown-node-label">"#),
+            "node labels should use markdown-node-label span"
+        );
+        assert!(
+            svg.contains(r#"<foreignObject width="#),
+            "node labels should be wrapped in foreignObject"
+        );
+        // Edge labels — "<<satisfies>>" etc.
+        assert!(
+            svg.contains(r#"<span class="edgeLabel ">"#),
+            "edge labels should use edgeLabel span"
+        );
+        assert!(
+            svg.contains(r#"class="labelBkg""#),
+            "edge foreignObject div should carry labelBkg class"
+        );
     }
 }

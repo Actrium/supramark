@@ -43,9 +43,9 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         h = fmt_num(h),
     ));
     if !label.is_empty() {
-        out.push_str(&format!(
-            r#"<g class="label" transform="translate(0, 0)"><text>{l}</text></g>"#,
-            l = super::types::xml_escape(&label),
+        out.push_str(&crate::render::foreign_object::shape_label_block(
+            &super::types::xml_escape(&label),
+            &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }
     out.push_str("</g>");

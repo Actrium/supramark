@@ -171,16 +171,16 @@ fn foreign_object_node_label(width: f64, height: f64, text: &str, _eid: &str) ->
     // Re-measure at 16 px to match upstream's calculateTextWidth call. We
     // can't just use the 14-px width we already have.
     use crate::font_metrics::text_width;
+    use crate::render::foreign_object::{foreign_object_body, LabelOpts};
     let w16 = text_width(text, "sans-serif", 16.0, false, false);
     let hit_min_floor = w16 + 40.0 < 100.0;
-    let maxw = if hit_min_floor { 100 } else { 200 };
-    format!(
-        r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel markdown-node-label"><p>{t}</p></span></div></foreignObject>"#,
-        w = fmt_num(width),
-        h = fmt_num(height),
-        mw = maxw,
-        t = html_escape(text),
-    )
+    let maxw = if hit_min_floor { 100.0 } else { 200.0 };
+    let opts = LabelOpts {
+        extra_span_classes: "markdown-node-label",
+        max_width: maxw,
+        ..LabelOpts::default()
+    };
+    foreign_object_body(&html_escape(text), width, height, &opts)
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -249,8 +249,7 @@ fn base64_points(points: &[(f64, f64)]) -> String {
 
 /// Minimal base64 encoder — matches `btoa` byte-for-byte.
 fn base64_encode(data: &[u8]) -> String {
-    const TBL: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     let mut chunks = data.chunks_exact(3);
     for c in &mut chunks {
@@ -288,36 +287,40 @@ fn base64_encode(data: &[u8]) -> String {
 // translate of (-lw/2, -lh/2).
 // ──────────────────────────────────────────────────────────────────────
 fn render_edge_label(e: &EdgeLayout) -> String {
-    let inner_span = if e.label.trim().is_empty() {
-        // Reference wraps empty / whitespace-only labels in a nowrap div
-        // *without* a `<p>` body — but with the literal label string
-        // preserved (for the `"   "` case). Reference shows a <p></p>
-        // when the role is empty. We mirror that simplest rule.
-        format!(
-            r#"<span class="edgeLabel ">{}</span>"#,
-            if e.label.is_empty() {
-                "".to_string()
-            } else {
-                format!("<p>{}</p>", html_escape(&e.label))
-            }
-        )
+    use crate::render::foreign_object::{render_edge_label as fo_edge, LabelOpts};
+    // Reference wraps empty / whitespace-only labels with no `<p>` body
+    // (or keeps the original whitespace intact for the `"   "` case).
+    // Non-empty labels always wrap in `<p>…</p>` post-markdown.
+    let (body, wrap_in_p) = if e.label.trim().is_empty() {
+        // Reproduce the prior exact branch: empty → empty; pure-
+        // whitespace → `<p>{literal}</p>` rendered inline.
+        if e.label.is_empty() {
+            (String::new(), false)
+        } else {
+            (format!("<p>{}</p>", html_escape(&e.label)), false)
+        }
     } else {
-        format!(r#"<span class="edgeLabel "><p>{}</p></span>"#, html_escape(&e.label))
+        (html_escape(&e.label), true)
     };
-    let fo = format!(
-        r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg">{span}</div></foreignObject>"#,
-        w = fmt_num(e.label_width),
-        h = fmt_num(e.label_height),
-        span = inner_span,
-    );
-    format!(
-        r#"<g class="edgeLabel" transform="translate({lx}, {ly})"><g class="label" data-id="{eid}" transform="translate({itx}, {ity})">{fo}</g></g>"#,
-        lx = fmt_num(e.label_x),
-        ly = fmt_num(e.label_y),
-        eid = e.id,
-        itx = fmt_num(-e.label_width / 2.0),
-        ity = fmt_num(-e.label_height / 2.0),
-        fo = fo,
+    let opts = LabelOpts {
+        data_id: Some(&e.id),
+        group_style: None,
+        ..LabelOpts::default()
+    };
+    // The inner render_edge_label forces add_background=true +
+    // is_node=false and emits both the outer <g class="edgeLabel"> +
+    // inner <g class="label">.
+    fo_edge(
+        &body,
+        e.label_x,
+        e.label_y,
+        e.label_width,
+        e.label_height,
+        {
+            let mut o = opts;
+            o.wrap_in_p = wrap_in_p;
+            o
+        },
     )
 }
 
@@ -331,11 +334,17 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
     // mirror the "default" mermaid theme for resilience.
     let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
-    let tertiary = theme.tertiary_color.as_deref().unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let tertiary = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
     let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let text_color = theme.text_color.as_deref().unwrap_or("#333");
     let node_text_color = theme.node_text_color.as_deref().unwrap_or(text_color);
-    let edge_label_bg = theme.edge_label_background.as_deref().unwrap_or("rgba(232,232,232, 0.8)");
+    let edge_label_bg = theme
+        .edge_label_background
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
     // labelBkg CSS: upstream styles.ts does `fade(tertiaryColor, 0.5)`.
     let labelbkg_color = fade(tertiary, 0.5);
     let labelbkg_color = labelbkg_color.as_str();
@@ -353,13 +362,19 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         css.push_str(s);
     };
 
-    p(&format!(
-        r#"<style>#{id}{{font-family:{ff};font-size:16px;fill:{tc};}}"#,
-        id = id,
-        ff = ff,
-        tc = text_color,
-    ), &mut css);
-    p("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}", &mut css);
+    p(
+        &format!(
+            r#"<style>#{id}{{font-family:{ff};font-size:16px;fill:{tc};}}"#,
+            id = id,
+            ff = ff,
+            tc = text_color,
+        ),
+        &mut css,
+    );
+    p(
+        "@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}",
+        &mut css,
+    );
     p("@keyframes dash{to{stroke-dashoffset:0;}}", &mut css);
     for (sel, body) in [
         (".edge-animation-slow", "stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;"),
@@ -375,62 +390,146 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
     ] {
         p(&format!("#{id} {sel}{{{body}}}"), &mut css);
     }
-    p(&format!("#{id} .marker{{fill:{lc};stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker.cross{{stroke:{lc};}}", lc = line_color), &mut css);
-    p(&format!("#{id} svg{{font-family:{ff};font-size:16px;}}", ff = ff), &mut css);
+    p(
+        &format!("#{id} .marker{{fill:{lc};stroke:{lc};}}", lc = line_color),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .marker.cross{{stroke:{lc};}}", lc = line_color),
+        &mut css,
+    );
+    p(
+        &format!("#{id} svg{{font-family:{ff};font-size:16px;}}", ff = ff),
+        &mut css,
+    );
     p(&format!("#{id} p{{margin:0;}}"), &mut css);
 
     // From styles.ts — er-specific rules.
-    p(&format!("#{id} .entityBox{{fill:{mb};stroke:{nb};}}", mb = main_bkg, nb = node_border), &mut css);
-    p(&format!(
-        "#{id} .relationshipLabelBox{{fill:{t};opacity:0.7;background-color:{t};}}",
-        t = tertiary
-    ), &mut css);
-    p(&format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"), &mut css);
-    p(&format!(
-        "#{id} .labelBkg{{background-color:{lbkg};}}",
-        lbkg = labelbkg_color
-    ), &mut css);
-    p(&format!("#{id} .edgeLabel{{background-color:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label rect{{fill:{ebg};}}", ebg = edge_label_bg), &mut css);
-    p(&format!("#{id} .edgeLabel .label text{{fill:{tc};}}", tc = text_color), &mut css);
-    p(&format!("#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}", nb = node_border), &mut css);
-    p(&format!("#{id} .label{{font-family:{ff};color:{ntc};}}", ff = ff, ntc = node_text_color), &mut css);
-    p(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"), &mut css);
+    p(
+        &format!(
+            "#{id} .entityBox{{fill:{mb};stroke:{nb};}}",
+            mb = main_bkg,
+            nb = node_border
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .relationshipLabelBox{{fill:{t};opacity:0.7;background-color:{t};}}",
+            t = tertiary
+        ),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .relationshipLabelBox rect{{opacity:0.5;}}"),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .labelBkg{{background-color:{lbkg};}}",
+            lbkg = labelbkg_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel{{background-color:{ebg};}}",
+            ebg = edge_label_bg
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label rect{{fill:{ebg};}}",
+            ebg = edge_label_bg
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label text{{fill:{tc};}}",
+            tc = text_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .edgeLabel .label{{fill:{nb};font-size:14px;}}",
+            nb = node_border
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .label{{font-family:{ff};color:{ntc};}}",
+            ff = ff,
+            ntc = node_text_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!("#{id} .edge-pattern-dashed{{stroke-dasharray:8,8;}}"),
+        &mut css,
+    );
     p(&format!(
         "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon{{fill:{mb};stroke:{nb};stroke-width:1px;}}",
         mb = main_bkg, nb = node_border,
     ), &mut css);
-    p(&format!("#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}", lc = line_color), &mut css);
-    p(&format!("#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}", lc = line_color), &mut css);
-    p(&format!(
-        "#{id} [data-look=neo].labelBkg{{background-color:{lbkg};}}",
-        lbkg = labelbkg_color,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} .relationshipLine{{stroke:{lc};stroke-width:1px;fill:none;}}",
+            lc = line_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} .marker{{fill:none!important;stroke:{lc}!important;stroke-width:1;}}",
+            lc = line_color
+        ),
+        &mut css,
+    );
+    p(
+        &format!(
+            "#{id} [data-look=neo].labelBkg{{background-color:{lbkg};}}",
+            lbkg = labelbkg_color,
+        ),
+        &mut css,
+    );
     // Neo-look shared rules — verbatim strings.
-    p(&format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border), &mut css);
+    p(
+        &format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node path{{stroke:{nb};stroke-width:1px;}}",
-        nb = node_border,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} [data-look=\"neo\"].node path{{stroke:{nb};stroke-width:1px;}}",
+            nb = node_border,
+        ),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node .outer-path{{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}"
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
-        nb = node_border,
-    ), &mut css);
+    p(
+        &format!(
+            "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
+            nb = node_border,
+        ),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].node circle{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"
-    ), &mut css);
+    p(
+        &format!("#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"),
+        &mut css,
+    );
     p(&format!(
         "#{id} [data-look=\"neo\"].icon-shape .icon{{fill:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
@@ -439,10 +538,10 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         "#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:{nb};filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}",
         nb = node_border,
     ), &mut css);
-    p(&format!(
-        "#{id} :root{{--mermaid-font-family:{ff};}}",
-        ff = ff,
-    ), &mut css);
+    p(
+        &format!("#{id} :root{{--mermaid-font-family:{ff};}}", ff = ff,),
+        &mut css,
+    );
     p("</style>", &mut css);
     css
 }
@@ -522,13 +621,7 @@ fn fade(color: &str, opacity: f64) -> String {
         );
     }
     if let Some((r, g, b)) = parse_hex_color(color) {
-        return format!(
-            "rgba({}, {}, {}, {})",
-            r,
-            g,
-            b,
-            fmt_num(opacity)
-        );
+        return format!("rgba({}, {}, {}, {})", r, g, b, fmt_num(opacity));
     }
     format!("rgba({}, {})", color, fmt_num(opacity))
 }
@@ -575,7 +668,11 @@ fn hsl_to_rgb_f64(s: &str) -> Option<(f64, f64, f64)> {
     let h = (h % 360.0) / 360.0;
     let s = sp / 100.0;
     let l = lp / 100.0;
-    let q = if l < 0.5 { l * (1.0 + s) } else { (l + s) - (l * s) };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        (l + s) - (l * s)
+    };
     let p = 2.0 * l - q;
     let hue2rgb = |t: f64| -> f64 {
         let mut t = t;
@@ -754,10 +851,8 @@ mod tests {
         // pass rate but does not fail on partial results — the Wave 4
         // agent hands off known-partial items (mostly blocked on
         // rough.js / dagre-layout divergences) to follow-up waves.
-        let cypress: Vec<String> =
-            (1..=73).map(|n| format!("{:02}", n)).collect();
-        let demos: Vec<String> =
-            (1..=7).map(|n| format!("{:02}", n)).collect();
+        let cypress: Vec<String> = (1..=73).map(|n| format!("{:02}", n)).collect();
+        let demos: Vec<String> = (1..=7).map(|n| format!("{:02}", n)).collect();
 
         let mut pass = 0usize;
         let mut passing: Vec<String> = Vec::new();
@@ -814,4 +909,3 @@ mod tests {
         }
     }
 }
-

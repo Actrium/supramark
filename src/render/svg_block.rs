@@ -105,7 +105,9 @@ fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
             // Upstream `stadium()` does NOT set a `class` on the rect —
             // the emitted tag is bare `<rect style rx ry x y w h>`.
             let h = n.text_height + crate::layout::block::PADDING;
-            let w = n.text_width + (n.text_height + crate::layout::block::PADDING) / 4.0 + crate::layout::block::PADDING;
+            let w = n.text_width
+                + (n.text_height + crate::layout::block::PADDING) / 4.0
+                + crate::layout::block::PADDING;
             out.push_str(&format!(
                 r#"<rect style="{s}" rx="{rxh}" ry="{rxh}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
                 s = node_style,
@@ -192,25 +194,23 @@ fn render_block_arrow(out: &mut String, diagram_id: &str, n: &NodeGeom) {
 }
 
 fn render_label(out: &mut String, n: &NodeGeom) {
-    // Label `<g>` transform: upstream useHtmlLabels branch centers the
-    // label via translate(-bbox.width/2, -bbox.height/2).
-    let dx = -n.text_width / 2.0;
-    let dy = -n.text_height / 2.0;
-    out.push_str(&format!(
-        r#"<g class="label" style="" transform="translate({dx}, {dy})"><rect></rect>"#,
-        dx = fmt_num(dx),
-        dy = fmt_num(dy),
-    ));
-    out.push_str(&format!(
-        r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel ">"#,
-        w = fmt_num(n.text_width),
-        h = if n.label.as_deref().unwrap_or("").is_empty() { fmt_num(LABEL_HEIGHT) } else { fmt_num(n.text_height) },
-    ));
+    // Block labels use the `width = Number.POSITIVE_INFINITY` branch of
+    // `addHtmlSpan` — no `max-width` / no `text-align` on the div. The
+    // outer group carries an empty `style=""` and a bbox-centred
+    // `translate`.
+    use crate::render::foreign_object::{render_node_label, LabelOpts};
     let label = n.label.as_deref().unwrap_or("");
-    if !label.is_empty() {
-        out.push_str(&format!("<p>{}</p>", html_escape(label)));
-    }
-    out.push_str("</span></div></foreignObject></g>");
+    let h = if label.is_empty() {
+        LABEL_HEIGHT
+    } else {
+        n.text_height
+    };
+    let opts = LabelOpts {
+        max_width: f64::INFINITY,
+        ..LabelOpts::default()
+    };
+    let escaped = html_escape(label);
+    out.push_str(&render_node_label(&escaped, n.text_width, h, &opts));
 }
 
 fn rx_ry_for(shape: BlockShape) -> (&'static str, &'static str) {
@@ -222,10 +222,15 @@ fn rx_ry_for(shape: BlockShape) -> (&'static str, &'static str) {
 
 fn format_node_style(styles: &[String]) -> String {
     // Upstream emits styles joined by `;` but empty string when none.
-    if styles.is_empty() { return String::new(); }
+    if styles.is_empty() {
+        return String::new();
+    }
     let mut s = String::new();
     for (i, st) in styles.iter().enumerate() {
-        if i > 0 { s.push(';'); s.push(' '); }
+        if i > 0 {
+            s.push(';');
+            s.push(' ');
+        }
         s.push_str(st);
     }
     s
@@ -276,7 +281,10 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         .edge_label_background
         .as_deref()
         .unwrap_or("rgba(232,232,232, 0.8)");
-    let tertiary_color = theme.tertiary_color.as_deref().unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let tertiary_color = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
     let border2 = theme.border2.as_deref().unwrap_or("#aaaa33");
     let cluster_bkg_fade = theme
         .cluster_bkg
@@ -298,31 +306,50 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     let mut s = String::with_capacity(4096);
     s.push_str(&format!(
         "<style>#{id}{{font-family:{ff};font-size:{fs};fill:{tc};}}",
-        id = id, ff = ff, fs = font_size, tc = text_color,
+        id = id,
+        ff = ff,
+        fs = font_size,
+        tc = text_color,
     ));
     s.push_str("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}");
     s.push_str("@keyframes dash{to{stroke-dashoffset:0;}}");
     s.push_str(&format!("#{id} .edge-animation-slow{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}}"));
     s.push_str(&format!("#{id} .edge-animation-fast{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}}"));
     s.push_str(&format!("#{id} .error-icon{{fill:{error_bkg};}}"));
-    s.push_str(&format!("#{id} .error-text{{fill:{error_text};stroke:{error_text};}}"));
-    s.push_str(&format!("#{id} .edge-thickness-normal{{stroke-width:{stroke_width}px;}}"));
-    s.push_str(&format!("#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"));
+    s.push_str(&format!(
+        "#{id} .error-text{{fill:{error_text};stroke:{error_text};}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-normal{{stroke-width:{stroke_width}px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"
+    ));
     s.push_str(&format!("#{id} .edge-pattern-solid{{stroke-dasharray:0;}}"));
-    s.push_str(&format!("#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"));
-    s.push_str(&format!("#{id} .marker{{fill:{line_color};stroke:{line_color};}}"));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .marker{{fill:{line_color};stroke:{line_color};}}"
+    ));
     s.push_str(&format!("#{id} .marker.cross{{stroke:{line_color};}}"));
-    s.push_str(&format!("#{id} svg{{font-family:{ff};font-size:{fs};}}", ff = ff, fs = font_size));
+    s.push_str(&format!(
+        "#{id} svg{{font-family:{ff};font-size:{fs};}}",
+        ff = ff,
+        fs = font_size
+    ));
     s.push_str(&format!("#{id} p{{margin:0;}}"));
     s.push_str(&format!(
         "#{id} .label{{font-family:{ff};color:{ntc};}}",
         ntc = node_text_color,
     ));
-    s.push_str(&format!(
-        "#{id} .cluster-label text{{fill:{title_color};}}"
-    ));
+    s.push_str(&format!("#{id} .cluster-label text{{fill:{title_color};}}"));
     s.push_str(&format!(
         "#{id} .cluster-label span,#{id} p{{color:{title_color};}}"
     ));
@@ -334,7 +361,9 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon,#{id} .node path{{fill:{mbg};stroke:{nb};stroke-width:{sw}px;}}",
         mbg = main_bkg, nb = node_border, sw = stroke_width,
     ));
-    s.push_str(&format!("#{id} .flowchart-label text{{text-anchor:middle;}}"));
+    s.push_str(&format!(
+        "#{id} .flowchart-label text{{text-anchor:middle;}}"
+    ));
     s.push_str(&format!("#{id} .node .label{{text-align:center;}}"));
     s.push_str(&format!("#{id} .node.clickable{{cursor:pointer;}}"));
     s.push_str(&format!("#{id} .arrowheadPath{{fill:{line_color};}}"));
@@ -415,10 +444,22 @@ fn minify_font_family(s: &str) -> String {
     let mut in_quote = false;
     let mut prev_comma = false;
     for c in s.chars() {
-        if c == '"' { in_quote = !in_quote; out.push(c); prev_comma = false; continue; }
+        if c == '"' {
+            in_quote = !in_quote;
+            out.push(c);
+            prev_comma = false;
+            continue;
+        }
         if !in_quote {
-            if c == ',' { out.push(c); prev_comma = true; continue; }
-            if prev_comma && c == ' ' { prev_comma = false; continue; }
+            if c == ',' {
+                out.push(c);
+                prev_comma = true;
+                continue;
+            }
+            if prev_comma && c == ' ' {
+                prev_comma = false;
+                continue;
+            }
         }
         out.push(c);
         prev_comma = false;
@@ -499,21 +540,26 @@ mod tests {
         let src = format!("tests/ext_fixtures/cypress/block/{}.mmd", num);
         let refp = format!("tests/reference/ext_fixtures/cypress/block/{}.svg", num);
         let id = format!("ref-ext-fixtures-cypress-block-{}", num);
-        let expected = std::fs::read_to_string(&refp)
-            .map_err(|e| format!("read ref: {e}"))?;
+        let expected = std::fs::read_to_string(&refp).map_err(|e| format!("read ref: {e}"))?;
         let got = render_fixture(&src, &id);
         let expected = expected.trim_end_matches('\n');
-        if got == expected { return Ok(()); }
+        if got == expected {
+            return Ok(());
+        }
         let mut at = 0usize;
         for (i, (a, b)) in got.bytes().zip(expected.bytes()).enumerate() {
-            if a != b { at = i; break; }
+            if a != b {
+                at = i;
+                break;
+            }
         }
         let ctx = 120;
         let g_end = (at + ctx).min(got.len());
         let e_end = (at + ctx).min(expected.len());
         Err(format!(
             "mismatch at {at}: got len={} ref len={}\n  got:...{}...\n  ref:...{}...",
-            got.len(), expected.len(),
+            got.len(),
+            expected.len(),
             &got[at.saturating_sub(ctx)..g_end],
             &expected[at.saturating_sub(ctx)..e_end],
         ))
@@ -522,7 +568,9 @@ mod tests {
     macro_rules! fixture_test {
         ($name:ident, $num:literal) => {
             #[test]
-            fn $name() { compare_fixture($num).unwrap(); }
+            fn $name() {
+                compare_fixture($num).unwrap();
+            }
         };
     }
 

@@ -3,6 +3,7 @@
 //! output for the same source.
 
 pub mod edges;
+pub mod foreign_object;
 pub mod markers;
 pub mod shapes;
 pub mod svg;

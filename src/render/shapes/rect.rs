@@ -42,9 +42,13 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         h = fmt_num(h),
     ));
     if !label.is_empty() {
-        out.push_str(&format!(
-            r#"<g class="label" transform="translate(0, 0)"><text>{l}</text></g>"#,
-            l = super::types::xml_escape(&label),
+        // HTML foreignObject label matching upstream `labelHelper` /
+        // `addHtmlSpan` output. Width/height come from the jsdom-shim
+        // measurement (14px sans-serif default — see
+        // `foreign_object::measure_html_label`).
+        out.push_str(&crate::render::foreign_object::shape_label_block(
+            &super::types::xml_escape(&label),
+            &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }
     out.push_str("</g>");
@@ -56,7 +60,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_rect_byte_exact() {
+    fn plain_rect_emits_foreign_object_label() {
         let mut n = Node::default();
         n.id = "n1".into();
         n.width = Some(100.0);
@@ -66,14 +70,19 @@ mod tests {
         n.label = Some("hi".into());
         let theme = ThemeVariables::default();
         let got = draw(&n, &theme).unwrap();
-        assert_eq!(
-            got,
-            r#"<g class="node undefined " id="n1" transform="translate(60, 30)"><rect class="basic label-container" style="" rx="0" ry="0" x="-50" y="-25" width="100" height="50"/><g class="label" transform="translate(0, 0)"><text>hi</text></g></g>"#
+        assert!(got.starts_with(
+            r#"<g class="node undefined " id="n1" transform="translate(60, 30)"><rect class="basic label-container" style="" rx="0" ry="0" x="-50" y="-25" width="100" height="50"/>"#
+        ));
+        assert!(
+            got.contains(r#"<foreignObject "#),
+            "label should use foreignObject, got:\n{got}"
         );
+        assert!(got.contains(r#"<span class="nodeLabel "><p>hi</p></span>"#));
+        assert!(got.ends_with("</g></g>"));
     }
 
     #[test]
-    fn rect_without_label_omits_text_block() {
+    fn rect_without_label_omits_label_block() {
         let mut n = Node::default();
         n.id = "n2".into();
         n.width = Some(20.0);
@@ -82,5 +91,6 @@ mod tests {
         let got = draw(&n, &theme).unwrap();
         assert!(got.contains(r#"width="20""#));
         assert!(!got.contains("<text>"));
+        assert!(!got.contains("<foreignObject"));
     }
 }

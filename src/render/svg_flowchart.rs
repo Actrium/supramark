@@ -171,15 +171,8 @@ fn render_edge_path(e: &UEdge, index: usize, svg_id: &str, aria_kind: &str) -> S
         " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-{thickness} edge-pattern-{pattern} flowchart-link"
     );
 
-    let style = e
-        .style
-        .as_ref()
-        .map(|v| v.join(";"))
-        .unwrap_or_default();
-    let edge_id = format!(
-        "{svg_id}-{id}",
-        id = e.id.clone(),
-    );
+    let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
+    let edge_id = format!("{svg_id}-{id}", id = e.id.clone(),);
     let marker_end = match e.arrow_type_end.as_deref() {
         Some("arrow_point") | Some("arrow") | None => {
             format!(" marker-end=\"url(#{svg_id}_{aria_kind}-pointEnd)\"",)
@@ -217,22 +210,25 @@ fn render_edge_path(e: &UEdge, index: usize, svg_id: &str, aria_kind: &str) -> S
 }
 
 fn render_edge_label(e: &UEdge) -> String {
+    use crate::render::foreign_object::{
+        measure_html_label, render_edge_label as fo_edge, HtmlLabelFont, LabelOpts,
+    };
     let label_text = e.label.clone().unwrap_or_default();
-    if label_text.is_empty() {
-        return format!(
-            r#"<g class="edgeLabel"><g class="label" data-id="{id}" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="edgeLabel "></span></div></foreignObject></g></g>"#,
-            id = e.id
-        );
-    }
+    let esc = xml_escape(&label_text);
+    let (w, h) = if esc.is_empty() {
+        (0.0, 0.0)
+    } else {
+        measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true)
+    };
     let lx = e.label_x.unwrap_or(0.0);
     let ly = e.label_y.unwrap_or(0.0);
-    format!(
-        r#"<g class="edgeLabel" transform="translate({lx}, {ly})"><g class="label" data-id="{id}" transform="translate(0, 0)"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="edgeLabel ">{text}</span></div></foreignObject></g></g>"#,
-        lx = fmt_num(lx),
-        ly = fmt_num(ly),
-        id = e.id,
-        text = xml_escape(&label_text),
-    )
+    let opts = LabelOpts {
+        data_id: Some(&e.id),
+        group_style: None,
+        wrap_in_p: !esc.is_empty(),
+        ..LabelOpts::default()
+    };
+    fo_edge(&esc, lx, ly, w, h, opts)
 }
 
 /// Build the CSS `<style>` block — a minimal subset of upstream's
@@ -252,7 +248,11 @@ fn build_css(id: &str, theme: &ThemeVariables, _d: &FlowchartDiagram) -> String 
         .as_deref()
         .unwrap_or("\"trebuchet ms\",verdana,arial,sans-serif");
     let font_size = theme.font_size.as_deref().unwrap_or("16px");
-    let txt_color = theme.node_text_color.as_deref().or(theme.text_color.as_deref()).unwrap_or("#333");
+    let txt_color = theme
+        .node_text_color
+        .as_deref()
+        .or(theme.text_color.as_deref())
+        .unwrap_or("#333");
 
     format!(
         "#{id}{{font-family:{ff};font-size:{fs};fill:{fill};}}\

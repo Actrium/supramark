@@ -24,9 +24,9 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     ));
     out.push_str(r#"<rect width="0.1" height="0.1"/>"#);
     if !label.is_empty() {
-        out.push_str(&format!(
-            r#"<g class="label" transform="translate(0, 0)"><text>{l}</text></g>"#,
-            l = xml_escape(&label),
+        out.push_str(&crate::render::foreign_object::shape_label_block(
+            &xml_escape(&label),
+            &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }
     out.push_str("</g>");

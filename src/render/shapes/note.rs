@@ -41,10 +41,24 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         h = fmt_num(h),
     ));
     if !label.is_empty() {
+        // Upstream emits the noteLabel marker inside a wrapper `<g class="label noteLabel">`.
+        // We emit the inner label block ourselves so we can swap the class.
+        use crate::render::foreign_object::{measure_html_label, HtmlLabelFont, LabelOpts};
+        let esc = xml_escape(&label);
+        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true);
+        let opts = LabelOpts::default();
+        // Emit the outer <g class="label noteLabel"> with bbox-centred
+        // translate and inlined foreignObject.
         out.push_str(&format!(
-            r#"<g class="label noteLabel" transform="translate(0, 0)"><text>{l}</text></g>"#,
-            l = xml_escape(&label),
+            r#"<g class="label noteLabel" transform="translate({tx}, {ty})">"#,
+            tx = fmt_num(-fw / 2.0),
+            ty = fmt_num(-fh / 2.0),
         ));
+        out.push_str("<rect></rect>");
+        out.push_str(&crate::render::foreign_object::foreign_object_body(
+            &esc, fw, fh, &opts,
+        ));
+        out.push_str("</g>");
     }
     out.push_str("</g>");
     Ok(out)
