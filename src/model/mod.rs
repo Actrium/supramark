@@ -8,6 +8,10 @@
 
 pub mod richtext;
 
+pub mod packet;
+pub mod pie;
+pub mod radar;
+
 /// Shared metadata every diagram carries — extracted from frontmatter
 /// (`---\ntitle: ...\n---`) or directives (`%%{init:...}%%`) by the
 /// preprocessor, plus accessibility fields from the diagram body.
@@ -25,9 +29,9 @@ pub struct DiagramMeta {
 /// from the corresponding submodule.
 #[derive(Debug, Clone)]
 pub enum Diagram {
-    Pie(()),
-    Packet(()),
-    Radar(()),
+    Pie(pie::PieDiagram),
+    Packet(packet::PacketDiagram),
+    Radar(radar::RadarDiagram),
     Ishikawa(()),
     Journey(()),
     Timeline(()),

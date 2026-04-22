@@ -7,3 +7,6 @@ pub mod markers;
 pub mod shapes;
 pub mod svg;
 pub mod svg_richtext;
+pub mod svg_pie;
+pub mod svg_packet;
+pub mod svg_radar;
