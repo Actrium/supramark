@@ -110,7 +110,7 @@ dependencies = [
 [[package]]
 name = "dagre"
 version = "0.1.0"
-source = "git+https://github.com/kookyleo/dagre-rs.git?branch=main#2af9b048b09f12f248ee19cb35587494c9e2d67f"
+source = "git+https://github.com/kookyleo/dagre-rs.git?branch=main#0b306d7792f7944a422a49c11d9ed1ce576e84fa"
 dependencies = [
  "log",
  "serde",

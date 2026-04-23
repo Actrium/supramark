@@ -8,6 +8,7 @@
 
 pub mod richtext;
 
+pub mod gantt;
 pub mod packet;
 pub mod pie;
 pub mod radar;
@@ -38,7 +39,7 @@ pub enum Diagram {
     Quadrant(quadrant::QuadrantDiagram),
     Xychart(xychart::XychartDiagram),
     Wardley(wardley::WardleyDiagram),
-    Gantt(()),
+    Gantt(gantt::GanttDiagram),
     Sankey(sankey::SankeyDiagram),
     Treemap(treemap::TreemapDiagram),
     Kanban(kanban::KanbanDiagram),

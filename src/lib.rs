@@ -170,8 +170,18 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
             let l = layout::flowchart::layout(&d, &theme)?;
             render::svg_flowchart::render(&d, &l, &theme, id)
         }
+        detect::DiagramKind::Gantt => {
+            let d = parser::gantt::parse(source)?;
+            let effective_theme = if let Some(name) = d.theme_name.as_deref() {
+                theme::get_theme(name)
+            } else {
+                theme.clone()
+            };
+            let l = layout::gantt::layout(&d, &effective_theme)?;
+            render::svg_gantt::render(&d, &l, &effective_theme, id)
+        }
         other => Err(MermaidError::Unsupported(format!(
-            "diagram kind '{}' not yet implemented — Wave 7: sequence/c4/gitgraph; gantt/mindmap TBD",
+            "diagram kind '{}' not yet implemented — Wave 7: sequence/c4/gitgraph; mindmap TBD",
             other.id()
         ))),
     }

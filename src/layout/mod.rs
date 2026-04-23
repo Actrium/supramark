@@ -3,6 +3,7 @@
 //! [`DiagramLayout`] the renderer pattern-matches on.
 
 pub mod dagre_bridge;
+pub mod gantt;
 pub mod intersect;
 pub mod packet;
 pub mod pie;
@@ -23,7 +24,7 @@ pub enum DiagramLayout {
     Quadrant(quadrant::QuadrantLayout),
     Xychart(xychart::XychartLayout),
     Wardley(wardley::WardleyLayout),
-    Gantt(()),
+    Gantt(gantt::GanttLayout),
     Sankey(sankey::SankeyLayout),
     Treemap(treemap::TreemapLayout),
     Kanban(kanban::KanbanLayout),

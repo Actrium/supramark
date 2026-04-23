@@ -6,6 +6,7 @@ pub mod class;
 pub mod common;
 pub mod er;
 pub mod flowchart;
+pub mod gantt;
 pub mod ishikawa;
 pub mod journey;
 pub mod kanban;

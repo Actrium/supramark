@@ -67,6 +67,15 @@ fn build_layout_options(data: &LayoutData) -> LayoutOptions {
         // Upstream hard-codes these to 8 at the top-level graph.
         marginx: 8.0,
         marginy: 8.0,
+        // dagre-d3-es v7.0.14 (the version mermaid uses) does NOT update
+        // the best layering when the crossing count is tied — it keeps the
+        // first one. The newer @dagrejs/dagre (v3.0.1-pre) replaces best
+        // on ties. Our dagre-rs defaults to the newer behavior
+        // (`tie_keep_first = false`), but mermaid's actual dagre behaves
+        // like `tie_keep_first = true`. This flag is the single biggest
+        // source of coordinate divergence for multi-rank graphs with
+        // multiple nodes per rank (e.g. ER/03, flowchart with branches).
+        tie_keep_first: true,
         ..LayoutOptions::default()
     }
 }
