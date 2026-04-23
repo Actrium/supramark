@@ -12,6 +12,7 @@
 //! `stateDiagram`).
 
 use crate::error::Result;
+use crate::font_metrics::{line_height as font_line_height, text_width};
 use crate::layout::unified::types::{Edge as LEdge, LayoutData, LayoutResult, Node as LNode};
 use crate::layout::unified::render as unified_render;
 use crate::model::state::{StateDiagram, StateKind};
@@ -33,8 +34,12 @@ const DEFAULT_NODE_SPACING: f64 = 50.0;
 const DEFAULT_RANK_SPACING: f64 = 50.0;
 const DEFAULT_LABEL_PAD_X: f64 = 8.0;
 const DEFAULT_LABEL_PAD_Y: f64 = 8.0;
-const DEFAULT_FONT_SIZE: f64 = 16.0;
-const DEFAULT_LINE_HEIGHT: f64 = 1.5;
+/// Font size used for node label measurement. Upstream's `labelHelper`
+/// calls `div.getBoundingClientRect()` on the foreignObject HTML label,
+/// which inherits the default 14 px sans-serif from the SVG root — NOT
+/// the theme's `fontSize` (16 px). Using 14 px here makes dagre assign
+/// the same node dimensions as upstream.
+const DEFAULT_FONT_SIZE: f64 = 14.0;
 
 /// Public entry.
 pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
@@ -222,26 +227,28 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     })
 }
 
-/// Crude label-box measurement: width = longest line × 8px + padding;
-/// height = lines × lineheight × fontsize + padding. A full-fidelity
-/// measurer would use `crate::font_metrics::DejaVu` per glyph; this
-/// approximation is enough for dagre to rank the graph without
-/// overlap. Renderer computes its own precise width for SVG emission.
+/// Precise label-box measurement using DejaVu Sans font metrics
+/// (matching upstream's jsdom getBoundingClientRect shim). Width and
+/// height are computed per-glyph, not estimated.
 fn measure_label_box(text: &str, font_size: f64) -> (f64, f64) {
     let lines: Vec<&str> = text.split('\n').collect();
     measure_lines_box(&lines.iter().copied().collect::<Vec<_>>(), font_size)
 }
 
 fn measure_lines_box(lines: &[&str], font_size: f64) -> (f64, f64) {
-    let max_chars = lines.iter().map(|l| visual_width(l)).max().unwrap_or(0);
-    let w = (max_chars as f64) * (font_size * 0.5) + 2.0 * DEFAULT_LABEL_PAD_X;
+    let font_family = "sans-serif";
+    let mut max_w = 0.0_f64;
+    for line in lines {
+        let w = text_width(line, font_family, font_size, false, false);
+        if w > max_w {
+            max_w = w;
+        }
+    }
     let lines_n = lines.len().max(1) as f64;
-    let h = lines_n * font_size * DEFAULT_LINE_HEIGHT + 2.0 * DEFAULT_LABEL_PAD_Y;
-    (w.max(40.0), h.max(20.0))
-}
-
-fn visual_width(s: &str) -> usize {
-    s.chars().count()
+    let h = lines_n * font_line_height(font_family, font_size, false, false);
+    let total_w = max_w + 2.0 * DEFAULT_LABEL_PAD_X;
+    let total_h = h + 2.0 * DEFAULT_LABEL_PAD_Y;
+    (total_w.max(40.0), total_h.max(20.0))
 }
 
 /// Small marker on `LNode` kept local here — stashes a flag in `extra`
