@@ -56,7 +56,7 @@ pub fn render(
     ));
     out.push_str("<style>");
     out.push_str(&theme_css::base_preamble(id, theme));
-    out.push_str(&stylesheet(id, theme));
+    out.push_str(&requirement_specific_css(id, theme));
     out.push_str(&theme_css::neo_look_block(id, theme));
     out.push_str("</style>");
     out.push_str(unified_shell::open_seed_group());
@@ -83,8 +83,8 @@ pub fn render(
     out.push_str(unified_shell::close_layer());
     // Nodes.
     out.push_str(&unified_shell::open_layer("nodes"));
-    for (n, labels) in l.graph.nodes.iter().zip(l.node_labels.iter()) {
-        out.push_str(&render_node(id, n, labels));
+    for (i, (n, labels)) in l.graph.nodes.iter().zip(l.node_labels.iter()).enumerate() {
+        out.push_str(&render_node(id, n, labels, i, theme));
     }
     out.push_str(unified_shell::close_layer());
     out.push_str(unified_shell::close_root_group());
@@ -94,7 +94,13 @@ pub fn render(
     Ok(out)
 }
 
-fn render_node(id_prefix: &str, n: &UNode, labels: &NodeLabels) -> String {
+fn render_node(
+    id_prefix: &str,
+    n: &UNode,
+    labels: &NodeLabels,
+    node_index: usize,
+    theme: &ThemeVariables,
+) -> String {
     let x = n.x.unwrap_or(0.0);
     let y = n.y.unwrap_or(0.0);
     let w = n.width.unwrap_or(0.0);
@@ -105,11 +111,24 @@ fn render_node(id_prefix: &str, n: &UNode, labels: &NodeLabels) -> String {
     let divider_y = hy + header_h;
     let mut s = String::new();
     let classes = format!("node default {}", n.css_classes.as_deref().unwrap_or(""));
+    // Build data-color-id attribute if borderColorArray is non-empty,
+    // matching upstream requirementBox.ts line 123-125.
+    let data_color_id_attr = if let Some(ref bca) = theme.border_color_array {
+        if !bca.is_empty() {
+            let color_idx = node_index % bca.len();
+            format!(r#" data-color-id="color-{}""#, color_idx)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
     s.push_str(&format!(
-        r#"<g class="{cls}" id="{dom}-{nid}" transform="translate({tx}, {ty})">"#,
+        r#"<g class="{cls}" id="{dom}-{nid}" data-look="classic"{dcid} transform="translate({tx}, {ty})">"#,
         cls = classes.trim(),
         dom = id_prefix,
         nid = xml_escape(&n.id),
+        dcid = data_color_id_attr,
         tx = fmt_num(x),
         ty = fmt_num(y),
     ));
@@ -207,39 +226,64 @@ fn render_edge(id_prefix: &str, e: &UEdge) -> String {
         d.push_str(&fmt_num(p.y));
     }
     let pattern_cls = match e.pattern.as_deref() {
-        Some("dashed") => " edge-pattern-dashed",
-        _ => "",
+        Some("dashed") => "edge-pattern-dashed",
+        _ => "edge-pattern-solid",
     };
     let classes = format!(
-        "edge-thickness-normal{} {}",
+        " edge-thickness-normal {} relationshipLine",
         pattern_cls,
-        e.classes.as_deref().unwrap_or("")
     );
+
+    // Build base64 data-points from the edge's point array.
+    let data_points_b64 = {
+        let mut json = String::from("[");
+        for (i, p) in points.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(
+                r#"{{"x":{x},"y":{y}}}"#,
+                x = fmt_num(p.x),
+                y = fmt_num(p.y),
+            ));
+        }
+        json.push(']');
+        unified_shell::base64_encode(json.as_bytes())
+    };
+
+    // Build the edge data-id from source-target-index.
+    let edge_data_id = format!(
+        "{}-{}-0",
+        xml_escape(e.source.as_deref().unwrap_or("")),
+        xml_escape(e.target.as_deref().unwrap_or("")),
+    );
+
     let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
-    let mut attrs = String::new();
+    let mut marker_attrs = String::new();
     if e.arrow_type_start
         .as_deref()
         .map_or(false, |s| !s.is_empty())
     {
-        attrs.push_str(&format!(
+        marker_attrs.push_str(&format!(
             r#" marker-start="url(#{id}_requirement-requirement_containsStart)""#,
             id = id_prefix,
         ));
     }
     if e.arrow_type_end.as_deref().map_or(false, |s| !s.is_empty()) {
-        attrs.push_str(&format!(
+        marker_attrs.push_str(&format!(
             r#" marker-end="url(#{id}_requirement-requirement_arrowEnd)""#,
             id = id_prefix,
         ));
     }
     format!(
-        r#"<path d="{d}" id="{id}-{eid}" class="{cls}" style="{st}"{attrs}/>"#,
+        r#"<path d="{d}" id="{id_prefix}-{eid}" class="{cls}" style="{st}" data-edge="true" data-et="edge" data-id="{did}" data-points="{b64}" data-look="classic"{ma}></path>"#,
         d = d,
-        id = id_prefix,
         eid = xml_escape(&e.id),
         cls = classes.trim(),
         st = style,
-        attrs = attrs,
+        did = edge_data_id,
+        b64 = data_points_b64,
+        ma = marker_attrs,
     )
 }
 
@@ -273,80 +317,189 @@ fn marker_defs(id_prefix: &str) -> String {
     )
 }
 
-fn stylesheet(id: &str, theme: &ThemeVariables) -> String {
+/// Requirement-diagram-specific CSS — port of upstream `styles.js`.
+///
+/// Sits between the shared `base_preamble` and `neo_look_block` in the
+/// `<style>` block. Covers:
+///
+/// * `genColor()` — `[data-color-id="color-N"]` rules for each colour
+///   in the `cScalePeer` / `cScale` arrays (only emitted when
+///   `borderColorArray` is non-empty; the default theme has none).
+/// * `marker` fill/stroke (re-emitted here because upstream's
+///   `styles.js` repeats them after the preamble).
+/// * `marker.cross` stroke.
+/// * `svg` font-family/font-size (also repeated).
+/// * `.reqBox`, `.reqTitle`/`.reqLabel`, `.reqLabelBox`,
+///   `.req-title-line`, `.relationshipLine`, `.relationshipLabel`,
+///   `.edgeLabel`, `.divider`, `.label`, `.labelBkg`.
+fn requirement_specific_css(id: &str, theme: &ThemeVariables) -> String {
     let rel_color = theme
         .relation_color
-        .clone()
-        .unwrap_or_else(|| "#333333".into());
+        .as_deref()
+        .unwrap_or("#333333");
     let req_bg = theme
         .requirement_background
-        .clone()
-        .unwrap_or_else(|| "#ECECFF".into());
+        .as_deref()
+        .unwrap_or("#ECECFF");
     let req_border = theme
         .requirement_border_color
-        .clone()
-        .unwrap_or_else(|| "hsl(240, 60%, 86.2745098039%)".into());
+        .as_deref()
+        .unwrap_or("hsl(240, 60%, 86.2745098039%)");
     let req_border_size = theme
         .requirement_border_size
-        .clone()
-        .unwrap_or_else(|| "1".into());
+        .as_deref()
+        .unwrap_or("1");
     let req_text = theme
         .requirement_text_color
-        .clone()
-        .unwrap_or_else(|| "#131300".into());
+        .as_deref()
+        .unwrap_or("#131300");
     let rel_label_bg = theme
         .relation_label_background
-        .clone()
-        .unwrap_or_else(|| "rgba(232,232,232, 0.8)".into());
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
     let rel_label_color = theme
         .relation_label_color
-        .clone()
-        .unwrap_or_else(|| "black".into());
-    let font_family = theme
+        .as_deref()
+        .unwrap_or("black");
+    let ff_raw = theme
         .font_family
-        .clone()
-        .unwrap_or_else(|| "\"trebuchet ms\",verdana,arial,sans-serif".into());
-    let font_size = theme.font_size.clone().unwrap_or_else(|| "16px".into());
-    let text_color = theme.text_color.clone().unwrap_or_else(|| "#333".into());
+        .as_deref()
+        .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
+    let ff = crate::render::stylis::strip_comma_spaces(ff_raw);
+    let font_size = theme.font_size.as_deref().unwrap_or("16px");
+    let text_color = theme.text_color.as_deref().unwrap_or("#333");
+    let node_text_color = theme.node_text_color.as_deref().unwrap_or(text_color);
     let edge_label_bg = theme
         .edge_label_background
-        .clone()
-        .unwrap_or_else(|| "rgba(232,232,232, 0.8)".into());
-    let node_border = theme
-        .node_border
-        .clone()
-        .unwrap_or_else(|| "#9370DB".into());
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
+    let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
 
-    format!(
-        concat!(
-            "#{id}{{font-family:{ff};font-size:{fs};fill:{tc};}}",
-            "#{id} svg{{font-family:{ff};font-size:{fs};}}",
-            "#{id} .reqBox{{fill:{rb};fill-opacity:1.0;stroke:{br};stroke-width:{bs};}}",
-            "#{id} .reqTitle,#{id} .reqLabel{{fill:{rt};}}",
-            "#{id} .reqLabelBox{{fill:{rlb};fill-opacity:1.0;}}",
-            "#{id} .req-title-line{{stroke:{br};stroke-width:{bs};}}",
-            "#{id} .relationshipLine{{stroke:{rc};stroke-width:1px;}}",
-            "#{id} .relationshipLabel{{fill:{rlc};}}",
-            "#{id} .edgeLabel{{background-color:{elb};}}",
-            "#{id} .edgeLabel .label rect{{fill:{elb};}}",
-            "#{id} .edgeLabel .label text{{fill:{rlc};}}",
-            "#{id} .divider{{stroke:{nb};stroke-width:1;}}",
-            "#{id} .labelBkg{{background-color:{elb};}}",
-        ),
-        id = id,
-        ff = font_family,
+    // Build borderColorArray / bkgColorArray from theme variables,
+    // matching upstream's genColor() logic. Only emit [data-color-id]
+    // rules when borderColorArray is explicitly set and non-empty
+    // (the default theme does NOT set it).
+    let border_color_array = theme.border_color_array.as_ref();
+    let bkg_color_array = theme.bkg_color_array.as_ref();
+    let theme_color_limit = border_color_array.map(|a| a.len()).unwrap_or(0);
+
+    let mut css = String::with_capacity(6000);
+
+    // genColor() — [data-color-id] rules (only when borderColorArray
+    // is non-empty, matching upstream's early-return guard).
+    if let Some(bca) = border_color_array {
+        if !bca.is_empty() {
+            let look = "classic";
+            for i in 0..theme_color_limit {
+                let border_color = &bca[i];
+                let bkg_fill = bkg_color_array
+                    .and_then(|a| a.get(i))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                css.push_str(&format!(
+                    r#"#{id} [data-look="{look}"][data-color-id="color-{i}"].node path{{stroke:{bc};fill:{bf};}}"#,
+                    bc = border_color,
+                    bf = bkg_fill,
+                ));
+                css.push_str(&format!(
+                    r#"#{id} [data-look="{look}"][data-color-id="color-{i}"].node rect{{stroke:{bc};fill:{bf};}}"#,
+                    bc = border_color,
+                    bf = bkg_fill,
+                ));
+            }
+        }
+    }
+
+    // marker (repeated from preamble — upstream styles.js emits these)
+    css.push_str(&format!(
+        "#{id} marker{{fill:{rc};stroke:{rc};}}",
+        rc = rel_color,
+    ));
+    css.push_str(&format!(
+        "#{id} marker.cross{{stroke:{lc};}}",
+        lc = theme.line_color.as_deref().unwrap_or("#333333"),
+    ));
+
+    // svg (repeated from preamble)
+    css.push_str(&format!(
+        "#{id} svg{{font-family:{ff};font-size:{fs};}}",
         fs = font_size,
-        tc = text_color,
+    ));
+
+    // .reqBox
+    css.push_str(&format!(
+        "#{id} .reqBox{{fill:{rb};fill-opacity:1.0;stroke:{br};stroke-width:{bs};}}",
         rb = req_bg,
         br = req_border,
         bs = req_border_size,
+    ));
+    // .reqTitle, .reqLabel
+    css.push_str(&format!(
+        "#{id} .reqTitle,#{id} .reqLabel{{fill:{rt};}}",
         rt = req_text,
+    ));
+    // .reqLabelBox
+    css.push_str(&format!(
+        "#{id} .reqLabelBox{{fill:{rlb};fill-opacity:1.0;}}",
         rlb = rel_label_bg,
+    ));
+    // .req-title-line
+    css.push_str(&format!(
+        "#{id} .req-title-line{{stroke:{br};stroke-width:{bs};}}",
+        br = req_border,
+        bs = req_border_size,
+    ));
+    // .relationshipLine — stroke-width is 1px for classic look
+    css.push_str(&format!(
+        "#{id} .relationshipLine{{stroke:{rc};stroke-width:1px;}}",
         rc = rel_color,
+    ));
+    // .relationshipLabel
+    css.push_str(&format!(
+        "#{id} .relationshipLabel{{fill:{rlc};}}",
         rlc = rel_label_color,
+    ));
+    // .edgeLabel
+    css.push_str(&format!(
+        "#{id} .edgeLabel{{background-color:{elb};}}",
         elb = edge_label_bg,
+    ));
+    // .edgeLabel .label rect
+    css.push_str(&format!(
+        "#{id} .edgeLabel .label rect{{fill:{elb};}}",
+        elb = edge_label_bg,
+    ));
+    // .edgeLabel .label text
+    css.push_str(&format!(
+        "#{id} .edgeLabel .label text{{fill:{rlc};}}",
+        rlc = rel_label_color,
+    ));
+    // .divider
+    css.push_str(&format!(
+        "#{id} .divider{{stroke:{nb};stroke-width:1;}}",
         nb = node_border,
-    )
+    ));
+    // .label
+    css.push_str(&format!(
+        "#{id} .label{{font-family:{ff};color:{ntc};}}",
+        ntc = node_text_color,
+    ));
+    // .label text,span
+    css.push_str(&format!(
+        "#{id} .label text,#{id} span{{fill:{ntc};color:{ntc};}}",
+        ntc = node_text_color,
+    ));
+    // .labelBkg — uses requirementEdgeLabelBackground if set, else edgeLabelBackground
+    let label_bkg_bg = theme
+        .requirement_edge_label_background
+        .as_deref()
+        .unwrap_or(edge_label_bg);
+    css.push_str(&format!(
+        "#{id} .labelBkg{{background-color:{lbb};}}",
+        lbb = label_bkg_bg,
+    ));
+
+    css
 }
 
 fn fmt_num(v: f64) -> String {

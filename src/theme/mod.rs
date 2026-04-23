@@ -106,8 +106,10 @@ pub struct ThemeVariables {
     pub attribute_background_color_even: Option<String>, // attributeBackgroundColorEven
     pub attribute_background_color_odd: Option<String>, // attributeBackgroundColorOdd
     pub background: Option<String>,               // background
+    pub bkg_color_array: Option<Vec<String>>,     // bkgColorArray
     pub border1: Option<String>,                  // border1
     pub border2: Option<String>,                  // border2
+    pub border_color_array: Option<Vec<String>>,  // borderColorArray
     pub branch_label_color: Option<String>,       // branchLabelColor
 
     pub c_scale0: Option<String>,  // cScale0
@@ -299,10 +301,11 @@ pub struct ThemeVariables {
     pub relation_color: Option<String>,            // relationColor
     pub relation_label_background: Option<String>, // relationLabelBackground
     pub relation_label_color: Option<String>,      // relationLabelColor
-    pub requirement_background: Option<String>,    // requirementBackground
-    pub requirement_border_color: Option<String>,  // requirementBorderColor
-    pub requirement_border_size: Option<String>,   // requirementBorderSize
-    pub requirement_text_color: Option<String>,    // requirementTextColor
+    pub requirement_background: Option<String>,              // requirementBackground
+    pub requirement_border_color: Option<String>,            // requirementBorderColor
+    pub requirement_border_size: Option<String>,             // requirementBorderSize
+    pub requirement_edge_label_background: Option<String>,   // requirementEdgeLabelBackground
+    pub requirement_text_color: Option<String>,              // requirementTextColor
     pub row_even: Option<String>,                  // rowEven
     pub row_odd: Option<String>,                   // rowOdd
     pub scale_label_color: Option<String>,         // scaleLabelColor
@@ -417,8 +420,10 @@ impl ThemeVariables {
             attribute_background_color_even,
             attribute_background_color_odd,
             background,
+            bkg_color_array,
             border1,
             border2,
+            border_color_array,
             branch_label_color,
             c_scale0,
             c_scale1,
@@ -600,6 +605,7 @@ impl ThemeVariables {
             requirement_background,
             requirement_border_color,
             requirement_border_size,
+            requirement_edge_label_background,
             requirement_text_color,
             row_even,
             row_odd,
