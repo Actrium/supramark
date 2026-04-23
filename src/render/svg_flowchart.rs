@@ -21,13 +21,14 @@ use crate::model::flowchart::FlowchartDiagram;
 use crate::render::edges;
 use crate::render::markers;
 use crate::render::shapes;
+use crate::render::svg_er::fade;
 use crate::render::unified_shell;
 use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
 /// Render a flowchart diagram as SVG.
 pub fn render(
-    d: &FlowchartDiagram,
+    _d: &FlowchartDiagram,
     l: &FlowchartLayout,
     theme: &ThemeVariables,
     id: &str,
@@ -53,7 +54,7 @@ pub fn render(
     // <style> block — shared preamble + flowchart slice + shared tail.
     out.push_str("<style>");
     out.push_str(&theme_css::base_preamble(id, theme));
-    out.push_str(&build_css(id, theme, d));
+    out.push_str(&flowchart_specific_css(id, theme));
     out.push_str(&theme_css::neo_look_block(id, theme));
     out.push_str("</style>");
 
@@ -151,7 +152,7 @@ fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables) -> 
     out
 }
 
-fn render_edge_path(e: &UEdge, index: usize, svg_id: &str, aria_kind: &str) -> String {
+fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> String {
     let pts: Vec<Point> = e
         .points
         .as_ref()
@@ -167,45 +168,80 @@ fn render_edge_path(e: &UEdge, index: usize, svg_id: &str, aria_kind: &str) -> S
 
     let thickness = e.thickness.as_deref().unwrap_or("normal");
     let pattern = e.pattern.as_deref().unwrap_or("solid");
+    // Upstream duplicates thickness/pattern classes — see insertEdge in
+    // dagre-wrapper index.js. Leading space is intentional (matches upstream).
     let class_attr = format!(
         " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-{thickness} edge-pattern-{pattern} flowchart-link"
     );
 
-    let style = e.style.as_ref().map(|v| v.join(";")).unwrap_or_default();
-    let edge_id = format!("{svg_id}-{id}", id = e.id.clone(),);
-    let marker_end = match e.arrow_type_end.as_deref() {
-        Some("arrow_point") | Some("arrow") | None => {
-            format!(" marker-end=\"url(#{svg_id}_{aria_kind}-pointEnd)\"",)
+    // Upstream writes `style=";"` when no explicit edge style is set.
+    let style_val = e
+        .style
+        .as_ref()
+        .map(|v| {
+            if v.is_empty() || v.iter().all(|s| s.is_empty()) {
+                ";".to_string()
+            } else {
+                v.join(";")
+            }
+        })
+        .unwrap_or_else(|| ";".to_string());
+
+    let edge_id = format!("{svg_id}-{id}", id = e.id.clone());
+
+    // data-points: base64-encoded JSON array of {x, y} objects.
+    let data_points_b64 = {
+        let mut json = String::from("[");
+        for (i, p) in pts.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(
+                r#"{{"x":{x},"y":{y}}}"#,
+                x = fmt_num(p.x),
+                y = fmt_num(p.y),
+            ));
         }
+        json.push(']');
+        unified_shell::base64_encode(json.as_bytes())
+    };
+
+    let marker_end = match e.arrow_type_end.as_deref() {
         Some("arrow_circle") => {
-            format!(" marker-end=\"url(#{svg_id}_{aria_kind}-circleEnd)\"",)
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-circleEnd)""#)
         }
         Some("arrow_cross") => {
-            format!(" marker-end=\"url(#{svg_id}_{aria_kind}-crossEnd)\"",)
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-crossEnd)""#)
         }
-        _ => String::new(),
+        _ => {
+            // Default arrow (point) — upstream emits marker-end for
+            // arrow_point, arrow, and the None case.
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-pointEnd)""#)
+        }
     };
     let marker_start = match e.arrow_type_start.as_deref() {
         Some("arrow_point") | Some("arrow") => {
-            format!(" marker-start=\"url(#{svg_id}_{aria_kind}-pointStart)\"",)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-pointStart)""#)
         }
         Some("arrow_circle") => {
-            format!(" marker-start=\"url(#{svg_id}_{aria_kind}-circleStart)\"",)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-circleStart)""#)
         }
         Some("arrow_cross") => {
-            format!(" marker-start=\"url(#{svg_id}_{aria_kind}-crossStart)\"",)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-crossStart)""#)
         }
         _ => String::new(),
     };
-    let _ = index;
+
     format!(
-        r#"<path d="{d}" id="{eid}" class="{cls}" style="{st};" data-look="classic"{ms}{me}></path>"#,
+        r#"<path d="{d}" id="{eid}" class="{cls}" style="{st}" data-edge="true" data-et="edge" data-id="{did}" data-points="{b64}" data-look="classic"{me}{ms}></path>"#,
         d = d_attr,
         eid = edge_id,
-        cls = class_attr.trim(),
-        st = style,
-        ms = marker_start,
+        cls = class_attr,
+        st = style_val,
+        did = e.id,
+        b64 = data_points_b64,
         me = marker_end,
+        ms = marker_start,
     )
 }
 
@@ -231,54 +267,232 @@ fn render_edge_label(e: &UEdge) -> String {
     fo_edge(&esc, lx, ly, w, h, opts)
 }
 
-/// Build the CSS `<style>` block — a minimal subset of upstream's
-/// `styles.ts` → `flowchart` output, scoped to `#<id>`. Real upstream
-/// CSS is ~3KB of class rules; we emit a compact subset focused on the
-/// structural classes our renderer outputs.
-fn build_css(id: &str, theme: &ThemeVariables, _d: &FlowchartDiagram) -> String {
-    let primary = theme.primary_color.as_deref().unwrap_or("#ECECFF");
-    let primary_border = theme.primary_border_color.as_deref().unwrap_or("#9370DB");
-    let line = theme
-        .line_color
-        .as_deref()
-        .or(theme.arrowhead_color.as_deref())
-        .unwrap_or("#333333");
-    let font_family = theme
+/// Build the flowchart-specific CSS slice — a complete port of upstream's
+/// `styles.ts` → `getStyles()` output, scoped to `#<id>`. This replaces
+/// the former minimal `build_css()` and emits every rule the upstream
+/// flowchart CSS template produces after stylis minification.
+///
+/// The caller sandwiches this between [`theme_css::base_preamble`] and
+/// [`theme_css::neo_look_block`] inside the `<style>` block.
+fn flowchart_specific_css(id: &str, theme: &ThemeVariables) -> String {
+    // Resolve theme variables with upstream defaults.
+    let ff_raw = theme
         .font_family
         .as_deref()
-        .unwrap_or("\"trebuchet ms\",verdana,arial,sans-serif");
-    let font_size = theme.font_size.as_deref().unwrap_or("16px");
-    let txt_color = theme
+        .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
+    let ff = crate::render::stylis::strip_comma_spaces(ff_raw);
+    let node_text_color = theme
         .node_text_color
         .as_deref()
         .or(theme.text_color.as_deref())
         .unwrap_or("#333");
+    let title_color = theme
+        .title_color
+        .as_deref()
+        .or(theme.text_color.as_deref())
+        .unwrap_or("#333");
+    let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
+    let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
+    let stroke_width = theme.stroke_width.unwrap_or(1);
+    let line_color = theme.line_color.as_deref().unwrap_or("#333333");
+    let arrowhead_color = theme
+        .arrowhead_color
+        .as_deref()
+        .unwrap_or("#333333");
+    let edge_label_bg = theme
+        .edge_label_background
+        .as_deref()
+        .unwrap_or("rgba(232,232,232, 0.8)");
+    let cluster_bkg = theme.cluster_bkg.as_deref().unwrap_or("#ffffde");
+    let cluster_border = theme.cluster_border.as_deref().unwrap_or("#aaaa33");
+    let tertiary_color = theme
+        .tertiary_color
+        .as_deref()
+        .unwrap_or("hsl(80, 100%, 96.2745098039%)");
+    let border2 = theme.border2.as_deref().unwrap_or("#aaaa33");
+    let text_color = theme.text_color.as_deref().unwrap_or("#333");
+    let font_family_tooltip = ff.clone();
 
-    format!(
-        "#{id}{{font-family:{ff};font-size:{fs};fill:{fill};}}\
-#{id} .marker{{fill:{line};stroke:{line};}}\
-#{id} .marker.cross{{stroke:{line};}}\
-#{id} .label{{font-family:{ff};color:{txt};}}\
-#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon,#{id} .node path{{fill:{primary};stroke:{primary_border};stroke-width:1px;}}\
-#{id} .flowchart-link{{stroke:{line};fill:none;}}\
-#{id} .edgeLabel{{background-color:rgba(232,232,232,0.8);text-align:center;}}\
-#{id} .edgeLabel p{{background-color:rgba(232,232,232,0.8);}}\
-#{id} .edgeLabel rect{{opacity:0.5;}}\
-#{id} .cluster rect{{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}}\
-#{id} .edge-thickness-normal{{stroke-width:1px;}}\
-#{id} .edge-thickness-thick{{stroke-width:3.5px;}}\
-#{id} .edge-pattern-solid{{stroke-dasharray:0;}}\
-#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}\
-#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}",
-        id = id,
-        ff = font_family,
-        fs = font_size,
-        fill = txt_color,
-        line = line,
-        primary = primary,
-        primary_border = primary_border,
-        txt = txt_color,
-    )
+    // labelBkg: upstream does `fade(options.edgeLabelBackground, 0.5)`.
+    let labelbkg_color = fade(edge_label_bg, 0.5);
+
+    let mut css = String::with_capacity(4000);
+
+    // .label { font-family: ...; color: nodeTextColor || textColor; }
+    css.push_str(&format!(
+        "#{id} .label{{font-family:{ff};color:{ntc};}}",
+        ntc = node_text_color,
+    ));
+
+    // .cluster-label text { fill: titleColor; }
+    css.push_str(&format!(
+        "#{id} .cluster-label text{{fill:{tc};}}",
+        tc = title_color,
+    ));
+
+    // .cluster-label span { color: titleColor; }
+    css.push_str(&format!(
+        "#{id} .cluster-label span{{color:{tc};}}",
+        tc = title_color,
+    ));
+
+    // .cluster-label span p { background-color: transparent; }
+    css.push_str(&format!(
+        "#{id} .cluster-label span p{{background-color:transparent;}}",
+    ));
+
+    // .label text, span { fill: nodeTextColor || textColor; color: nodeTextColor || textColor; }
+    // Note: stylis expands `.label text,span` → `#id .label text,#id span`
+    css.push_str(&format!(
+        "#{id} .label text,#{id} span{{fill:{ntc};color:{ntc};}}",
+        ntc = node_text_color,
+    ));
+
+    // .node rect, .node circle, .node ellipse, .node polygon, .node path
+    css.push_str(&format!(
+        "#{id} .node rect,#{id} .node circle,#{id} .node ellipse,#{id} .node polygon,#{id} .node path{{fill:{mb};stroke:{nb};stroke-width:{sw}px;}}",
+        mb = main_bkg,
+        nb = node_border,
+        sw = stroke_width,
+    ));
+
+    // .rough-node .label text, .node .label text, .image-shape .label, .icon-shape .label
+    // { text-anchor: middle; }
+    css.push_str(&format!(
+        "#{id} .rough-node .label text,#{id} .node .label text,#{id} .image-shape .label,#{id} .icon-shape .label{{text-anchor:middle;}}",
+    ));
+
+    // .node .katex path { fill: #000; stroke: #000; stroke-width: 1px; }
+    css.push_str(&format!(
+        "#{id} .node .katex path{{fill:#000;stroke:#000;stroke-width:1px;}}",
+    ));
+
+    // .rough-node .label, .node .label, .image-shape .label, .icon-shape .label
+    // { text-align: center; }
+    css.push_str(&format!(
+        "#{id} .rough-node .label,#{id} .node .label,#{id} .image-shape .label,#{id} .icon-shape .label{{text-align:center;}}",
+    ));
+
+    // .node.clickable { cursor: pointer; }
+    css.push_str(&format!(
+        "#{id} .node.clickable{{cursor:pointer;}}",
+    ));
+
+    // .root .anchor path { fill: lineColor !important; stroke-width: 0; stroke: lineColor; }
+    css.push_str(&format!(
+        "#{id} .root .anchor path{{fill:{lc}!important;stroke-width:0;stroke:{lc};}}",
+        lc = line_color,
+    ));
+
+    // .arrowheadPath { fill: arrowheadColor; }
+    css.push_str(&format!(
+        "#{id} .arrowheadPath{{fill:{ac};}}",
+        ac = arrowhead_color,
+    ));
+
+    // .edgePath .path { stroke: lineColor; stroke-width: strokeWidth ?? 2px; }
+    css.push_str(&format!(
+        "#{id} .edgePath .path{{stroke:{lc};stroke-width:{sw}px;}}",
+        lc = line_color,
+        sw = stroke_width,
+    ));
+
+    // .flowchart-link { stroke: lineColor; fill: none; }
+    css.push_str(&format!(
+        "#{id} .flowchart-link{{stroke:{lc};fill:none;}}",
+        lc = line_color,
+    ));
+
+    // .edgeLabel { background-color: edgeLabelBackground; text-align: center; }
+    css.push_str(&format!(
+        "#{id} .edgeLabel{{background-color:{ebg};text-align:center;}}",
+        ebg = edge_label_bg,
+    ));
+
+    // .edgeLabel p { background-color: edgeLabelBackground; }
+    css.push_str(&format!(
+        "#{id} .edgeLabel p{{background-color:{ebg};}}",
+        ebg = edge_label_bg,
+    ));
+
+    // .edgeLabel rect { opacity: 0.5; background-color: edgeLabelBackground; fill: edgeLabelBackground; }
+    css.push_str(&format!(
+        "#{id} .edgeLabel rect{{opacity:0.5;background-color:{ebg};fill:{ebg};}}",
+        ebg = edge_label_bg,
+    ));
+
+    // .labelBkg { background-color: fade(edgeLabelBackground, 0.5); }
+    css.push_str(&format!(
+        "#{id} .labelBkg{{background-color:{lbkg};}}",
+        lbkg = labelbkg_color,
+    ));
+
+    // .cluster rect { fill: clusterBkg; stroke: clusterBorder; stroke-width: 1px; }
+    css.push_str(&format!(
+        "#{id} .cluster rect{{fill:{cb};stroke:{cbr};stroke-width:1px;}}",
+        cb = cluster_bkg,
+        cbr = cluster_border,
+    ));
+
+    // .cluster text { fill: titleColor; }
+    css.push_str(&format!(
+        "#{id} .cluster text{{fill:{tc};}}",
+        tc = title_color,
+    ));
+
+    // .cluster span { color: titleColor; }
+    css.push_str(&format!(
+        "#{id} .cluster span{{color:{tc};}}",
+        tc = title_color,
+    ));
+
+    // div.mermaidTooltip
+    css.push_str(&format!(
+        "#{id} div.mermaidTooltip{{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:{ff_tip};font-size:12px;background:{tc3};border:1px solid {b2};border-radius:2px;pointer-events:none;z-index:100;}}",
+        ff_tip = font_family_tooltip,
+        tc3 = tertiary_color,
+        b2 = border2,
+    ));
+
+    // .flowchartTitleText { text-anchor: middle; font-size: 18px; fill: textColor; }
+    css.push_str(&format!(
+        "#{id} .flowchartTitleText{{text-anchor:middle;font-size:18px;fill:{tc};}}",
+        tc = text_color,
+    ));
+
+    // rect.text { fill: none; stroke-width: 0; }
+    css.push_str(&format!(
+        "#{id} rect.text{{fill:none;stroke-width:0;}}",
+    ));
+
+    // .icon-shape, .image-shape { background-color: edgeLabelBackground; text-align: center; }
+    css.push_str(&format!(
+        "#{id} .icon-shape,#{id} .image-shape{{background-color:{ebg};text-align:center;}}",
+        ebg = edge_label_bg,
+    ));
+
+    // .icon-shape p, .image-shape p { background-color: edgeLabelBackground; padding: 2px; }
+    css.push_str(&format!(
+        "#{id} .icon-shape p,#{id} .image-shape p{{background-color:{ebg};padding:2px;}}",
+        ebg = edge_label_bg,
+    ));
+
+    // .icon-shape .label rect, .image-shape .label rect
+    css.push_str(&format!(
+        "#{id} .icon-shape .label rect,#{id} .image-shape .label rect{{opacity:0.5;background-color:{ebg};fill:{ebg};}}",
+        ebg = edge_label_bg,
+    ));
+
+    // getIconStyles() — from globalStyles.ts
+    css.push_str(&format!(
+        "#{id} .label-icon{{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}}",
+    ));
+
+    css.push_str(&format!(
+        "#{id} .node .label-icon path{{fill:currentColor;stroke:revert;stroke-width:revert;}}",
+    ));
+
+    css
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
@@ -348,5 +562,175 @@ mod tests {
         let svg = render(&d, &l, &th, "t").unwrap();
         assert!(svg.contains(r#"class="clusters""#));
         assert!(svg.contains(r#"class="cluster"#));
+    }
+
+    #[test]
+    fn flowchart_css_contains_all_upstream_rules() {
+        let th = theme::get_theme("default");
+        let css = flowchart_specific_css("test", &th);
+        // Verify all major CSS rules from upstream styles.ts are present.
+        assert!(css.contains("#test .label{"), "missing .label rule");
+        assert!(css.contains("#test .cluster-label text{"), "missing .cluster-label text");
+        assert!(css.contains("#test .cluster-label span{"), "missing .cluster-label span");
+        assert!(css.contains("#test .cluster-label span p{"), "missing .cluster-label span p");
+        assert!(css.contains("#test .label text,#test span{"), "missing .label text,span");
+        assert!(css.contains("#test .node rect,"), "missing .node rect");
+        assert!(css.contains("#test .arrowheadPath{"), "missing .arrowheadPath");
+        assert!(css.contains("#test .edgePath .path{"), "missing .edgePath .path");
+        assert!(css.contains("#test .flowchart-link{"), "missing .flowchart-link");
+        assert!(css.contains("#test .edgeLabel{"), "missing .edgeLabel");
+        assert!(css.contains("#test .edgeLabel p{"), "missing .edgeLabel p");
+        assert!(css.contains("#test .edgeLabel rect{"), "missing .edgeLabel rect");
+        assert!(css.contains("#test .labelBkg{"), "missing .labelBkg");
+        assert!(css.contains("#test .cluster rect{"), "missing .cluster rect");
+        assert!(css.contains("#test .cluster text{"), "missing .cluster text");
+        assert!(css.contains("#test .cluster span{"), "missing .cluster span");
+        assert!(css.contains("#test div.mermaidTooltip{"), "missing div.mermaidTooltip");
+        assert!(css.contains("#test .flowchartTitleText{"), "missing .flowchartTitleText");
+        assert!(css.contains("#test rect.text{"), "missing rect.text");
+        assert!(css.contains("#test .icon-shape,#test .image-shape{"), "missing icon/image-shape");
+        assert!(css.contains("#test .label-icon{"), "missing .label-icon");
+        assert!(css.contains("#test .node .label-icon path{"), "missing .node .label-icon path");
+    }
+
+    #[test]
+    fn flowchart_css_labelbkg_uses_fade() {
+        let th = theme::get_theme("default");
+        let css = flowchart_specific_css("test", &th);
+        // labelBkg should use the faded version of edgeLabelBackground.
+        // For default theme, edgeLabelBackground is "rgba(232,232,232, 0.8)"
+        // and fade("rgba(232,232,232, 0.8)", 0.5) should produce
+        // "rgba(232, 232, 232, 0.5)" (with spaces after commas).
+        assert!(
+            css.contains("#test .labelBkg{background-color:rgba(232, 232, 232, 0.5);}"),
+            "labelBkg should use faded color: got {}",
+            css
+        );
+    }
+
+    /// ID function matching the reference fixture naming convention.
+    fn id_for_fixture(rel: &str) -> String {
+        let mut id = String::from("ref-");
+        let mut last_sep = false;
+        for c in rel.chars() {
+            if c.is_ascii_alphanumeric() {
+                id.push(c);
+                last_sep = false;
+            } else if !last_sep {
+                id.push('-');
+                last_sep = true;
+            }
+        }
+        if id.ends_with('-') {
+            id.pop();
+        }
+        id
+    }
+
+    fn render_fixture(source: &str, id: &str) -> String {
+        let d = fcp::parse(source).expect("parse");
+        let theme = theme::get_theme("default");
+        let l = fcl::layout(&d, &theme).expect("layout");
+        super::render(&d, &l, &theme, id).expect("render")
+    }
+
+    fn check_one(rel: &str) -> bool {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = base.join("tests").join(format!("{}.mmd", rel));
+        let svg = base.join("tests/reference").join(format!("{}.svg", rel));
+        let source = match std::fs::read_to_string(&mmd) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let expected = match std::fs::read_to_string(&svg) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let id = id_for_fixture(rel);
+        let got = match std::panic::catch_unwind(|| render_fixture(&source, &id)) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        got == expected
+    }
+
+    #[test]
+    fn byte_exact_sweep() {
+        // Walk every cypress + demos flowchart fixture. Fixture 46 is
+        // known_ignored (no reference SVG).
+        let cypress: Vec<String> = (1..=253u32)
+            .filter(|n| *n != 46)
+            .map(|n| format!("{:02}", n))
+            .collect();
+        let demos: Vec<String> = (1..=66u32).map(|n| format!("{:02}", n)).collect();
+
+        let mut pass = 0usize;
+        let mut passing: Vec<String> = Vec::new();
+        let mut fail_names: Vec<String> = Vec::new();
+        for n in &cypress {
+            let rel = format!("ext_fixtures/cypress/flowchart/{}", n);
+            if check_one(&rel) {
+                pass += 1;
+                passing.push(rel);
+            } else {
+                fail_names.push(rel);
+            }
+        }
+        for n in &demos {
+            let rel = format!("ext_fixtures/demos/flowchart/{}", n);
+            if check_one(&rel) {
+                pass += 1;
+                passing.push(rel);
+            } else {
+                fail_names.push(rel);
+            }
+        }
+        let total = cypress.len() + demos.len();
+        eprintln!("Flowchart byte-exact: {}/{}", pass, total);
+        if pass > 0 {
+            eprintln!("Passing ({}): {:?}", passing.len(), passing);
+        }
+        if pass < total {
+            eprintln!(
+                "Failing ({}): {:?}",
+                fail_names.len(),
+                &fail_names[..fail_names.len().min(10)]
+            );
+        }
+        // This test never fails — it reports progress.
+    }
+
+    /// Diagnostic: probe the first divergence point for a single fixture.
+    #[test]
+    #[ignore]
+    fn diff_probe_02() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let rel = "ext_fixtures/cypress/flowchart/02";
+        let source = std::fs::read_to_string(
+            base.join(format!("tests/{}.mmd", rel)),
+        ).unwrap();
+        let expected = std::fs::read_to_string(
+            base.join(format!("tests/reference/{}.svg", rel)),
+        ).unwrap();
+        let d = fcp::parse(&source).unwrap();
+        let theme = theme::get_theme("default");
+        let l = fcl::layout(&d, &theme).unwrap();
+        let id = id_for_fixture(rel);
+        let got = super::render(&d, &l, &theme, &id).unwrap();
+        let a = got.as_bytes();
+        let b = expected.as_bytes();
+        let n = a.len().min(b.len());
+        let mut i = 0;
+        while i < n && a[i] == b[i] { i += 1; }
+        if i >= n && a.len() == b.len() {
+            eprintln!("BYTE EXACT!");
+            return;
+        }
+        let ctx_lo = i.saturating_sub(80);
+        let ctx_hi_a = (i + 200).min(a.len());
+        let ctx_hi_b = (i + 200).min(b.len());
+        eprintln!("Diverge at byte {} (got={}, want={})", i, a.len(), b.len());
+        eprintln!("got [{}..]: {}", ctx_lo, String::from_utf8_lossy(&a[ctx_lo..ctx_hi_a]));
+        eprintln!("want[{}..]: {}", ctx_lo, String::from_utf8_lossy(&b[ctx_lo..ctx_hi_b]));
     }
 }

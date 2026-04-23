@@ -542,5 +542,40 @@ mod tests {
             exp.len(),
             prefix
         );
+
+        // Compare CSS sections
+        let got_style_start = got.find("<style>").map(|i| i + 7).unwrap_or(0);
+        let got_style_end = got.find("</style>").unwrap_or(got.len());
+        let got_css = &got[got_style_start..got_style_end];
+
+        let exp_style_start = exp.find("<style>").map(|i| i + 7).unwrap_or(0);
+        let exp_style_end = exp.find("</style>").unwrap_or(exp.len());
+        let exp_css = &exp[exp_style_start..exp_style_end];
+
+        let css_prefix = got_css
+            .bytes()
+            .zip(exp_css.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "[requirement-css-diag] got_css={} exp_css={} prefix={}",
+            got_css.len(),
+            exp_css.len(),
+            css_prefix
+        );
+
+        // Dump our output to /tmp for comparison
+        let _ = std::fs::write("/tmp/got_req01.svg", &got);
+
+        // Dump node dimensions
+        for (i, n) in l.graph.nodes.iter().enumerate() {
+            eprintln!(
+                "Node {}: id={} x={:?} y={:?} w={:?} h={:?}",
+                i, n.id, n.x, n.y, n.width, n.height
+            );
+        }
+        for (i, e) in l.graph.edges.iter().enumerate() {
+            eprintln!("Edge {}: id={} points={:?}", i, e.id, e.points);
+        }
     }
 }

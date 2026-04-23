@@ -57,6 +57,11 @@ pub struct LabelOpts<'a> {
     /// the node's `labelStyle` string verbatim — after replacing any
     /// `fill:` prefix with `color:`.
     pub label_style: Option<&'a str>,
+    /// Style prefix for the `<div>` — text properties with spaces and
+    /// hex→rgb normalization, e.g. `"color: rgb(0, 0, 255) !important; "`.
+    /// When set, this PRECEDES the default `display: table-cell; ...` style
+    /// in the div's style attribute.
+    pub div_style_prefix: Option<&'a str>,
     /// `data-id` attribute written on the outer `<g class="label">`.
     /// Upstream only sets this for edge labels; node labels omit it.
     pub data_id: Option<&'a str>,
@@ -94,6 +99,7 @@ impl<'a> Default for LabelOpts<'a> {
         Self {
             extra_span_classes: "",
             label_style: None,
+            div_style_prefix: None,
             data_id: None,
             group_style: Some(""),
             group_transform: None,
@@ -190,22 +196,21 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
         w = fmt_num(width),
         h = fmt_num(height),
     ));
-    // <div>. Style attribute order matches upstream setAttribute-by-
-    // setAttribute calls in addHtmlSpan.
-    let mut div_style = String::from("display: table-cell; white-space: nowrap; line-height: 1.5;");
+    // <div>. Style attribute order: when there are text style properties
+    // (from style/classDef), they PRECEDE the standard display/white-space/
+    // line-height block. Upstream applies them via `applyStyle(div,
+    // labelStyle)` before setting display etc.
+    let mut div_style = String::new();
+    if let Some(prefix) = opts.div_style_prefix {
+        div_style.push_str(prefix);
+    }
+    div_style.push_str("display: table-cell; white-space: nowrap; line-height: 1.5;");
     if opts.max_width.is_finite() {
         div_style.push_str(&format!(
             " max-width: {}px; text-align: center;",
             fmt_num(opts.max_width)
         ));
     }
-    // applyStyle(div, labelStyle) executes BEFORE the inline display/
-    // white-space/line-height setters. In DOM terms they all accumulate
-    // in the `style` attribute; upstream `applyStyle` is `dom.attr('style',
-    // fn)` which REPLACES any prior style. So the order in the emitted
-    // string is exactly [display, white-space, line-height, max-width,
-    // text-align], and labelStyle is NOT re-applied on the div. This
-    // matches the fixtures: `<div style="display: table-cell; …">`.
     out.push_str(&format!(
         r#"<div style="{ds}" xmlns="http://www.w3.org/1999/xhtml""#,
         ds = div_style,

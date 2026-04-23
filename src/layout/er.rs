@@ -95,6 +95,8 @@ pub struct EntityLayout {
     pub x: f64,
     pub y: f64,
     pub css_classes: String,
+    /// Inline style strings applied via `style` statements (e.g. `fill:#f9f`).
+    pub css_styles: Vec<String>,
     /// Whether this entity has attributes → needs the richer erBox path.
     pub has_attrs: bool,
     /// Populated iff `has_attrs`. Holds per-row + per-column geometry.
@@ -134,6 +136,8 @@ pub struct ErLayout {
     /// Title anchor x (centre of pre-title bbox). `None` when there is
     /// no title.
     pub title_anchor_x: Option<f64>,
+    /// classDef definitions — keyed by class id.
+    pub classes: std::collections::BTreeMap<String, crate::model::er::EntityClass>,
 }
 
 /// Measure a single line at sans-serif 14 px.
@@ -333,13 +337,23 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         } else {
             entity.label.clone()
         };
-        let label_w = measure_width(&rendered_label);
-        let (w, h) = if entity.attributes.is_empty() {
-            // No-attribute case: pre-size the box so dagre routes around
-            // the real geometry.
-            entity_box_size(label_w, label_h)
+        
+        // Collect styled font properties from classDefs + style commands.
+        let (styled_size, styled_bold) = resolve_styled_font(entity, &d.classes);
+        let label_w = if styled_size != LABEL_FONT_SIZE || styled_bold {
+            text_width(&rendered_label, LABEL_FONT_FAMILY, styled_size, styled_bold, false)
         } else {
-            // Attribute-bearing case: compute full erBox geometry.
+            measure_width(&rendered_label)
+        };
+        let label_h_s = if styled_size != LABEL_FONT_SIZE || styled_bold {
+            line_height(LABEL_FONT_FAMILY, styled_size, styled_bold, false)
+        } else {
+            label_h
+        };
+        
+        let (w, h) = if entity.attributes.is_empty() {
+            entity_box_size(label_w, label_h_s)
+        } else {
             let a = compute_attr_layout(&rendered_label, &entity.attributes);
             attr_entity_bbox(&a)
         };
@@ -389,6 +403,7 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     // ── 3. Pack ErLayout ─────────────────────────────────────────────
     let mut out = ErLayout::default();
     out.direction = d.direction.clone();
+    out.classes = d.classes.clone();
 
     for (idx, name) in d.entity_keys.iter().enumerate() {
         let entity = &d.entities[name];
@@ -406,7 +421,17 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         } else {
             entity.label.clone()
         };
-        let label_w = measure_width(&rendered_label);
+        let (styled_size, styled_bold) = resolve_styled_font(entity, &d.classes);
+        let label_w = if styled_size != LABEL_FONT_SIZE || styled_bold {
+            text_width(&rendered_label, LABEL_FONT_FAMILY, styled_size, styled_bold, false)
+        } else {
+            measure_width(&rendered_label)
+        };
+        let label_h_s = if styled_size != LABEL_FONT_SIZE || styled_bold {
+            line_height(LABEL_FONT_FAMILY, styled_size, styled_bold, false)
+        } else {
+            label_h
+        };
         let attr_layout = if entity.attributes.is_empty() {
             None
         } else {
@@ -416,12 +441,13 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
             id: entity.id.clone(),
             label: rendered_label,
             label_width: label_w,
-            label_height: label_h,
+            label_height: label_h_s,
             width: w,
             height: h,
             x,
             y,
             css_classes: entity.css_classes.clone(),
+            css_styles: entity.css_styles.clone(),
             has_attrs: !entity.attributes.is_empty(),
             attr_layout,
         });
@@ -567,6 +593,53 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
 
 fn edge_id(rel: &Relationship, counter: usize) -> String {
     format!("id_{}_{}_{}", rel.entity_a, rel.entity_b, counter)
+}
+
+/// Resolve the effective font size and bold state for an entity by
+/// examining its `css_styles` (style command) and any classDef classes.
+/// Returns `(font_size, bold)`.
+fn resolve_styled_font(
+    entity: &crate::model::er::Entity,
+    classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>,
+) -> (f64, bool) {
+    let mut font_size = LABEL_FONT_SIZE;
+    let mut bold = false;
+
+    let mut all_styles: Vec<String> = Vec::new();
+    for cls_name in entity.css_classes.split_whitespace() {
+        if let Some(class_def) = classes.get(cls_name) {
+            for s in &class_def.styles {
+                all_styles.push(s.clone());
+            }
+        }
+    }
+    for s in &entity.css_styles {
+        all_styles.push(s.clone());
+    }
+
+    for style in &all_styles {
+        let style = style.trim();
+        if style.is_empty() { continue; }
+        if let Some((prop, val)) = style.split_once(':') {
+            let prop = prop.trim();
+            let val = val.trim();
+            match prop {
+                "font-size" => {
+                    if let Some(num) = val.trim_end_matches("px").parse::<f64>().ok() {
+                        font_size = num;
+                    }
+                }
+                "font-weight" => {
+                    if val == "bold" || val == "bolder" || val.starts_with('7') || val.starts_with('8') || val.starts_with('9') {
+                        bold = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    (font_size, bold)
 }
 
 #[cfg(test)]

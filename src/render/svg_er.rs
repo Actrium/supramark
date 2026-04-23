@@ -105,9 +105,9 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
     out.push_str(r#"<g class="nodes">"#);
     for ent in &l.entities {
         if ent.has_attrs {
-            out.push_str(&render_entity_node_with_attrs(id, ent, theme));
+            out.push_str(&render_entity_node_with_attrs(id, ent, theme, &l.classes));
         } else {
-            out.push_str(&render_entity_node(id, ent));
+            out.push_str(&render_entity_node(id, ent, &l.classes));
         }
     }
     out.push_str("</g>");
@@ -148,10 +148,10 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
 /// `entity.attributes.length > 0`). Emits the rough.js-generated outer
 /// rectangle, per-row rects, column foreignObjects, and column /
 /// row dividers in the exact order the reference generator produces.
-fn render_entity_node_with_attrs(id: &str, e: &EntityLayout, theme: &ThemeVariables) -> String {
+fn render_entity_node_with_attrs(id: &str, e: &EntityLayout, theme: &ThemeVariables, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> String {
     let a = match &e.attr_layout {
         Some(a) => a,
-        None => return render_entity_node(id, e),
+        None => return render_entity_node(id, e, classes),
     };
     // Pull ER theme colours.
     let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
@@ -541,10 +541,108 @@ fn calc_text_max_width(text: &str) -> i64 {
     (w + 100.0).round() as i64
 }
 
-fn render_entity_node(id: &str, e: &EntityLayout) -> String {
+// ──────────────────────────────────────────────────────────────────────
+// Style / classDef helpers
+// ──────────────────────────────────────────────────────────────────────
+
+/// Collected styles for an entity, split into rect-relevant (fill, stroke)
+/// and text-relevant (color, font-size, font-weight, etc.) categories.
+struct EntityStyles {
+    /// Inline style for `<rect>` — e.g. `"fill:#f9f !important;stroke:blue !important"`.
+    rect_style: String,
+    /// Inline style for `<g class="label">` — e.g. `"color:grey !important;font-size:24px !important"`.
+    label_style: String,
+    /// Inline style for `<span>` inside the foreignObject.
+    span_style: String,
+    /// Inline style prefix for `<div>` — text properties with spaces and
+    /// hex→rgb normalization, e.g. `"color: rgb(0, 0, 255) !important; "`.
+    div_style_prefix: String,
+}
+
+/// Collect all styles for an entity from its css_styles (style command)
+/// and any classDef classes it belongs to. Split into rect vs text.
+fn collect_entity_styles(e: &EntityLayout, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> EntityStyles {
+    let mut all_styles: Vec<String> = Vec::new();
+    for cls_name in e.css_classes.split_whitespace() {
+        if let Some(class_def) = classes.get(cls_name) {
+            for s in &class_def.styles {
+                all_styles.push(s.clone());
+            }
+        }
+    }
+    for s in &e.css_styles {
+        all_styles.push(s.clone());
+    }
+    if all_styles.is_empty() {
+        return EntityStyles {
+            rect_style: String::new(),
+            label_style: String::new(),
+            span_style: String::new(),
+            div_style_prefix: String::new(),
+        };
+    }
+    let mut rect_parts: Vec<String> = Vec::new();
+    let mut text_parts: Vec<String> = Vec::new();
+    for style in &all_styles {
+        let style = style.trim();
+        if style.is_empty() { continue; }
+        let prop_name = style.split(':').next().unwrap_or("").trim();
+        if prop_name == "fill" || prop_name == "stroke" {
+            rect_parts.push(format!("{} !important", style));
+        } else {
+            text_parts.push(format!("{} !important", style));
+        }
+    }
+    let rect_style = rect_parts.join(";");
+    let label_style = text_parts.join(";");
+    let span_style = label_style.clone();
+    let div_style_prefix = text_parts.iter().map(|p| {
+        let p_no_imp = p.strip_suffix(" !important").unwrap_or(p);
+        if let Some((prop, val)) = p_no_imp.split_once(':') {
+            let val = val.trim();
+            let normalized_val = normalize_color_for_div(val);
+            format!("{}: {} !important; ", prop, normalized_val)
+        } else {
+            format!("{} ", p)
+        }
+    }).collect::<String>();
+    EntityStyles { rect_style, label_style, span_style, div_style_prefix }
+}
+
+/// Normalize a color value for the `<div>` style attribute. The div's style
+/// is set via DOM `setAttribute` which causes the browser (jsdom) to normalize
+/// hex colors like `#0000FF` to `rgb(0, 0, 255)`.
+fn normalize_color_for_div(val: &str) -> String {
+    let val = val.trim();
+    if let Some(hex) = val.strip_prefix('#') {
+        match hex.len() {
+            3 => {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..1], 16),
+                    u8::from_str_radix(&hex[1..2], 16),
+                    u8::from_str_radix(&hex[2..3], 16),
+                ) {
+                    return format!("rgb({}, {}, {})", r * 17, g * 17, b * 17);
+                }
+            }
+            6 => {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..2], 16),
+                    u8::from_str_radix(&hex[2..4], 16),
+                    u8::from_str_radix(&hex[4..6], 16),
+                ) {
+                    return format!("rgb({}, {}, {})", r, g, b);
+                }
+            }
+            _ => {}
+        }
+    }
+    val.to_string()
+}
+
+fn render_entity_node(id: &str, e: &EntityLayout, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> String {
+    let styles = collect_entity_styles(e, classes);
     let mut out = String::with_capacity(512);
-    // Normalize classes: upstream concatenates "default" then any user-added
-    // class with a space. Inner "node" class is always prefixed.
     let class_extra = &e.css_classes;
     out.push_str(&format!(
         r#"<g class="node {} " id="{sid}-{eid}" data-look="classic" transform="translate({tx}, {ty})">"#,
@@ -554,33 +652,29 @@ fn render_entity_node(id: &str, e: &EntityLayout) -> String {
         tx = fmt_num(e.x),
         ty = fmt_num(e.y),
     ));
-    // Rect.
+    // Rect — style attribute carries fill/stroke from style/classDef.
     out.push_str(&format!(
-        r#"<rect class="basic label-container" style="" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        r#"<rect class="basic label-container" style="{rs}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        rs = styles.rect_style,
         x = fmt_num(-e.width / 2.0),
         y = fmt_num(-e.height / 2.0),
         w = fmt_num(e.width),
         h = fmt_num(e.height),
     ));
-    // Label group: translate(-label_w/2, -label_h/2) centres it on (0,0).
+    // Label group — style carries text properties (color, font-size, etc.).
     out.push_str(&format!(
-        r#"<g class="label" style="" transform="translate({lx}, {ly})"><rect></rect>{fo}</g>"#,
+        r#"<g class="label" style="{ls}" transform="translate({lx}, {ly})"><rect></rect>{fo}</g>"#,
+        ls = styles.label_style,
         lx = fmt_num(-e.label_width / 2.0),
         ly = fmt_num(-e.label_height / 2.0),
-        fo = foreign_object_node_label(e.label_width, e.label_height, &e.label, &e.id),
+        fo = foreign_object_node_label_styled(e.label_width, e.label_height, &e.label, &styles),
     ));
     out.push_str("</g>");
     out
 }
 
-/// foreignObject wrapper used around an entity label (markdown-node-label).
-/// `max-width` reflects the entity box's "wrap width": 100 if the entity
-/// hit the minEntityWidth floor (node.width was explicitly set to 100),
-/// else 200 (`flowchart.wrappingWidth` default). Decided upstream by
-/// comparing the label width measured at *16* px (not 14).
-fn foreign_object_node_label(width: f64, height: f64, text: &str, _eid: &str) -> String {
-    // Re-measure at 16 px to match upstream's calculateTextWidth call. We
-    // can't just use the 14-px width we already have.
+/// foreignObject wrapper for styled entity labels.
+fn foreign_object_node_label_styled(width: f64, height: f64, text: &str, styles: &EntityStyles) -> String {
     use crate::font_metrics::text_width;
     use crate::render::foreign_object::{foreign_object_body, LabelOpts};
     let w16 = text_width(text, "sans-serif", 16.0, false, false);
@@ -589,6 +683,8 @@ fn foreign_object_node_label(width: f64, height: f64, text: &str, _eid: &str) ->
     let opts = LabelOpts {
         extra_span_classes: "markdown-node-label",
         max_width: maxw,
+        label_style: if styles.span_style.is_empty() { None } else { Some(&styles.span_style) },
+        div_style_prefix: if styles.div_style_prefix.is_empty() { None } else { Some(&styles.div_style_prefix) },
         ..LabelOpts::default()
     };
     foreign_object_body(&html_escape(text), width, height, &opts)
@@ -860,7 +956,7 @@ fn markers_block(id: &str) -> String {
 /// the requested opacity. Preserves f64 precision so the emitted
 /// channel values match JS `Number.toString` output byte-for-byte
 /// (the HSL path is the load-bearing case for ER's `labelBkg`).
-fn fade(color: &str, opacity: f64) -> String {
+pub(crate) fn fade(color: &str, opacity: f64) -> String {
     if let Some((r, g, b)) = hsl_to_rgb_f64(color) {
         // khroma's `channel()` passes through `lang.round` which rounds
         // to 10 decimal places — we must mirror that for byte parity.
@@ -876,6 +972,9 @@ fn fade(color: &str, opacity: f64) -> String {
         );
     }
     if let Some((r, g, b)) = parse_hex_color(color) {
+        return format!("rgba({}, {}, {}, {})", r, g, b, fmt_num(opacity));
+    }
+    if let Some((r, g, b)) = parse_rgba_color(color) {
         return format!("rgba({}, {}, {}, {})", r, g, b, fmt_num(opacity));
     }
     format!("rgba({}, {})", color, fmt_num(opacity))
@@ -972,6 +1071,23 @@ fn parse_hex_color(s: &str) -> Option<(u8, u8, u8)> {
         }
         _ => None,
     }
+}
+
+/// Parse `rgba(r, g, b, a)` → `(r, g, b)` as integers.
+fn parse_rgba_color(s: &str) -> Option<(i64, i64, i64)> {
+    let s = s.trim();
+    if !s.starts_with("rgba(") {
+        return None;
+    }
+    let inner = s.strip_prefix("rgba(")?.strip_suffix(')')?;
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let r = parts[0].trim().parse::<i64>().ok()?;
+    let g = parts[1].trim().parse::<i64>().ok()?;
+    let b = parts[2].trim().parse::<i64>().ok()?;
+    Some((r, g, b))
 }
 
 fn fmt_num(v: f64) -> String {
