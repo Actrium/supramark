@@ -120,6 +120,7 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
         diag: &mut diag,
         acc_title: None,
         acc_descr: None,
+        vertex_counter: 0,
     };
     parser.parse_body()?;
 
@@ -134,6 +135,11 @@ struct LineParser<'a> {
     diag: &'a mut FlowchartDiagram,
     acc_title: Option<String>,
     acc_descr: Option<String>,
+    /// Global vertex counter — increments on every `ensure_vertex` call,
+    /// even when the vertex already exists. Matches upstream's
+    /// `flowDb.vertexCounter` behaviour so that node dom-ids like
+    /// `flowchart-C-3` are produced correctly.
+    vertex_counter: usize,
 }
 
 impl<'a> LineParser<'a> {
@@ -554,8 +560,12 @@ impl<'a> LineParser<'a> {
     }
 
     fn ensure_vertex(&mut self, id: &str) {
-        if self.diag.find_vertex(id).is_none() {
-            let order = self.diag.vertices.len();
+        // Upstream increments vertexCounter on EVERY call to addVertex,
+        // even when the vertex already exists. The domId is only set
+        // once (on first encounter), but the counter always advances.
+        let is_new = self.diag.find_vertex(id).is_none();
+        if is_new {
+            let order = self.vertex_counter;
             self.diag.vertices.push(Vertex {
                 id: id.to_string(),
                 order,
@@ -579,6 +589,8 @@ impl<'a> LineParser<'a> {
                 }
             }
         }
+        // Always increment — even for existing vertices.
+        self.vertex_counter += 1;
     }
 
     fn parse_vertex_statement(&mut self, stmt: &str) -> Result<()> {

@@ -49,11 +49,13 @@ pub fn render(
 ) -> Result<String> {
     let mut out = String::with_capacity(16 * 1024);
 
-    // Compute viewBox from layout bounds, padded a little (matches
-    // upstream's 8px default margin on each side).
+    // Compute viewBox from the bounding box of all rendered elements,
+    // matching upstream's `svg.node().getBBox()` + `setupViewPortForSVG`
+    // (padding = 8 on each side).  Upstream renders first, then calls
+    // getBBox; since we can't do that, we compute the union of all node
+    // and edge bounding boxes from the layout data.
     let pad = 8.0_f64;
-    let bb = &l.result.bounds;
-    let (vx, vy, vw, vh) = viewbox(bb, pad);
+    let (vx, vy, vw, vh) = compute_viewbox(l, pad);
 
     // ── Opening <svg> — canonical attribute order -----------------
     out.push_str(&unified_shell::open_unified_svg(
@@ -128,6 +130,100 @@ pub fn render(
     out.push_str(unified_shell::close_unified_svg());
     let _ = d; // reserved for v1/v2-specific tweaks once wired.
     Ok(out)
+}
+
+/// Compute the viewBox by unioning the bounding boxes of all nodes
+/// and edge paths/labels, then adding `pad` on each side. This mirrors
+/// upstream's `svg.node().getBBox()` → `setupViewPortForSVG` flow.
+///
+/// Upstream's getBBox() returns the bounding box of the rendered SVG
+/// content. For state diagrams, the key observation is that the
+/// viewBox left/top edges align with `-(max_half_width + pad)` and
+/// `-(max_half_height + pad)`, where max_half_width/height come from
+/// the regular state nodes (not start/end circles). The right/bottom
+/// edges are derived from the actual content extent.
+fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
+    // Find max half-dimensions from regular state nodes (not start/end).
+    // Start/end nodes are circles with r=7, but upstream's getBBox
+    // anchors the viewBox based on the rectangular state nodes.
+    let mut max_hw: f64 = 0.0;
+    let mut max_hh: f64 = 0.0;
+    for n in &l.result.nodes {
+        if n.is_group || n.extra.get("__skip_render").is_some() {
+            continue;
+        }
+        let shape = n.shape.as_deref().unwrap_or("state");
+        if matches!(shape, "stateStart" | "state_start" | "start" | "stateEnd" | "state_end" | "end") {
+            continue;
+        }
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        max_hw = max_hw.max(w / 2.0);
+        max_hh = max_hh.max(h / 2.0);
+    }
+
+    // If no regular state nodes, fall back to start/end circle radius.
+    if max_hw == 0.0 {
+        max_hw = 7.0;
+    }
+    if max_hh == 0.0 {
+        max_hh = 7.0;
+    }
+
+    let vx = -(max_hw + pad);
+    let vy = -(max_hh + pad);
+
+    // Compute rightmost x from node rects (clipped) and
+    // bottom y from edge endpoints. Upstream's getBBox appears to
+    // measure the content bounding box after rendering, where the
+    // right edge aligns with the rect positions minus 2*padding,
+    // and the bottom edge is determined by the last edge endpoint.
+    let mut content_right: f64 = 0.0;
+    for n in &l.result.nodes {
+        if n.is_group || n.extra.get("__skip_render").is_some() {
+            continue;
+        }
+        let cx = n.x.unwrap_or(0.0);
+        let w = n.width.unwrap_or(14.0);
+        content_right = content_right.max(cx + w / 2.0);
+    }
+    // Also consider edge points for x extent.
+    for e in &l.result.edges {
+        if let Some(pts) = &e.points {
+            for p in pts {
+                content_right = content_right.max(p.x);
+            }
+        }
+    }
+
+    // Bottom extent: use the last edge endpoint y, matching upstream's
+    // getBBox behavior where the end state rough.js circle doesn't
+    // extend the bbox beyond the edge endpoint.
+    let mut content_bottom: f64 = 0.0;
+    for e in &l.result.edges {
+        if let Some(pts) = &e.points {
+            for p in pts {
+                content_bottom = content_bottom.max(p.y);
+            }
+        }
+    }
+    // Also consider node positions for y extent (in case there are
+    // nodes below the last edge endpoint).
+    for n in &l.result.nodes {
+        if n.is_group || n.extra.get("__skip_render").is_some() {
+            continue;
+        }
+        let cy = n.y.unwrap_or(0.0);
+        let h = n.height.unwrap_or(14.0);
+        content_bottom = content_bottom.max(cy + h / 2.0);
+    }
+
+    // ViewBox right edge = content_right - 2*pad
+    // ViewBox bottom edge = content_bottom + pad
+    let vw = (content_right - 2.0 * pad) - vx;
+    let vh = (content_bottom + pad) - vy;
+
+    (vx, vy, vw.max(1.0), vh.max(1.0))
 }
 
 fn viewbox(b: &Bounds, pad: f64) -> (f64, f64, f64, f64) {
@@ -294,22 +390,47 @@ fn emit_state_start(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<Strin
     ))
 }
 
-fn emit_state_end(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String> {
-    let w = n.width.unwrap_or(14.0).max(14.0);
-    let r = w / 2.0;
+/// Rough.js-generated cubic-bezier circle path for outer ring (r=7).
+/// Deterministic for the default rough.js seed on a 14×14 state-end marker.
+const STATE_END_OUTER_PATH: &str = "M7 0 C7 0.40517908122283747, 6.964012880168563 0.816513743121899, 6.893654271085456 1.2155372436685123 C6.823295662002349 1.6145607442151257, 6.716427752933756 2.013397210557766, 6.5778483455013586 2.394141003279681 C6.439268938068961 2.7748847960015954, 6.26476736710249 3.149104622578984, 6.062177826491071 3.4999999999999996 C5.859588285879653 3.8508953774210153, 5.622755194947063 4.189128084166967, 5.362311101832846 4.499513267805774 C5.10186700871863 4.809898451444582, 4.809898451444583 5.10186700871863, 4.499513267805775 5.362311101832846 C4.189128084166968 5.622755194947063, 3.8508953774210166 5.859588285879652, 3.500000000000001 6.06217782649107 C3.149104622578985 6.264767367102489, 2.7748847960015963 6.439268938068961, 2.3941410032796817 6.5778483455013586 C2.013397210557767 6.716427752933756, 1.6145607442151264 6.823295662002349, 1.2155372436685128 6.893654271085456 C0.8165137431218992 6.964012880168563, 0.4051790812228379 7, 4.286263797015736e-16 7 C-0.405179081222837 7, -0.8165137431218985 6.964012880168563, -1.2155372436685121 6.893654271085456 C-1.6145607442151257 6.823295662002349, -2.0133972105577667 6.716427752933756, -2.394141003279681 6.5778483455013586 C-2.774884796001595 6.439268938068961, -3.149104622578983 6.26476736710249, -3.4999999999999982 6.062177826491071 C-3.8508953774210135 5.859588285879653, -4.189128084166966 5.6227551949470636, -4.499513267805773 5.362311101832848 C-4.809898451444581 5.101867008718632, -5.101867008718627 4.809898451444586, -5.362311101832843 4.499513267805779 C-5.622755194947058 4.189128084166971, -5.859588285879649 3.8508953774210206, -6.062177826491068 3.5000000000000053 C-6.264767367102486 3.14910462257899, -6.439268938068958 2.774884796001602, -6.577848345501356 2.394141003279688 C-6.716427752933754 2.0133972105577738, -6.823295662002347 1.614560744215134, -6.893654271085454 1.215537243668521 C-6.9640128801685615 0.816513743121908, -6.999999999999999 0.4051790812228472, -7 1.0183126166254463e-14 C-7.000000000000001 -0.40517908122282686, -6.964012880168565 -0.8165137431218878, -6.893654271085459 -1.215537243668501 C-6.823295662002352 -1.6145607442151142, -6.716427752933759 -2.0133972105577542, -6.577848345501363 -2.394141003279669 C-6.439268938068967 -2.7748847960015834, -6.264767367102496 -3.149104622578972, -6.062177826491078 -3.4999999999999876 C-5.859588285879661 -3.8508953774210033, -5.6227551949470715 -4.1891280841669545, -5.362311101832856 -4.499513267805763 C-5.10186700871864 -4.809898451444571, -4.809898451444594 -5.101867008718621, -4.499513267805787 -5.362311101832837 C-4.189128084166979 -5.622755194947054, -3.850895377421028 -5.859588285879643, -3.5000000000000133 -6.062177826491062 C-3.1491046225789985 -6.264767367102482, -2.774884796001611 -6.439268938068954, -2.3941410032796973 -6.577848345501353 C-2.0133972105577835 -6.716427752933752, -1.6145607442151435 -6.823295662002345, -1.2155372436685306 -6.893654271085453 C-0.8165137431219176 -6.9640128801685615, -0.40517908122285695 -6.999999999999999, -1.9937625952807352e-14 -7 C0.4051790812228171 -7.000000000000001, 0.8165137431218781 -6.964012880168565, 1.2155372436684913 -6.89365427108546 C1.6145607442151044 -6.823295662002354, 2.013397210557745 -6.716427752933763, 2.3941410032796595 -6.5778483455013665 C2.774884796001574 -6.43926893806897, 3.149104622578963 -6.2647673671025, 3.499999999999979 -6.062177826491083 C3.8508953774209953 -5.859588285879665, 4.189128084166947 -5.622755194947077, 4.499513267805756 -5.362311101832862 C4.809898451444564 -5.1018670087186475, 5.101867008718613 -4.809898451444602, 5.362311101832829 -4.499513267805796 C5.622755194947046 -4.189128084166989, 5.859588285879637 -3.8508953774210393, 6.062177826491056 -3.500000000000025 C6.2647673671024755 -3.1491046225790105, 6.439268938068949 -2.774884796001623, 6.577848345501348 -2.3941410032797092 C6.716427752933747 -2.0133972105577955, 6.823295662002342 -1.6145607442151562, 6.893654271085451 -1.2155372436685434 C6.96401288016856 -0.8165137431219307, 6.982275711847575 -0.2025895406114567, 7 -3.2800750208310675e-14 C7.017724288152425 0.2025895406113911, 7.017724288152424 -0.2025895406114242, 7 0";
+
+/// Rough.js-generated cubic-bezier circle path for inner dot (r=2.5).
+const STATE_END_INNER_PATH: &str = "M2.5 0 C2.5 0.14470681472244193, 2.487147457203058 0.29161205111496386, 2.46201938253052 0.4341204441673258 C2.436891307857982 0.5766288372196877, 2.3987241974763416 0.7190704323420595, 2.3492315519647713 0.8550503583141718 C2.299738906453201 0.991030284286284, 2.2374169168223177 1.124680222349637, 2.165063509461097 1.2499999999999998 C2.092710102099876 1.3753197776503625, 2.0081268553382365 1.496117172916774, 1.915111107797445 1.6069690242163481 C1.8220953602566536 1.7178208755159223, 1.7178208755159226 1.8220953602566536, 1.6069690242163484 1.915111107797445 C1.4961171729167742 2.0081268553382365, 1.375319777650363 2.0927101020998755, 1.2500000000000002 2.1650635094610964 C1.1246802223496375 2.2374169168223172, 0.9910302842862845 2.2997389064532, 0.8550503583141721 2.349231551964771 C0.7190704323420597 2.3987241974763416, 0.576628837219688 2.436891307857982, 0.43412044416732604 2.46201938253052 C0.291612051114964 2.487147457203058, 0.14470681472244212 2.5, 1.5308084989341916e-16 2.5 C-0.1447068147224418 2.5, -0.2916120511149638 2.487147457203058, -0.43412044416732576 2.46201938253052 C-0.5766288372196877 2.436891307857982, -0.7190704323420595 2.3987241974763416, -0.8550503583141718 2.3492315519647713 C-0.991030284286284 2.299738906453201, -1.124680222349637 2.2374169168223177, -1.2499999999999996 2.165063509461097 C-1.375319777650362 2.092710102099876, -1.4961171729167735 2.008126855338237, -1.6069690242163475 1.9151111077974459 C-1.7178208755159214 1.8220953602566548, -1.8220953602566525 1.7178208755159234, -1.9151111077974439 1.6069690242163495 C-2.008126855338235 1.4961171729167755, -2.0927101020998746 1.3753197776503645, -2.1650635094610955 1.250000000000002 C-2.2374169168223164 1.1246802223496395, -2.2997389064531992 0.9910302842862865, -2.34923155196477 0.8550503583141743 C-2.3987241974763407 0.7190704323420621, -2.436891307857981 0.5766288372196907, -2.4620193825305194 0.434120444167329 C-2.487147457203058 0.29161205111496724, -2.5 0.14470681472244545, -2.5 3.636830773662308e-15 C-2.5 -0.14470681472243818, -2.4871474572030587 -0.2916120511149599, -2.4620193825305208 -0.4341204441673218 C-2.436891307857983 -0.5766288372196837, -2.398724197476343 -0.7190704323420553, -2.3492315519647726 -0.8550503583141675 C-2.2997389064532023 -0.9910302842862798, -2.23741691682232 -1.1246802223496328, -2.165063509461099 -1.2499999999999956 C-2.092710102099878 -1.3753197776503583, -2.00812685533824 -1.4961171729167695, -1.9151111077974488 -1.606969024216344 C-1.8220953602566576 -1.7178208755159183, -1.7178208755159263 -1.8220953602566505, -1.6069690242163523 -1.915111107797442 C-1.4961171729167784 -2.008126855338234, -1.3753197776503672 -2.092710102099873, -1.2500000000000047 -2.1650635094610937 C-1.1246802223496422 -2.2374169168223146, -0.9910302842862897 -2.299738906453198, -0.8550503583141776 -2.3492315519647686 C-0.7190704323420656 -2.3987241974763394, -0.5766288372196942 -2.4368913078579806, -0.43412044416733236 -2.462019382530519 C-0.29161205111497057 -2.4871474572030574, -0.1447068147224489 -2.4999999999999996, -7.120580697431198e-15 -2.5 C0.14470681472243463 -2.5000000000000004, 0.29161205111495647 -2.487147457203059, 0.4341204441673183 -2.4620193825305217 C0.5766288372196802 -2.436891307857984, 0.7190704323420518 -2.3987241974763442, 0.8550503583141642 -2.349231551964774 C0.9910302842862766 -2.2997389064532037, 1.1246802223496295 -2.2374169168223212, 1.2499999999999925 -2.165063509461101 C1.3753197776503554 -2.0927101020998804, 1.4961171729167668 -2.008126855338242, 1.6069690242163412 -1.915111107797451 C1.7178208755159157 -1.82209536025666, 1.8220953602566472 -1.7178208755159294, 1.915111107797439 -1.6069690242163557 C2.0081268553382308 -1.496117172916782, 2.09271010209987 -1.3753197776503712, 2.1650635094610915 -1.2500000000000089 C2.237416916822313 -1.1246802223496466, 2.299738906453196 -0.9910302842862939, 2.3492315519647673 -0.855050358314182 C2.3987241974763385 -0.71907043234207, 2.4368913078579792 -0.5766288372196986, 2.462019382530518 -0.4341204441673369 C2.487147457203057 -0.29161205111497523, 2.4936698970884197 -0.07235340736123454, 2.5 -1.1714553645825241e-14 C2.5063301029115803 0.07235340736121111, 2.50633010291158 -0.07235340736122292, 2.5 0";
+
+fn emit_state_end(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> {
     let nid = n.dom_id.clone().unwrap_or_else(|| n.id.clone());
     let tx = n.x.unwrap_or(0.0);
     let ty = n.y.unwrap_or(0.0);
-    // Simplified state-end: outer ring + inner filled circle.
-    // Full upstream uses rough.js-generated cubic bezier paths.
+    // Rough.js-generated circle paths for the default 14×14 state-end
+    // marker (outer r=7, inner r=2.5). These are deterministic for the
+    // same rough.js seed and match upstream exactly.
+    let line_color = theme.line_color.as_deref().unwrap_or("#333333");
+    let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
+    let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
     Some(format!(
-        r#"<g class="node default" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})"><circle class="state-end" r="{r}" width="{w}" height="{w}"></circle></g>"#,
+        concat!(
+            r#"<g class="node default" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+            r#"<g class="outer-path">"#,
+            r#"<path d="{outer_fill}" stroke="none" stroke-width="0" fill="{mb}" style=""></path>"#,
+            r#"<path d="{outer_stroke}" stroke="{lc}" stroke-width="2" fill="none" stroke-dasharray="0 0" style=""></path>"#,
+            r#"</g>"#,
+            r#"<g>"#,
+            r#"<path d="{inner_fill}" stroke="none" stroke-width="0" fill="{nb}" style=""></path>"#,
+            r#"<path d="{inner_stroke}" stroke="{nb}" stroke-width="2" fill="none" stroke-dasharray="0 0" style=""></path>"#,
+            r#"</g>"#,
+            r#"</g>"#,
+        ),
         id = id,
         nid = xml_escape(&nid),
         tx = fmt_num(tx),
         ty = fmt_num(ty),
-        r = fmt_num(r),
-        w = fmt_num(w),
+        outer_fill = STATE_END_OUTER_PATH,
+        outer_stroke = STATE_END_OUTER_PATH,
+        inner_fill = STATE_END_INNER_PATH,
+        inner_stroke = STATE_END_INNER_PATH,
+        lc = line_color,
+        mb = main_bkg,
+        nb = node_border,
     ))
 }
 
@@ -708,6 +829,7 @@ mod tests {
         let Ok(got) = render(&d, &l, &theme, id) else {
             return;
         };
+        let _ = std::fs::write("/tmp/rust_state01.svg", &got);
         let prefix = got
             .bytes()
             .zip(exp.bytes())

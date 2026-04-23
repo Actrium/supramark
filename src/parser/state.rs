@@ -463,22 +463,25 @@ fn split_label_lines(raw: &str) -> Vec<String> {
 fn resolve_endpoint(
     diagram: &mut StateDiagram,
     tok: &str,
-    start_end_idx: &mut usize,
+    _start_end_idx: &mut usize,
     parent: &Option<String>,
     is_source: bool,
 ) -> String {
     if tok == "[*]" {
         let root = parent.clone().unwrap_or_else(|| "root".into());
         let role = if is_source { "start" } else { "end" };
-        let id = format!("state-{}_{}{}", root, role, start_end_idx);
-        *start_end_idx += 1;
-        diagram.states.push(State {
-            id: id.clone(),
-            kind: StateKind::StartEnd,
-            parent: parent.clone(),
-            implicit: true,
-            ..State::default()
-        });
+        let id = format!("root_{}", role);
+        // Reuse existing start/end node within the same parent scope,
+        // matching upstream where [*] always maps to a single node per scope.
+        if !diagram.states.iter().any(|s| s.id == id && s.parent == *parent) {
+            diagram.states.push(State {
+                id: id.clone(),
+                kind: StateKind::StartEnd,
+                parent: parent.clone(),
+                implicit: true,
+                ..State::default()
+            });
+        }
         id
     } else if tok == "[H]" {
         ensure_state(diagram, tok, parent.clone());

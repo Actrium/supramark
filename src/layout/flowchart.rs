@@ -45,6 +45,13 @@ const DEFAULT_FONT_FAMILY: &str = "trebuchet ms,verdana,arial,sans-serif";
 /// SVG root — NOT the theme fontSize (16 px). Using 14 px here makes
 /// dagre assign the same node dimensions as upstream.
 const LABEL_FONT_SIZE: f64 = 14.0;
+/// Upstream `config.flowchart?.padding` default (from config.schema.yaml).
+/// Used by shape functions to compute the total node size around the
+/// label bounding box:
+/// - rect (squareRect): labelPaddingX = padding * 2, labelPaddingY = padding
+/// - round (roundedRect): labelPaddingX = padding, labelPaddingY = padding
+/// - diamond: s = (labelW + padding) + (labelH + padding)
+const FLOWCHART_PADDING: f64 = 15.0;
 
 /// Lay out a flowchart diagram. Uses dagre for the graph geometry.
 pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartLayout> {
@@ -57,7 +64,7 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         edges,
         clusters,
         bounds,
-        diagram_padding: 8.0,
+        diagram_padding: 20.0,
         aria_kind: if d.header_keyword == "flowchart-elk" {
             "flowchart-elk".to_string()
         } else if d.is_v2 {
@@ -105,7 +112,7 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.shape = Some(shape_id.to_string());
         node.width = Some(w);
         node.height = Some(h);
-        node.padding = Some(NODE_PADDING_Y.max(NODE_PADDING_X));
+        node.padding = Some(FLOWCHART_PADDING);
         node.look = Some("classic".into());
         node.parent_id = parent_of.get(&v.id).cloned();
         // CSS classes — upstream: `'default ' + vertex.classes.join(' ')`.
@@ -161,8 +168,16 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
     // first non-cluster descendant — dagre-rs panics when a compound
     // node is used as an edge endpoint. Upstream mermaid does the
     // equivalent remapping inside `mermaid-graphlib::findNonClusterChild`.
+    // Upstream edge IDs use a per-pair counter (see `getEdgeId`):
+    //   L_{start}_{end}_0 for the first edge between a pair,
+    //   L_{start}_{end}_1 for the second, etc.
+    use std::collections::HashMap;
+    let mut pair_count: HashMap<(String, String), usize> = HashMap::new();
     for e in &d.edges {
-        let mut ue = build_edge(e, d);
+        let start = e.start.clone();
+        let end = e.end.clone();
+        let counter = *pair_count.entry((start.clone(), end.clone())).and_modify(|c| *c += 1).or_insert(0);
+        let mut ue = build_edge(e, d, counter);
         retarget_cluster_endpoints(&mut ue, d);
         data.edges.push(ue);
     }
@@ -243,20 +258,27 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 }
 
 /// Measure a vertex's bounding box including its intrinsic shape padding.
+/// These padding values must match what the upstream shape renderers
+/// compute at draw time, so that dagre assigns the correct node
+/// dimensions.
 fn measure_vertex_box(v: &Vertex) -> (f64, f64) {
     let label = display_label(v);
     let (tw, th) = measure_text(&label);
-    // Upstream shape helpers apply their own padding on top of the
-    // label bbox. For a rough, common baseline:
-    //   rect: +16, +16
-    //   round: +16, +16 (rx/ry adds little)
-    //   stadium: +label_height, +0  (wider to fit the semicircle caps)
-    //   diamond: label_w*√2, label_h*√2  (then outer octagonal)
-    //   hexagon: tw + m_x, h + pad
-    //   cylinder: +16, +24 (top/bottom arcs)
-    //   circle: max(tw, th) + 32
-    //   doublecircle: max(tw, th) + 48
+    // Upstream shape helpers compute total size from the label bbox
+    // plus per-shape padding. The `node.padding` config default is 15.
+    //
+    // squareRect: totalW = bbox.w + padding*4, totalH = bbox.h + padding*2
+    //   (labelPaddingX = padding*2, applied twice = padding*4)
+    //   (labelPaddingY = padding, applied twice = padding*2)
+    // roundedRect: totalW = bbox.w + padding*2, totalH = bbox.h + padding*2
+    // diamond: s = (bbox.w + padding) + (bbox.h + padding)
+    // hexagon: uses nodePadding directly
+    // stadium: wider by label_height
+    // cylinder: extra 24 for arcs
+    // circle: max(tw,th) + 32
+    // doublecircle: max(tw,th) + 48
     let shape = v.shape.as_deref().unwrap_or("rect");
+    let p = FLOWCHART_PADDING;
     let (pad_x, pad_y) = match shape {
         "circle" | "circ" => {
             let d = tw.max(th) + 32.0;
@@ -267,16 +289,19 @@ fn measure_vertex_box(v: &Vertex) -> (f64, f64) {
             return (d, d);
         }
         "diamond" | "question" => {
-            let s = (tw.powi(2) + th.powi(2)).sqrt() + 24.0;
+            let w = tw + p;
+            let h = th + p;
+            let s = w + h;
             return (s, s);
         }
-        "hexagon" | "hex" => (24.0, 8.0),
-        "stadium" | "pill" => (th + 16.0, 16.0),
-        "cylinder" | "cyl" => (16.0, 24.0),
-        "subroutine" => (32.0, 16.0),
+        "hexagon" | "hex" => (p * 4.0, p * 2.0),
+        "stadium" | "pill" => (th + p * 2.0, p * 2.0),
+        "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
+        "subroutine" => (p * 4.0, p * 2.0),
         "trapezoid" | "trap" | "inv_trapezoid" | "invertedTrapezoid" | "lean_left" | "lean-left"
-        | "lean_right" | "lean-right" => (32.0, 16.0),
-        _ => (16.0, 16.0),
+        | "lean_right" | "lean-right" => (p * 4.0, p * 2.0),
+        "round" | "rounded" => (p * 2.0, p * 2.0),
+        _ => (p * 4.0, p * 2.0), // rect / squareRect: labelPaddingX = p*2, ×2 sides = p*4
     };
     (tw + pad_x, th + pad_y)
 }
@@ -305,9 +330,11 @@ fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
 }
 
 /// Build a unified::Edge from a model Edge, applying link-style overrides.
-fn build_edge(e: &ModelEdge, d: &FlowchartDiagram) -> unified::Edge {
+/// `pair_counter` is the per-(start,end) duplicate count — 0 for the first
+/// edge between a given pair, 1 for the second, etc. (upstream `getEdgeId`).
+fn build_edge(e: &ModelEdge, d: &FlowchartDiagram, pair_counter: usize) -> unified::Edge {
     let mut ue = unified::Edge::default();
-    ue.id = format!("L_{}_{}_{}", e.start, e.end, e.index);
+    ue.id = format!("L_{}_{}_{}", e.start, e.end, pair_counter);
     ue.start = Some(e.start.clone());
     ue.end = Some(e.end.clone());
     ue.minlen = Some(e.length as i32);

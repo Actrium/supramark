@@ -26,6 +26,71 @@ use crate::render::unified_shell;
 use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
+/// Compute the viewBox from the layout bounds and rendered node dimensions.
+///
+/// Upstream uses `svg.getBBox()` after rendering, which returns the
+/// tight axis-aligned bounding box of all rendered content. We
+/// approximate this by computing bounds from the layout nodes,
+/// accounting for shape-specific geometry (e.g. diamonds extend
+/// beyond their node center by s/2).
+fn compute_viewbox(l: &FlowchartLayout, _inner: &str, padding: f64) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for n in &l.nodes {
+        let (Some(x), Some(y)) = (n.x, n.y) else {
+            continue;
+        };
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        // For diamond shapes, w and h both equal s (the diagonal).
+        // The diamond extends s/2 in each direction from center.
+        // For rect shapes, w and h are the actual dimensions,
+        // extending w/2 and h/2 from center.
+        let half_w = w / 2.0;
+        let half_h = h / 2.0;
+        min_x = min_x.min(x - half_w);
+        min_y = min_y.min(y - half_h);
+        max_x = max_x.max(x + half_w);
+        max_y = max_y.max(y + half_h);
+    }
+
+    // Include edge path points in the bounds.
+    for e in &l.edges {
+        if let Some(points) = &e.points {
+            for p in points {
+                min_x = min_x.min(p.x);
+                min_y = min_y.min(p.y);
+                max_x = max_x.max(p.x);
+                max_y = max_y.max(p.y);
+            }
+        }
+    }
+
+    // Include edge label positions.
+    for e in &l.edges {
+        if let (Some(lx), Some(ly)) = (e.label_x, e.label_y) {
+            min_x = min_x.min(lx);
+            min_y = min_y.min(ly);
+            max_x = max_x.max(lx);
+            max_y = max_y.max(ly);
+        }
+    }
+
+    if !min_x.is_finite() {
+        return (0.0, 0.0, 1.0, 1.0);
+    }
+
+    let vb_x = min_x - padding;
+    let vb_y = min_y - padding;
+    let vb_w = (max_x - min_x + 2.0 * padding).max(1.0);
+    let vb_h = (max_y - min_y + 2.0 * padding).max(1.0);
+
+    (vb_x, vb_y, vb_w, vb_h)
+}
+
 /// Render a flowchart diagram as SVG.
 pub fn render(
     _d: &FlowchartDiagram,
@@ -33,16 +98,86 @@ pub fn render(
     theme: &ThemeVariables,
     id: &str,
 ) -> Result<String> {
-    let mut out = String::new();
-
-    // Compute viewBox with padding.
     let padding = l.diagram_padding;
-    let vb_x = l.bounds.x - padding;
-    let vb_y = l.bounds.y - padding;
-    let vb_w = (l.bounds.width + 2.0 * padding).max(1.0);
-    let vb_h = (l.bounds.height + 2.0 * padding).max(1.0);
 
-    // SVG root — canonical attribute order via the unified shell.
+    // ── Render inner content first (markers + root group) ──────────
+    // We need the rendered content to compute the viewBox accurately,
+    // matching upstream's `getBBox()` approach.
+
+    let mut inner = String::new();
+
+    // Seed <g> wrapping markers + root — matches upstream's
+    // dagre-unified pipeline behaviour of appending directly into
+    // the seed group produced by appendDivSvgG.
+    inner.push_str(unified_shell::open_seed_group());
+    // Marker defs — emitted as-is (diagram-specific wrapper).
+    inner.push_str(&markers::defs(&l.aria_kind, id, theme));
+
+    // Root container — `<g class="root">` with clusters, edgePaths,
+    // edgeLabels, and nodes sub-groups.
+    inner.push_str(unified_shell::open_root_group());
+
+    // Clusters (subgraphs).
+    inner.push_str(&unified_shell::open_layer("clusters"));
+    for cluster in &l.clusters {
+        if let Some(cnode) = l.nodes.iter().find(|n| n.id == cluster.id && n.is_group) {
+            inner.push_str(&render_cluster(cnode, cluster, theme, id));
+        }
+    }
+    inner.push_str(unified_shell::close_layer());
+
+    // Edge paths.
+    inner.push_str(&unified_shell::open_layer("edgePaths"));
+    for (i, e) in l.edges.iter().enumerate() {
+        inner.push_str(&render_edge_path(e, i, id, &l.aria_kind));
+    }
+    inner.push_str(unified_shell::close_layer());
+
+    // Edge labels.
+    inner.push_str(&unified_shell::open_layer("edgeLabels"));
+    for e in l.edges.iter() {
+        inner.push_str(&render_edge_label(e));
+    }
+    inner.push_str(unified_shell::close_layer());
+
+    // Nodes.
+    inner.push_str(&unified_shell::open_layer("nodes"));
+    for n in &l.nodes {
+        if n.is_group {
+            continue;
+        }
+        // Prepend SVG id to dom_id — upstream prefixes the stored
+        // domId with the diagram's SVG element id at lookup time
+        // (see flowDb.lookUpDomId).
+        let mut prefixed = n.clone();
+        if let Some(did) = &prefixed.dom_id {
+            prefixed.dom_id = Some(format!("{svg_id}-{did}", svg_id = id));
+        }
+        // Dispatch to the shape registry. Unknown shapes fall back to rect.
+        let shape_id = prefixed.shape.clone().unwrap_or_else(|| "rect".to_string());
+        match shapes::draw(&shape_id, &prefixed, theme) {
+            Ok(svg) => inner.push_str(&svg),
+            Err(_) => {
+                // Fallback: plain rect.
+                if let Ok(svg) = shapes::draw("rect", &prefixed, theme) {
+                    inner.push_str(&svg);
+                }
+            }
+        }
+    }
+    inner.push_str(unified_shell::close_layer());
+
+    inner.push_str(unified_shell::close_root_group());
+    inner.push_str(unified_shell::close_seed_group());
+
+    // ── Compute viewBox from rendered content ──────────────────────
+    // Upstream uses `svg.getBBox()` which returns the actual rendered
+    // bounds including shape geometry, edge curves, and label
+    // positions. We compute from layout nodes and edges.
+    let (vb_x, vb_y, vb_w, vb_h) = compute_viewbox(l, &inner, padding);
+
+    // ── Assemble final SVG ─────────────────────────────────────────
+    let mut out = String::new();
     out.push_str(&unified_shell::open_unified_svg(
         id,
         vb_w,
@@ -58,73 +193,20 @@ pub fn render(
     out.push_str(&theme_css::neo_look_block(id, theme));
     out.push_str("</style>");
 
-    // Seed <g> wrapping markers + root — matches upstream's
-    // dagre-unified pipeline behaviour of appending directly into
-    // the seed group produced by appendDivSvgG.
-    out.push_str(unified_shell::open_seed_group());
-    // Marker defs — emitted as-is (diagram-specific wrapper).
-    out.push_str(&markers::defs(&l.aria_kind, id, theme));
+    out.push_str(&inner);
 
-    // Root container — `<g class="root">` with clusters, edgePaths,
-    // edgeLabels, and nodes sub-groups.
-    out.push_str(unified_shell::open_root_group());
-
-    // Clusters (subgraphs).
-    out.push_str(&unified_shell::open_layer("clusters"));
-    for cluster in &l.clusters {
-        if let Some(cnode) = l.nodes.iter().find(|n| n.id == cluster.id && n.is_group) {
-            out.push_str(&render_cluster(cnode, cluster, theme));
-        }
-    }
-    out.push_str(unified_shell::close_layer());
-
-    // Edge paths.
-    out.push_str(&unified_shell::open_layer("edgePaths"));
-    for (i, e) in l.edges.iter().enumerate() {
-        out.push_str(&render_edge_path(e, i, id, &l.aria_kind));
-    }
-    out.push_str(unified_shell::close_layer());
-
-    // Edge labels.
-    out.push_str(&unified_shell::open_layer("edgeLabels"));
-    for e in l.edges.iter() {
-        out.push_str(&render_edge_label(e));
-    }
-    out.push_str(unified_shell::close_layer());
-
-    // Nodes.
-    out.push_str(&unified_shell::open_layer("nodes"));
-    for n in &l.nodes {
-        if n.is_group {
-            continue;
-        }
-        // Dispatch to the shape registry. Unknown shapes fall back to rect.
-        let shape_id = n.shape.clone().unwrap_or_else(|| "rect".to_string());
-        match shapes::draw(&shape_id, n, theme) {
-            Ok(svg) => out.push_str(&svg),
-            Err(_) => {
-                // Fallback: plain rect.
-                if let Ok(svg) = shapes::draw("rect", n, theme) {
-                    out.push_str(&svg);
-                }
-            }
-        }
-    }
-    out.push_str(unified_shell::close_layer());
-
-    out.push_str(unified_shell::close_root_group());
-    out.push_str(unified_shell::close_seed_group());
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
     out.push_str(unified_shell::close_unified_svg());
     Ok(out)
 }
 
-fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables) -> String {
+fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables, svg_id: &str) -> String {
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
     let x = node.x.unwrap_or(0.0);
     let y = node.y.unwrap_or(0.0);
-    let id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
+    let base_id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
+    let id = format!("{svg_id}-{base_id}");
     let label = node.label.clone().unwrap_or_default();
 
     let mut out = String::new();
@@ -251,8 +333,13 @@ fn render_edge_label(e: &UEdge) -> String {
     };
     let label_text = e.label.clone().unwrap_or_default();
     let esc = xml_escape(&label_text);
-    let (w, h) = if esc.is_empty() {
-        (0.0, 0.0)
+    let is_empty = esc.is_empty();
+    // Upstream always measures the label height (even when empty),
+    // using the font's line-height. For empty labels, width=0 but
+    // height is still the font's line-height.
+    let (w, h) = if is_empty {
+        let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
+        (0.0, lh)
     } else {
         measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true)
     };
@@ -261,7 +348,7 @@ fn render_edge_label(e: &UEdge) -> String {
     let opts = LabelOpts {
         data_id: Some(&e.id),
         group_style: None,
-        wrap_in_p: !esc.is_empty(),
+        wrap_in_p: !is_empty,
         ..LabelOpts::default()
     };
     fo_edge(&esc, lx, ly, w, h, opts)
@@ -698,6 +785,22 @@ mod tests {
             );
         }
         // This test never fails — it reports progress.
+    }
+
+    /// Diagnostic: dump our SVG to /tmp for comparison
+    #[test]
+    #[ignore]
+    fn dump_02_svg() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let rel = "ext_fixtures/cypress/flowchart/02";
+        let source = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))).unwrap();
+        let d = fcp::parse(&source).unwrap();
+        let theme = theme::get_theme("default");
+        let l = fcl::layout(&d, &theme).unwrap();
+        let id = id_for_fixture(rel);
+        let got = super::render(&d, &l, &theme, &id).unwrap();
+        std::fs::write("/tmp/rust_02.svg", &got).unwrap();
+        eprintln!("Wrote {} bytes to /tmp/rust_02.svg", got.len());
     }
 
     /// Diagnostic: probe the first divergence point for a single fixture.

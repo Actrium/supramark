@@ -41,8 +41,18 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         tx = fmt_num(tx),
         ty = fmt_num(ty),
     ));
+    // Upstream omits rx/ry when both are 0 (D3's .attr() skips
+    // attributes whose value is 0 for rect elements). Only emit
+    // them when the node has rx/ry set (e.g. round shape).
+    let rx_ry = match (node.rx, node.ry) {
+        (Some(rx), Some(ry)) if rx > 0.0 && ry > 0.0 => {
+            format!(r#" rx="{}" ry="{}""#, fmt_num(rx), fmt_num(ry))
+        }
+        _ => String::new(),
+    };
     out.push_str(&format!(
-        r#"<rect class="basic label-container" style="" rx="0" ry="0" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        r#"<rect class="basic label-container" style=""{rx_ry} x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        rx_ry = rx_ry,
         x = fmt_num(x),
         y = fmt_num(y),
         w = fmt_num(w),
@@ -78,7 +88,7 @@ mod tests {
         let theme = ThemeVariables::default();
         let got = draw(&n, &theme).unwrap();
         assert!(got.starts_with(
-            r#"<g class="node undefined " id="n1" transform="translate(60, 30)"><rect class="basic label-container" style="" rx="0" ry="0" x="-50" y="-25" width="100" height="50"></rect>"#
+            r#"<g class="node undefined " id="n1" transform="translate(60, 30)"><rect class="basic label-container" style="" x="-50" y="-25" width="100" height="50"></rect>"#
         ));
         assert!(
             got.contains(r#"<foreignObject "#),

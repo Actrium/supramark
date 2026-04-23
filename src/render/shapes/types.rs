@@ -212,6 +212,9 @@ pub fn measure_label(label: &str, font_family: &str, font_size: f64, bold: bool)
 /// trapezoid variants, diamond, choice, …) so that attribute order
 /// and whitespace are identical across them.
 ///
+/// Upstream's `insertPolygonShape` emits `class="label-container"`
+/// (no "basic"), no `style` attribute, and uses `></polygon>` closing.
+///
 /// `pts` are already in centred-around-origin coordinates — no
 /// further translation is applied inside the inner `<polygon>`.
 pub fn emit_polygon_node(
@@ -237,7 +240,7 @@ pub fn emit_polygon_node(
         ty = fmt_num(ty),
     ));
     out.push_str(&format!(
-        r#"<polygon class="basic label-container" style="" points="{p}"/>"#,
+        r#"<polygon class="label-container" points="{p}"></polygon>"#,
         p = pts_attr.join(" "),
     ));
     if !label.is_empty() {

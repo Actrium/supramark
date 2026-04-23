@@ -53,25 +53,24 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     data.layout_algorithm = Some("dagre".into());
     data.markers.push("barbEnd".into());
 
-    // Emit nodes.
+    // Emit nodes (dom_ids assigned later based on edge traversal order).
     let mut node_counter: usize = 0;
     for state in &d.states {
         let mut n = LNode::default();
         n.id = state.id.clone();
         n.parent_id = state.parent.clone();
-        // Upstream dom_id format: "state-{itemId}-{counter}"
-        n.dom_id = Some(format!("state-{}-{}", state.id, node_counter));
-        node_counter += 1;
+        // dom_id will be assigned below after edge traversal
         n.label = state.label.clone().or_else(|| Some(state.id.clone()));
         n.description = state.description.clone();
         n.look = Some("classic".into());
         n.label_type = Some("markdown".into());
         match state.kind {
             StateKind::StartEnd => {
-                // Shape picked by the renderer based on edge role; default
-                // to start marker here (renderer may swap to state_end
-                // when the node is only ever a transition target).
-                n.shape = Some("stateStart".into());
+                // Shape determined by the node id: root_start → start,
+                // root_end → end. Upstream uses parsedItem.start boolean
+                // (true for start, false for end).
+                let is_start = state.id.ends_with("_start");
+                n.shape = Some(if is_start { "stateStart" } else { "stateEnd" }.into());
                 n.width = Some(14.0);
                 n.height = Some(14.0);
                 n.label = None;
@@ -152,8 +151,19 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         data.nodes.push(n);
     }
 
-    // Emit edges (transitions).
+    // Emit edges (transitions) and assign dom_ids matching upstream's
+    // graphItemCount logic: each edge i increments the counter after
+    // processing both endpoints. A node's dom_id uses the counter at
+    // the time it is last seen (upstream's insertOrUpdateNode overwrites).
+    let mut graph_item_count: usize = 0;
     for (i, t) in d.transitions.iter().enumerate() {
+        // Update dom_id for source and target using current counter.
+        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.source) {
+            n.dom_id = Some(format!("state-{}-{}", t.source, graph_item_count));
+        }
+        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
+            n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
+        }
         let mut e = LEdge::default();
         e.id = format!("edge{}", i);
         e.start = Some(t.source.clone());
@@ -168,6 +178,16 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             e.label = Some(lines.join("\n"));
         }
         data.edges.push(e);
+        graph_item_count += 1;
+    }
+
+    // For any nodes not yet assigned a dom_id (e.g. standalone state
+    // declarations that have no edges), assign one using the current counter.
+    for n in data.nodes.iter_mut() {
+        if n.dom_id.is_none() {
+            n.dom_id = Some(format!("state-{}-{}", n.id, graph_item_count));
+            graph_item_count += 1;
+        }
     }
 
     // Notes: emit as extra nodes on the same composite level as target
@@ -177,8 +197,8 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         let nid = format!("note{}", ni);
         let mut n = LNode::default();
         n.id = nid.clone();
-        n.dom_id = Some(format!("state-{}----note-{}", note.target, node_counter));
-        node_counter += 1;
+        n.dom_id = Some(format!("state-{}----note-{}", note.target, graph_item_count));
+        graph_item_count += 1;
         n.shape = Some("note".into());
         n.css_classes = Some("statediagram-note".into());
         n.label_type = Some("markdown".into());

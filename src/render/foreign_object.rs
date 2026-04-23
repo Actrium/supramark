@@ -39,6 +39,23 @@
 
 use crate::font_metrics::{line_height, text_width};
 
+/// Replace FontAwesome icon references (`fa:fa-car`, `fas:fa-spinner`, etc.)
+/// with `<i class="fa fa-car"></i>` etc. — matches upstream's
+/// `createText.ts::replaceIconSubstring` fallback when the icon is not
+/// registered in the Iconify registry.
+pub fn replace_fa_icons(text: &str) -> String {
+    regex::Regex::new(r"(fa[bklrs]?):fa-([\w-]+)")
+        .unwrap()
+        .replace_all(text, |caps: &regex::Captures| {
+            let prefix = &caps[1];
+            let icon = &caps[2];
+            // Upstream: `<i class='fa fa-car'></i>` (space between prefix and
+            // `fa-icon` name, using `fa-` prefix on the icon).
+            format!(r#"<i class="{} fa-{}"></i>"#, prefix, icon)
+        })
+        .to_string()
+}
+
 // ─── Public API ────────────────────────────────────────────────────────
 
 /// Tuning knobs for `render_node_label` / `render_edge_label`.
@@ -177,10 +194,16 @@ pub fn render_edge_label(
     // Edge labels omit the `<rect>` marker — addBackground=true handles
     // that branch in render_node_label.
     let inner = render_node_label(text, width, height, &opts);
+    // Upstream omits the `transform` attribute entirely when the label
+    // has no text (empty edge labels don't get positioned).
+    let transform_attr = if text.is_empty() {
+        String::new()
+    } else {
+        format!(r#" transform="translate({lx}, {ly})""#, lx = fmt_num(label_x), ly = fmt_num(label_y))
+    };
     format!(
-        r#"<g class="edgeLabel" transform="translate({lx}, {ly})">{inner}</g>"#,
-        lx = fmt_num(label_x),
-        ly = fmt_num(label_y),
+        r#"<g class="edgeLabel"{transform}>{inner}</g>"#,
+        transform = transform_attr,
         inner = inner,
     )
 }
@@ -264,8 +287,11 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
     if escaped_label.is_empty() {
         return String::new();
     }
-    let (w, h) = measure_html_label(escaped_label, font, 200.0, true);
-    render_node_label(escaped_label, w, h, &LabelOpts::default())
+    // Replace FontAwesome icon references (fa:fa-car → <i class="fa fa-car"></i>).
+    // Applied after xml_escape since the FA pattern uses no XML-special chars.
+    let processed = replace_fa_icons(escaped_label);
+    let (w, h) = measure_html_label(&processed, font, 200.0, true);
+    render_node_label(&processed, w, h, &LabelOpts::default())
 }
 
 // ─── CSS-aware label measurement ───────────────────────────────────────
