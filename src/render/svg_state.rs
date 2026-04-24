@@ -143,85 +143,81 @@ pub fn render(
 /// the regular state nodes (not start/end circles). The right/bottom
 /// edges are derived from the actual content extent.
 fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
-    // Find max half-dimensions from regular state nodes (not start/end).
-    // Start/end nodes are circles with r=7, but upstream's getBBox
-    // anchors the viewBox based on the rectangular state nodes.
-    let mut max_hw: f64 = 0.0;
-    let mut max_hh: f64 = 0.0;
+    // Simulate upstream's `svg.node().getBBox()` with the jsdom shim used
+    // to generate reference SVGs.  That shim collects intrinsic bounding
+    // boxes of all SVG primitives (rect, circle, path, foreignObject …)
+    // while **ignoring all transform attributes**.  Since every node group
+    // carries a `transform="translate(cx,cy)"` that the shim skips, each
+    // node contributes its LOCAL-coordinate bbox to the union:
+    //
+    //   regular state node  →  rect: {x:-w/2, y:-h/2, w, h}
+    //                          foreignObject: {x:0, y:0, w:lw, h:lh}
+    //                          union: {x:-w/2, x_max:max(w/2,lw), y:-h/2, y_max:max(h/2,lh)}
+    //
+    //   start/end circle    →  circle at cx=0,cy=0,r=7: {x:-7, y:-7, w:14, h:14}
+    //
+    // Edge paths live in <g class="edgePaths"> with no transform, so their
+    // `d`-attribute coordinates are already in the same space as node locals
+    // (i.e. the layout's absolute space — both merge correctly).
+
+    let mut g_x_min: f64 = f64::INFINITY;
+    let mut g_x_max: f64 = f64::NEG_INFINITY;
+    let mut g_y_min: f64 = f64::INFINITY;
+    let mut g_y_max: f64 = f64::NEG_INFINITY;
+
     for n in &l.result.nodes {
         if n.is_group || n.extra.get("__skip_render").is_some() {
             continue;
         }
         let shape = n.shape.as_deref().unwrap_or("state");
-        if matches!(shape, "stateStart" | "state_start" | "start" | "stateEnd" | "state_end" | "end") {
-            continue;
-        }
-        let w = n.width.unwrap_or(0.0);
-        let h = n.height.unwrap_or(0.0);
-        max_hw = max_hw.max(w / 2.0);
-        max_hh = max_hh.max(h / 2.0);
+        let (nx_min, nx_max, ny_min, ny_max) = if matches!(
+            shape,
+            "stateStart" | "state_start" | "start"
+            | "stateEnd" | "state_end" | "end"
+            | "forkJoin" | "fork_join" | "fork" | "join"
+        ) {
+            // Circle or rectangle at local origin, r=7.
+            (-7.0_f64, 7.0_f64, -7.0_f64, 7.0_f64)
+        } else {
+            let w = n.width.unwrap_or(0.0);
+            let h = n.height.unwrap_or(0.0);
+            let padx = n.label_padding_x.unwrap_or(8.0);
+            let pady = n.label_padding_y.unwrap_or(8.0);
+            // foreignObject dimensions (label content area).
+            let lw = (w - 2.0 * padx).max(0.0);
+            let lh = (h - 2.0 * pady).max(0.0);
+            let hw = w / 2.0;
+            let hh = h / 2.0;
+            // Local bbox = union of rect and foreignObject.
+            (-hw, lw.max(hw), -hh, lh.max(hh))
+        };
+        g_x_min = g_x_min.min(nx_min);
+        g_x_max = g_x_max.max(nx_max);
+        g_y_min = g_y_min.min(ny_min);
+        g_y_max = g_y_max.max(ny_max);
     }
 
-    // If no regular state nodes, fall back to start/end circle radius.
-    if max_hw == 0.0 {
-        max_hw = 7.0;
-    }
-    if max_hh == 0.0 {
-        max_hh = 7.0;
-    }
-
-    let vx = -(max_hw + pad);
-    let vy = -(max_hh + pad);
-
-    // Compute rightmost x from node rects (clipped) and
-    // bottom y from edge endpoints. Upstream's getBBox appears to
-    // measure the content bounding box after rendering, where the
-    // right edge aligns with the rect positions minus 2*padding,
-    // and the bottom edge is determined by the last edge endpoint.
-    let mut content_right: f64 = 0.0;
-    for n in &l.result.nodes {
-        if n.is_group || n.extra.get("__skip_render").is_some() {
-            continue;
-        }
-        let cx = n.x.unwrap_or(0.0);
-        let w = n.width.unwrap_or(14.0);
-        content_right = content_right.max(cx + w / 2.0);
-    }
-    // Also consider edge points for x extent.
+    // Edge points — in absolute layout space (no transform on edge groups).
     for e in &l.result.edges {
         if let Some(pts) = &e.points {
             for p in pts {
-                content_right = content_right.max(p.x);
+                g_x_min = g_x_min.min(p.x);
+                g_x_max = g_x_max.max(p.x);
+                g_y_min = g_y_min.min(p.y);
+                g_y_max = g_y_max.max(p.y);
             }
         }
     }
 
-    // Bottom extent: use the last edge endpoint y, matching upstream's
-    // getBBox behavior where the end state rough.js circle doesn't
-    // extend the bbox beyond the edge endpoint.
-    let mut content_bottom: f64 = 0.0;
-    for e in &l.result.edges {
-        if let Some(pts) = &e.points {
-            for p in pts {
-                content_bottom = content_bottom.max(p.y);
-            }
-        }
-    }
-    // Also consider node positions for y extent (in case there are
-    // nodes below the last edge endpoint).
-    for n in &l.result.nodes {
-        if n.is_group || n.extra.get("__skip_render").is_some() {
-            continue;
-        }
-        let cy = n.y.unwrap_or(0.0);
-        let h = n.height.unwrap_or(14.0);
-        content_bottom = content_bottom.max(cy + h / 2.0);
+    // Fall back when the layout has no renderable content at all.
+    if !g_x_min.is_finite() {
+        return (-(7.0 + pad), -(7.0 + pad), 14.0 + 2.0 * pad, 14.0 + 2.0 * pad);
     }
 
-    // ViewBox right edge = content_right - 2*pad
-    // ViewBox bottom edge = content_bottom + pad
-    let vw = (content_right - 2.0 * pad) - vx;
-    let vh = (content_bottom + pad) - vy;
+    let vx = g_x_min - pad;
+    let vy = g_y_min - pad;
+    let vw = (g_x_max - g_x_min) + 2.0 * pad;
+    let vh = (g_y_max - g_y_min) + 2.0 * pad;
 
     (vx, vy, vw.max(1.0), vh.max(1.0))
 }
@@ -803,6 +799,104 @@ mod tests {
     use crate::theme::get_theme;
     use std::fs;
     use std::path::PathBuf;
+
+    /// Diagnostic probe: sweeps all cypress/state fixtures, ranks by
+    /// common-prefix ratio, dumps top mismatches to /tmp.
+    /// Never asserts; use with `-- --nocapture`.
+    #[test]
+    fn dump_state_multi_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dir = base.join("tests/ext_fixtures/cypress/state");
+        let Ok(entries) = std::fs::read_dir(&dir) else { return };
+        let mut mmds: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                if p.extension().and_then(|s| s.to_str()) == Some("mmd") {
+                    let stem = p.file_stem()?.to_str()?.to_string();
+                    Some(format!("ext_fixtures/cypress/state/{}", stem))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        mmds.sort();
+        let mut results: Vec<(String, usize, usize, usize)> = vec![];
+        for rel in &mmds {
+            let Ok(mmd) = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))) else {
+                continue;
+            };
+            let Ok(exp) =
+                std::fs::read_to_string(base.join(format!("tests/reference/{}.svg", rel)))
+            else {
+                continue;
+            };
+            let stem = rel.replace('/', "-").replace("ext-fixtures-", "");
+            let id = format!("ref-{}", rel.replace('/', "-").replace("_", "-"));
+            let Ok(d) = parse(&mmd) else { continue };
+            let theme = get_theme("default");
+            let Ok(l) = crate::layout::state::layout(&d, &theme) else {
+                continue;
+            };
+            let Ok(got) = render(&d, &l, &theme, &id) else {
+                continue;
+            };
+            let prefix = got
+                .bytes()
+                .zip(exp.bytes())
+                .take_while(|(a, b)| a == b)
+                .count();
+            results.push((rel.clone(), got.len(), exp.len(), prefix));
+            if got == exp {
+                let _ = std::fs::write(format!("/tmp/rust_state_{}.svg", stem), &got);
+            }
+        }
+        // Sort by descending prefix ratio (prefix / min(got,exp)).
+        results.sort_by(|a, b| {
+            let ra = a.3 as f64 / a.1.min(a.2) as f64;
+            let rb = b.3 as f64 / b.1.min(b.2) as f64;
+            rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let exact: Vec<_> = results.iter().filter(|r| r.3 == r.1 && r.1 == r.2).collect();
+        eprintln!("=== dump_state_multi_diff: {} fixtures, {} exact ===", results.len(), exact.len());
+        for r in exact {
+            eprintln!("  EXACT: {}", r.0);
+        }
+        eprintln!("=== Top 10 by prefix ratio ===");
+        for r in results.iter().take(10) {
+            let p = r.3;
+            let stem = r.0.replace("ext_fixtures/cypress/state/", "");
+            eprintln!("  [{}] got={} exp={} prefix={}", stem, r.1, r.2, p);
+            if p < r.1.min(r.2) {
+                // Write top mismatches for examination.
+                let _ = std::fs::write(format!("/tmp/rust_state_{}.svg", stem), {
+                    let mmd_path = base.join(format!("tests/{}.mmd", r.0));
+                    let Ok(mmd) = std::fs::read_to_string(&mmd_path) else { continue };
+                    let Ok(d) = parse(&mmd) else { continue };
+                    let theme = get_theme("default");
+                    let Ok(l) = crate::layout::state::layout(&d, &theme) else { continue };
+                    let Ok(got) = render(&d, &l, &theme, &format!("ref-{}", r.0.replace(['/', '_'], "-"))) else { continue };
+                    got
+                });
+                let exp_path = base.join(format!("tests/reference/{}.svg", r.0));
+                let Ok(exp) = std::fs::read_to_string(&exp_path) else { continue };
+                let Ok(got_bytes) = std::fs::read(format!("/tmp/rust_state_{}.svg", stem)) else { continue };
+                let got = String::from_utf8_lossy(&got_bytes);
+                eprintln!(
+                    "  got[{}..{}] = {:?}",
+                    p.saturating_sub(20),
+                    (p + 80).min(got.len()),
+                    &got[p.saturating_sub(20)..(p + 80).min(got.len())]
+                );
+                eprintln!(
+                    "  exp[{}..{}] = {:?}",
+                    p.saturating_sub(20),
+                    (p + 80).min(exp.len()),
+                    &exp[p.saturating_sub(20)..(p + 80).min(exp.len())]
+                );
+            }
+        }
+    }
 
     /// Diagnostic probe that reports alignment of the renderer's
     /// `<svg>`-shell + `<style>` block against the reference. The

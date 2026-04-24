@@ -17,6 +17,18 @@
 
 use super::DiagramMeta;
 
+/// A single item in upstream's flat parse order list, used to reproduce
+/// the `graphItemCount` dom_id assignment that upstream's `setupGraph()`
+/// applies.  Upstream processes state-declarations *and* relations in a
+/// single flat pass, incrementing a shared counter after each item.
+#[derive(Debug, Clone)]
+pub enum ParseItem {
+    /// Explicit `state …` declaration — carries the resolved state id.
+    StateDecl(String),
+    /// `A --> B` transition — carries the index into `transitions`.
+    Relation(usize),
+}
+
 /// Top-level state-diagram model.
 #[derive(Debug, Clone, Default)]
 pub struct StateDiagram {
@@ -37,6 +49,9 @@ pub struct StateDiagram {
     /// Free-standing notes attached to a state. Note geometry is
     /// computed by the layout stage, not stored here.
     pub notes: Vec<Note>,
+    /// Parse-order item sequence mirroring upstream's `items` array.
+    /// Used to reproduce the `graphItemCount`-based dom_id assignment.
+    pub items: Vec<ParseItem>,
     /// `classDef`-style style definitions, keyed by class name. Values
     /// are raw CSS fragments.
     pub class_defs: Vec<ClassDef>,

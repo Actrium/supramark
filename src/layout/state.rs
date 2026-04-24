@@ -15,7 +15,7 @@ use crate::error::Result;
 use crate::font_metrics::{line_height as font_line_height, text_width};
 use crate::layout::unified::types::{Edge as LEdge, LayoutData, LayoutResult, Node as LNode};
 use crate::layout::unified::render as unified_render;
-use crate::model::state::{StateDiagram, StateKind};
+use crate::model::state::{ParseItem, StateDiagram, StateKind};
 use crate::theme::ThemeVariables;
 
 /// Layout result for one state diagram.
@@ -151,19 +151,18 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         data.nodes.push(n);
     }
 
-    // Emit edges (transitions) and assign dom_ids matching upstream's
-    // graphItemCount logic: each edge i increments the counter after
-    // processing both endpoints. A node's dom_id uses the counter at
-    // the time it is last seen (upstream's insertOrUpdateNode overwrites).
+    // Assign dom_ids and emit edges following upstream's `graphItemCount`
+    // logic from `setupGraph()`.  Upstream processes state-declarations
+    // AND relations in a single flat pass (in parse order), calling
+    // `insertOrUpdateNode` with the current counter for every node
+    // touched, then incrementing the counter.  We replay that sequence
+    // using the `items` list recorded by the parser so that dom_ids
+    // match exactly.
     let mut graph_item_count: usize = 0;
+    // First pass: build edges list in transition index order (needed
+    // because edges reference transitions by index).
+    let mut edge_list: Vec<LEdge> = Vec::with_capacity(d.transitions.len());
     for (i, t) in d.transitions.iter().enumerate() {
-        // Update dom_id for source and target using current counter.
-        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.source) {
-            n.dom_id = Some(format!("state-{}-{}", t.source, graph_item_count));
-        }
-        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
-            n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
-        }
         let mut e = LEdge::default();
         e.id = format!("edge{}", i);
         e.start = Some(t.source.clone());
@@ -177,12 +176,51 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         if let Some(lines) = &t.label {
             e.label = Some(lines.join("\n"));
         }
-        data.edges.push(e);
-        graph_item_count += 1;
+        edge_list.push(e);
     }
 
+    // Second pass: process items in parse order to assign dom_ids.
+    if !d.items.is_empty() {
+        for item in &d.items {
+            match item {
+                ParseItem::StateDecl(state_id) => {
+                    // Upstream's `insertOrUpdateNode` overwrites the
+                    // node's dom_id each time it is mentioned.
+                    if let Some(n) = data.nodes.iter_mut().find(|n| n.id == *state_id) {
+                        n.dom_id = Some(format!("state-{}-{}", state_id, graph_item_count));
+                    }
+                    graph_item_count += 1;
+                }
+                ParseItem::Relation(idx) => {
+                    if let Some(t) = d.transitions.get(*idx) {
+                        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.source) {
+                            n.dom_id = Some(format!("state-{}-{}", t.source, graph_item_count));
+                        }
+                        if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
+                            n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
+                        }
+                    }
+                    graph_item_count += 1;
+                }
+            }
+        }
+    } else {
+        // Fallback for diagrams parsed before items tracking: only relations.
+        for t in &d.transitions {
+            if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.source) {
+                n.dom_id = Some(format!("state-{}-{}", t.source, graph_item_count));
+            }
+            if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
+                n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
+            }
+            graph_item_count += 1;
+        }
+    }
+    data.edges.extend(edge_list);
+
     // For any nodes not yet assigned a dom_id (e.g. standalone state
-    // declarations that have no edges), assign one using the current counter.
+    // declarations that have no edges and were not in items list), assign
+    // one using the current counter.
     for n in data.nodes.iter_mut() {
         if n.dom_id.is_none() {
             n.dom_id = Some(format!("state-{}-{}", n.id, graph_item_count));

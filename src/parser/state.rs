@@ -22,7 +22,8 @@
 use crate::config::{directive, frontmatter};
 use crate::error::{MermaidError, Result};
 use crate::model::state::{
-    ClassApply, ClassDef, Note, NotePosition, State, StateDiagram, StateKind, Transition,
+    ClassApply, ClassDef, Note, NotePosition, ParseItem, State, StateDiagram, StateKind,
+    Transition,
 };
 
 /// Public entry.
@@ -196,6 +197,7 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
             if let Some(stripped) = rest.strip_suffix('{') {
                 let decl = stripped.trim();
                 let id = ingest_state_decl(&mut diagram, decl, parent_stack.last().cloned());
+                diagram.items.push(ParseItem::StateDecl(id.clone()));
                 // Promote to composite.
                 if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
                     if s.kind == StateKind::Simple {
@@ -205,7 +207,8 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
                 parent_stack.push(id);
                 continue;
             }
-            ingest_state_decl(&mut diagram, rest, parent_stack.last().cloned());
+            let id = ingest_state_decl(&mut diagram, rest, parent_stack.last().cloned());
+            diagram.items.push(ParseItem::StateDecl(id));
             continue;
         }
 
@@ -226,7 +229,9 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
 
         // --- Transition ---------------------------------------------------
         if let Some(tr) = parse_transition(line, &mut diagram, &mut next_start_end_idx, &parent_stack) {
+            let idx = diagram.transitions.len();
             diagram.transitions.push(tr);
+            diagram.items.push(ParseItem::Relation(idx));
             continue;
         }
 
@@ -250,6 +255,7 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         // Fallback — bare identifier is a state declaration.
         if is_identifier(line) {
             ensure_state(&mut diagram, line, parent_stack.last().cloned());
+            diagram.items.push(ParseItem::StateDecl(line.to_string()));
             continue;
         }
 
