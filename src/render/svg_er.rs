@@ -228,7 +228,7 @@ fn render_entity_node_with_attrs(id: &str, e: &EntityLayout, theme: &ThemeVariab
         fw = fmt_num(a.name_bbox_width),
         fh = fmt_num(name_h - text_pad),
         mw = calc_text_max_width(&e.label),
-        t = html_escape(&e.label),
+        t = render_attr_markdown(&e.label),
     ));
 
     // ── Per-row attribute labels (type / name / keys / comment) ────
@@ -398,22 +398,30 @@ fn attr_foreign_object_html(cls: &str, tx: f64, ty: f64, w: f64, h: f64, text: &
     // case here to choose the correct inner-span shape. The escaped
     // form (&lt; &gt;) is what upstream measures for max-width.
     let has_generics = cls == "attribute-type" && (text.contains('<') || text.contains('>'));
-    let max_w_text = if has_generics {
-        html_escape(text)
+    // max-width computation:
+    // - generics: measure the raw escaped text (including markdown decorators) at 16px
+    // - others: strip markdown per line, take max-line width at 16px
+    let max_w = if has_generics {
+        calc_text_max_width_raw_literal(&html_escape(text))
     } else {
-        text.to_string()
+        calc_text_max_width_raw(text)
     };
-    let max_w = calc_text_max_width_raw(&max_w_text);
 
     let inner_span = if text.is_empty() {
         r#"<span class="nodeLabel "></span>"#.to_string()
     } else if has_generics {
-        // Raw text (HTML-escaped) inside the div, no wrapper tags.
-        html_escape(text)
+        // attribute-type with generic notation: strip markdown decorators
+        // then HTML-escape (upstream's `parseGenericTypes` + `sanitize` path
+        // produces plain escaped text, no bold/italic wrappers).
+        use crate::text::markdown_text_content;
+        html_escape(&markdown_text_content(text))
     } else {
+        // attribute-name, attribute-keys, attribute-comment: run through
+        // markdown-to-HTML so bold/italic markers become proper HTML tags,
+        // matching upstream's `marked` rendering inside the foreignObject.
         format!(
             r#"<span class="nodeLabel "><p>{}</p></span>"#,
-            html_escape(text)
+            render_attr_markdown(text)
         )
     };
     format!(
@@ -505,16 +513,51 @@ fn parse_generic_types(input: &str) -> String {
     output.join("")
 }
 
-/// `calc_text_max_width` variant that takes the already-escaped text —
-/// used by `attr_foreign_object_html` so generics get the wider
-/// `&lt;T&gt;` measurement.
-fn calc_text_max_width_raw(text: &str) -> i64 {
+/// Measure text as-is (no markdown stripping, no `<br>` splitting) for the
+/// `max-width` of generic-type cells.  The text is already HTML-escaped and
+/// may contain markdown decorators — upstream measures the full string.
+fn calc_text_max_width_raw_literal(text: &str) -> i64 {
     use crate::font_metrics::text_width;
     if text.is_empty() {
         return 100;
     }
     let w = text_width(text, "sans-serif", 16.0, false, false);
     (w + 100.0).round() as i64
+}
+
+/// `calc_text_max_width` variant for attribute cells (name / keys / comment).
+///
+/// Upstream's `addText` calls `calculateTextWidth(text, config)` at 16 px.
+/// The behaviour depends on whether the text contains `<br>` break tags:
+///
+/// - **No `<br>`**: measure the raw text as-is (markdown decorators contribute
+///   to the width, matching upstream's unstripped measurement).
+/// - **With `<br>`**: split on break tags, strip markdown per segment, take the
+///   maximum segment width.  The per-segment stripping is necessary because
+///   upstream's `calculateTextWidth` effectively sees the plain-text of each
+///   visual line when `<br>` forces multi-line rendering.
+fn calc_text_max_width_raw(text: &str) -> i64 {
+    use crate::font_metrics::text_width;
+    use crate::layout::er::split_br;
+    use crate::text::markdown_text_content;
+    if text.is_empty() {
+        return 100;
+    }
+    let parts = split_br(text);
+    let max_w = if parts.len() == 1 {
+        // No <br> — measure raw text as-is
+        text_width(text, "sans-serif", 16.0, false, false)
+    } else {
+        // Multi-line — strip markdown per segment, take max
+        parts
+            .iter()
+            .map(|seg| {
+                let plain = markdown_text_content(seg);
+                text_width(&plain, "sans-serif", 16.0, false, false)
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    (max_w + 100.0).round() as i64
 }
 
 /// `max-width: Xpx` on the div — upstream uses
@@ -795,10 +838,9 @@ fn render_edge_label(e: &EdgeLayout) -> String {
             (format!("<p>{}</p>", html_escape(&e.label)), false)
         }
     } else {
-        // Upstream mermaid's markdown processing converts `<br />` to `<br/>`
-        // and passes them through unescaped in the foreignObject body.
-        // We must not html_escape those break tags.
-        (escape_label_keeping_br(&e.label), true)
+        // Upstream mermaid's markdown processing renders bold/italic markers
+        // and converts `<br />` to `<br/>`.  Apply the same pipeline here.
+        (render_attr_markdown(&e.label), true)
     };
     let opts = LabelOpts {
         data_id: Some(&e.id),
@@ -1149,6 +1191,28 @@ fn escape_label_keeping_br(s: &str) -> String {
     parts
         .iter()
         .map(|p| html_escape(p))
+        .collect::<Vec<_>>()
+        .join("<br/>")
+}
+
+/// Render an attribute cell text (name / comment / entity-name) through
+/// upstream's markdown pipeline:
+///  1. split on `<br ...>` tags,
+///  2. convert each segment's markdown decorators to HTML tags,
+///  3. rejoin with `<br/>`.
+///
+/// This mirrors what mermaid's `marked` library does when inserting
+/// the label into a foreignObject `<p>` element.
+fn render_attr_markdown(s: &str) -> String {
+    use crate::layout::er::split_br;
+    use crate::text::markdown_to_html;
+    let parts = split_br(s);
+    if parts.len() == 1 {
+        return markdown_to_html(s);
+    }
+    parts
+        .iter()
+        .map(|p| markdown_to_html(p))
         .collect::<Vec<_>>()
         .join("<br/>")
 }

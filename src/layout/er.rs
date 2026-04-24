@@ -25,6 +25,7 @@
 use crate::error::Result;
 use crate::font_metrics::{line_height, text_width};
 use crate::layout::unified::render as unified_render;
+use crate::text::markdown_text_content;
 use crate::layout::unified::types::{Edge, LayoutData, LayoutResult, Node};
 use crate::model::er::{ErDiagram, Relationship};
 use crate::theme::ThemeVariables;
@@ -155,7 +156,11 @@ fn measure_width(text: &str) -> f64 {
     if text.is_empty() {
         return 0.0;
     }
-    // Split on HTML break tags (<br/>, <br />, <br/> variants).
+    // Split on HTML break tags (<br/>, <br />, <br/> variants), then strip
+    // markdown decorators from each segment before measuring.  Upstream's
+    // calculateTextWidth feeds the plain-text form (after marked renders
+    // **bold** / __bold__ / *italic* etc.) to the canvas measurer, so we
+    // must match that by applying markdown_text_content per segment.
     let raw_lines = split_br(text);
     raw_lines
         .iter()
@@ -163,7 +168,8 @@ fn measure_width(text: &str) -> f64 {
             if line.is_empty() {
                 0.0f64
             } else {
-                text_width(line, LABEL_FONT_FAMILY, LABEL_FONT_SIZE, false, false)
+                let plain = markdown_text_content(line);
+                text_width(&plain, LABEL_FONT_FAMILY, LABEL_FONT_SIZE, false, false)
             }
         })
         .sum()
@@ -764,4 +770,5 @@ mod tests {
             );
         }
     }
+
 }

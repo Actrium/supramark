@@ -33,6 +33,16 @@ pub fn markdown_text_content(s: &str) -> String {
     let mut result = String::with_capacity(n);
     let mut i = 0;
     while i < n {
+        // *** bold-italic *** — must check before ** to avoid ** consuming the
+        // wrong closing marker (e.g. `***X***` would otherwise match `**` open
+        // at 0 and closing `**` at 20, leaving inner `*X` with no closing `*`).
+        if i + 2 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' && bytes[i + 2] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 3, "***") {
+                result.push_str(&markdown_text_content(&s[i + 3..end]));
+                i = end + 3;
+                continue;
+            }
+        }
         // ** bold ** — * delimiters are always processed
         if i + 1 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' {
             if let Some(end) = find_marker_str(s, i + 2, "**") {
@@ -174,6 +184,16 @@ pub fn markdown_to_html(s: &str) -> String {
     let mut result = String::with_capacity(n + 32);
     let mut i = 0;
     while i < n {
+        // *** bold-italic *** — must check before ** to avoid wrong closing match
+        if i + 2 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' && bytes[i + 2] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 3, "***") {
+                result.push_str("<em><strong>");
+                result.push_str(&markdown_to_html(&s[i + 3..end]));
+                result.push_str("</strong></em>");
+                i = end + 3;
+                continue;
+            }
+        }
         // ** bold **
         if i + 1 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' {
             if let Some(end) = find_marker_str(s, i + 2, "**") {
