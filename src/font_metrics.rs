@@ -255,6 +255,16 @@ mod tests {
 mod extra_tests {
     use super::*;
     #[test]
+    fn measure_crash_bold() {
+        let normal = text_width("Crash", "sans-serif", 14.0, false, false);
+        let bold = text_width("Crash", "sans-serif", 14.0, true, false);
+        eprintln!("Crash normal={} bold={}", normal, bold);
+        let normal_b = text_width("B", "sans-serif", 14.0, false, false);
+        let bold_b = text_width("B", "sans-serif", 14.0, true, false);
+        eprintln!("B normal={} bold={}", normal_b, bold_b);
+    }
+
+    #[test]
     fn measure_markdown_segments() {
         eprintln!("Text: = {}", text_width("Text: ", "sans-serif", 14.0, false, false));
         eprintln!("Bolded text (bold) = {}", text_width("Bolded text", "sans-serif", 14.0, true, false));
@@ -313,5 +323,21 @@ mod extra_tests {
         eprintln!("Risk: High (BOLD) = {}", text_width("Risk: High", "sans-serif", 14.0, true, false));
         eprintln!("Verification: Test (BOLD) = {}", text_width("Verification: Test", "sans-serif", 14.0, true, false));
         eprintln!("Type: simulation (BOLD) = {}", text_width("Type: simulation", "sans-serif", 14.0, true, false));
+    }
+}
+
+#[cfg(test)]
+mod debug_note_width {
+    use super::*;
+    #[test]
+    fn note_text_width_cy11() {
+        // Upstream: jsdom textContent concatenates lines (strips <br/>).
+        // \n has zero advance so text_width with \n gives concatenated width.
+        let full = "Important information! You can write\nnotes.";
+        let w = text_width(full, "sans-serif", 14.0, false, false);
+        let note_w = w + 30.0; // + 2*15 padding
+        // Expected: (303.48828125) + 30 = 333.48828125
+        assert!((note_w - 333.48828125).abs() < 0.01,
+            "note_w = {} but expected 333.48828125", note_w);
     }
 }

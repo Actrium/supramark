@@ -15,7 +15,7 @@ use crate::error::Result;
 use crate::font_metrics::{line_height as font_line_height, text_width};
 use crate::layout::unified::types::{Edge as LEdge, LayoutData, LayoutResult, Node as LNode};
 use crate::layout::unified::render as unified_render;
-use crate::model::state::{ParseItem, StateDiagram, StateKind};
+use crate::model::state::{NotePosition, ParseItem, StateDiagram, StateKind};
 use crate::theme::ThemeVariables;
 
 /// Layout result for one state diagram.
@@ -28,6 +28,25 @@ pub struct StateLayout {
     /// to pick the outer `class="statediagram"` attribute vs the legacy
     /// `stateDiagram` one.
     pub is_v2: bool,
+}
+
+/// Strip HTML tags from text, matching jsdom's `textContent` semantics.
+///
+/// Removes all `<...>` HTML tags. Used to measure note text width since
+/// upstream measures via `getBoundingClientRect` on jsdom which strips all
+/// HTML (including `<br/>`, `<br>`, etc.) before returning text width.
+fn strip_html_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => { in_tag = true; }
+            '>' => { in_tag = false; }
+            _ if !in_tag => { out.push(ch); }
+            _ => {}
+        }
+    }
+    out
 }
 
 const DEFAULT_NODE_SPACING: f64 = 50.0;
@@ -62,8 +81,33 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         // dom_id will be assigned below after edge traversal
         n.label = state.label.clone().or_else(|| Some(state.id.clone()));
         n.description = state.description.clone();
+        // Per-node inline style from `style X fill:...` directive.
+        // Store as a comma-separated string in label_style for the renderer
+        // to process via styles2_string.
+        if let Some(ref sty) = state.style {
+            n.label_style = Some(sty.clone());
+        }
         n.look = Some("classic".into());
         n.label_type = Some("markdown".into());
+        // Determine whether any applied classDef specifies font-weight:bold.
+        // Upstream's jsdom shim resolves font-weight from inline style attributes,
+        // which includes classDef 'text styles' (font-weight:bold) applied via
+        // cssCompiledStyles → label inline style. Node size measurement uses
+        // bold metrics when font-weight:bold is detected.
+        let node_is_bold = d
+            .class_applies
+            .iter()
+            .filter(|ca| ca.state_id == state.id)
+            .any(|ca| {
+                d.class_defs
+                    .iter()
+                    .find(|cd| cd.name == ca.class_name)
+                    .map_or(false, |cd| {
+                        cd.styles
+                            .split(',')
+                            .any(|p| p.trim().trim_end_matches(';').replace(" ", "") == "font-weight:bold")
+                    })
+            });
         match state.kind {
             StateKind::StartEnd => {
                 // Shape determined by the node id: root_start → start,
@@ -71,8 +115,30 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 // (true for start, false for end).
                 let is_start = state.id.ends_with("_start");
                 n.shape = Some(if is_start { "stateStart" } else { "stateEnd" }.into());
-                n.width = Some(14.0);
-                n.height = Some(14.0);
+                // The stateEnd shape renders a rough.js circle of diameter 14.
+                // After rendering, updateNodeBounds() calls getBBox() which
+                // returns width = 14.017724288152422 (the rough outer circle
+                // bounding box). In the upstream pipeline, insertNode is called
+                // BEFORE dagre layout, so dagre sees this wider value and uses
+                // it to compute node positions.  Pass this exact width to dagre
+                // so that our layout matches the upstream positions.
+                // stateStart uses a plain SVG circle <circle r=7>, whose
+                // getBBox returns exactly width=14.
+                // stateStart uses a plain SVG <circle r=7>; getBBox → 14×14.
+                // stateEnd uses a rough.js circle; getBBox width=14.017724288152422
+                // (asymmetric control points), but height≈14.0 in practice because
+                // the rough circle is taller than wider only marginally.
+                // Dagre uses width for intra-rank x-spacing and height for
+                // rank-height calculation.  Pass width=14.017724 for stateEnd
+                // (needed when it shares a rank with other nodes) but height=14.0
+                // (so an isolated stateEnd rank stays at the correct y position).
+                if is_start {
+                    n.width = Some(14.0);
+                    n.height = Some(14.0);
+                } else {
+                    n.width = Some(14.017724288152422);
+                    n.height = Some(14.0);
+                }
                 n.label = None;
             }
             StateKind::Fork | StateKind::Join => {
@@ -123,30 +189,87 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 n.implicit_skip_render(true);
             }
             StateKind::Simple => {
-                n.shape = Some("state".into());
                 let label = state.label.as_deref().unwrap_or(&state.id);
-                let mut lines: Vec<&str> = vec![label];
-                if let Some(desc) = state.description.as_ref() {
-                    for l in desc {
-                        lines.push(l.as_str());
+                let has_desc = state.description.as_ref().map_or(false, |d| !d.is_empty());
+                if has_desc {
+                    // State node with description lines: upstream uses the
+                    // `rectWithTitle` shape. Dagre dimensions are based on
+                    // the jsdom getBBox of the label group (title + description
+                    // foreign-objects), where jsdom ignores transforms. Both
+                    // FOs contribute their local (0, text_w)×(0, lh) bboxes,
+                    // so the union width = max(title_w, desc_w), height = lh.
+                    // Node size = union_w + padding × union_h + padding.
+                    n.shape = Some("rectWithTitle".into());
+                    let desc_lines = state.description.as_ref().unwrap();
+                    let lh = font_line_height("sans-serif", DEFAULT_FONT_SIZE, node_is_bold, false);
+                    let title_w = text_width(label, "sans-serif", DEFAULT_FONT_SIZE, node_is_bold, false);
+                    let mut max_w = title_w;
+                    for dl in desc_lines {
+                        let dw = text_width(dl, "sans-serif", DEFAULT_FONT_SIZE, node_is_bold, false);
+                        if dw > max_w { max_w = dw; }
                     }
+                    let node_w = max_w + DEFAULT_LABEL_PAD_X; // + one padding (upstream: bbox.width + node.padding)
+                    let node_h = lh + DEFAULT_LABEL_PAD_X;    // + one padding (upstream: bbox.height + node.padding)
+                    n.width = Some(node_w);
+                    n.height = Some(node_h);
+                    n.label_padding_x = Some(DEFAULT_LABEL_PAD_X);
+                    n.label_padding_y = Some(DEFAULT_LABEL_PAD_Y);
+                } else {
+                    n.shape = Some("state".into());
+                    let lines: Vec<&str> = vec![label];
+                    let (w, h) = measure_lines_box(&lines, DEFAULT_FONT_SIZE, node_is_bold);
+                    n.width = Some(w);
+                    n.height = Some(h);
+                    n.label_padding_x = Some(DEFAULT_LABEL_PAD_X);
+                    n.label_padding_y = Some(DEFAULT_LABEL_PAD_Y);
+                    n.rx = Some(5.0);
+                    n.ry = Some(5.0);
                 }
-                let (w, h) = measure_lines_box(&lines, DEFAULT_FONT_SIZE);
-                n.width = Some(w);
-                n.height = Some(h);
-                n.label_padding_x = Some(DEFAULT_LABEL_PAD_X);
-                n.label_padding_y = Some(DEFAULT_LABEL_PAD_Y);
-                n.rx = Some(5.0);
-                n.ry = Some(5.0);
             }
         }
-        // Upstream: `cssClasses = ' ' + CSS_DIAGRAM_STATE` which produces a
-        // leading space before "statediagram-state". When combined with
-        // `getNodeClasses` output `"node" + " " + cssClasses + " " + extra`
-        // this yields `"node  statediagram-state "` (double space).
-        // State-start/end use class "node default" set directly by the shape.
-        if n.css_classes.is_none() && !matches!(state.kind, StateKind::StartEnd) {
-            n.css_classes = Some(" statediagram-state".into());
+        // Collect applied class names for this state (from `class X name`
+        // or `state X:::name` directives). Upstream sets
+        // `cssClasses = "${classStr} ${CSS_DIAGRAM_STATE}"` where classStr
+        // is the space-joined list of applied class names.
+        if !matches!(state.kind, StateKind::StartEnd) {
+            let applied: Vec<&str> = d
+                .class_applies
+                .iter()
+                .filter(|ca| ca.state_id == state.id)
+                .map(|ca| ca.class_name.as_str())
+                .collect();
+            let css_classes = if applied.is_empty() {
+                // Default: leading space before "statediagram-state" —
+                // upstream produces `" statediagram-state"` (note the space).
+                " statediagram-state".to_string()
+            } else {
+                // Upstream: `"exampleStyleClass statediagram-state"` — no
+                // leading space when there are applied classes.
+                format!("{} statediagram-state", applied.join(" "))
+            };
+            n.css_classes = Some(css_classes);
+
+            // Populate css_compiled_styles from classDef styles.
+            // Upstream: `nodeData.cssCompiledStyles = [...classDef.styles]`
+            // for each applied class. These are the raw CSS property strings
+            // like "fill:#fff" that the renderer merges with cssStyles.
+            if !applied.is_empty() {
+                let mut compiled: Vec<String> = Vec::new();
+                for class_name in &applied {
+                    if let Some(def) = d.class_defs.iter().find(|cd| &cd.name.as_str() == class_name) {
+                        // Split comma-separated class styles into individual properties.
+                        for prop in def.styles.split(',') {
+                            let p = prop.trim().trim_end_matches(';').trim().to_string();
+                            if !p.is_empty() {
+                                compiled.push(p);
+                            }
+                        }
+                    }
+                }
+                if !compiled.is_empty() {
+                    n.css_compiled_styles = Some(compiled);
+                }
+            }
         }
         data.nodes.push(n);
     }
@@ -159,37 +282,157 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     // using the `items` list recorded by the parser so that dom_ids
     // match exactly.
     let mut graph_item_count: usize = 0;
-    // First pass: build edges list in transition index order (needed
-    // because edges reference transitions by index).
-    let mut edge_list: Vec<LEdge> = Vec::with_capacity(d.transitions.len());
-    for (i, t) in d.transitions.iter().enumerate() {
-        let mut e = LEdge::default();
-        e.id = format!("edge{}", i);
-        e.start = Some(t.source.clone());
-        e.end = Some(t.target.clone());
-        e.arrowhead = Some("barbEnd".into());
-        e.arrow_type_end = Some("barbEnd".into());
-        e.classes = Some("transition".into());
-        e.curve = Some("basis".into());
-        e.thickness = Some("normal".into());
-        e.pattern = Some("solid".into());
-        if let Some(lines) = &t.label {
-            e.label = Some(lines.join("\n"));
-        }
-        edge_list.push(e);
-    }
 
-    // Second pass: process items in parse order to assign dom_ids.
+    // Process items in parse order to assign dom_ids AND build edges.
+    // Edges are pushed to data.edges directly here (in items order), so that
+    // the final edge order matches upstream's sequential processing:
+    //   note-edge for State1, then edge1 (transition), then note-edge for State2, ...
+    // This mirrors upstream's pattern where note processing + relation processing
+    // happen in the same sequential pass over parse items.
     if !d.items.is_empty() {
         for item in &d.items {
             match item {
                 ParseItem::StateDecl(state_id) => {
-                    // Upstream's `insertOrUpdateNode` overwrites the
-                    // node's dom_id each time it is mentioned.
+                    // Upstream: STMT_STATE calls dataFetcher which uses the
+                    // current graphItemCount for domId but does NOT increment it.
+                    // Only STMT_RELATION (edges) increment the counter after
+                    // both endpoints are stamped with the same counter value.
                     if let Some(n) = data.nodes.iter_mut().find(|n| n.id == *state_id) {
                         n.dom_id = Some(format!("state-{}-{}", state_id, graph_item_count));
                     }
-                    graph_item_count += 1;
+                    // NOTE: do NOT increment graph_item_count here.
+                }
+                ParseItem::NoteDecl(ni) => {
+                    // Process note: create noteGroup cluster, note node, and note
+                    // edge, then increment counter. The counter value used for all
+                    // note-related IDs is the current `graph_item_count` BEFORE
+                    // incrementing. The target state also gets its dom_id updated
+                    // to use this counter (matching upstream `insertOrUpdateNode`).
+                    if let Some(note) = d.notes.get(*ni) {
+                        let ctr = graph_item_count;
+                        let target = &note.target;
+
+                        // --- noteGroup cluster ---
+                        // Upstream creates a group node with id = "{target}----parent"
+                        // that both the target state and note are parented under.
+                        // In upstream's dataFetcher, the order of nodes array is:
+                        //   [noteGroup, noteData, stateData]
+                        // because insertOrUpdateNode pushes each in that order.
+                        // We replicate this by inserting noteGroup and noteData
+                        // BEFORE the target state in data.nodes.
+                        let parent_id_str = format!("{}----parent", target);
+                        let parent_dom_id = format!("state-{}----parent-{}", target, ctr);
+                        // Find the target state's current position in data.nodes,
+                        // plus its css_classes and parent_id (for noteGroup creation).
+                        // Upstream insertOrUpdateNode sequence for a state with a note:
+                        //   insertOrUpdateNode(nodes, groupData)   // noteGroup → new, pushed after existing content
+                        //   insertOrUpdateNode(nodes, noteData)    // note → new, pushed after noteGroup
+                        //   insertOrUpdateNode(nodes, nodeData2)   // state → already exists, updated in-place
+                        //
+                        // In upstream, the state may have been inserted earlier (e.g. by a
+                        // prior STMT_STATE or STMT_RELATION call), so noteGroup and noteData
+                        // are appended AFTER the state's existing position. To replicate this
+                        // exactly we insert noteGroup and noteData immediately after the state's
+                        // current array position — this way multiple note-states maintain the
+                        // same relative ordering as upstream (state1, noteGroup1, note1,
+                        // state2, noteGroup2, note2, ...).
+                        let (target_css_classes, target_parent, target_idx) = {
+                            let idx = data.nodes.iter().position(|n| n.id == *target);
+                            let css = data.nodes.iter()
+                                .find(|n| n.id == *target)
+                                .and_then(|n| n.css_classes.clone());
+                            let par = data.nodes.iter()
+                                .find(|n| n.id == *target)
+                                .and_then(|n| n.parent_id.clone());
+                            (css, par, idx)
+                        };
+                        // --- update target state dom_id ---
+                        // Upstream's insertOrUpdateNode(nodes, nodeData, classes) at
+                        // line 357 of dataFetcher.ts updates the state's domId with
+                        // the same graphItemCount (before increment). The state's
+                        // parentId is NOT changed (line 350 is commented out in
+                        // upstream): "//nodeData.parentId = parentNodeId;"
+                        // So the state STAYS at its original parent level.
+                        if let Some(state_node) = data.nodes.iter_mut().find(|n| n.id == *target) {
+                            state_node.dom_id = Some(format!("state-{}-{}", target, ctr));
+                            // Do NOT set state_node.parent_id — the state is not
+                            // inside the noteGroup cluster.
+                        }
+
+                        let mut group_node = LNode::default();
+                        group_node.id = parent_id_str.clone();
+                        group_node.dom_id = Some(parent_dom_id);
+                        group_node.is_group = true;
+                        group_node.shape = Some("noteGroup".into());
+                        group_node.padding = Some(16.0);
+                        group_node.css_classes = target_css_classes;
+                        // The parent state's own parent (if any) becomes the noteGroup's parent.
+                        group_node.parent_id = target_parent;
+                        // Insert noteGroup immediately after the target state.
+                        // If state is not found (shouldn't happen), push at end.
+                        let insert_after = target_idx.map(|i| i + 1).unwrap_or(data.nodes.len());
+                        data.nodes.insert(insert_after, group_node);
+
+                        // --- note data node ---
+                        let note_id = format!("{}----note-{}", target, ctr);
+                        let note_dom_id = format!("state-{}----note-{}", target, ctr);
+                        // Note width: text_width(stripped text) + 2*15.
+                        // Upstream measures the note HTML via jsdom textContent
+                        // which strips all HTML tags (including <br/>, <br>, etc.)
+                        // and returns a single concatenated line. `\n` has zero
+                        // advance in text_width. Strip HTML tags before measuring.
+                        let stripped_text = strip_html_tags(&note.text);
+                        let note_text_w = text_width(
+                            &stripped_text,
+                            "sans-serif",
+                            DEFAULT_FONT_SIZE,
+                            false,
+                            false,
+                        );
+                        // Note height is always 46.296875 (16.296875 + 2*15):
+                        // jsdom getBoundingClientRect on the single-line foreignObject returns
+                        // exactly one line height (16.296875) regardless of multi-line content.
+                        const NOTE_HEIGHT: f64 = 46.296875;
+                        const NOTE_PAD: f64 = 15.0;
+                        let note_w = note_text_w + 2.0 * NOTE_PAD;
+                        let mut note_node = LNode::default();
+                        note_node.id = note_id.clone();
+                        note_node.dom_id = Some(note_dom_id);
+                        note_node.shape = Some("note".into());
+                        note_node.css_classes = Some("statediagram-note".into());
+                        note_node.label_type = Some("markdown".into());
+                        note_node.look = Some("classic".into());
+                        note_node.label = Some(note.text.clone());
+                        note_node.width = Some(note_w);
+                        note_node.height = Some(NOTE_HEIGHT);
+                        note_node.parent_id = Some(parent_id_str.clone());
+                        // Insert note node right after noteGroup (which was inserted at insert_after).
+                        data.nodes.insert(insert_after + 1, note_node);
+
+                        // --- note edge ---
+                        // id = "{start}-{end}" (direction determines which end is start).
+                        // "right of" and default: state → note.
+                        // "left of": note → state.
+                        // No arrowhead (arrowhead=None).
+                        let (edge_start, edge_end) = match note.position {
+                            NotePosition::LeftOf => (note_id.clone(), target.clone()),
+                            _ => (target.clone(), note_id.clone()),
+                        };
+                        let mut note_edge = LEdge::default();
+                        note_edge.id = format!("{}-{}", edge_start, edge_end);
+                        note_edge.start = Some(edge_start);
+                        note_edge.end = Some(edge_end);
+                        // No arrowhead for note edges.
+                        note_edge.arrowhead = None;
+                        note_edge.arrow_type_end = None;
+                        note_edge.classes = Some("transition note-edge".into());
+                        note_edge.curve = Some("basis".into());
+                        note_edge.thickness = Some("normal".into());
+                        note_edge.pattern = Some("solid".into());
+                        data.edges.push(note_edge);
+
+                        graph_item_count += 1;
+                    }
                 }
                 ParseItem::Relation(idx) => {
                     if let Some(t) = d.transitions.get(*idx) {
@@ -199,6 +442,29 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                         if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
                             n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
                         }
+                        // Build the transition edge here (using current graph_item_count
+                        // for the ID), so edge IDs match upstream's "edge{graphItemCount}"
+                        // and the edge order matches the items processing sequence.
+                        let mut e = LEdge::default();
+                        e.id = format!("edge{}", graph_item_count);
+                        e.start = Some(t.source.clone());
+                        e.end = Some(t.target.clone());
+                        e.arrowhead = Some("barbEnd".into());
+                        e.arrow_type_end = Some("barbEnd".into());
+                        e.classes = Some("transition".into());
+                        e.curve = Some("basis".into());
+                        e.thickness = Some("normal".into());
+                        e.pattern = Some("solid".into());
+                        if let Some(lines) = &t.label {
+                            let raw_label = lines.join("\n");
+                            let decoded = decode_label_entities(&raw_label);
+                            let (lw, lh) = measure_edge_label(decoded.trim());
+                            e.extra.insert("label_width".into(), lw.to_string());
+                            e.extra.insert("label_height".into(), lh.to_string());
+                            e.labelpos = Some("c".into());
+                            e.label = Some(raw_label);
+                        }
+                        data.edges.push(e);
                     }
                     graph_item_count += 1;
                 }
@@ -213,10 +479,30 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             if let Some(n) = data.nodes.iter_mut().find(|n| n.id == t.target) {
                 n.dom_id = Some(format!("state-{}-{}", t.target, graph_item_count));
             }
+            // Build edge in fallback path using current graph_item_count.
+            let mut e = LEdge::default();
+            e.id = format!("edge{}", graph_item_count);
+            e.start = Some(t.source.clone());
+            e.end = Some(t.target.clone());
+            e.arrowhead = Some("barbEnd".into());
+            e.arrow_type_end = Some("barbEnd".into());
+            e.classes = Some("transition".into());
+            e.curve = Some("basis".into());
+            e.thickness = Some("normal".into());
+            e.pattern = Some("solid".into());
+            if let Some(lines) = &t.label {
+                let raw_label = lines.join("\n");
+                let decoded = decode_label_entities(&raw_label);
+                let (lw, lh) = measure_edge_label(decoded.trim());
+                e.extra.insert("label_width".into(), lw.to_string());
+                e.extra.insert("label_height".into(), lh.to_string());
+                e.labelpos = Some("c".into());
+                e.label = Some(raw_label);
+            }
+            data.edges.push(e);
             graph_item_count += 1;
         }
     }
-    data.edges.extend(edge_list);
 
     // For any nodes not yet assigned a dom_id (e.g. standalone state
     // declarations that have no edges and were not in items list), assign
@@ -228,36 +514,28 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         }
     }
 
-    // Notes: emit as extra nodes on the same composite level as target
-    // + a dotted edge connecting them. Layout-wise they share geometry
-    // machinery with regular nodes.
-    for (ni, note) in d.notes.iter().enumerate() {
-        let nid = format!("note{}", ni);
-        let mut n = LNode::default();
-        n.id = nid.clone();
-        n.dom_id = Some(format!("state-{}----note-{}", note.target, graph_item_count));
-        graph_item_count += 1;
-        n.shape = Some("note".into());
-        n.css_classes = Some("statediagram-note".into());
-        n.label_type = Some("markdown".into());
-        n.look = Some("classic".into());
-        n.label = Some(note.text.clone());
-        let (w, h) = measure_label_box(&note.text, DEFAULT_FONT_SIZE);
-        n.width = Some(w);
-        n.height = Some(h);
-        // Parent it next to the target so dagre keeps them close.
-        if let Some(target) = d.states.iter().find(|s| s.id == note.target) {
-            n.parent_id = target.parent.clone();
-        }
-        data.nodes.push(n);
+    // Notes are handled in the items pass above (ParseItem::NoteDecl).
 
-        let mut e = LEdge::default();
-        e.id = format!("note-edge{}", ni);
-        e.start = Some(note.target.clone());
-        e.end = Some(nid);
-        e.classes = Some("note-edge".into());
-        e.pattern = Some("dashed".into());
-        data.edges.push(e);
+    // Replicate JavaScript object-key iteration order: in V8 (and per the
+    // ECMAScript spec), integer-indexed property keys (non-negative integer
+    // strings like "1", "2", …) are iterated first in ascending numeric order,
+    // followed by other string keys in insertion order.  Dagre's `g.nodes()`
+    // iterates the internal `_nodes` object with this same rule, which governs
+    // the render order of nodes in the upstream SVG.  We sort `data.nodes`
+    // using an equivalent key so that our output matches the upstream order.
+    {
+        let orig_indices: std::collections::HashMap<String, usize> = data.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect();
+        data.nodes.sort_by(|a, b| {
+            let ia = orig_indices.get(&a.id).copied().unwrap_or(0);
+            let ib = orig_indices.get(&b.id).copied().unwrap_or(0);
+            let key_a = if let Ok(v) = a.id.parse::<u64>() { (0u8, v, 0usize) } else { (1, 0, ia) };
+            let key_b = if let Ok(v) = b.id.parse::<u64>() { (0u8, v, 0usize) } else { (1, 0, ib) };
+            key_a.cmp(&key_b)
+        });
     }
 
     // Dagre-rs panics on compound graphs where a composite (cluster) node
@@ -303,6 +581,36 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         }
     };
 
+    // Post-process: recompute edge endpoints for stateEnd nodes.
+    // In upstream, after dagre layout, updateNodeBounds() updates the
+    // stateEnd node.width to the getBBox of the rough outer circle path
+    // (~14.017724288152400), which is slightly larger than the dagre
+    // node width (14.0). The stateEnd.intersect function then uses
+    // node.width/2 as the circle radius. Since dagre runs with width=14
+    // but the intersection uses the actual rendered width, we replicate
+    // this by adjusting edge endpoints after layout.
+    //
+    // Effective stateEnd radius: node.width/2 after updateNodeBounds.
+    // rough.js rc.circle(0,0,14,...) produces a path whose control-point
+    // bounding box has x_max=7.017724288152425, x_min=-7.000000000000001.
+    // Chrome getBBox returns 14.017724288152422 (= 7.0088621440762111 * 2),
+    // which is used as node.width in the upstream intersect.circle call.
+    // Empirically verified against both edge2 and edge6 in fixture 70.
+    // After dagre layout, edge endpoints for stateEnd are computed using
+    // node.width/2 = 7.0 as the circle radius.  But the actual rendered
+    // rough circle has getBBox width = 14.017724288152422, so its effective
+    // radius is 7.0088621440762111.  Upstream calls updateNodeBounds() which
+    // updates node.width to the getBBox value AFTER dagre layout; the
+    // stateEnd.intersect function then uses this updated width.  Replicate
+    // by adjusting the last edge endpoint after layout.
+    let mut result = result;
+    fix_state_end_edge_endpoints(&mut result, 7.0088621440762111);
+
+    // Upstream updateNodeBounds() updates node.width to the rendered getBBox
+    // AFTER dagre layout.  For stateEnd the rough circle getBBox width is
+    // 14.017724288152422, which is already set before dagre, so no update needed.
+    // (Height stays at 14.0; the rough circle's y-extent is essentially ±7.)
+
     Ok(StateLayout {
         result,
         direction,
@@ -310,28 +618,171 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     })
 }
 
+/// Adjust the last edge point for edges ending at a stateEnd node to use
+/// the effective rough-path radius (from `updateNodeBounds` + `getBBox`).
+///
+/// Dagre computes edge intersections with nodes using the node's width/height
+/// (set to 14×14 for stateEnd). But upstream calls updateNodeBounds() which
+/// updates node.width to the getBBox of the rendered rough circle (~14.0177),
+/// so the actual intersection radius is slightly larger than 7.
+fn fix_state_end_edge_endpoints(result: &mut crate::layout::unified::types::LayoutResult, effective_r: f64) {
+    // Build a map from node id → (cx, cy) for stateEnd nodes.
+    let end_nodes: Vec<(String, f64, f64)> = result.nodes.iter()
+        .filter(|n| matches!(n.shape.as_deref(), Some("stateEnd" | "state_end" | "end")))
+        .map(|n| (n.id.clone(), n.x.unwrap_or(0.0), n.y.unwrap_or(0.0)))
+        .collect();
+
+    if end_nodes.is_empty() {
+        return;
+    }
+
+    for edge in result.edges.iter_mut() {
+        let target_id = match &edge.end {
+            Some(id) => id.clone(),
+            None => continue,
+        };
+        let Some((_, cx, cy)) = end_nodes.iter().find(|(id, _, _)| id == &target_id) else {
+            continue;
+        };
+        let pts = match &mut edge.points {
+            Some(pts) if pts.len() >= 2 => pts,
+            _ => continue,
+        };
+        // Last point is the intersection with the target node boundary.
+        // Recompute using effective_r instead of 7.0 (the dagre default).
+        let n = pts.len();
+        let probe = pts[n - 2]; // second-to-last = interior point
+        let dx = probe.x - cx;
+        let dy = probe.y - cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist < 1e-12 {
+            continue;
+        }
+        // Intersection along the ray from center toward probe at distance effective_r.
+        let last = &mut pts[n - 1];
+        last.x = cx + dx * effective_r / dist;
+        last.y = cy + dy * effective_r / dist;
+    }
+}
+
+/// Decode mermaid `#name;` entities to plain text for label measurement.
+/// Mirrors the upstream `decodeEntities` + HTML entity resolution step.
+fn decode_label_entities(s: &str) -> String {
+    if !s.contains('#') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '#' {
+            let mut name = String::new();
+            let mut found_semi = false;
+            for nc in chars.by_ref() {
+                if nc == ';' {
+                    found_semi = true;
+                    break;
+                }
+                name.push(nc);
+            }
+            if found_semi {
+                let decoded = match name.as_str() {
+                    "amp"    => "&",
+                    "lt"     => "<",
+                    "gt"     => ">",
+                    "quot"   => "\"",
+                    "apos"   => "'",
+                    "colon"  => ":",
+                    "semi"   => ";",
+                    "period" => ".",
+                    "comma"  => ",",
+                    "excl"   => "!",
+                    "quest"  => "?",
+                    "lpar"   => "(",
+                    "rpar"   => ")",
+                    "lsqb" | "lbrack" => "[",
+                    "rsqb" | "rbrack" => "]",
+                    "lbrace" | "lcub" => "{",
+                    "rbrace" | "rcub" => "}",
+                    "num"    => "#",
+                    "dollar" => "$",
+                    "sol"    => "/",
+                    "bsol"   => "\\",
+                    "verbar" | "vert" => "|",
+                    "at"     => "@",
+                    "equals" => "=",
+                    "plus"   => "+",
+                    "minus" | "hyphen" => "-",
+                    "ast" | "midast"  => "*",
+                    "Hat"    => "^",
+                    "tilde"  => "~",
+                    "space"  => " ",
+                    _ => {
+                        // Numeric or unknown: output as-is
+                        out.push('#');
+                        out.push_str(&name);
+                        out.push(';');
+                        continue;
+                    }
+                };
+                out.push_str(decoded);
+            } else {
+                out.push('#');
+                out.push_str(&name);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Measure the dimensions of an edge label for dagre layout.
+///
+/// Mirrors upstream's `getBoundingClientRect` shim on the label's HTML
+/// foreignObject: the shim measures `textContent`, which concatenates all
+/// text nodes without the `<br/>` separators.  In our model the label is
+/// stored as `lines.join("\n")` where each `\n` was a `<br/>` in the source;
+/// since `text_width("\n") == 0`, summing all characters via `text_width` on
+/// the full joined string gives the same result as measuring the textContent.
+fn measure_edge_label(text: &str) -> (f64, f64) {
+    const EDGE_LABEL_FONT: &str = "sans-serif";
+    const EDGE_LABEL_SIZE: f64 = 14.0;
+    let h = font_line_height(EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
+    if text.is_empty() {
+        return (0.0, h);
+    }
+    // Measure the full text as one string — \n chars have zero advance so the
+    // sum equals the textContent width (with <br/> tags stripped).  This
+    // matches upstream's getBoundingClientRect measurement on the HTML label.
+    let w = text_width(text, EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
+    (w, h)
+}
+
 /// Precise label-box measurement using DejaVu Sans font metrics
 /// (matching upstream's jsdom getBoundingClientRect shim). Width and
 /// height are computed per-glyph, not estimated.
 fn measure_label_box(text: &str, font_size: f64) -> (f64, f64) {
     let lines: Vec<&str> = text.split('\n').collect();
-    measure_lines_box(&lines.iter().copied().collect::<Vec<_>>(), font_size)
+    measure_lines_box(&lines.iter().copied().collect::<Vec<_>>(), font_size, false)
 }
 
-fn measure_lines_box(lines: &[&str], font_size: f64) -> (f64, f64) {
+fn measure_lines_box(lines: &[&str], font_size: f64, bold: bool) -> (f64, f64) {
     let font_family = "sans-serif";
     let mut max_w = 0.0_f64;
     for line in lines {
-        let w = text_width(line, font_family, font_size, false, false);
+        let w = text_width(line, font_family, font_size, bold, false);
         if w > max_w {
             max_w = w;
         }
     }
     let lines_n = lines.len().max(1) as f64;
-    let h = lines_n * font_line_height(font_family, font_size, false, false);
+    let h = lines_n * font_line_height(font_family, font_size, bold, false);
     let total_w = max_w + 2.0 * DEFAULT_LABEL_PAD_X;
     let total_h = h + 2.0 * DEFAULT_LABEL_PAD_Y;
-    (total_w.max(40.0), total_h.max(20.0))
+    // No minimum width: upstream's labelHelper uses actual text metrics with
+    // no enforced minimum — the rendered width is whatever the text requires
+    // plus padding.  Using max(40) caused over-wide nodes for short labels.
+    (total_w, total_h)
 }
 
 /// After a flat-mode dagre layout (where parent_id was stripped), compute
@@ -451,4 +902,60 @@ mod tests {
         let l = layout(&d, &theme).unwrap();
         assert!(l.result.nodes.iter().any(|n| n.id == "Parent" && n.is_group));
     }
+
+    /// dom_id counter: only STMT_RELATION increments graphItemCount.
+    /// Pure state declarations must NOT increment the counter (matches upstream).
+    /// fixture 09: state "A long long name" as long1; state "A" as longlonglongid
+    /// No transitions => both nodes get suffix -0.
+    #[test]
+    fn check_node_width_no_min() {
+        use crate::render::svg_state::render;
+        let mmd = "stateDiagram-v2\n  state \"A long long name\" as long1\n  state \"A\" as longlonglongid\n";
+        let d = parse(mmd).unwrap();
+        let theme = get_theme("default");
+        let l = layout(&d, &theme).unwrap();
+        for n in &l.result.nodes {
+            eprintln!("node id={:?} w={:?} h={:?}", n.id, n.width, n.height);
+        }
+        let llid = l.result.nodes.iter().find(|n| n.id == "longlonglongid").unwrap();
+        // "A" label: ~9.577 px wide + 2*8 padding = ~25.577 px total (no min-40 clamping)
+        let w = llid.width.unwrap_or(0.0);
+        assert!(w < 30.0, "longlonglongid width={} should be ~25.577 (no min-40)", w);
+    }
+
+    #[test]
+    fn dom_id_state_decl_no_increment() {
+        let src = "stateDiagram-v2\n  state \"A long long name\" as long1\n  state \"A\" as longlonglongid\n";
+        let d = parse(src).unwrap();
+        let theme = get_theme("default");
+        let l = layout(&d, &theme).unwrap();
+        let long1 = l.result.nodes.iter().find(|n| n.id == "long1").unwrap();
+        let llid = l.result.nodes.iter().find(|n| n.id == "longlonglongid").unwrap();
+        eprintln!("long1 dom_id={:?}", long1.dom_id);
+        eprintln!("longlonglongid dom_id={:?}", llid.dom_id);
+        // upstream: state decl does not bump counter, both nodes get -0
+        assert_eq!(long1.dom_id.as_deref(), Some("state-long1-0"),
+            "state decl must not bump counter; long1 should be -0");
+        assert_eq!(llid.dom_id.as_deref(), Some("state-longlonglongid-0"),
+            "state decl must not bump counter; longlonglongid should be -0");
+    }
+
+    /// fixture 07: [*] --> S1; state "Some long name" as S1
+    /// relation(root_start,S1)@counter=0 => counter++ => counter=1
+    /// state_decl(S1)@counter=1 => no increment (overwrites S1 dom_id to -1)
+    #[test]
+    fn dom_id_relation_then_decl() {
+        let src = "stateDiagram-v2\n\n[*] --> S1\nstate \"Some long name\" as S1\n";
+        let d = parse(src).unwrap();
+        let theme = get_theme("default");
+        let l = layout(&d, &theme).unwrap();
+        let start = l.result.nodes.iter().find(|n| n.id.ends_with("_start")).unwrap();
+        let s1 = l.result.nodes.iter().find(|n| n.id == "S1").unwrap();
+        eprintln!("root_start dom_id={:?}", start.dom_id);
+        eprintln!("S1 dom_id={:?}", s1.dom_id);
+        assert_eq!(start.dom_id.as_deref(), Some(format!("state-{}-0", start.id).as_str()));
+        assert_eq!(s1.dom_id.as_deref(), Some("state-S1-1"),
+            "S1 final dom_id should be -1 (relation sets -0, counter++, StateDecl overwrites to -1)");
+    }
 }
+

@@ -55,19 +55,31 @@ pub fn render(
     // getBBox; since we can't do that, we compute the union of all node
     // and edge bounding boxes from the layout data.
     let pad = 8.0_f64;
-    let (vx, vy, vw, vh) = compute_viewbox(l, pad);
+    let title = d.meta.title.as_deref();
+    let (vx, vy, vw, vh, title_center_x) = compute_viewbox(l, pad, title);
 
     // ── Opening <svg> — canonical attribute order -----------------
-    out.push_str(&unified_shell::open_unified_svg(
+    let has_acc_descr = d.meta.acc_descr.is_some();
+    let has_acc_title = d.meta.acc_title.is_some();
+    out.push_str(&unified_shell::open_unified_svg_with_a11y(
         id,
         vw,
         (vx, vy, vw, vh),
         Some("statediagram"),
         "stateDiagram",
+        has_acc_descr,
+        has_acc_title,
+    ));
+    // Accessibility elements — must appear immediately after <svg> opens,
+    // before the <style> block. Upstream emits <title> before <desc>.
+    out.push_str(&unified_shell::emit_a11y_elements(
+        id,
+        d.meta.acc_title.as_deref(),
+        d.meta.acc_descr.as_deref(),
     ));
 
     // ── <style> block — base preamble + state-specific rules + tail.
-    out.push_str(&style_block(id, theme));
+    out.push_str(&style_block(id, theme, d));
 
     // ── Seed <g> wrapping markers + root --------------------------
     out.push_str(unified_shell::open_seed_group());
@@ -88,10 +100,10 @@ pub fn render(
     // ── Root <g> with clusters, edges, labels, nodes ------------
     out.push_str(unified_shell::open_root_group());
 
-    // Clusters (composite states) -------------------------------
+    // Clusters (composite states + note groups) ----------------
     out.push_str(r#"<g class="clusters">"#);
     for n in l.result.nodes.iter().filter(|n| n.is_group) {
-        out.push_str(&emit_cluster(n));
+        out.push_str(&emit_cluster(id, n));
     }
     out.push_str("</g>");
 
@@ -127,8 +139,21 @@ pub fn render(
     // Drop-shadow filter defs (match upstream tail).
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
 
+    // Diagram title — upstream's `insertTitle` appends a <text> element
+    // AFTER the main content and drop-shadow defs but BEFORE </svg>.
+    // The title x is the center of the content bounding box (before the
+    // title itself widens it). y is fixed at -25.
+    if let Some(t) = title {
+        if !t.is_empty() {
+            out.push_str(&format!(
+                r#"<text text-anchor="middle" x="{x}" y="-25" class="statediagramTitleText">{text}</text>"#,
+                x = fmt_num(title_center_x),
+                text = xml_escape(t),
+            ));
+        }
+    }
+
     out.push_str(unified_shell::close_unified_svg());
-    let _ = d; // reserved for v1/v2-specific tweaks once wired.
     Ok(out)
 }
 
@@ -142,7 +167,121 @@ pub fn render(
 /// `-(max_half_height + pad)`, where max_half_width/height come from
 /// the regular state nodes (not start/end circles). The right/bottom
 /// edges are derived from the actual content extent.
-fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
+/// Round to 3 decimal places — matches d3's `appendRound(3)` / `fmt_coord`
+/// rounding used for SVG path coordinates. The upstream getBBox() is called
+/// on the rendered SVG, so viewBox extents must use rounded path coords.
+#[inline]
+fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
+
+/// Compute the bounding box (x_min, x_max, y_min, y_max) of a d3 curveBasis
+/// path rendered from `points`. Mirrors the upstream flow where getBBox() is
+/// called on the actual SVG <path> element. Chrome/WebKit's getBBox for cubic
+/// Bezier paths uses the convex hull (control point bbox), not the geometric
+/// tight bbox. So we scan ALL path coordinate values (endpoints + control
+/// points) after 3-decimal rounding, matching the browser's approach.
+fn basis_spline_tight_bbox(points: &[crate::layout::unified::types::Point]) -> (f64, f64, f64, f64) {
+    if points.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let mut x_min = f64::INFINITY;
+    let mut x_max = f64::NEG_INFINITY;
+    let mut y_min = f64::INFINITY;
+    let mut y_max = f64::NEG_INFINITY;
+
+    // Expand bbox with one coordinate pair (rounded).
+    macro_rules! add_coord {
+        ($px:expr, $py:expr) => {{
+            let rx = round3($px);
+            let ry = round3($py);
+            if rx < x_min { x_min = rx; }
+            if rx > x_max { x_max = rx; }
+            if ry < y_min { y_min = ry; }
+            if ry > y_max { y_max = ry; }
+        }};
+    }
+
+    // Scan all path coordinates including control points of each cubic.
+    // Mirrors the Chrome getBBox control-point scanning behaviour.
+    macro_rules! scan_cubic {
+        ($c1x:expr, $c1y:expr, $c2x:expr, $c2y:expr, $ex:expr, $ey:expr) => {{
+            add_coord!($c1x, $c1y);
+            add_coord!($c2x, $c2y);
+            add_coord!($ex, $ey);
+        }};
+    }
+
+    // Re-implement the path_basis coordinate walk.
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut state: u8 = 0;
+
+    for p in points {
+        let (x, y) = (p.x, p.y);
+        match state {
+            0 => {
+                // M command — just the start point.
+                add_coord!(x, y);
+                state = 1;
+            }
+            1 => {
+                state = 2;
+            }
+            2 => {
+                // L anchor + first cubic.
+                let lpx = (5.0 * x0 + x1) / 6.0;
+                let lpy = (5.0 * y0 + y1) / 6.0;
+                add_coord!(lpx, lpy);
+                scan_cubic!(
+                    (2.0*x0+x1)/3.0, (2.0*y0+y1)/3.0,
+                    (x0+2.0*x1)/3.0, (y0+2.0*y1)/3.0,
+                    (x0+4.0*x1+x)/6.0, (y0+4.0*y1+y)/6.0
+                );
+                state = 3;
+            }
+            _ => {
+                scan_cubic!(
+                    (2.0*x0+x1)/3.0, (2.0*y0+y1)/3.0,
+                    (x0+2.0*x1)/3.0, (y0+2.0*y1)/3.0,
+                    (x0+4.0*x1+x)/6.0, (y0+4.0*y1+y)/6.0
+                );
+            }
+        }
+        x0 = x1;
+        x1 = x;
+        y0 = y1;
+        y1 = y;
+    }
+
+    // lineEnd
+    match state {
+        3 => {
+            // Tail cubic (emit_basis_cubic with last point repeated).
+            scan_cubic!(
+                (2.0*x0+x1)/3.0, (2.0*y0+y1)/3.0,
+                (x0+2.0*x1)/3.0, (y0+2.0*y1)/3.0,
+                (x0+4.0*x1+x1)/6.0, (y0+4.0*y1+y1)/6.0
+            );
+            // Final L to last point.
+            add_coord!(x1, y1);
+        }
+        2 => {
+            add_coord!(x1, y1);
+        }
+        _ => {}
+    }
+    (x_min, x_max, y_min, y_max)
+}
+
+/// Returns `(vx, vy, vw, vh, title_center_x)`.
+///
+/// `title_center_x` is the center of the content-only bounding box (before
+/// the title text widens it), matching upstream's `insertTitle` which records
+/// the bounds center before adding the `<text>` element.
+fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64, f64, f64, f64) {
     // Simulate upstream's `svg.node().getBBox()` with the jsdom shim used
     // to generate reference SVGs.  That shim collects intrinsic bounding
     // boxes of all SVG primitives (rect, circle, path, foreignObject …)
@@ -165,6 +304,22 @@ fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
     let mut g_y_min: f64 = f64::INFINITY;
     let mut g_y_max: f64 = f64::NEG_INFINITY;
 
+    // NoteGroup clusters: rendered as <g class="note-cluster"> with absolute
+    // coordinate rect (no transform). Include their absolute bounds in the
+    // viewbox computation.
+    for n in l.result.nodes.iter().filter(|n| n.is_group && n.shape.as_deref() == Some("noteGroup")) {
+        if let (Some(cx), Some(cy), Some(w), Some(h)) = (n.x, n.y, n.width, n.height) {
+            let x_left = cx - w / 2.0;
+            let x_right = cx + w / 2.0;
+            let y_top = cy - h / 2.0;
+            let y_bottom = cy + h / 2.0;
+            g_x_min = g_x_min.min(x_left);
+            g_x_max = g_x_max.max(x_right);
+            g_y_min = g_y_min.min(y_top);
+            g_y_max = g_y_max.max(y_bottom);
+        }
+    }
+
     for n in &l.result.nodes {
         if n.is_group || n.extra.get("__skip_render").is_some() {
             continue;
@@ -176,8 +331,43 @@ fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
             | "stateEnd" | "state_end" | "end"
             | "forkJoin" | "fork_join" | "fork" | "join"
         ) {
-            // Circle or rectangle at local origin, r=7.
-            (-7.0_f64, 7.0_f64, -7.0_f64, 7.0_f64)
+            // Circle or rectangle at local origin.
+            // Use n.width/2 as the half-extent so that stateEnd (width =
+            // 14.0177…) contributes the correct rough-path bounding box.
+            let hw = n.width.unwrap_or(14.0) / 2.0;
+            let hh = n.height.unwrap_or(14.0) / 2.0;
+            (-hw, hw, -hh, hh)
+        } else if shape == "rectWithTitle" {
+            // rectWithTitle (state with description): outer rect + two
+            // foreignObjects. jsdom ignores ALL transforms, so both FOs
+            // contribute local (0, text_w)×(0, lh) bboxes.
+            //
+            // Node layout: width W = max_text_w + padding, height H = lh + padding.
+            // Local bbox union:
+            //   rect:  (-W/2, W/2)×(-H/2, H/2)
+            //   FOs:   (0, W-padding)×(0, lh)
+            // Union:  (-W/2, W-padding)×(-H/2, lh)
+            let w = n.width.unwrap_or(0.0);
+            let h = n.height.unwrap_or(0.0);
+            let padding = n.label_padding_x.unwrap_or(8.0); // node.padding
+            let lh_fo = h - padding; // = line_height (stored in height = lh + padding)
+            let text_max_w = w - padding; // = max(title_w, desc_w)
+            let hw = w / 2.0;
+            let hh = h / 2.0;
+            (-hw, text_max_w.max(hw), -hh, lh_fo.max(hh))
+        } else if shape == "note" {
+            // Note shape: rough-path rect (-hw..hw, -hh..hh) plus foreignObject
+            // (0..fw, 0..fh) where fw = w - 2*15 (note padding = 15).
+            let w = n.width.unwrap_or(0.0);
+            let h = n.height.unwrap_or(0.0);
+            const NOTE_PAD: f64 = 15.0;
+            let fw = (w - 2.0 * NOTE_PAD).max(0.0);
+            let fh = (h - 2.0 * NOTE_PAD).max(0.0);
+            let hw = w / 2.0;
+            let hh = h / 2.0;
+            // Local bbox = union of rough-path rect (-hw..hw)×(-hh..hh)
+            // and foreignObject [0..fw]×[0..fh] (at local origin).
+            (-hw, fw.max(hw), -hh, fh.max(hh))
         } else {
             let w = n.width.unwrap_or(0.0);
             let h = n.height.unwrap_or(0.0);
@@ -197,21 +387,78 @@ fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
         g_y_max = g_y_max.max(ny_max);
     }
 
-    // Edge points — in absolute layout space (no transform on edge groups).
+    // Edge paths — compute tight bounding box of the rendered basis spline.
+    // The upstream getBBox() is called on the *rendered* SVG path element
+    // (whose coordinates are rounded to 3 decimal places by fmt_coord).
+    // For a basis spline, the actual path extent can be smaller than the
+    // convex hull of the control points, so we compute the tight bbox.
+    //
+    // Also account for edge labels: the label foreignObject is at
+    // (label_x - lw/2, label_y - lh/2) with width=lw, height=lh.
+    // The upstream jsdom shim includes foreignObject bboxes in getBBox()
+    // without applying transforms (since the edgeLabel <g> has a transform,
+    // but the foreignObject's bbox is in the LOCAL coordinate of the
+    // transformed group, so we use label_x ± lw/2 directly).
     for e in &l.result.edges {
-        if let Some(pts) = &e.points {
-            for p in pts {
-                g_x_min = g_x_min.min(p.x);
-                g_x_max = g_x_max.max(p.x);
-                g_y_min = g_y_min.min(p.y);
-                g_y_max = g_y_max.max(p.y);
+        if let Some(pts) = e.points.as_deref() {
+            let (bx_min, bx_max, by_min, by_max) = basis_spline_tight_bbox(pts);
+            g_x_min = g_x_min.min(bx_min);
+            g_x_max = g_x_max.max(bx_max);
+            g_y_min = g_y_min.min(by_min);
+            g_y_max = g_y_max.max(by_max);
+        }
+        // Edge label bbox.
+        // The upstream jsdom shim used to generate reference SVGs calls
+        // getBBox() without applying CSS/SVG transforms. So a foreignObject
+        // with width=lw, height=lh inside nested <g transform=...> groups
+        // contributes its UNTRANSFORMED local bbox [0,lw]×[0,lh] to the
+        // global getBBox union. We replicate this behavior here.
+        if e.label_x.is_some() {
+            // Get label text and measure width.
+            let raw_label = e.label.as_deref().unwrap_or("");
+            if !raw_label.trim().is_empty() {
+                // Decode mermaid entities for accurate width measurement.
+                let decoded = decode_mermaid_entities(raw_label);
+                if !decoded.trim().is_empty() {
+                    use crate::font_metrics::text_width as ftw;
+                    let lw = ftw(decoded.trim(), "sans-serif", 14.0, false, false);
+                    let lh = 16.296875_f64; // one line height
+                    // foreignObject LOCAL bbox (ignoring parent transforms): [0,lw]×[0,lh].
+                    g_x_min = g_x_min.min(0.0);
+                    g_x_max = g_x_max.max(lw);
+                    g_y_min = g_y_min.min(0.0);
+                    g_y_max = g_y_max.max(lh);
+                }
             }
         }
     }
 
     // Fall back when the layout has no renderable content at all.
     if !g_x_min.is_finite() {
-        return (-(7.0 + pad), -(7.0 + pad), 14.0 + 2.0 * pad, 14.0 + 2.0 * pad);
+        return (-(7.0 + pad), -(7.0 + pad), 14.0 + 2.0 * pad, 14.0 + 2.0 * pad, 0.0);
+    }
+
+    // Record center of the content-only bounding box — this is the x
+    // coordinate used for the diagram title <text> element, matching
+    // upstream's `insertTitle` which saves `bounds.x + bounds.width/2`
+    // (i.e. g_x_min + (g_x_max-g_x_min)/2) BEFORE adding the text.
+    let content_center_x = g_x_min + (g_x_max - g_x_min) / 2.0;
+
+    // Expand bounds to include the diagram title text if present.
+    // The title <text> element has no inline font attributes, so jsdom's
+    // resolveFont falls back to default: sans-serif 14px.
+    // Its intrinsicBox is {x:0, y:0, width:text_width, height:lh} (x,y
+    // are always 0 regardless of the `x` attribute).
+    if let Some(t) = title {
+        if !t.is_empty() {
+            use crate::font_metrics::text_width as ftw;
+            let tw = ftw(t, "sans-serif", 14.0, false, false);
+            let lh = 16.296875_f64;
+            g_x_min = g_x_min.min(0.0);
+            g_x_max = g_x_max.max(tw);
+            g_y_min = g_y_min.min(0.0);
+            g_y_max = g_y_max.max(lh);
+        }
     }
 
     let vx = g_x_min - pad;
@@ -219,7 +466,7 @@ fn compute_viewbox(l: &StateLayout, pad: f64) -> (f64, f64, f64, f64) {
     let vw = (g_x_max - g_x_min) + 2.0 * pad;
     let vh = (g_y_max - g_y_min) + 2.0 * pad;
 
-    (vx, vy, vw.max(1.0), vh.max(1.0))
+    (vx, vy, vw.max(1.0), vh.max(1.0), content_center_x)
 }
 
 fn viewbox(b: &Bounds, pad: f64) -> (f64, f64, f64, f64) {
@@ -230,21 +477,36 @@ fn viewbox(b: &Bounds, pad: f64) -> (f64, f64, f64, f64) {
     (x, y, w, h)
 }
 
-fn emit_cluster(n: &Node) -> String {
+fn emit_cluster(svg_id: &str, n: &Node) -> String {
     let w = n.width.unwrap_or(0.0);
     let h = n.height.unwrap_or(0.0);
+    let dom_id = n.dom_id.as_deref().unwrap_or(&n.id);
+    // Note groups: render as <g class="note-cluster"> with an absolute-coordinate rect.
+    if n.shape.as_deref() == Some("noteGroup") {
+        let cx = n.x.unwrap_or(0.0);
+        let cy = n.y.unwrap_or(0.0);
+        return format!(
+            r#"<g class="note-cluster" id="{svg_id}-{dom_id}"><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"></rect></g>"#,
+            svg_id = svg_id,
+            dom_id = xml_escape(dom_id),
+            x = fmt_num(cx - w / 2.0),
+            y = fmt_num(cy - h / 2.0),
+            w = fmt_num(w),
+            h = fmt_num(h),
+        );
+    }
     let label = n.label.as_deref().unwrap_or("");
     let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
     format!(
         concat!(
-            r#"<g class=" statediagram-state {css}" id="{id}" data-id="{nid}" data-look="classic">"#,
+            r#"<g class=" statediagram-state {css}" id="{svg_id}-{dom_id}" data-id="{dom_id}" data-look="classic">"#,
             r#"<g><rect class="outer" x="{rx}" y="{ry}" width="{w}" height="{h}" data-look="classic"></rect></g>"#,
             r#"<g class="cluster-label"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml">{lbl}</div></foreignObject></g>"#,
             r#"</g>"#,
         ),
         css = css,
-        id = xml_escape(&n.id),
-        nid = xml_escape(&n.id),
+        svg_id = svg_id,
+        dom_id = xml_escape(dom_id),
         rx = fmt_num(-w / 2.0),
         ry = fmt_num(-h / 2.0),
         w = fmt_num(w),
@@ -286,14 +548,28 @@ fn emit_edge_path(id: &str, e: &Edge) -> String {
         json.push(']');
         unified_shell::base64_encode(json.as_bytes())
     };
-    format!(
-        r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic" marker-end="url(#{id}_stateDiagram-barbEnd)"></path>"##,
-        d = d,
-        id = id,
-        eid = e.id,
-        cls = class,
-        b64 = data_points_b64,
-    )
+    // Note edges have no arrowhead (arrowhead=None, class contains "note-edge").
+    let is_note_edge = e.classes.as_deref()
+        .map_or(false, |c| c.contains("note-edge"));
+    if is_note_edge {
+        format!(
+            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic"></path>"##,
+            d = d,
+            id = id,
+            eid = e.id,
+            cls = class,
+            b64 = data_points_b64,
+        )
+    } else {
+        format!(
+            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic" marker-end="url(#{id}_stateDiagram-barbEnd)"></path>"##,
+            d = d,
+            id = id,
+            eid = e.id,
+            cls = class,
+            b64 = data_points_b64,
+        )
+    }
 }
 
 fn emit_edge_label(e: &Edge) -> String {
@@ -301,22 +577,39 @@ fn emit_edge_label(e: &Edge) -> String {
     use crate::font_metrics::text_width;
 
     let raw = e.label.as_deref().unwrap_or("");
-    let (body, wrap_in_p) = if raw.trim().is_empty() {
-        if raw.is_empty() {
+    // Decode mermaid #name; entities before rendering (upstream decodeEntities).
+    let decoded = decode_mermaid_entities(raw);
+    // Build the HTML body for the <p> content.
+    // The raw label uses actual \n for <br/> splits (from the parser); literal
+    // backslash+n text is preserved as-is.  We reconstruct the HTML by:
+    //   1. Splitting on actual \n → these come from <br/> parsing → emit <br/>
+    //   2. XML-escaping each segment (leaves literal \n chars as their chars)
+    //   3. Joining with <br/> tag
+    let (body, wrap_in_p) = if decoded.trim().is_empty() {
+        if decoded.is_empty() {
             (String::new(), false)
         } else {
             // Whitespace-only: preserve literal whitespace in <p>.
-            (format!("<p>{}</p>", xml_escape(raw)), false)
+            (format!("<p>{}</p>", xml_escape(&decoded)), false)
         }
     } else {
-        (xml_escape(raw), true)
+        let parts: Vec<String> = decoded
+            .split('\n')
+            .map(|seg| xml_escape(seg))
+            .collect();
+        (parts.join("<br/>"), true)
     };
 
     // Measure label text for foreignObject dimensions.
-    let (lw, lh) = if raw.is_empty() {
+    // Upstream measures via getBoundingClientRect → textContent of the HTML
+    // element. textContent concatenates text nodes without the <br/> tag content,
+    // yielding the same result as text_width(joined_label_without_newlines).
+    // Since \n has zero advance in our font metrics, text_width(decoded) gives
+    // the correct sum: each line's chars plus zero for each \n separator.
+    let (lw, lh) = if decoded.is_empty() {
         (0.0, 16.296875) // default line-height at 14px sans-serif
     } else {
-        let tw = text_width(raw.trim(), "sans-serif", 14.0, false, false);
+        let tw = text_width(decoded.trim(), "sans-serif", 14.0, false, false);
         (tw, 16.296875)
     };
 
@@ -365,8 +658,23 @@ fn emit_node(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> {
         "stateEnd" | "state_end" | "end" => emit_state_end(id, n, theme),
         "forkJoin" | "fork_join" | "fork" | "join" => emit_fork_join(id, n, theme),
         "state" => emit_state_node(id, n, theme),
+        "rectWithTitle" => emit_rect_with_title(id, n, theme),
+        "note" => emit_note_node(id, n, theme),
         _ => shapes::draw(shape, n, theme).ok(),
     }
+}
+
+/// Render a note node, applying the `{svg_id}-{dom_id}` id convention
+/// used by the state renderer (same as other state node types).
+fn emit_note_node(svg_id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> {
+    // Delegate to the note shape drawer, then patch the id attribute to
+    // include the svg_id prefix (matching upstream's note shape id format).
+    let raw = shapes::draw("note", n, theme).ok()?;
+    // The note shape emits `id="{dom_id}"`. Replace with `id="{svg_id}-{dom_id}"`.
+    let dom_id = xml_escape(n.dom_id.as_deref().unwrap_or(&n.id));
+    let old_id = format!(r#"id="{}""#, dom_id);
+    let new_id = format!(r#"id="{}-{}""#, svg_id, dom_id);
+    Some(raw.replacen(&old_id, &new_id, 1))
 }
 
 fn emit_state_start(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String> {
@@ -409,10 +717,10 @@ fn emit_state_end(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
             r#"<g class="outer-path">"#,
             r#"<path d="{outer_fill}" stroke="none" stroke-width="0" fill="{mb}" style=""></path>"#,
             r#"<path d="{outer_stroke}" stroke="{lc}" stroke-width="2" fill="none" stroke-dasharray="0 0" style=""></path>"#,
-            r#"</g>"#,
             r#"<g>"#,
             r#"<path d="{inner_fill}" stroke="none" stroke-width="0" fill="{nb}" style=""></path>"#,
             r#"<path d="{inner_stroke}" stroke="{nb}" stroke-width="2" fill="none" stroke-dasharray="0 0" style=""></path>"#,
+            r#"</g>"#,
             r#"</g>"#,
             r#"</g>"#,
         ),
@@ -473,7 +781,24 @@ fn emit_state_node(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String
     let ty = n.y.unwrap_or(0.0);
     let label = n.label.clone().unwrap_or_default();
     let is_markdown = n.label_type.as_deref() == Some("markdown");
-    let label_style = n.label_style.as_deref().unwrap_or("");
+
+    // Merge cssCompiledStyles (from classDef) and cssStyles/labelStyle
+    // (from inline `style X ...` directive). Upstream uses a Map so that
+    // cssStyles overrides cssCompiledStyles for the same key.
+    // We build a merged comma-separated string: compiled first, inline last
+    // (later entries override earlier ones in styles2_string).
+    let merged_style = merge_node_styles(
+        n.css_compiled_styles.as_deref(),
+        n.label_style.as_deref(),
+    );
+    let label_style = merged_style.as_str();
+
+    // Split merged style into node/label parts with !important.
+    let (node_styles, label_styles_str, div_prefix) = if label_style.is_empty() {
+        (String::new(), String::new(), String::new())
+    } else {
+        styles2_string(label_style)
+    };
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -485,7 +810,8 @@ fn emit_state_node(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String
         ty = fmt_num(ty),
     ));
     out.push_str(&format!(
-        r#"<rect class="basic label-container" style="" rx="{r}" ry="{r}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        r#"<rect class="basic label-container" style="{node_styles}" rx="{r}" ry="{r}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        node_styles = node_styles,
         r = fmt_num(r),
         x = fmt_num(-w / 2.0),
         y = fmt_num(-h / 2.0),
@@ -494,15 +820,35 @@ fn emit_state_node(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String
     ));
     if !label.is_empty() {
         let escaped = xml_escape(&label);
+        // Detect bold from merged style (classDef or inline style).
+        let label_is_bold = merged_style
+            .split(',')
+            .any(|p| p.trim().trim_end_matches(';').replace(' ', "") == "font-weight:bold");
         let (lw, lh) = measure_html_label(
             &escaped,
-            &crate::render::foreign_object::HtmlLabelFont::default(),
+            &crate::render::foreign_object::HtmlLabelFont {
+                bold: if label_is_bold { Some(true) } else { None },
+                ..Default::default()
+            },
             200.0,
             true,
         );
+        let label_styles_ref: Option<&str> = if label_styles_str.is_empty() {
+            None
+        } else {
+            Some(&label_styles_str)
+        };
+        let div_prefix_ref: Option<&str> = if div_prefix.is_empty() {
+            None
+        } else {
+            Some(&div_prefix)
+        };
+        let group_style_val: &str = if label_styles_str.is_empty() { "" } else { &label_styles_str };
         let opts = LabelOpts {
             extra_span_classes: if is_markdown { "markdown-node-label" } else { "" },
-            group_style: if label_style.is_empty() { Some("") } else { Some(label_style) },
+            group_style: Some(group_style_val),
+            label_style: label_styles_ref,
+            div_style_prefix: div_prefix_ref,
             ..LabelOpts::default()
         };
         out.push_str(&crate::render::foreign_object::render_node_label(
@@ -513,23 +859,493 @@ fn emit_state_node(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String
     Some(out)
 }
 
+/// Render a state node that has description lines (upstream shape: rectWithTitle).
+///
+/// Structure mirrors the upstream `rectWithTitle` function in dagre-wrapper:
+/// - An outer rect ("title-state") sized to the label group bbox + padding.
+/// - A divider line at the bottom of the title row.
+/// - A label group containing two foreignObjects: title and description.
+fn emit_rect_with_title(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String> {
+    use crate::font_metrics::{line_height as fl_lh, text_width as ft_w};
+    const FONT_FAMILY: &str = "sans-serif";
+    const FONT_SIZE: f64 = 14.0;
+    const HALF_PAD: f64 = 4.0; // halfPadding = node.padding / 2 = 8/2 = 4
+
+    let w = n.width.unwrap_or(0.0);
+    let h = n.height.unwrap_or(0.0);
+    let padding = n.label_padding_x.unwrap_or(8.0);
+    let lh = h - padding; // = line_height (=16.296875)
+    // Upstream rectWithTitle uses `"node " + node2.classes` (no trailing space),
+    // not the `get_node_classes` helper (which appends a trailing space).
+    let css_cls = n.css_classes.as_deref().unwrap_or("undefined");
+    let classes = format!("node {}", css_cls);
+    let nid = n.dom_id.clone().unwrap_or_else(|| n.id.clone());
+    let tx = n.x.unwrap_or(0.0);
+    let ty = n.y.unwrap_or(0.0);
+
+    let merged_style = merge_node_styles(
+        n.css_compiled_styles.as_deref(),
+        n.label_style.as_deref(),
+    );
+    let label_style = merged_style.as_str();
+    let (node_styles, label_styles_str, _div_prefix) = if label_style.is_empty() {
+        (String::new(), String::new(), String::new())
+    } else {
+        styles2_string(label_style)
+    };
+    let label_is_bold = merged_style
+        .split(',')
+        .any(|p| p.trim().trim_end_matches(';').replace(' ', "") == "font-weight:bold");
+
+    // Title = first label line. Description = n.description.
+    let title = n.label.as_deref().unwrap_or("");
+    let desc_lines: Vec<&str> = n.description.as_deref()
+        .map(|d| d.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+
+    // Measure text widths.
+    let title_w = ft_w(title, FONT_FAMILY, FONT_SIZE, label_is_bold, false);
+    let mut desc_max_w = 0.0f64;
+    for dl in &desc_lines {
+        let dw = ft_w(dl, FONT_FAMILY, FONT_SIZE, label_is_bold, false);
+        if dw > desc_max_w { desc_max_w = dw; }
+    }
+    // Label group bbox.width = max(title_w, desc_max_w) (jsdom ignores transforms).
+    let bbox_w = title_w.max(desc_max_w);
+
+    // Outer rect geometry.
+    // rect x/y = -bbox_w/2 - halfPad, -lh/2 - halfPad
+    let rect_x = -bbox_w / 2.0 - HALF_PAD;
+    let rect_y = -lh / 2.0 - HALF_PAD;
+    let rect_w = bbox_w + padding;
+    let rect_h = lh + padding;
+    // Divider y = -lh/2 - halfPad + lh + halfPad = lh/2
+    let div_y = lh / 2.0;
+    // Label group translate: (-bbox_w/2, -lh/2 - halfPad + 3)
+    let label_tx = -bbox_w / 2.0;
+    let label_ty = -lh / 2.0 - HALF_PAD + 3.0;
+
+    // Title foreignObject: offset depends on whether title is wider than desc.
+    let title_fo_tx = if title_w >= desc_max_w {
+        0.0_f64
+    } else {
+        -(title_w - desc_max_w) / 2.0
+    };
+    let title_fo_width = title_w;
+
+    // Description foreignObject(s): one per description line.
+    // The upstream joins all desc lines with <br/> and measures as one block.
+    // For single-line descriptions the width is that line's text width.
+    // Position: translate( desc_x_off, titleBox.height + halfPad + 5 )
+    let desc_y = lh + HALF_PAD + 5.0; // titleBox.height + halfPadding + 5
+
+    // Upstream always emits style="..." even when empty for rectWithTitle.
+    let label_style_attr = format!(r#" style="{}""#, label_styles_str);
+    let node_style_attr = format!(r#" style="{}""#, node_styles);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="{classes}" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        classes = classes,
+        id = id,
+        nid = xml_escape(&nid),
+        tx = fmt_num(tx),
+        ty = fmt_num(ty),
+    ));
+    // Outer group with rect and divider.
+    out.push_str("<g>");
+    out.push_str(&format!(
+        r#"<rect class="outer title-state"{node_style_attr} x="{rx}" y="{ry}" width="{rw}" height="{rh}"></rect>"#,
+        node_style_attr = node_style_attr,
+        rx = fmt_num(rect_x),
+        ry = fmt_num(rect_y),
+        rw = fmt_num(rect_w),
+        rh = fmt_num(rect_h),
+    ));
+    out.push_str(&format!(
+        r#"<line class="divider" x1="{x1}" x2="{x2}" y1="{y1}" y2="{y2}"></line>"#,
+        x1 = fmt_num(rect_x),
+        x2 = fmt_num(-rect_x),
+        y1 = fmt_num(div_y),
+        y2 = fmt_num(div_y),
+    ));
+    out.push_str("</g>");
+    // Label group.
+    out.push_str(&format!(
+        r#"<g class="label"{label_style_attr} transform="translate({ltx}, {lty})">"#,
+        label_style_attr = label_style_attr,
+        ltx = fmt_num(label_tx),
+        lty = fmt_num(label_ty),
+    ));
+    // Title foreignObject.
+    // Upstream rectWithTitle (dagre-wrapper) uses `createLabel` which emits
+    // `<span class="nodeLabel ">` (trailing space, no markdown class).
+    out.push_str(&format!(
+        r#"<foreignObject width="{tw}" height="{lh}" transform="translate({fo_tx}, 0)"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{title}</p></span></div></foreignObject>"#,
+        tw = fmt_num(title_fo_width),
+        lh = fmt_num(lh),
+        fo_tx = format!(" {}", fmt_num(title_fo_tx)),
+        title = xml_escape(title),
+    ));
+    // Description foreignObject(s).
+    // Upstream joins all desc lines with <br/> in one foreignObject for a
+    // multi-line description, but we emit individual foreignObjects to match
+    // the reference when there is exactly one description line. The upstream
+    // `createLabel` for multiple lines produces one block; for the reference
+    // SVGs we only see single-description cases (one extra line). If the
+    // description has exactly one line we emit it directly.
+    let desc_text = if desc_lines.len() == 1 {
+        desc_lines[0].to_string()
+    } else {
+        desc_lines.join("<br/>")
+    };
+    let actual_desc_w = desc_max_w;
+    // desc x offset: if desc is narrower than title, center it.
+    let desc_fo_tx = if actual_desc_w <= title_w {
+        (title_w - actual_desc_w) / 2.0
+    } else {
+        0.0
+    };
+    out.push_str(&format!(
+        r#"<foreignObject width="{dw}" height="{lh}" transform="translate({fo_tx}, {fo_ty})"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{desc}</p></span></div></foreignObject>"#,
+        dw = fmt_num(actual_desc_w),
+        lh = fmt_num(lh),
+        fo_tx = format!(" {}", fmt_num(desc_fo_tx)),
+        fo_ty = fmt_num(desc_y),
+        desc = xml_escape(&desc_text),
+    ));
+    out.push_str("</g>");
+    out.push_str("</g>");
+    Some(out)
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
+/// Decode mermaid `#name;` entities to their HTML/text equivalents.
+///
+/// Upstream mermaid uses `encodeEntities` (parser phase) to convert `#colon;`
+/// → `ﬂ°colon¶ß`, then `decodeEntities` (render phase) converts back to
+/// `&colon;`. We skip the intermediate encoding and go directly from the
+/// `#name;` form (as stored in our parsed model) to the character/HTML entity.
+///
+/// Numeric entities like `#123;` → `&#123;` (HTML numeric ref).
+/// Named entities like `#colon;` → `:`, `#amp;` → `&`, etc.
+fn decode_mermaid_entities(s: &str) -> String {
+    // Fast path: if there's no '#' followed by a letter/digit and ';', return as-is.
+    if !s.contains('#') {
+        return s.to_string();
+    }
+    let mut result = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    while i < n {
+        if bytes[i] == b'#' {
+            // Find the closing ';'
+            let start = i + 1;
+            let mut end = start;
+            while end < n && bytes[end] != b';' {
+                end += 1;
+            }
+            if end < n {
+                let name = &s[start..end];
+                // Check if numeric
+                if name.chars().all(|c| c.is_ascii_digit()) {
+                    // Numeric entity: #123; → &#123;  (decoded as HTML)
+                    if let Ok(cp) = name.parse::<u32>() {
+                        if let Some(ch) = char::from_u32(cp) {
+                            result.push(ch);
+                        } else {
+                            result.push_str(&format!("&#{};", name));
+                        }
+                    } else {
+                        result.push('#');
+                        result.push_str(name);
+                        result.push(';');
+                    }
+                } else {
+                    // Named entity: map common ones used in mermaid labels.
+                    let decoded = match name {
+                        "amp"    => "&",
+                        "lt"     => "<",
+                        "gt"     => ">",
+                        "quot"   => "\"",
+                        "apos"   => "'",
+                        "colon"  => ":",
+                        "semi"   => ";",
+                        "period" => ".",
+                        "comma"  => ",",
+                        "excl"   => "!",
+                        "quest"  => "?",
+                        "lpar"   => "(",
+                        "rpar"   => ")",
+                        "lsqb" | "lbrack" => "[",
+                        "rsqb" | "rbrack" => "]",
+                        "lbrace" | "lcub" => "{",
+                        "rbrace" | "rcub" => "}",
+                        "num"    => "#",
+                        "dollar" => "$",
+                        "sol"    => "/",
+                        "bsol"   => "\\",
+                        "verbar" | "vert" => "|",
+                        "at"     => "@",
+                        "equals" => "=",
+                        "plus"   => "+",
+                        "minus" | "hyphen" => "-",
+                        "ast" | "midast"  => "*",
+                        "Hat"    => "^",
+                        "tilde"  => "~",
+                        "grave"  => "`",
+                        "lowbar" | "underbar" => "_",
+                        "space"  => " ",
+                        "nbsp"   => "\u{00A0}",
+                        "ndash"  => "\u{2013}",
+                        "mdash"  => "\u{2014}",
+                        "laquo"  => "\u{00AB}",
+                        "raquo"  => "\u{00BB}",
+                        _ => {
+                            // Unknown: keep as-is
+                            result.push('#');
+                            result.push_str(name);
+                            result.push(';');
+                            i = end + 1;
+                            continue;
+                        }
+                    };
+                    result.push_str(decoded);
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
+/// Merge CSS styles from `cssCompiledStyles` (classDef) and inline `style`
+/// directive into a single comma-separated string. Later entries override
+/// earlier ones for the same property key (matching upstream `styles2Map`).
+///
+/// `compiled` is a slice of individual CSS property strings like
+/// `["fill:#fff", "color: blue"]`. `inline` is a comma-separated string
+/// like `"fill:#636,color:white"`. Returns a comma-joined merged string.
+fn merge_node_styles(compiled: Option<&[String]>, inline: Option<&str>) -> String {
+    // Use a Vec to preserve insertion order; later entries override earlier
+    // ones for the same key (matching upstream styles2Map behaviour).
+    let mut entries: Vec<(String, String)> = Vec::new();
+
+    if let Some(props) = compiled {
+        for prop in props {
+            let p = prop.trim();
+            if let Some(c) = p.find(':') {
+                let key = p[..c].trim().to_string();
+                let val = p[c + 1..].trim().to_string();
+                entries.push((key, val));
+            }
+        }
+    }
+    if let Some(raw) = inline {
+        for prop in raw.split(',') {
+            let p = prop.trim();
+            if let Some(c) = p.find(':') {
+                let key = p[..c].trim().to_string();
+                let val = p[c + 1..].trim().to_string();
+                entries.push((key, val));
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return String::new();
+    }
+
+    // Dedup: last entry with same key wins (like a Map built with forEach).
+    // Build unique keys in order of first appearance, then overwrite value.
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut ordered_keys: Vec<String> = Vec::new();
+    let mut final_vals: Vec<String> = vec![String::new(); entries.len()];
+
+    for (i, (k, v)) in entries.iter().enumerate() {
+        if let Some(&prev_idx) = seen.get(k) {
+            // Override: update the value at the prev slot.
+            final_vals[prev_idx] = v.clone();
+        } else {
+            seen.insert(k.clone(), i);
+            ordered_keys.push(k.clone());
+            final_vals[i] = v.clone();
+        }
+    }
+
+    // Build in key order.
+    let mut result = Vec::new();
+    for key in &ordered_keys {
+        if let Some(&idx) = seen.get(key) {
+            result.push(format!("{}:{}", key, final_vals[idx]));
+        }
+    }
+    result.join(",")
+}
+
+/// Mirrors upstream `styles2String` + `isLabelStyle` in
+/// `handDrawnShapeStyles.ts`.
+///
+/// Splits a comma-separated CSS string (e.g. `"fill:#636,border:1px solid
+/// red,color:white"`) into three derived strings:
+/// * `node_styles`  — semicolon-joined non-label properties with `!important`,
+///   e.g. `"fill:#636 !important;border:1px solid red !important"`.
+/// * `label_styles` — semicolon-joined label/text properties with `!important`,
+///   e.g. `"color:white !important"`.
+/// * `div_prefix`   — label properties formatted for D3-normalised div style
+///   prefix, e.g. `"color: white !important; "`.
+fn styles2_string(raw_css: &str) -> (String, String, String) {
+    let mut node_parts: Vec<String> = Vec::new();
+    let mut label_parts: Vec<String> = Vec::new();
+    let mut div_parts: Vec<String> = Vec::new();
+
+    for prop in raw_css.split(',') {
+        let prop = prop.trim();
+        if prop.is_empty() {
+            continue;
+        }
+        // Split only on the first `:` — values like `1px solid red` contain no colon.
+        if let Some(colon_pos) = prop.find(':') {
+            let key = prop[..colon_pos].trim();
+            let value = prop[colon_pos + 1..].trim();
+            let with_important = format!("{}:{} !important", key, value);
+            if is_label_style_key(key) {
+                label_parts.push(with_important);
+                // D3's `.style()` normalises to "key: value !important; ".
+                div_parts.push(format!("{}: {} !important; ", key, value));
+            } else {
+                node_parts.push(with_important);
+            }
+        }
+    }
+
+    (node_parts.join(";"), label_parts.join(";"), div_parts.join(""))
+}
+
+/// Mirrors upstream `isLabelStyle` in `handDrawnShapeStyles.ts`.
+fn is_label_style_key(key: &str) -> bool {
+    matches!(
+        key,
+        "color"
+            | "font-size"
+            | "font-family"
+            | "font-weight"
+            | "font-style"
+            | "text-decoration"
+            | "text-align"
+            | "text-transform"
+            | "line-height"
+            | "letter-spacing"
+            | "word-spacing"
+            | "text-shadow"
+            | "text-overflow"
+            | "white-space"
+            | "word-wrap"
+            | "word-break"
+            | "overflow-wrap"
+            | "hyphens"
+    )
+}
+
 /// `<style>` block — built from the shared base preamble + the full
 /// state-specific CSS (ported from upstream `state/styles.js`) + the
-/// shared neo-look tail.
-fn style_block(id: &str, theme: &ThemeVariables) -> String {
+/// shared neo-look tail + any `classDef` rules from the diagram.
+fn style_block(id: &str, theme: &ThemeVariables, d: &StateDiagram) -> String {
     let mut s = String::with_capacity(4096);
     s.push_str("<style>");
     s.push_str(&theme_css::base_preamble(id, theme));
     s.push_str(&state_specific_css(id, theme));
     s.push_str(&theme_css::neo_look_block(id, theme));
+    // classDef CSS injected after :root rule, before </style>.
+    // Mirrors upstream `createCssStyles` + Stylis minification.
+    if !d.class_defs.is_empty() {
+        s.push_str(&class_def_css(id, d));
+    }
     s.push_str("</style>");
     s
+}
+
+/// Generate Stylis-minified CSS for `classDef` directives.
+///
+/// Mirrors upstream `createCssStyles` in `mermaidAPI.ts`:
+/// * For each classDef, emit rules for `> *` and `span` (htmlLabels path)
+///   with all styles as `!important`.
+/// * Emit a `tspan` rule using only text/label-style properties
+///   (with `color` → `fill` substitution).
+fn class_def_css(id: &str, d: &StateDiagram) -> String {
+    let mut out = String::new();
+    for def in &d.class_defs {
+        // Split comma-separated styles from classDef value.
+        // e.g. "fill:#fff,color: blue" → ["fill:#fff", "color: blue"]
+        let raw = def.styles.trim().trim_end_matches(';');
+        let props: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+
+        let mut styles: Vec<String> = Vec::new();    // all properties
+        let mut text_styles: Vec<String> = Vec::new(); // label/color properties only
+
+        for prop in &props {
+            // Strip trailing `;`
+            let fixed = prop.trim_end_matches(';').trim();
+            if let Some(colon_pos) = fixed.find(':') {
+                let key = fixed[..colon_pos].trim();
+                let val = fixed[colon_pos + 1..].trim();
+                // Upstream: if COLOR_KEYWORD matches the attrib:
+                //   newStyle1 = fixedAttrib.replace('fill', 'bgFill')
+                //   newStyle2 = newStyle1.replace('color', 'fill')
+                //   textStyles.push(newStyle2)
+                if key.contains("color") {
+                    // Replace 'fill' → 'bgFill' in key (noop for 'color'),
+                    // then 'color' → 'fill'. Rebuild without extra spaces.
+                    let new_key = key.replace("fill", "bgFill").replace("color", "fill");
+                    // Value is preserved as-is.
+                    text_styles.push(format!("{}:{}", new_key, val));
+                }
+                styles.push(format!("{}:{}", key, val));
+            }
+        }
+
+        if !styles.is_empty() {
+            // ">*" rule has no space; "span" rule has a space.
+            // Stylis minifies "> *" → ">*" but "span" stays as " span".
+            for element in &[">*", " span"] {
+                out.push_str(&format!(
+                    "#{id} .{cls}{el}{{",
+                    id = id,
+                    cls = def.name,
+                    el = element
+                ));
+                for s in &styles {
+                    out.push_str(s);
+                    out.push_str("!important;");
+                }
+                out.push('}');
+            }
+        }
+        if !text_styles.is_empty() {
+            // tspan rule — text/color properties with !important.
+            // Space before "tspan" in selector.
+            out.push_str(&format!(
+                "#{id} .{cls} tspan{{",
+                id = id,
+                cls = def.name,
+            ));
+            for s in &text_styles {
+                out.push_str(s);
+                out.push_str("!important;");
+            }
+            out.push('}');
+        }
+    }
+    out
 }
 
 /// Full port of upstream `packages/mermaid/src/diagrams/state/styles.js`.
@@ -964,6 +1780,132 @@ mod tests {
     }
 
     #[test]
+    fn sweep_all_fixtures_detail() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut all: Vec<(String, usize, usize, usize)> = vec![];
+        for sub in ["cypress", "demos"] {
+            let dir = base.join(format!("tests/ext_fixtures/{}/state", sub));
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let mut files: Vec<_> = entries.flatten().collect();
+            files.sort_by_key(|e| e.file_name());
+            for entry in files {
+                let p = entry.path();
+                if p.extension().and_then(|s| s.to_str()) != Some("mmd") { continue; }
+                let stem = p.file_stem().unwrap().to_str().unwrap().to_string();
+                let rel = format!("ext_fixtures/{}/state/{}", sub, stem);
+                let Ok(mmd) = fs::read_to_string(&p) else { continue };
+                let ref_path = base.join(format!("tests/reference/{}.svg", rel));
+                let Ok(exp) = fs::read_to_string(&ref_path) else { continue };
+                let id = fixture_id(&rel);
+                let Ok(d) = parse(&mmd) else { continue };
+                let theme = get_theme("default");
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::layout::state::layout(&d, &theme).and_then(|l| render(&d, &l, &theme, &id))
+                }));
+                let got = match result { Ok(Ok(s)) => s, _ => continue };
+                let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+                all.push((rel, got.len(), exp.len(), prefix));
+            }
+        }
+        all.sort_by(|a, b| {
+            let ra = a.3 as f64 / a.1.min(a.2) as f64;
+            let rb = b.3 as f64 / b.1.min(b.2) as f64;
+            rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        eprintln!("=== sweep_all_fixtures_detail: {} rendered ===", all.len());
+        let exact: Vec<_> = all.iter().filter(|r| r.3 == r.1 && r.1 == r.2).collect();
+        eprintln!("EXACT ({}): {:?}", exact.len(), exact.iter().map(|r| &r.0).collect::<Vec<_>>());
+        eprintln!("Top 20 non-exact:");
+        for r in all.iter().filter(|r| r.3 != r.1 || r.1 != r.2).take(20) {
+            let stem = r.0.split('/').last().unwrap_or("");
+            eprintln!("  [{}] got={} ref={} prefix={}", stem, r.1, r.2, r.3);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_29_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/29.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/29.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-29";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes {
+            eprintln!("node id={:?} w={:?} h={:?} x={:?} y={:?} label={:?} shape={:?}",
+                      n.id, n.width, n.height, n.x, n.y, n.label, n.shape);
+        }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_29.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("29: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            eprintln!("got[p-10:p+150]: {:?}", &got[prefix.saturating_sub(10)..(prefix+150).min(got.len())]);
+            eprintln!("ref[p-10:p+150]: {:?}", &exp[prefix.saturating_sub(10)..(prefix+150).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_04_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/04.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/04.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-04";
+        let Ok(d) = parse(&mmd) else { return };
+        let theme = get_theme("default");
+        let Ok(l) = crate::layout::state::layout(&d, &theme) else { return };
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_04.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("04: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            eprintln!("got[p-10:p+150]: {:?}", &got[p.saturating_sub(10)..(p+150).min(got.len())]);
+            eprintln!("ref[p-10:p+150]: {:?}", &exp[p.saturating_sub(10)..(p+150).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_09_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/09.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/09.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-09";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_09.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("09: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            eprintln!("got[p-20:p+120]: {:?}", &got[prefix.saturating_sub(20)..(prefix+120).min(got.len())]);
+            eprintln!("ref[p-20:p+120]: {:?}", &exp[prefix.saturating_sub(20)..(prefix+120).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_41_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/41.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/41.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-41";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_41.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("41: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 60;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
     fn renders_minimal_diagram_without_panicking() {
         let src = "stateDiagram-v2\n[*] --> S1\nS1 --> [*]\n";
         let d = parse(src).unwrap();
@@ -974,6 +1916,84 @@ mod tests {
         assert!(svg.contains(r#"class="statediagram""#));
         assert!(svg.contains(r#"aria-roledescription="stateDiagram""#));
         assert!(svg.ends_with("</svg>"));
+    }
+
+    #[test]
+    fn gen_fixture_06_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/06.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/06.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-06";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        // Show edge data
+        for e in &l.result.edges {
+            eprintln!("edge id={:?} points={:?}", e.id, e.points);
+        }
+        for n in &l.result.nodes {
+            eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape);
+        }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_06.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("06: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 30;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_03_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/03.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/03.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-03";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes {
+            eprintln!("node id={:?} w={:?} h={:?} x={:?} y={:?} label={:?} shape={:?} css={:?} parent={:?} is_group={:?}",
+                      n.id, n.width, n.height, n.x, n.y, n.label, n.shape, n.css_classes, n.parent_id, n.is_group);
+        }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_03.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("03: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 30;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_30_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/30.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/30.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-30";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes {
+            eprintln!("node id={:?} w={:?} h={:?} x={:?} y={:?} label={:?} shape={:?} css_classes={:?}",
+                      n.id, n.width, n.height, n.x, n.y, n.label, n.shape, n.css_classes);
+        }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_30.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("30: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 30;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
     }
 
     fn fixture_id(rel: &str) -> String {
@@ -1085,6 +2105,484 @@ mod tests {
             for f in failed {
                 eprintln!("  - {}", f);
             }
+        }
+        // Print all non-exact fixtures with prefix info
+        for (rel, rendered, exact, prefix) in &groups {
+            if !*exact {
+                eprintln!("[state] FAIL prefix={} rendered={} : {}", prefix, rendered, rel);
+            }
+        }
+    }
+
+    #[test]
+    fn gen_fixture_70_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/70.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/70.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-70";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_70.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("70: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 60;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_39_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/39.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/39.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-39";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_39.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("39: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 60;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_38_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/38.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/38.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-38";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_38.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("38: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 200, &got[p.saturating_sub(ctx)..(p+200).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 200, &exp[p.saturating_sub(ctx)..(p+200).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_06b_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/06.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/06.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-06";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_06b.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("06: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_37_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/37.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/37.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-37";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_37.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("37: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 600, &got[p.saturating_sub(ctx)..(p+600).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 600, &exp[p.saturating_sub(ctx)..(p+600).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_04c_diff() {
+        // fixture 04 in cypress directory
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/04.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/04.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-04";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_04c.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("04c: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 60;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_16_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/16.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/16.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-16";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_16.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("16: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_demos06_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/06.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/06.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-06";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos06.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos06: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_17_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/17.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/17.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-17";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_17.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("17: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 120;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_demos03_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/03.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/03.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-03";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos03.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos03: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_demos04_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/04.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/04.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-04";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos04.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos04: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn check_diagram_title_width() {
+        use crate::font_metrics::text_width;
+        let title_text = "Very simple diagram";
+        // resolveFont finds default: sans-serif 14px (no font-size on SVG inline style)
+        let w14 = text_width(title_text, "sans-serif", 14.0, false, false);
+        let w16 = text_width(title_text, "sans-serif", 16.0, false, false);
+        eprintln!("'Very simple diagram' sans 14px: {} (target: 145.5400390625)", w14);
+        eprintln!("'Very simple diagram' sans 16px: {}", w16);
+    }
+
+    #[test]
+    fn gen_fixture_demos05_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/05.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/05.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-05";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos05.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos05: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 60;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_demos01_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/01.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/01.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-01";
+        let d = parse(&mmd).unwrap();
+        eprintln!("acc_title={:?} acc_descr={:?}", d.meta.acc_title, d.meta.acc_descr);
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos01.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos01: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_demos02_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/demos/state/02.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/demos/state/02.svg")).unwrap();
+        let id = "ref-ext-fixtures-demos-state-02";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_demos02.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("demos02: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_cypress08_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/08.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/08.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-08";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_cy08.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("cy08: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_cypress10_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/10.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/10.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-10";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for e in &l.result.edges { eprintln!("edge id={:?} label={:?} label_x={:?} label_y={:?}", e.id, e.label, e.label_x, e.label_y); }
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_cy10.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("cy10: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_cypress43_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/43.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/43.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-43";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_cy43.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("cy43: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 400, &got[p.saturating_sub(ctx)..(p+400).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 400, &exp[p.saturating_sub(ctx)..(p+400).min(exp.len())]);
+        }
+    }
+
+    #[test]
+    fn gen_fixture_cypress03_diff() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = fs::read_to_string(base.join("tests/ext_fixtures/cypress/state/03.mmd")).unwrap();
+        let exp = fs::read_to_string(base.join("tests/reference/ext_fixtures/cypress/state/03.svg")).unwrap();
+        let id = "ref-ext-fixtures-cypress-state-03";
+        let d = parse(&mmd).unwrap();
+        let theme = get_theme("default");
+        let l = crate::layout::state::layout(&d, &theme).unwrap();
+        for n in &l.result.nodes { eprintln!("node id={:?} x={:?} y={:?} w={:?} h={:?} shape={:?}", n.id, n.x, n.y, n.width, n.height, n.shape); }
+        let got = render(&d, &l, &theme, id).unwrap();
+        let _ = fs::write("/tmp/fresh_state_cy03.svg", &got);
+        let prefix = got.bytes().zip(exp.bytes()).take_while(|(a, b)| a == b).count();
+        eprintln!("cy03: got={} exp={} prefix={} exact={}", got.len(), exp.len(), prefix, got == exp);
+        if got != exp {
+            let p = prefix;
+            let ctx = 40;
+            eprintln!("got[p-{}:p+{}]: {:?}", ctx, 300, &got[p.saturating_sub(ctx)..(p+300).min(got.len())]);
+            eprintln!("ref[p-{}:p+{}]: {:?}", ctx, 300, &exp[p.saturating_sub(ctx)..(p+300).min(exp.len())]);
+        }
+    }
+
+    /// Verbose per-fixture diff analysis for near-miss fixtures.
+    #[test]
+    fn report_per_fixture_prefix() {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut groups: Vec<(String, bool, bool, usize, usize, usize)> = vec![];
+        for sub in ["cypress", "demos"] {
+            let dir = base.join(format!("tests/ext_fixtures/{}/state", sub));
+            let Ok(entries) = fs::read_dir(&dir) else { continue; };
+            let mut files: Vec<_> = entries.flatten().collect();
+            files.sort_by_key(|e| e.file_name());
+            for entry in files {
+                let p = entry.path();
+                if p.extension().and_then(|s| s.to_str()) != Some("mmd") { continue; }
+                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                let rel = format!("ext_fixtures/{}/state/{}", sub, stem);
+                let mmd = match fs::read_to_string(&p) { Ok(s) => s, Err(_) => continue };
+                let ref_svg = base.join(format!("tests/reference/{}.svg", rel));
+                let expected = match fs::read_to_string(&ref_svg) { Ok(s) => s, Err(_) => continue };
+                let id = fixture_id(&rel);
+                let theme = get_theme("default");
+                let mmd_c = mmd.clone();
+                let id_c = id.clone();
+                let theme_c = theme.clone();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    parse(&mmd_c).and_then(|d| {
+                        let eff = d.theme_override.as_deref().map(get_theme).unwrap_or_else(|| theme_c.clone());
+                        let l = crate::layout::state::layout(&d, &eff)?;
+                        render(&d, &l, &eff, &id_c)
+                    })
+                }));
+                let got = match result { Ok(Ok(s)) => s, _ => { groups.push((rel, false, false, 0, 0, 0)); continue; } };
+                let exact = got == expected;
+                let prefix = got.bytes().zip(expected.bytes()).take_while(|(a, b)| a == b).count();
+                groups.push((rel, true, exact, prefix, got.len(), expected.len()));
+            }
+        }
+        // Sort by prefix descending (near-misses first)
+        let mut non_exact: Vec<_> = groups.iter().filter(|(_, _, e, _, _, _)| !*e).collect();
+        non_exact.sort_by(|a, b| b.3.cmp(&a.3));
+        eprintln!("=== Non-exact fixtures sorted by prefix (highest first) ===");
+        for (rel, rendered, _, prefix, got_len, exp_len) in &non_exact {
+            if !rendered { eprintln!("  PANIC  {}", rel); continue; }
+            let stem: &str = rel.split('/').last().unwrap_or("");
+            eprintln!("  prefix={:6}  got={:6}  exp={:6}  {}", prefix, got_len, exp_len, stem);
+        }
+        let exact_count = groups.iter().filter(|(_, _, e, _, _, _)| *e).count();
+        eprintln!("=== exact={}/{} ===", exact_count, groups.len());
+
+        // Detailed diff for each failing fixture — only prints the divergence context
+        // Sort by prefix descending so highest near-miss prints last.
+        let base2 = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for (rel, rendered, exact, prefix, _, _) in &groups {
+            if *exact || !rendered { continue; }
+            let mmd = match fs::read_to_string(base2.join(format!("tests/{}.mmd", rel))) { Ok(s) => s, _ => continue };
+            let expected = match fs::read_to_string(base2.join(format!("tests/reference/{}.svg", rel))) { Ok(s) => s, _ => continue };
+            let id = fixture_id(rel);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                parse(&mmd).and_then(|d| {
+                    let t = d.theme_override.as_deref().map(get_theme).unwrap_or_else(|| get_theme("default"));
+                    let l = crate::layout::state::layout(&d, &t)?;
+                    render(&d, &l, &t, &id)
+                })
+            }));
+            let got = match result { Ok(Ok(s)) => s, _ => continue };
+            let p = *prefix;
+            let ctx = 40;
+            let g_ctx = &got[p.saturating_sub(ctx)..(p+120).min(got.len())];
+            let e_ctx = &expected[p.saturating_sub(ctx)..(p+120).min(expected.len())];
+            eprintln!("DIFF[{}] got: {:?}", rel.split('/').last().unwrap_or(rel), g_ctx);
+            eprintln!("DIFF[{}] exp: {:?}", rel.split('/').last().unwrap_or(rel), e_ctx);
         }
     }
 }
