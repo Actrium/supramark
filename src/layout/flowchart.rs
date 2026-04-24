@@ -34,6 +34,11 @@ pub struct FlowchartLayout {
     /// `aria-roledescription` — derived from the header keyword:
     /// `flowchart-elk`, `flowchart-v2`, or `flowchart-v1`.
     pub aria_kind: String,
+    /// IDs of clusters that were laid out via the recursive inner-layout
+    /// algorithm (isolated clusters — no cross-boundary edges).
+    /// These are rendered as inner `<g class="root">` groups inside
+    /// the outer `<g class="nodes">` section, not in `<g class="clusters">`.
+    pub isolated_cluster_ids: std::collections::HashSet<String>,
 }
 
 /// Font sizing defaults (upstream `flowchart.nodePadding=8, ranksep=50, nodesep=50`).
@@ -56,7 +61,7 @@ const FLOWCHART_PADDING: f64 = 15.0;
 /// Lay out a flowchart diagram. Uses dagre for the graph geometry.
 pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartLayout> {
     let layout_data = build_layout_data(d);
-    let LayoutResult { nodes, edges, clusters, bounds } =
+    let LayoutResult { nodes, edges, clusters, bounds, isolated_cluster_ids } =
         unified::layout(&layout_data, "dagre", theme)?;
 
     Ok(FlowchartLayout {
@@ -73,6 +78,7 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         } else {
             "flowchart-v2".to_string()
         },
+        isolated_cluster_ids,
     })
 }
 
@@ -127,15 +133,17 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.look = Some("classic".into());
         node.parent_id = parent_of.get(&v.id).cloned();
         // CSS classes — upstream: `'default ' + vertex.classes.join(' ')`.
-        // The trailing space after "default" is intentional — it produces
-        // the double-space before the closing quote in `getNodeClasses`.
-        let mut classes = String::from("default");
-        for cls in &v.classes {
-            classes.push(' ');
-            classes.push_str(cls);
-        }
-        // Always append trailing space — even when no extra classes.
-        classes.push(' ');
+        // `"default "` has a trailing space; when classes are appended via
+        // join(' '), the result is `"default dark"` (no trailing space) for
+        // one class, or `"default "` (trailing space) when the list is empty.
+        // The shape renderer then formats `"node {cssClasses} "` which
+        // produces `"node default  "` (double space) when no extra classes,
+        // and `"node default dark "` (one trailing space) when "dark" is last.
+        let classes = if v.classes.is_empty() {
+            "default ".to_string()
+        } else {
+            format!("default {}", v.classes.join(" "))
+        };
         node.css_classes = Some(classes);
         // Inline styles.
         let merged_styles = collect_styles(v, &class_map);
@@ -200,6 +208,10 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         let end = e.end.clone();
         let counter = *pair_count.entry((start.clone(), end.clone())).and_modify(|c| *c += 1).or_insert(0);
         let mut ue = build_edge(e, d, counter);
+        // Record original endpoints before retargeting so the isolation check
+        // in dagre_bridge can test against the pre-retarget cluster IDs.
+        ue.extra.insert("orig_start".into(), e.start.clone());
+        ue.extra.insert("orig_end".into(), e.end.clone());
         retarget_cluster_endpoints(&mut ue, d);
         data.edges.push(ue);
     }
@@ -279,13 +291,69 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
     }
 }
 
+/// Strip markdown syntax markers from a label to get the plain text that
+/// jsdom `textContent` would return after markdown→HTML conversion.
+///
+/// Markdown `**bold**` → `<strong>bold</strong>` → textContent `bold`.
+/// Markdown `*italic*` → `<em>italic</em>` → textContent `italic`.
+/// HTML tags like `<br>` embedded in markdown are stripped by textContent.
+/// The `\n` → `<br/>` → stripped. Result: plain text, single line.
+fn strip_markdown_for_measure(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let bytes = label.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'*' {
+            // Skip `**` or `*` markers
+            if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                i += 2; // skip **
+            } else {
+                i += 1; // skip *
+            }
+        } else if bytes[i] == b'_' {
+            // Skip `__` or `_` markers
+            if i + 1 < bytes.len() && bytes[i + 1] == b'_' {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        } else if bytes[i] == b'`' {
+            i += 1; // skip backtick (inline code marker)
+        } else if bytes[i] == b'<' {
+            // HTML tag embedded in markdown: skip to '>'
+            if let Some(rel_end) = label[i..].find('>') {
+                i += rel_end + 1; // skip the tag
+            } else {
+                // Bare '<' with no '>' — treat as literal
+                out.push('<');
+                i += 1;
+            }
+        } else if bytes[i] == b'\n' {
+            // \n → <br/> in HTML → stripped by textContent
+            i += 1;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Measure a vertex's bounding box including its intrinsic shape padding.
 /// These padding values must match what the upstream shape renderers
 /// compute at draw time, so that dagre assigns the correct node
 /// dimensions.
 fn measure_vertex_box(v: &Vertex) -> (f64, f64) {
     let label = display_label(v);
-    let (tw, th) = measure_text(&label);
+    // For markdown labels, the `**bold**` syntax is rendered as HTML and
+    // textContent strips the markers — measure the plain-text equivalent.
+    let is_markdown = v.label.as_ref().map(|l| l.kind == LabelKind::Markdown).unwrap_or(false);
+    let measure_label = if is_markdown {
+        strip_markdown_for_measure(&label)
+    } else {
+        label.clone()
+    };
+    let (tw, th) = measure_text(&measure_label);
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
     //
@@ -303,11 +371,17 @@ fn measure_vertex_box(v: &Vertex) -> (f64, f64) {
     let p = FLOWCHART_PADDING;
     let (pad_x, pad_y) = match shape {
         "circle" | "circ" => {
-            let d = tw.max(th) + 32.0;
+            // Upstream circle.ts: r = bbox.width/2 + halfPadding
+            // halfPadding = node.padding/2 = p/2
+            // d = 2*r = bbox.width + node.padding = tw + p
+            // Uses label WIDTH only (not max(tw,th)) to match upstream bbox.width.
+            let d = tw + p;
             return (d, d);
         }
         "doublecircle" => {
-            let d = tw.max(th) + 48.0;
+            // Upstream: r = bbox.width/2 + labelPadding*2 (look="neo") or + halfPadding*3
+            // Using approximate: d = tw + p*2 (matching observed behavior)
+            let d = tw + p * 2.0;
             return (d, d);
         }
         "diamond" | "question" => {
@@ -363,40 +437,59 @@ fn strip_fa_icons(text: &str) -> String {
 }
 
 /// Strip HTML tags from label text for width measurement.
-/// Handles `<br>` / `<br/>` as line breaks and tracks bold state via
-/// `<strong>` / `<b>` tags. Returns a list of (text, bold) line segments.
+///
+/// Mirrors jsdom's `textContent` semantics: ALL HTML tags (including `<br>`)
+/// are stripped, text nodes are concatenated, and only `\n` (actual newline
+/// characters) create new measurement lines. This matches how the upstream
+/// getBBox shim calls `measureTextBlock(el.textContent, ...)`.
+///
+/// Bold state is tracked for accurate width: `<strong>`/`<b>` toggles bold.
+/// Strip HTML tags from `s` to get the plain text as jsdom `textContent` would.
+///
+/// `textContent` strips ALL HTML tags (including `<br>`, `<strong>`, etc.)
+/// and returns a single concatenated plain text string. Bold markup is NOT
+/// accounted for in textContent — it returns plain text regardless.
+///
+/// `\n` was already converted to `<br/>` in HTML before measurement;
+/// textContent strips `<br/>` — so `\n` contributes nothing to the text.
+///
+/// Returns a single-element vec with the concatenated plain text and bold=false.
 fn strip_html_for_measure(s: &str) -> Vec<(String, bool)> {
-    let mut lines: Vec<(String, bool)> = vec![(String::new(), false)];
-    let mut bold = false;
+    let mut text = String::with_capacity(s.len());
     let mut i = 0;
     let bytes = s.as_bytes();
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            // Find closing '>'
-            let end = s[i..].find('>').map(|n| i + n + 1).unwrap_or(s.len());
-            let tag = &s[i + 1..end - 1].trim_start_matches('/').to_ascii_lowercase();
-            let tag_lc = tag.trim();
-            match tag_lc {
-                "br" | "br/" => {
-                    lines.push((String::new(), bold));
-                }
-                "strong" | "b" => bold = true,
-                "/strong" | "/b" => bold = false,
-                _ => {}
+            // Try to find closing '>'. If not found, treat '<' as literal text.
+            if let Some(rel_end) = s[i..].find('>') {
+                i += rel_end + 1; // skip entire tag
+            } else {
+                text.push('<');
+                i += 1;
             }
-            i = end;
+        } else if bytes[i] == b'\n' {
+            // \n → <br/> in HTML → stripped by textContent
+            i += 1;
         } else {
-            let line = lines.last_mut().unwrap();
-            line.0.push(bytes[i] as char);
+            text.push(bytes[i] as char);
             i += 1;
         }
     }
-    lines
+    vec![(text, false)]
 }
 
 /// Measure the overall width/height of the (possibly multi-line) label.
-/// Handles HTML labels (containing tags like `<strong>`, `<br/>`) by
-/// stripping tags and measuring the visible text content only.
+///
+/// Upstream mermaid measures node labels via `measureTextBlock` which puts
+/// the rendered HTML into a jsdom `<div>` and then reads `el.textContent`.
+/// `textContent` strips ALL HTML tags (including `<br/>`) and returns the
+/// concatenated plain text — which never contains `\n` since `\n` in the
+/// original label was already converted to `<br/>` before measurement.
+/// Therefore the measured block is always exactly ONE line, regardless of
+/// how many `<br/>` or `\n` appear in the source label.
+///
+/// Width is the width of the concatenated plain text (with bold spans
+/// measured at bold weight). Height is always one `line_height`.
 fn measure_text(label: &str) -> (f64, f64) {
     if label.is_empty() {
         return (0.0, LABEL_FONT_SIZE);
@@ -405,26 +498,15 @@ fn measure_text(label: &str) -> (f64, f64) {
     let stripped = strip_fa_icons(label);
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
 
-    // Check whether the label contains HTML tags.
-    if stripped.contains('<') {
-        // HTML label — strip tags, treat <br> as line break, <strong>/<b> as bold.
-        let segments = strip_html_for_measure(&stripped);
-        let line_count = segments.len().max(1) as f64;
-        let max_w = segments.iter().map(|(text, bold)| {
-            font_metrics::text_width(text, DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, *bold, false)
-        }).fold(0.0f64, f64::max);
-        return (max_w, lh * line_count);
-    }
-
-    let lines: Vec<&str> = stripped.split("<br/>").flat_map(|s| s.split('\n')).collect();
-    let mut max_w = 0.0f64;
-    for line in &lines {
-        let w = font_metrics::text_width(line, DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
-        if w > max_w {
-            max_w = w;
-        }
-    }
-    (max_w, lh * lines.len() as f64)
+    // strip_html_for_measure strips all HTML tags (including <br>) and
+    // returns segments split on \n. Since jsdom textContent strips <br/>
+    // and the original \n was converted to <br/> before measurement, we
+    // treat the whole label as ONE line: sum all segment widths.
+    let segments = strip_html_for_measure(&stripped);
+    let total_w: f64 = segments.iter().map(|(text, bold)| {
+        font_metrics::text_width(text, DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, *bold, false)
+    }).sum();
+    (total_w, lh)
 }
 
 fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
@@ -535,6 +617,14 @@ fn collect_styles<'a>(
     class_map: &BTreeMap<&'a str, &'a ClassDef>,
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    // Upstream: getCompiledStyles(["default", "node", ...vertex.classes])
+    // So we look up the "default" and "node" classDefs in addition to the
+    // vertex's own classes.
+    for builtin in &["default", "node"] {
+        if let Some(cd) = class_map.get(*builtin) {
+            out.extend(cd.styles.iter().cloned());
+        }
+    }
     for cls in &v.classes {
         if let Some(cd) = class_map.get(cls.as_str()) {
             out.extend(cd.styles.iter().cloned());

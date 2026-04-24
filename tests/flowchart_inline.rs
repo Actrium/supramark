@@ -229,7 +229,7 @@ fn flowchart_byte_exact_sweep() {
 
 #[test]
 fn flowchart_single_diff_report() {
-    let rel = "ext_fixtures/cypress/flowchart/114";
+    let rel = "ext_fixtures/cypress/flowchart/134";
     let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mmd = base.join("tests").join(format!("{}.mmd", rel));
     let svg_path = base.join("tests/reference").join(format!("{}.svg", rel));
@@ -237,11 +237,15 @@ fn flowchart_single_diff_report() {
     let expected = std::fs::read_to_string(&svg_path).unwrap();
     let id = id_for(rel);
     let d = fcp::parse(&source).unwrap();
+    eprintln!("vertices: {:?}", d.vertices.iter().map(|n| &n.id).collect::<Vec<_>>());
+    eprintln!("subgraphs: {:?}", d.subgraphs.iter().map(|s| (&s.id, &s.title, &s.members, &s.children)).collect::<Vec<_>>());
+    eprintln!("edges: {}", d.edges.len());
     let th = theme::get_theme("default");
     let l = fcl::layout(&d, &th).unwrap();
     eprintln!("diagram_padding={}", l.diagram_padding);
+    eprintln!("isolated_cluster_ids: {:?}", l.isolated_cluster_ids);
     for n in &l.nodes {
-        eprintln!("  node id={} x={:?} y={:?} w={:?} h={:?} shape={:?} is_group={}", n.id, n.x, n.y, n.width, n.height, n.shape, n.is_group);
+        eprintln!("  node id={} x={:?} y={:?} w={:?} h={:?} shape={:?} is_group={} parent={:?} padding={:?}", n.id, n.x, n.y, n.width, n.height, n.shape, n.is_group, n.parent_id, n.padding);
     }
     for e in &l.edges {
         eprintln!("  edge id={} lx={:?} ly={:?}", e.id, e.label_x, e.label_y);

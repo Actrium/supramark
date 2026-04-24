@@ -165,6 +165,100 @@ fn edge_target<'a>(e: &'a Edge) -> Option<&'a str> {
     e.end.as_deref().or(e.target.as_deref())
 }
 
+/// Build a map from cluster-id to its "anchor" leaf node id.
+///
+/// Upstream `adjustClustersAndEdges` rewrites edges that point to/from a
+/// cluster node so they instead point to/from a representative leaf node
+/// (the "anchor") inside the cluster. This allows dagre to compute correct
+/// ranks for nodes connected to clusters via compound edges.
+///
+/// The anchor for a cluster is the first direct leaf (non-cluster) child.
+/// If all direct children are themselves clusters, we recurse.
+///
+/// Clusters that do NOT have external connections are not rewritten (they
+/// will be handled by the isolated-cluster path instead).
+fn build_cluster_anchors(
+    data: &LayoutData,
+    excluded: &std::collections::HashSet<&str>,
+) -> std::collections::HashMap<String, String> {
+    use std::collections::{HashMap, HashSet};
+
+    // Collect all cluster ids.
+    let cluster_ids: HashSet<&str> = data.nodes.iter()
+        .filter(|n| n.is_group && !excluded.contains(n.id.as_str()))
+        .map(|n| n.id.as_str())
+        .collect();
+
+    if cluster_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    // For each cluster, determine if it has external connections.
+    // A cluster has external connections if any edge has exactly one endpoint
+    // that is a descendant of (or is) the cluster.
+    let desc_of: HashMap<&str, HashSet<String>> = cluster_ids.iter()
+        .map(|&cid| (cid, all_descendants(cid, data)))
+        .collect();
+
+    let mut has_external: HashSet<&str> = HashSet::new();
+    for edge in &data.edges {
+        let src = match edge_source(edge) {
+            Some(s) => s,
+            None => continue,
+        };
+        let dst = match edge_target(edge) {
+            Some(s) => s,
+            None => continue,
+        };
+        for &cid in &cluster_ids {
+            let members = desc_of.get(cid).unwrap();
+            let src_in = members.contains(src) || src == cid;
+            let dst_in = members.contains(dst) || dst == cid;
+            if src_in != dst_in {
+                has_external.insert(cid);
+            }
+        }
+    }
+
+    // For each cluster with external connections, find its anchor leaf node.
+    // The anchor is the first direct non-cluster child (recurse if needed).
+    fn find_anchor<'a>(
+        cluster_id: &str,
+        data: &'a LayoutData,
+        cluster_ids: &HashSet<&str>,
+    ) -> Option<&'a str> {
+        // Find direct children of this cluster.
+        let children: Vec<&Node> = data.nodes.iter()
+            .filter(|n| n.parent_id.as_deref() == Some(cluster_id))
+            .collect();
+        for child in &children {
+            if !cluster_ids.contains(child.id.as_str()) {
+                // Leaf child — this is the anchor.
+                return Some(&child.id);
+            }
+        }
+        // All children are clusters — recurse into the first one.
+        for child in &children {
+            if let Some(anchor) = find_anchor(&child.id, data, cluster_ids) {
+                return Some(anchor);
+            }
+        }
+        None
+    }
+
+    let mut anchors: HashMap<String, String> = HashMap::new();
+    for &cid in &has_external {
+        if let Some(anchor) = find_anchor(cid, data, &cluster_ids) {
+            anchors.insert(cid.to_string(), anchor.to_string());
+            log::debug!(
+                "dagre_bridge: cluster '{}' has external connections, anchor='{}'",
+                cid, anchor
+            );
+        }
+    }
+    anchors
+}
+
 /// Populate a dagre graph from a `LayoutData`. Self-edges are expanded
 /// using the upstream pattern (two label-rect helper nodes + three
 /// stitched edges).
@@ -228,6 +322,16 @@ fn build_graph_filtered_ex<'a>(
     // Collect the set of all isolated cluster ids for quick lookup.
     let isolated_cluster_ids: std::collections::HashSet<&str> =
         isolated_descendants.keys().map(|s| s.as_str()).collect();
+
+    // Build cluster anchor map: for non-isolated clusters with external
+    // connections, map cluster_id → first non-cluster leaf child.
+    // Edges that point to/from a cluster are rewritten to point to/from
+    // the anchor, matching upstream's `adjustClustersAndEdges` behavior.
+    let cluster_anchors = if g.is_compound() {
+        build_cluster_anchors(data, excluded)
+    } else {
+        std::collections::HashMap::new()
+    };
 
     for edge in &data.edges {
         // When an edge was originally cluster-to-cluster (orig_start/orig_end
@@ -294,16 +398,41 @@ fn build_graph_filtered_ex<'a>(
             }
         }
 
-        if effective_src == effective_dst {
+        // Rewrite cluster endpoints to their anchor leaf nodes.
+        // Upstream `adjustClustersAndEdges` does this before running dagre so
+        // that edges involving cluster nodes are ranked against their internal
+        // representative node. This matches dagre's expectation that all edges
+        // connect leaf nodes, not compound parents.
+        //
+        // Note: only rewrite if the effective endpoint is a cluster that is NOT
+        // an isolated cluster (isolated clusters enter the outer dagre as plain
+        // leaf nodes and do not need anchor rewriting).
+        let dagre_src: &str = if !isolated_cluster_ids.contains(effective_src) {
+            cluster_anchors.get(effective_src).map(|s| s.as_str()).unwrap_or(effective_src)
+        } else {
+            effective_src
+        };
+        let dagre_dst: &str = if !isolated_cluster_ids.contains(effective_dst) {
+            cluster_anchors.get(effective_dst).map(|s| s.as_str()).unwrap_or(effective_dst)
+        } else {
+            effective_dst
+        };
+
+        // Skip edges where anchor lookup resulted in an excluded node.
+        if excluded.contains(dagre_src) || excluded.contains(dagre_dst) {
+            continue;
+        }
+
+        if dagre_src == dagre_dst {
             // Self-edge expansion — see upstream index.ts:308-364.
-            expand_self_edge(&mut g, edge, effective_src);
+            expand_self_edge(&mut g, edge, dagre_src);
         } else {
             let name = if edge.id.is_empty() {
                 None
             } else {
                 Some(edge.id.as_str())
             };
-            g.set_edge(effective_src, effective_dst, Some(make_edge_label(edge)), name);
+            g.set_edge(dagre_src, dagre_dst, Some(make_edge_label(edge)), name);
         }
     }
 
@@ -380,7 +509,16 @@ fn collect_nodes(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Node
 }
 
 /// Pull post-layout edge spline points + label centres.
-fn collect_edges(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Edge> {
+///
+/// `cluster_anchors`: optional map from cluster-id to the anchor leaf node
+/// that was used as the dagre edge endpoint after rewriting. When an edge's
+/// original endpoint is a cluster, we look up the anchor to find the actual
+/// dagre edge and copy its routing points.
+fn collect_edges(
+    data: &LayoutData,
+    g: &Graph<NodeLabel, EdgeLabel>,
+    cluster_anchors: &std::collections::HashMap<String, String>,
+) -> Vec<Edge> {
     data.edges
         .iter()
         .map(|orig| {
@@ -404,12 +542,16 @@ fn collect_edges(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Edge
             } else {
                 (src_raw, dst_raw)
             };
+            // Apply anchor rewriting so we look up the edge under the same
+            // (dagre_src, dagre_dst) key that was used in build_graph_filtered_ex.
+            let dagre_src: &str = cluster_anchors.get(eff_src).map(|s| s.as_str()).unwrap_or(eff_src);
+            let dagre_dst: &str = cluster_anchors.get(eff_dst).map(|s| s.as_str()).unwrap_or(eff_dst);
             let name = if orig.id.is_empty() {
                 None
             } else {
                 Some(orig.id.as_str())
             };
-            if let Some(lbl) = g.edge(eff_src, eff_dst, name) {
+            if let Some(lbl) = g.edge(dagre_src, dagre_dst, name) {
                 out.points = Some(
                     lbl.points
                         .iter()
@@ -1015,6 +1157,44 @@ fn layout_isolated_cluster(
     }
 }
 
+/// Reorder edges so that edges with cluster endpoints come last.
+///
+/// Upstream `adjustClustersAndEdges` removes edges to/from clusters and re-adds
+/// them (with anchor rewriting), which pushes them to the end of graphlib's edge
+/// list. This affects the rendering order in the SVG `<g class="edgePaths">`.
+fn reorder_cluster_edges(edges: Vec<Edge>, data: &LayoutData) -> Vec<Edge> {
+    // Build set of all cluster ids in data.
+    let cluster_ids: std::collections::HashSet<&str> = data.nodes.iter()
+        .filter(|n| n.is_group)
+        .map(|n| n.id.as_str())
+        .collect();
+
+    if cluster_ids.is_empty() {
+        return edges;
+    }
+
+    let is_cluster_edge = |e: &Edge| -> bool {
+        // Use original (pre-retarget) endpoints to detect cluster connections.
+        let orig_src = e.extra.get("orig_start").map(|s| s.as_str())
+            .unwrap_or_else(|| edge_source(e).unwrap_or(""));
+        let orig_dst = e.extra.get("orig_end").map(|s| s.as_str())
+            .unwrap_or_else(|| edge_target(e).unwrap_or(""));
+        cluster_ids.contains(orig_src) || cluster_ids.contains(orig_dst)
+    };
+
+    // Stable partition: non-cluster edges first, cluster edges last.
+    let mut non_cluster: Vec<Edge> = Vec::new();
+    let mut cluster_edges: Vec<Edge> = Vec::new();
+    for e in edges {
+        if is_cluster_edge(&e) {
+            cluster_edges.push(e);
+        } else {
+            non_cluster.push(e);
+        }
+    }
+    non_cluster.into_iter().chain(cluster_edges).collect()
+}
+
 /// Public entry — run the dagre layout on a `LayoutData`, return the
 /// geometry. Upstream analogue: `render.ts::render` + `dagre/index.ts::render`.
 pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult> {
@@ -1127,6 +1307,9 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
 
     let excluded_refs: std::collections::HashSet<&str> =
         excluded_node_ids.iter().map(|s| s.as_str()).collect();
+    // Build cluster anchor map for non-isolated clusters with external connections.
+    // Must be computed from outer_data (with isolated clusters replaced as leaf nodes).
+    let outer_cluster_anchors = build_cluster_anchors(&outer_data, &excluded_refs);
     let mut g = build_graph_filtered(
         &outer_data,
         &excluded_refs,
@@ -1231,8 +1414,11 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         })
         .collect();
 
-    let edges_pre = collect_edges(data, &g);
-    let edges = routing::refine_edges(&nodes, &edges_pre);
+    let edges_pre = collect_edges(data, &g, &outer_cluster_anchors);
+    // Reorder edges so cluster-endpoint edges come last, matching upstream's
+    // behavior where `adjustClustersAndEdges` removes and re-adds such edges.
+    let edges_reordered = reorder_cluster_edges(edges_pre, data);
+    let edges = routing::refine_edges(&nodes, &edges_reordered);
     let clusters = collect_clusters(&nodes);
     let bounds = compute_bounds(&nodes, &edges);
 

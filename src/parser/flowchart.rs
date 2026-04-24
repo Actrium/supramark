@@ -38,6 +38,8 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
     // Strip whole-line `%%` comments, keep everything else (we DO want
     // to preserve `%%{init:...}%%` directives content, but they were
     // already removed above).
+    // Also expand inline `;` separators (upstream treats `;` like `\n`),
+    // splitting outside quoted strings to preserve e.g. subgraph titles.
     let mut lines: Vec<String> = Vec::new();
     for raw in body.split('\n') {
         let t = raw.trim_end_matches('\r');
@@ -45,7 +47,11 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
         if t.trim_start().starts_with("%%") && !t.trim_start().starts_with("%%{") {
             continue;
         }
-        lines.push(t.to_string());
+        // Expand `;` as statement separator (outside of `"..."` quotes).
+        let segments = split_semicolons_outside_quotes(t);
+        for seg in segments {
+            lines.push(seg);
+        }
     }
 
     // --- header: `flowchart TD` / `graph LR` / `flowchart-elk RL` ----
@@ -123,6 +129,14 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
         vertex_counter: 0,
     };
     parser.parse_body()?;
+
+    // Post-process: renumber auto-generated subgraph IDs to match upstream's
+    // bottom-up (post-order) numbering. Upstream's LR parser reduces inner
+    // subgraphs before outer ones, so inner subgraphs get lower subCount values.
+    // Our top-down parser encounters outer subgraphs first, giving them lower
+    // order numbers. We fix this by doing a post-order traversal of the subgraph
+    // tree and reassigning counters in that order.
+    renumber_auto_subgraph_ids(&mut diag);
 
     Ok(diag)
 }
@@ -362,7 +376,10 @@ impl<'a> LineParser<'a> {
         //   subgraph id
         //   subgraph id[Title]
         //   subgraph id ["Title"]
-        let line = raw.trim().trim_start_matches("subgraph").trim();
+        // `after_kw` is the raw suffix after stripping "subgraph" (spaces preserved).
+        // Used to detect upstream's "id contains whitespace → use auto-id" rule.
+        let after_kw = raw.trim().trim_start_matches("subgraph");
+        let line = after_kw.trim();
         let order = self.diag.subgraphs.len();
         let (id, title_opt) = if line.is_empty() {
             (format!("subGraph{}", order), None)
@@ -383,10 +400,33 @@ impl<'a> LineParser<'a> {
                 } else {
                     (line.to_string(), None)
                 }
+            } else if line.starts_with('"') && line.ends_with('"') && line.len() >= 2 {
+                // Quoted string — upstream treats this as a label-only declaration:
+                // `subgraph "Some Title"` → id = subGraphN (auto), title = "Some Title".
+                let inner = &line[1..line.len() - 1];
+                let label = parse_label_text(inner);
+                (format!("subGraph{}", order), Some(label))
             } else {
                 // Maybe just a title without brackets — use as id+title.
+                // Upstream jison grammar rule: `subgraph SPACE textNoTags NEWLINE...`.
+                // One leading space is consumed as the SPACE separator token; any extra
+                // leading whitespace becomes part of the textNoTags text. The upstream
+                // check is `_id === _title && /\s/.exec(_title.text)` — if the token
+                // text contains whitespace, the id is auto-generated instead.
+                //
+                // `subgraph main`  → one space separator, textNoTags.text = "main"  → no \s → id = "main"
+                // `subgraph  main` → two spaces, textNoTags.text = " main" → has \s → auto-id
                 let label = parse_label_text(line);
-                (line.to_string(), Some(label))
+                // after_kw starts with the space(s) between "subgraph" and the title.
+                // The first space is consumed as separator token; remaining chars form the
+                // textNoTags token text. If that remainder contains whitespace, use auto-id.
+                let after_sep: String = after_kw.chars().skip(1).collect();
+                if after_sep.contains(|c: char| c.is_whitespace()) {
+                    // Extra leading whitespace → upstream auto-generates the id
+                    (format!("subGraph{}", order), Some(label))
+                } else {
+                    (line.to_string(), Some(label))
+                }
             }
         };
         // Register subgraph
@@ -713,6 +753,31 @@ fn split_once_ws(s: &str) -> (&str, &str) {
     }
 }
 
+/// Split `s` on `;` characters that occur outside double-quoted strings.
+/// Returns the resulting segments (empty segments from trailing `;` are kept
+/// as empty strings so the caller can skip them).
+fn split_semicolons_outside_quotes(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_quote = !in_quote;
+                current.push(c);
+            }
+            ';' if !in_quote => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    result.push(current);
+    result
+}
+
 fn pop_quoted(s: &str) -> (String, &str) {
     let s = s.trim_start();
     if let Some(rest) = s.strip_prefix('"') {
@@ -729,12 +794,13 @@ fn is_link_target(s: &str) -> bool {
 
 fn parse_label_text(raw: &str) -> Label {
     let trimmed = raw.trim();
-    if let Some(inner) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
-        return Label::string(inner);
-    }
+    // Markdown label: starts with "`" inside quotes — check BEFORE plain string.
     if trimmed.starts_with("\"`") && trimmed.ends_with("`\"") {
         let inner = &trimmed[2..trimmed.len() - 2];
         return Label::markdown(inner);
+    }
+    if let Some(inner) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+        return Label::string(inner);
     }
     Label::text(trimmed)
 }
@@ -1066,9 +1132,8 @@ fn classify_arrow(
     };
 
     // Detect embedded label: a space somewhere inside span_rest.
-    let (body_chars, embedded_label) = if let Some(sp_idx) = span_rest.find(' ') {
+    let (body_chars, dot_chars, embedded_label) = if let Some(sp_idx) = span_rest.find(' ') {
         // Everything between the first and last body-run.
-        let before = &span_rest[..sp_idx];
         let after = &span_rest[sp_idx..];
         // Find where the trailing body-run starts in `after`.
         let body_predicate = |c: char| match stroke {
@@ -1077,7 +1142,6 @@ fn classify_arrow(
             EdgeStroke::Normal => c == '-',
             _ => false,
         };
-        let after_b = after.as_bytes();
         let mut run_start = after.len();
         // Walk backwards to find start of trailing body run.
         let chars: Vec<(usize, char)> = after.char_indices().collect();
@@ -1090,15 +1154,17 @@ fn classify_arrow(
         }
         let label_text = after[..run_start].trim();
         let trail = &after[run_start..];
-        let body_len = before.chars().filter(|c| body_predicate(*c)).count()
-            + trail.chars().filter(|c| body_predicate(*c)).count();
+        // Upstream mermaid uses only the TRAILING body (LINK token) for length computation.
+        // The leading body (START_LINK token) determines stroke/start-arrow type only.
+        // See destructLink: length comes from destructEndLink(_str) where _str = trailing arrow.
+        let body_len = trail.chars().filter(|c| body_predicate(*c)).count();
+        let dots = trail.chars().filter(|c| *c == '.').count();
         let label = if label_text.is_empty() {
             None
         } else {
             Some(parse_label_text(label_text))
         };
-        let _ = after_b;
-        (body_len, label)
+        (body_len, dots, label)
     } else {
         let body_predicate = |c: char| match stroke {
             EdgeStroke::Thick => c == '=',
@@ -1106,11 +1172,25 @@ fn classify_arrow(
             EdgeStroke::Normal => c == '-',
             _ => false,
         };
-        (span_rest.chars().filter(|c| body_predicate(*c)).count(), None)
+        let bc = span_rest.chars().filter(|c| body_predicate(*c)).count();
+        let dc = span_rest.chars().filter(|c| *c == '.').count();
+        (bc, dc, None)
     };
 
-    // Length: mermaid's convention is `length = max(1, count - 1)`.
-    let length = body_chars.saturating_sub(1).max(1);
+    // Mirror upstream mermaid's destructEndLink length formula:
+    //   line = str.slice(0, -1)  -- always removes last char
+    //   length = dots_in_line (dotted) OR line.length - 1 (normal/thick)
+    // Since we've already removed the arrow-end char when arrow_end != None,
+    // we need to apply one more subtraction when there's no arrow end
+    // (the trailing '-' or '=' plays the role of the "end char").
+    let extra = if arrow_end == ArrowType::None { 1usize } else { 0usize };
+    let length = if stroke == EdgeStroke::Dotted {
+        // For dotted: length = dot_count - extra (where extra accounts for no arrow)
+        dot_chars.saturating_sub(extra)
+    } else {
+        // For normal/thick: length = body_chars - extra - 1
+        body_chars.saturating_sub(extra).saturating_sub(1)
+    };
     Some((stroke, length, arrow_end, arrow_start, embedded_label))
 }
 
@@ -1238,7 +1318,18 @@ fn parse_one_vertex(
         (Some(shape.to_string()), Some(parse_label_text(text)), r)
     } else if let Some(after) = rest.strip_prefix("[") {
         let (text, r) = take_until(after, "]")?;
-        (Some("rect".to_string()), Some(parse_label_text(text)), r)
+        // Handle [|key:value|label] syntax — strip the `|key:value|` prefix.
+        // Upstream grammar rule 62: addVertex(id, label, "rect", ..., {key: value})
+        let label_text = if let Some(pipe_rest) = text.strip_prefix('|') {
+            if let Some(close_pipe) = pipe_rest.find('|') {
+                pipe_rest[close_pipe + 1..].trim()
+            } else {
+                text
+            }
+        } else {
+            text
+        };
+        (Some("rect".to_string()), Some(parse_label_text(label_text)), r)
     } else {
         (None, None, rest)
     };
@@ -1278,6 +1369,124 @@ fn parse_one_vertex(
 fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
     let end = s.find(tok)?;
     Some((&s[..end], &s[end + tok.len()..]))
+}
+
+/// Renumber auto-generated subgraph IDs (matching `subGraph\d+`) to match
+/// upstream's bottom-up (post-order) processing order.
+///
+/// Upstream's LR jison parser reduces inner subgraph blocks before outer ones,
+/// so the `subCount` counter (used for auto-ids) increments for inner subgraphs
+/// first. Our top-down parser assigns lower numbers to outer subgraphs.
+///
+/// This function performs a post-order traversal of the subgraph tree and
+/// reassigns auto-ids in that order, matching upstream numbering exactly.
+fn renumber_auto_subgraph_ids(diag: &mut FlowchartDiagram) {
+    use std::collections::HashMap;
+
+    // Determine which subgraphs have auto-generated IDs.
+    // Auto-ids match the pattern `subGraph\d+`.
+    let auto_re = |s: &str| -> bool {
+        s.starts_with("subGraph") && s[8..].chars().all(|c| c.is_ascii_digit())
+    };
+
+    // Build a map from id → index for quick lookup.
+    let id_to_idx: HashMap<String, usize> = diag.subgraphs.iter()
+        .enumerate()
+        .map(|(i, sg)| (sg.id.clone(), i))
+        .collect();
+
+    // Find roots (subgraphs not listed as children of any other subgraph).
+    let all_children: std::collections::HashSet<String> = diag.subgraphs.iter()
+        .flat_map(|sg| sg.children.iter().cloned())
+        .collect();
+    let roots: Vec<usize> = diag.subgraphs.iter()
+        .enumerate()
+        .filter(|(_, sg)| !all_children.contains(&sg.id))
+        .map(|(i, _)| i)
+        .collect();
+
+    // Post-order traversal: collect auto-id subgraph indices in post-order.
+    let mut post_order_auto: Vec<usize> = Vec::new();
+    let mut stack: Vec<(usize, bool)> = roots.iter().map(|&i| (i, false)).collect();
+    // Reverse to maintain original order when popping.
+    stack.reverse();
+    while let Some((idx, visited)) = stack.pop() {
+        if visited {
+            if auto_re(&diag.subgraphs[idx].id) {
+                post_order_auto.push(idx);
+            }
+        } else {
+            stack.push((idx, true));
+            // Push children in reverse order so first child is processed first.
+            let children: Vec<usize> = diag.subgraphs[idx].children.iter()
+                .filter_map(|cid| id_to_idx.get(cid).copied())
+                .collect();
+            for &ci in children.iter().rev() {
+                stack.push((ci, false));
+            }
+        }
+    }
+
+    if post_order_auto.is_empty() {
+        return;
+    }
+
+    // Determine what new counter values to assign.
+    // In upstream, subCount increments for EVERY subgraph (auto or not).
+    // Post-order traversal of the entire tree gives the upstream call order.
+    // We need to compute, for each auto-id subgraph, what its upstream subCount
+    // would have been when addSubGraph was called for it.
+    //
+    // Simpler approach: just number the auto-id subgraphs in post-order,
+    // while non-auto subgraphs also consume counter slots.
+    let mut full_post_order: Vec<usize> = Vec::new();
+    let mut stack2: Vec<(usize, bool)> = roots.iter().map(|&i| (i, false)).collect();
+    stack2.reverse();
+    while let Some((idx, visited)) = stack2.pop() {
+        if visited {
+            full_post_order.push(idx);
+        } else {
+            stack2.push((idx, true));
+            let children: Vec<usize> = diag.subgraphs[idx].children.iter()
+                .filter_map(|cid| id_to_idx.get(cid).copied())
+                .collect();
+            for &ci in children.iter().rev() {
+                stack2.push((ci, false));
+            }
+        }
+    }
+
+    // Assign counter values: counter increments for every subgraph in post-order;
+    // auto-id subgraphs get their new name from the counter at that point.
+    let mut counter = 0usize;
+    let mut new_ids: HashMap<usize, String> = HashMap::new();
+    for &idx in &full_post_order {
+        if auto_re(&diag.subgraphs[idx].id) {
+            new_ids.insert(idx, format!("subGraph{}", counter));
+        }
+        counter += 1;
+    }
+
+    if new_ids.is_empty() {
+        return;
+    }
+
+    // Build old→new id mapping.
+    let id_remap: HashMap<String, String> = new_ids.iter()
+        .map(|(&idx, new_id)| (diag.subgraphs[idx].id.clone(), new_id.clone()))
+        .collect();
+
+    // Apply remap to subgraph ids, children references, parent references in vertices, etc.
+    for sg in &mut diag.subgraphs {
+        if let Some(new_id) = id_remap.get(&sg.id) {
+            sg.id = new_id.clone();
+        }
+        for child in &mut sg.children {
+            if let Some(new_id) = id_remap.get(child.as_str()) {
+                *child = new_id.clone();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

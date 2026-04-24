@@ -43,7 +43,7 @@ use crate::theme::ThemeVariables;
 ///
 /// `viewBox = "${union.x - p} ${union.y - p} ${union.w + 2p} ${union.h + 2p}"`
 fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
-    use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+    use crate::render::foreign_object::{measure_html_label, measure_html_markup_label, HtmlLabelFont};
 
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -81,7 +81,7 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
             let label_text = n.label.as_deref().unwrap_or("");
             if !label_text.is_empty() {
                 let processed = crate::render::foreign_object::replace_fa_icons(label_text);
-                let (lw, lh) = measure_html_label(&processed, &font, 200.0, true);
+                let (lw, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
                 expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
             }
             continue;
@@ -95,6 +95,13 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
                 // polyBBox of points = {x:0, y:-s, w:s, h:s}
                 let s = w; // w == h == s for diamond
                 expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, -s, s, s);
+            }
+            "circle" | "circ" => {
+                // Upstream circle.ts: r = w/2 (with corrected sizing: d = label_w + padding).
+                // The <circle r> in local coords → bbox {x:-r, y:-r, w:2r, h:2r}.
+                // jsdom shim ignores transform, uses this local bbox.
+                let r = w / 2.0;
+                expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, -r, -r, 2.0 * r, 2.0 * r);
             }
             _ => {
                 // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
@@ -112,7 +119,7 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
                 crate::render::foreign_object::string_label_to_html(label_text)
             };
             let processed = crate::render::foreign_object::replace_fa_icons(&label_escaped);
-            let (lw, lh) = measure_html_label(&processed, &font, 200.0, true);
+            let (lw, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
             expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
         }
     }
@@ -127,11 +134,21 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
     // overlap the node boundary. For a vertical edge going downward:
     //   last_y_adjusted = last_y - 4
     // For a diagonal edge, it is proportional to sin(angle).
+    //
+    // Upstream markerOffsets only has: arrow_point=4, arrow_barb=0, arrow_barb_neo=5.5.
+    // arrow_open (edges without arrowheads, e.g. `---`) is NOT present, so NO offset
+    // is applied for those edges.
     const ARROW_POINT_OFFSET: f64 = 4.0;
     for e in &l.edges {
         let Some(points) = &e.points else { continue };
         let n = points.len();
         if n == 0 { continue }
+
+        let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
+        let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
+        // Only arrow_point carries a non-zero offset in upstream's markerOffsets.
+        let end_offset = if arrow_end == "arrow_point" { ARROW_POINT_OFFSET } else { 0.0 };
+        let start_offset = if arrow_start == "arrow_point" { ARROW_POINT_OFFSET } else { 0.0 };
 
         for (i, p) in points.iter().enumerate() {
             let (mut px, mut py) = (p.x, p.y);
@@ -142,7 +159,7 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
             //   angle = atan2(bdy, bdx)
             //   px += cos(angle) * offset * sign_x
             //   py += sin(angle) * offset * sign_y
-            if i == n - 1 && n >= 2 {
+            if i == n - 1 && n >= 2 && end_offset > 0.0 {
                 let prev = &points[n - 2];
                 let bdx = prev.x - px;
                 let bdy = prev.y - py;
@@ -150,12 +167,23 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
                 if blen > 0.0 {
                     let cos_a = bdx / blen;
                     let sin_a = bdy / blen;
-                    px += ARROW_POINT_OFFSET * cos_a;
-                    py += ARROW_POINT_OFFSET * sin_a;
+                    px += end_offset * cos_a;
+                    py += end_offset * sin_a;
                 }
             }
-            // Apply arrow_point start offset to the first point (arrow_barb start = 0,
-            // but arrow_point start is uncommon; skip for now).
+            // Apply arrow_point start offset to the first point.
+            if i == 0 && n >= 2 && start_offset > 0.0 {
+                let next = &points[1];
+                let fdx = next.x - px;
+                let fdy = next.y - py;
+                let flen = (fdx * fdx + fdy * fdy).sqrt();
+                if flen > 0.0 {
+                    let cos_a = fdx / flen;
+                    let sin_a = fdy / flen;
+                    px += start_offset * cos_a;
+                    py += start_offset * sin_a;
+                }
+            }
 
             let rx = (px * 1000.0).round() / 1000.0;
             let ry = (py * 1000.0).round() / 1000.0;
@@ -178,9 +206,9 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
             (0.0, h)
         } else {
             // replace_fa_icons converts `fa:fa-car` → `<i class="fa fa-car"></i>`
-            // which measure_html_label strips as a zero-width HTML tag.
+            // which measure_html_markup_label strips as a zero-width HTML tag.
             let processed = crate::render::foreign_object::replace_fa_icons(label_text);
-            measure_html_label(&processed, &font, 200.0, true)
+            measure_html_markup_label(&processed, &font, 200.0, true)
         };
         // foreignObject x=0, y=0 (no transform applied)
         expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
@@ -202,12 +230,19 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
 
 /// Render a flowchart diagram as SVG.
 pub fn render(
-    _d: &FlowchartDiagram,
+    d: &FlowchartDiagram,
     l: &FlowchartLayout,
     theme: &ThemeVariables,
     id: &str,
 ) -> Result<String> {
     let padding = l.diagram_padding;
+
+    // Build cluster bounds map for cluster-endpoint edge clipping.
+    // Keys are the original cluster IDs; values are the AABB bounds.
+    let cluster_bounds: std::collections::HashMap<String, crate::layout::unified::Bounds> =
+        l.clusters.iter()
+            .filter_map(|c| c.bounds.as_ref().map(|b| (c.id.clone(), b.clone())))
+            .collect();
 
     // ── Render inner content first (markers + root group) ──────────
     // We need the rendered content to compute the viewBox accurately,
@@ -255,7 +290,7 @@ pub fn render(
         if src_isolated || dst_isolated {
             continue;
         }
-        inner.push_str(&render_edge_path(e, i, id, &l.aria_kind));
+        inner.push_str(&render_edge_path(e, i, id, &l.aria_kind, &cluster_bounds));
     }
     inner.push_str(unified_shell::close_layer());
 
@@ -338,20 +373,30 @@ pub fn render(
     let (vb_x, vb_y, vb_w, vb_h) = compute_viewbox(l, padding);
 
     // ── Assemble final SVG ─────────────────────────────────────────
+    let acc_title = d.meta.acc_title.as_deref();
+    let acc_descr = d.meta.acc_descr.as_deref();
+
     let mut out = String::new();
-    out.push_str(&unified_shell::open_unified_svg(
+    out.push_str(&unified_shell::open_unified_svg_with_a11y(
         id,
         vb_w,
         (vb_x, vb_y, vb_w, vb_h),
         Some("flowchart"),
         &l.aria_kind,
+        acc_descr.is_some(),
+        acc_title.is_some(),
     ));
 
-    // <style> block — shared preamble + flowchart slice + shared tail.
+    // Accessibility title/desc elements (if present in diagram source).
+    out.push_str(&unified_shell::emit_a11y_elements(id, acc_title, acc_descr));
+
+    // <style> block — shared preamble + flowchart slice + shared tail +
+    // classDef rules emitted after :root (upstream `utils.insertClass`).
     out.push_str("<style>");
     out.push_str(&theme_css::base_preamble(id, theme));
     out.push_str(&flowchart_specific_css(id, theme));
     out.push_str(&theme_css::neo_look_block(id, theme));
+    out.push_str(&flowchart_class_def_css(id, d));
     out.push_str("</style>");
 
     out.push_str(&inner);
@@ -362,7 +407,7 @@ pub fn render(
 }
 
 fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables, svg_id: &str) -> String {
-    use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+    use crate::render::foreign_object::{measure_html_label, measure_html_markup_label, HtmlLabelFont};
 
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
@@ -413,7 +458,7 @@ fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables, svg
         // Measure label for foreignObject dimensions.
         let font = HtmlLabelFont::default();
         let escaped = xml_escape(&label);
-        let (lw, lh) = measure_html_label(&escaped, &font, 200.0, true);
+        let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
         let label_tx = cx - lw / 2.0;
         let label_ty = ry;
@@ -589,7 +634,7 @@ fn render_isolated_cluster_inner_root(
         if src_in_sub_iso || dst_in_sub_iso {
             continue;
         }
-        out.push_str(&render_edge_path(e, i, svg_id, &l.aria_kind));
+        out.push_str(&render_edge_path(e, i, svg_id, &l.aria_kind, &std::collections::HashMap::new()));
     }
     out.push_str(unified_shell::close_layer());
 
@@ -741,7 +786,13 @@ fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str
     }
 }
 
-fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> String {
+fn render_edge_path(
+    e: &UEdge,
+    _index: usize,
+    svg_id: &str,
+    aria_kind: &str,
+    cluster_bounds: &std::collections::HashMap<String, crate::layout::unified::Bounds>,
+) -> String {
     // `pts` used for data-points (original dagre coordinates, matching upstream
     // `pointsStr` = btoa(JSON.stringify(points)) which precedes the offset step).
     let pts_raw: Vec<Point> = e
@@ -757,6 +808,24 @@ fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> 
     let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
     let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
     apply_marker_offsets(&mut pts, arrow_end, arrow_start);
+
+    // Clip rendered path at cluster boundaries when the original edge endpoint
+    // was a cluster. The `data-points` attribute keeps the full path (pts_raw),
+    // but the visual `d=` path is clipped to the cluster border.
+    // Upstream renders the edge path stopping at the cluster rect boundary.
+    use crate::layout::routing::clip_to_cluster_border;
+    let orig_dst = e.extra.get("orig_end").map(|s| s.as_str())
+        .unwrap_or_else(|| e.end.as_deref().unwrap_or(""));
+    let orig_src = e.extra.get("orig_start").map(|s| s.as_str())
+        .unwrap_or_else(|| e.start.as_deref().unwrap_or(""));
+    if let Some(bounds) = cluster_bounds.get(orig_dst) {
+        pts = clip_to_cluster_border(&pts, bounds);
+    }
+    if let Some(bounds) = cluster_bounds.get(orig_src) {
+        pts.reverse();
+        pts = clip_to_cluster_border(&pts, bounds);
+        pts.reverse();
+    }
 
     // Build `d=` via the curve configured on this edge (offset-adjusted pts).
     let curve = e.curve.as_deref().unwrap_or("basis");
@@ -818,9 +887,13 @@ fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> 
         Some("arrow_cross") => {
             format!(r#" marker-end="url(#{svg_id}_{aria_kind}-crossEnd)""#)
         }
+        Some("none") | None => {
+            // No arrowhead (arrow_open / open edges like `---`): no marker.
+            String::new()
+        }
         _ => {
             // Default arrow (point) — upstream emits marker-end for
-            // arrow_point, arrow, and the None case.
+            // arrow_point, arrow, etc.
             format!(r#" marker-end="url(#{svg_id}_{aria_kind}-pointEnd)""#)
         }
     };
@@ -838,21 +911,21 @@ fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> 
     };
 
     format!(
-        r#"<path d="{d}" id="{eid}" class="{cls}" style="{st}" data-edge="true" data-et="edge" data-id="{did}" data-points="{b64}" data-look="classic"{me}{ms}></path>"#,
+        r#"<path d="{d}" id="{eid}" class="{cls}" style="{st}" data-edge="true" data-et="edge" data-id="{did}" data-points="{b64}" data-look="classic"{ms}{me}></path>"#,
         d = d_attr,
         eid = edge_id,
         cls = class_attr,
         st = style_val,
         did = e.id,
         b64 = data_points_b64,
-        me = marker_end,
         ms = marker_start,
+        me = marker_end,
     )
 }
 
 fn render_edge_label(e: &UEdge) -> String {
     use crate::render::foreign_object::{
-        measure_html_label, render_edge_label as fo_edge, replace_fa_icons, HtmlLabelFont, LabelOpts,
+        measure_html_label, measure_html_markup_label, render_edge_label as fo_edge, replace_fa_icons, HtmlLabelFont, LabelOpts,
     };
     let label_text = e.label.clone().unwrap_or_default();
     // Apply FA icon substitution (fa:fa-car → <i class="fa fa-car"></i>) before
@@ -867,7 +940,7 @@ fn render_edge_label(e: &UEdge) -> String {
         let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
         (0.0, lh)
     } else {
-        measure_html_label(&processed, &HtmlLabelFont::default(), 200.0, true)
+        measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true)
     };
     let lx = e.label_x.unwrap_or(0.0);
     let ly = e.label_y.unwrap_or(0.0);
@@ -887,6 +960,54 @@ fn render_edge_label(e: &UEdge) -> String {
 ///
 /// The caller sandwiches this between [`theme_css::base_preamble`] and
 /// [`theme_css::neo_look_block`] inside the `<style>` block.
+/// Generate CSS rules for `classDef` directives.
+///
+/// Mirrors upstream `utils.insertClass(svg, classDef, diagramId)` which calls
+/// `createCssStyles` to produce:
+/// - `#id .name>*{<all styles>!important;}`
+/// - `#id .name span{<all styles>!important;}`
+/// - `#id .name tspan{<color→fill styles>!important;}`
+fn flowchart_class_def_css(id: &str, d: &FlowchartDiagram) -> String {
+    let mut out = String::new();
+    for def in &d.class_defs {
+        // Build the "all styles" block.
+        let mut all_props: Vec<String> = Vec::new();
+        let mut text_props: Vec<String> = Vec::new();
+        for style in &def.styles {
+            let style = style.trim().trim_end_matches(';');
+            if style.is_empty() {
+                continue;
+            }
+            if let Some(colon) = style.find(':') {
+                let key = style[..colon].trim();
+                let val = style[colon + 1..].trim();
+                all_props.push(format!("{}:{}!important;", key, val));
+                // tspan only: properties whose key contains "color"
+                if key.contains("color") {
+                    // upstream: replace "fill" → "bgFill" then "color" → "fill"
+                    let new_key = key.replace("fill", "bgFill").replace("color", "fill");
+                    text_props.push(format!("{}:{}!important;", new_key, val));
+                }
+            } else {
+                all_props.push(format!("{}!important;", style));
+            }
+        }
+        if all_props.is_empty() {
+            continue;
+        }
+        let all_css: String = all_props.join("");
+        // >* and span rules use all styles
+        out.push_str(&format!("#{id} .{name}>*{{{css}}}", name = def.name, css = all_css));
+        out.push_str(&format!("#{id} .{name} span{{{css}}}", name = def.name, css = all_css));
+        // tspan rule uses only text (color) styles
+        if !text_props.is_empty() {
+            let text_css: String = text_props.join("");
+            out.push_str(&format!("#{id} .{name} tspan{{{css}}}", name = def.name, css = text_css));
+        }
+    }
+    out
+}
+
 fn flowchart_specific_css(id: &str, theme: &ThemeVariables) -> String {
     // Resolve theme variables with upstream defaults.
     let ff_raw = theme
