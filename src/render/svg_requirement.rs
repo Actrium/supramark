@@ -553,11 +553,11 @@ mod tests {
         // No byte-exact match expected — this is a structural stub.
     }
 
-    /// Byte-exact sweep across the 44 fixtures. We don't expect any
-    /// to match today — the assertion here just records progress for
-    /// future waves.
+    /// Byte-exact sweep across the 44 fixtures. This stays non-failing
+    /// and reports the current pass count so follow-up waves can ratchet
+    /// the requirement renderer upward without rewriting the harness.
     #[test]
-    fn byte_exact_sweep_reports_zero_matches() {
+    fn byte_exact_sweep_reports_progress() {
         let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let dirs = [
             "tests/ext_fixtures/cypress/requirement",
@@ -618,10 +618,7 @@ mod tests {
                 }
             }
         }
-        eprintln!(
-            "requirement sweep: {}/{} byte-exact (structural port, not targeting byte-match this wave)",
-            matched, total
-        );
+        eprintln!("[requirement] byte-exact={}/{}", matched, total);
         // Byte-exact parity tracked as Wave 5 work; assert total>0 so
         // regressions in fixture discovery are caught.
         assert!(total > 0, "no fixtures discovered — check test data paths");

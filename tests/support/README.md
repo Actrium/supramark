@@ -12,9 +12,9 @@ byte-exact across machines, we pin:
   updating `tests/reference/VERSION`).
 - **`jsdom@25.0.1`** as the DOM host — lighter than chromium, enough for
   mermaid's rendering path.
-- A placeholder text-metric shim today (8px × char width, 14px line
-  height). Phase 2 replaces this with a DejaVu Sans baked table so the
-  Rust side and this generator agree byte-for-byte.
+- Bundled DejaVu font metrics via `font_metrics.mjs`, mirroring the
+  Rust-side `src/font_metrics.rs` lookup logic so both pipelines agree
+  on text measurement without host font probing.
 
 ## Setup
 
@@ -54,10 +54,10 @@ tests/reference/
 Confirmed: same `.mmd` + same fixture path → identical SVG bytes across
 runs on Node 20.19.4 + jsdom 25.0.1 + mermaid 11.14.0.
 
-Remaining divergence sources (still to harden in later phases):
+Remaining caveats:
 
-- **Text metrics**: placeholder geometry for now. Any environment that
-  resolves fonts differently would diverge if we switched to a real
-  font probe — hence the baked-table approach in Phase 2.
 - **Node minor version drift**: chevrotain parser behaviour could
   theoretically differ; pin exact Node in CI once Phase 1 CI lands.
+- **Diagram implementation gaps**: the remaining byte diffs are now
+  renderer/layout fidelity issues (viewBox, shape geometry, edge paths,
+  label HTML), not host-font measurement drift.

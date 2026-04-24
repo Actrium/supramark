@@ -16,17 +16,20 @@ on top of the complete dagre.js port at
 
 ## Status
 
-**Scaffolding phase — no diagram types rendered yet.** This repo
-currently contains the workspace skeleton, the dependency survey, and
-the phased execution plan. See [FEATURES.md](FEATURES.md) for the full
-support matrix and roadmap.
+**Active porting phase.** The foundations, reference-SVG pipeline, and
+Wave 1/2 geometry diagrams are already live. `cargo test` is green; the
+current work is concentrated on the Stratum 3 dagre family (`er`,
+`requirement`, `state`, `flowchart`, `block`, `class`), where working
+renderers exist but byte-exact parity is still being closed.
 
 | | |
 |---|---|
 | Upstream version | `mermaid@11.14.0` (`2b9d054d`, tagged 2026-04-01) |
-| Target diagrams | 24 of 25 (architecture deferred; see plan) |
+| Implemented in `convert_with_id` | 19 diagram kinds (`gantt` is still renderer-stubbed) |
 | Layout backend | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
-| Reference tests | 0 (pipeline coming in Phase 1) |
+| Reference tests | Wave 1/2 byte-exact sweeps are green; Stratum 3 is tracked by progress sweeps |
+| Active frontier | Stratum 3 parity, `gantt` renderer, then `mindmap` / `sequence` / `c4` / `gitGraph` |
+| Tracking docs | [PROGRESS.zh.md](PROGRESS.zh.md), [docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |
 
 ## Non-Goals
 

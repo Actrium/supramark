@@ -1,10 +1,11 @@
 //! mermaid-little — pure-Rust reimplementation of Mermaid, targeting
 //! byte-exact SVG output parity with upstream `mermaid@11.14.0`.
 //!
-//! Wave 0 lands foundations: module tree, Diagram/DiagramLayout enums
-//! with placeholders for all 25 diagram types, config + preprocess +
-//! detect pipeline, theme variants, eval harness. No diagram types
-//! render yet — each Wave 1+ milestone fills in one or more variants.
+//! Current status: foundations + reference pipeline are landed.
+//! `convert_with_id` dispatches the Wave 1/2 geometry families plus the
+//! active Stratum 3 dagre family (`er` / `block` / `requirement` /
+//! `class` / `state` / `flowchart`). `gantt` is parser/layout-only for
+//! now; `sequence` / `c4` / `gitGraph` / `mindmap` are still pending.
 //!
 //! Licensing: core crate is MIT. Portions vendored from sister
 //! projects (plantuml-little, dagre-rs, selkie, mmdr, mmdflux) are

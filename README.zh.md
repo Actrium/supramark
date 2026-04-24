@@ -10,14 +10,20 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 
 ## 当前状态
 
-**骨架阶段 —— 尚无任何 diagram 类型落地**。仓库目前只含 workspace 骨架、依赖勘察报告和分期执行计划。完整的支持矩阵和路线图参见 [FEATURES.zh.md](FEATURES.zh.md)。
+**主动推进阶段。** foundations、reference-SVG 管线和 Wave 1/2
+几何类 diagram 已经落地，`cargo test` 全绿；当前主战场集中在
+Stratum 3 的 dagre 家族（`er`、`requirement`、`state`、
+`flowchart`、`block`、`class`），这些 diagram 已有可工作的
+renderer，但还在继续收敛 byte-exact parity。
 
 | | |
 |---|---|
 | 上游版本 | `mermaid@11.14.0`（`2b9d054d`，2026-04-01 发布） |
-| 目标图表 | 25 中 24 种（architecture 推迟，详见计划） |
+| `convert_with_id` 已接线 | 19 种 diagram（`gantt` 仍是 renderer stub） |
 | Layout 后端 | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
-| Reference 测试 | 0（Phase 1 会搭好管线） |
+| Reference 测试 | Wave 1/2 byte-exact sweep 已稳定；Stratum 3 通过进度 sweep 跟踪 |
+| 当前推进面 | Stratum 3 parity、`gantt` renderer，随后是 `mindmap` / `sequence` / `c4` / `gitGraph` |
+| 跟踪文档 | [PROGRESS.zh.md](PROGRESS.zh.md)、[docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |
 
 ## 不在范围内
 

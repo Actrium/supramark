@@ -848,21 +848,24 @@ mod tests {
         }
 
         eprintln!(
-            "class byte-exact: {}/{} pass ({:.1}%)",
+            "[class] byte-exact={}/{} pass_pct={:.1}",
             pass,
             total,
             pass as f64 / total as f64 * 100.0
         );
         if !passing.is_empty() {
-            eprintln!("  passing: {:?}", passing);
+            eprintln!("[class] passing: {:?}", passing);
         }
         if !err_names.is_empty() {
-            eprintln!("  errors: {:?}", err_names);
+            eprintln!("[class] errors: {:?}", err_names);
         }
         if !fail_names.is_empty() && fail_names.len() <= 10 {
-            eprintln!("  failing (first 10): {:?}", &fail_names[..fail_names.len().min(10)]);
+            eprintln!(
+                "[class] failing (first 10): {:?}",
+                &fail_names[..fail_names.len().min(10)]
+            );
         } else if !fail_names.is_empty() {
-            eprintln!("  failing: {} fixtures", fail_names.len());
+            eprintln!("[class] failing: {} fixtures", fail_names.len());
         }
         // At minimum the renderer should produce output for every fixture.
         assert!(total > 0, "no class fixtures found");

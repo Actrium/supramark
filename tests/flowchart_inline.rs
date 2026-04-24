@@ -103,9 +103,9 @@ fn flowchart_parser_roundtrips_all_fixtures() {
     // run to completion without panicking on the ~270 non-elk fixtures.
     let ignored = read_known_ignored();
     let dirs = ["ext_fixtures/cypress/flowchart", "ext_fixtures/demos/flowchart"];
-    let mut total = 0;
-    let mut skipped_elk = 0;
-    let mut skipped_ignored = 0;
+    let mut total = 0usize;
+    let mut skipped_elk = 0usize;
+    let mut skipped_ignored = 0usize;
     let mut parse_failures = Vec::new();
     let mut layout_failures = Vec::new();
     let mut render_failures = Vec::new();
@@ -161,9 +161,11 @@ fn flowchart_parser_roundtrips_all_fixtures() {
             }
         }
     }
+    let eligible = total.saturating_sub(skipped_elk + skipped_ignored);
     eprintln!(
-        "flowchart sweep: total={} elk-skipped={} ignored={} parse-fail={} layout-fail={} render-fail={}",
+        "[flowchart] scan total={} eligible={} elk-skipped={} ignored={} parse-fail={} layout-fail={} render-fail={}",
         total,
+        eligible,
         skipped_elk,
         skipped_ignored,
         parse_failures.len(),
@@ -171,13 +173,13 @@ fn flowchart_parser_roundtrips_all_fixtures() {
         render_failures.len(),
     );
     for (r, e) in parse_failures.iter().take(10) {
-        eprintln!("  PARSE FAIL {r}: {e}");
+        eprintln!("[flowchart] parse-fail {r}: {e}");
     }
     for (r, e) in layout_failures.iter().take(10) {
-        eprintln!("  LAYOUT FAIL {r}: {e}");
+        eprintln!("[flowchart] layout-fail {r}: {e}");
     }
     for (r, e) in render_failures.iter().take(10) {
-        eprintln!("  RENDER FAIL {r}: {e}");
+        eprintln!("[flowchart] render-fail {r}: {e}");
     }
     // Treat as advisory — report to stderr but don't fail. The main
     // pipeline will tighten this once parser coverage extends to the
@@ -217,9 +219,9 @@ fn flowchart_byte_exact_sweep() {
             }
         }
     }
-    eprintln!("flowchart byte-exact: {pass} / {total}");
+    eprintln!("[flowchart] byte-exact={}/{}", pass, total);
     for (r, d) in diffs.iter().take(5) {
-        eprintln!("  FAIL {r}: {d}");
+        eprintln!("[flowchart] diff {r}: {d}");
     }
     // This test is aspirational for the MVP: it exists so the CI / harness
     // can track regression. Not a hard-fail until we hit 100%.

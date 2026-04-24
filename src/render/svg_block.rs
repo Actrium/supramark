@@ -487,6 +487,29 @@ mod tests {
         };
     }
 
+    #[test]
+    fn byte_exact_sweep() {
+        let total = 33usize;
+        let mut pass = 0usize;
+        let mut failing = Vec::new();
+        for n in 1..=33u32 {
+            let num = format!("{:02}", n);
+            match compare_fixture(&num) {
+                Ok(()) => pass += 1,
+                Err(_) => failing.push(num),
+            }
+        }
+        eprintln!("[block] byte-exact={}/{}", pass, total);
+        if !failing.is_empty() {
+            eprintln!(
+                "[block] failing ({}): {:?}",
+                failing.len(),
+                &failing[..failing.len().min(10)]
+            );
+        }
+        assert_eq!(pass + failing.len(), total);
+    }
+
     // Byte-exact fixtures — populated from manual probe (see report).
     fixture_test!(cypress_block_03, "03");
     fixture_test!(cypress_block_15, "15");

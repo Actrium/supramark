@@ -1250,11 +1250,11 @@ mod tests {
                 fail_names.push(rel);
             }
         }
-        eprintln!("ER byte-exact: {}/80", pass);
-        eprintln!("Passing ({}): {:?}", passing.len(), passing);
+        eprintln!("[er] byte-exact={}/80", pass);
+        eprintln!("[er] passing ({}): {:?}", passing.len(), passing);
         if pass < 80 {
             eprintln!(
-                "Failing ({}): {:?}",
+                "[er] failing ({}): {:?}",
                 fail_names.len(),
                 &fail_names[..fail_names.len().min(25)]
             );
@@ -1387,6 +1387,46 @@ mod probe_tests {
     #[ignore]
     fn er40_diff_probe() {
         diff_probe("40");
+    }
+    #[test]
+    #[ignore]
+    fn er38_diff_probe() {
+        diff_probe("38");
+    }
+    #[test]
+    #[ignore]
+    fn er39_diff_probe() {
+        diff_probe("39");
+    }
+    #[test]
+    #[ignore]
+    fn er42_diff_probe() {
+        diff_probe("42");
+    }
+    #[test]
+    #[ignore]
+    fn er09_diff_probe() {
+        diff_probe("09");
+    }
+    #[test]
+    #[ignore]
+    fn er10_diff_probe() {
+        diff_probe("10");
+    }
+    #[test]
+    #[ignore]
+    fn er11_diff_probe() {
+        diff_probe("11");
+    }
+    #[test]
+    #[ignore]
+    fn er44_diff_probe() {
+        diff_probe("44");
+    }
+    #[test]
+    #[ignore]
+    fn er29_diff_probe() {
+        diff_probe("29");
     }
     #[test]
     #[ignore]
