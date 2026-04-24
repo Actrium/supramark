@@ -349,6 +349,11 @@ pub struct LayoutResult {
     pub clusters: Vec<Cluster>,
     /// Overall graph bounds (tight AABB around all nodes + edge points).
     pub bounds: Bounds,
+    /// IDs of clusters that were laid out via the recursive inner-layout
+    /// algorithm (no cross-boundary edges). These clusters are rendered as
+    /// inner `<g class="root">` wrappers in the `<g class="nodes">` section,
+    /// rather than as entries in the `<g class="clusters">` section.
+    pub isolated_cluster_ids: std::collections::HashSet<String>,
 }
 
 /// Post-layout render-data envelope. Matches TS `RenderData` shape, kept

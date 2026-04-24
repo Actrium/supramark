@@ -371,6 +371,280 @@ pub fn measure_html_label(
     (max_line_w, lh * lines.len() as f64)
 }
 
+/// Width × height of a label where the input is already HTML markup
+/// (tags like `<strong>`, `<br/>`, `<em>`, plus HTML entities).
+///
+/// This is the "post-`markdownToHTML`" measurement used by flowchart and
+/// any other caller that hands `measure_html_*` a string it has already
+/// converted to HTML. jsdom's `getBoundingClientRect` on a `<div>` built
+/// from this markup measures the rendered `textContent` — tags do not
+/// contribute width, `<br/>` collapses to a zero-width break, and HTML
+/// entities are decoded back to their represented character.
+///
+/// Callers that pass **plain text** (even text that happens to contain a
+/// literal `<` such as `<<requirement>>`) must use `measure_html_label`
+/// instead — this function would otherwise strip the `<…>` fragment as a
+/// (non-existent) tag.
+pub fn measure_html_markup_label(
+    text: &str,
+    font: &HtmlLabelFont<'_>,
+    max_width_px: f64,
+    wrap_enabled: bool,
+) -> (f64, f64) {
+    let (family, size, base_bold) = font.resolve();
+    if text.is_empty() {
+        return (0.0, line_height(family, size, base_bold, false));
+    }
+    let _ = (max_width_px, wrap_enabled);
+    let segments = parse_html_text_segments(text, base_bold);
+    let lh = line_height(family, size, base_bold, false);
+    let total_w: f64 = segments
+        .iter()
+        .map(|(seg, bold)| text_width(seg, family, size, *bold, false))
+        .sum();
+    (total_w, lh)
+}
+
+/// Parse HTML text to extract plain text content, matching jsdom `textContent`
+/// semantics.
+///
+/// `textContent` strips ALL HTML tags (including `<br>`, `<strong>`, etc.)
+/// and decodes HTML entities. The result is the concatenated plain text as
+/// a SINGLE line, measured at `base_bold` weight (tags do not affect weight).
+///
+/// This is used for foreignObject dimension measurement — the dimensions
+/// reflect what jsdom's measurement shim returns, which uses `textContent`.
+/// Parse HTML text to extract plain text content for font-metric measurement.
+///
+/// Matches jsdom `textContent` semantics:
+/// - ALL HTML tags are stripped (including `<strong>`, `<br>`, etc.)
+/// - HTML entities are decoded (`&gt;` → `>`, `&amp;` → `&`, etc.)
+/// - Bold markup is IGNORED — all text is measured at `base_bold` weight
+/// - `<br>` does NOT create a new line (textContent strips it)
+///
+/// Returns a single-element vec with all text and `base_bold` weight.
+fn parse_html_text_segments(html: &str, base_bold: bool) -> Vec<(String, bool)> {
+    let mut text = String::with_capacity(html.len());
+    let mut i = 0;
+    let bytes = html.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            // A `<` only starts an HTML tag when the next character is an
+            // ASCII letter (open tag like `<br>`, `<strong>`) or a `/`
+            // followed by a letter (close tag like `</strong>`). Anything
+            // else (`<<`, `< `, `<1`, `<!`, `<?` without the full form, …)
+            // is treated as literal text — matching how a real HTML parser
+            // recovers from invalid tag starts and how jsdom's `textContent`
+            // surfaces the offending `<` as a normal character.
+            let next = bytes.get(i + 1).copied();
+            let is_tag_start = match next {
+                Some(c) if c.is_ascii_alphabetic() => true,
+                Some(b'/') => bytes.get(i + 2).map(|c| c.is_ascii_alphabetic()).unwrap_or(false),
+                _ => false,
+            };
+            if is_tag_start {
+                if let Some(rel_end) = html[i..].find('>') {
+                    i += rel_end + 1;
+                    continue;
+                }
+            }
+            text.push('<');
+            i += 1;
+        } else if bytes[i] == b'&' {
+            // HTML entity — decode to plain text.
+            if let Some(semi_rel) = html[i..].find(';') {
+                let entity = &html[i + 1..i + semi_rel];
+                let ch = match entity {
+                    "amp" => Some('&'),
+                    "lt" => Some('<'),
+                    "gt" => Some('>'),
+                    "quot" => Some('"'),
+                    "apos" => Some('\''),
+                    "nbsp" => Some('\u{00A0}'),
+                    _ => None,
+                };
+                if let Some(c) = ch {
+                    text.push(c);
+                    i += semi_rel + 1;
+                    continue;
+                }
+            }
+            text.push('&');
+            i += 1;
+        } else {
+            text.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    vec![(text, base_bold)]
+}
+
+/// Convert a markdown-syntax label string to rendered HTML for embedding
+/// in a `<foreignObject>` label.
+///
+/// Rules (subset of mermaid's `markdownToLines`):
+/// - `**text**` → `<strong>text</strong>`
+/// - `*text*` → `<em>text</em>`
+/// - `` `code` `` → `<code>code</code>`
+/// - `<br>` / `<br/>` embedded HTML tags → passed through as `<br/>`
+/// - plain text characters are XML-escaped (`>` → `&gt;`, etc.)
+/// - `\n` is treated the same as `<br/>` → `<br/>`
+///
+/// This matches what upstream's `markdownToLines` + `dedupPostProcessor`
+/// produce for the inline markdown labels used in flowchart nodes.
+pub fn markdown_label_to_html(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() * 2);
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Check for **bold** or *italic*
+        if b == b'*' {
+            if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                // **bold**
+                if let Some(end) = src[i + 2..].find("**") {
+                    let inner = &src[i + 2..i + 2 + end];
+                    out.push_str("<strong>");
+                    out.push_str(&xml_escape_label(inner));
+                    out.push_str("</strong>");
+                    i += 2 + end + 2;
+                    continue;
+                }
+            }
+            // *italic*
+            if let Some(end) = src[i + 1..].find('*') {
+                if end > 0 {
+                    let inner = &src[i + 1..i + 1 + end];
+                    out.push_str("<em>");
+                    out.push_str(&xml_escape_label(inner));
+                    out.push_str("</em>");
+                    i += 1 + end + 1;
+                    continue;
+                }
+            }
+            // bare *, treat as literal
+            out.push_str("*");
+            i += 1;
+        } else if b == b'`' {
+            // inline code: `code`
+            if let Some(end) = src[i + 1..].find('`') {
+                let inner = &src[i + 1..i + 1 + end];
+                out.push_str("<code>");
+                out.push_str(&xml_escape_label(inner));
+                out.push_str("</code>");
+                i += 1 + end + 1;
+                continue;
+            }
+            out.push_str("`");
+            i += 1;
+        } else if b == b'<' {
+            // Embedded HTML tag — pass through (with normalisation of <br> → <br/>)
+            if let Some(rel_end) = src[i..].find('>') {
+                let tag = &src[i..i + rel_end + 1];
+                let inner = tag[1..tag.len() - 1].trim();
+                let tag_lc = inner.trim_end_matches('/').trim().to_ascii_lowercase();
+                if tag_lc == "br" {
+                    out.push_str("<br/>");
+                } else {
+                    out.push_str(tag); // pass through other tags verbatim
+                }
+                i += rel_end + 1;
+            } else {
+                out.push_str("&lt;");
+                i += 1;
+            }
+        } else if b == b'\n' {
+            out.push_str("<br/>");
+            i += 1;
+        } else {
+            // Plain text — XML-escape
+            match b {
+                b'&' => out.push_str("&amp;"),
+                b'>' => out.push_str("&gt;"),
+                b'"' => out.push_str("&quot;"),
+                _ => out.push(b as char),
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
+/// XML-escape a plain text segment (for use within HTML element content).
+fn xml_escape_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'&' => out.push_str("&amp;"),
+            b'<' => out.push_str("&lt;"),
+            b'>' => out.push_str("&gt;"),
+            b'"' => out.push_str("&quot;"),
+            _ => out.push(b as char),
+        }
+    }
+    out
+}
+
+/// Convert a "string"-type label (double-quoted string) to HTML for
+/// embedding in a `<foreignObject>`.
+///
+/// In upstream mermaid, double-quoted labels may contain embedded HTML tags
+/// (e.g. `<strong>text</strong>`) which are rendered as HTML. Text content
+/// outside of tags has `>` escaped to `&gt;` and `&` to `&amp;`. This
+/// matches the browser's serialization behavior (innerHTML round-trip).
+///
+/// Rules:
+/// - `\n` → `<br/>` (converted to `<br/>` in rendering, stripped by textContent)
+/// - `<letter` / `</letter` / `<!` — HTML tag start, pass through INCLUDING its closing `>`
+/// - `<` NOT followed by tag-start char (e.g. `< 4`) → `&lt;` (text content)
+/// - `>` in text content → `&gt;`
+/// - `&` in text content → `&amp;`
+pub fn string_label_to_html(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() * 2);
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\n' {
+            out.push_str("<br/>");
+            i += 1;
+        } else if b == b'<' {
+            // Check if this starts an HTML tag (letter, '/', '!' follows).
+            let next = bytes.get(i + 1).copied().unwrap_or(0);
+            if next.is_ascii_alphabetic() || next == b'/' || next == b'!' {
+                // HTML tag — pass through the entire tag (including its closing `>`).
+                out.push('<');
+                i += 1;
+                // Emit tag content until `>` (or end of string), without escaping.
+                while i < bytes.len() && bytes[i] != b'>' {
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    out.push('>'); // the closing '>' of the tag
+                    i += 1;
+                }
+            } else {
+                // Not a valid HTML tag start — treat as literal `<` in text content.
+                out.push_str("&lt;");
+                i += 1;
+            }
+        } else if b == b'>' {
+            // `>` in text content — escape it.
+            out.push_str("&gt;");
+            i += 1;
+        } else if b == b'&' {
+            // `&` in text content — escape it.
+            out.push_str("&amp;");
+            i += 1;
+        } else {
+            out.push(b as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 // ─── Internal helpers ──────────────────────────────────────────────────
 
 /// JS-Number-like float formatting — integers lose `.0`, fractions use
@@ -524,6 +798,7 @@ mod tests {
     #[test]
     fn measure_html_label_multiline() {
         let (_w, h) = measure_html_label("a\nbb", &HtmlLabelFont::default(), 200.0, true);
+        // Plain-text path splits on '\n' and reports one line-height per line.
         // Height should be 2× line-height.
         let lh = line_height("sans-serif", 14.0, false, false);
         assert!((h - 2.0 * lh).abs() < 1e-9);

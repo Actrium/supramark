@@ -8,7 +8,7 @@
 //! anchored at `(-w/2, -h/2)` (upstream convention — the parent `<g>`
 //! carries the translate).
 
-use super::types::{fmt_num, get_node_classes};
+use super::types::{build_div_style_prefix, build_inline_style, build_label_style, fmt_num, get_node_classes};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::theme::ThemeVariables;
@@ -50,8 +50,12 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         }
         _ => String::new(),
     };
+    // Inline styles from `style <id> …` directives, each decorated with
+    // `!important` (matching upstream's applyStyles utility).
+    let rect_style = build_inline_style(node.css_styles.as_deref().unwrap_or(&[]));
     out.push_str(&format!(
-        r#"<rect class="basic label-container" style=""{rx_ry} x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        r#"<rect class="basic label-container" style="{rect_style}"{rx_ry} x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        rect_style = rect_style,
         rx_ry = rx_ry,
         x = fmt_num(x),
         y = fmt_num(y),
@@ -61,11 +65,41 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     if !label.is_empty() {
         // HTML foreignObject label matching upstream `labelHelper` /
         // `addHtmlSpan` output. Width/height come from the jsdom-shim
-        // measurement (14px sans-serif default — see
-        // `foreign_object::measure_html_label`).
-        out.push_str(&crate::render::foreign_object::shape_label_block(
-            &super::types::xml_escape(&label),
-            &crate::render::foreign_object::HtmlLabelFont::default(),
+        // measurement (14px sans-serif default).
+        //
+        // For "string" label types (quoted HTML labels), pass raw without escaping.
+        // For "markdown" label types, convert markdown syntax to HTML first.
+        // For plain text, XML-escape.
+        let is_markdown = node.label_type.as_deref() == Some("markdown");
+        let label_content = if is_markdown {
+            crate::render::foreign_object::markdown_label_to_html(&label)
+        } else {
+            // "string" and "text" labels: process embedded HTML tags and escape text chars
+            crate::render::foreign_object::string_label_to_html(&label)
+        };
+        // Apply FA icon substitution before measuring: fa:fa-car → <i ...></i> (zero width).
+        let for_measure = crate::render::foreign_object::replace_fa_icons(&label_content);
+        let font = crate::render::foreign_object::HtmlLabelFont::default();
+        let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
+            &for_measure, &font, 200.0, true,
+        );
+        // Label-specific CSS (color:, font-*) from `style` directives:
+        //   - group_style → <g class="label" style="..."> (raw hex)
+        //   - label_style → <span style="..."> (raw hex)
+        //   - div_style_prefix → <div style="prefix; display: ..."> (rgb-converted)
+        let css = node.css_styles.as_deref().unwrap_or(&[]);
+        let lbl_style = build_label_style(css);
+        let div_prefix = build_div_style_prefix(css);
+        let opts = crate::render::foreign_object::LabelOpts {
+            extra_span_classes: if is_markdown { "markdown-node-label" } else { "" },
+            group_style: if lbl_style.is_empty() { Some("") } else { Some(&lbl_style) },
+            label_style: if lbl_style.is_empty() { None } else { Some(&lbl_style) },
+            div_style_prefix: if div_prefix.is_empty() { None } else { Some(&div_prefix) },
+            ..crate::render::foreign_object::LabelOpts::default()
+        };
+        // Use the FA-processed version for rendering too (contains <i> tags).
+        out.push_str(&crate::render::foreign_object::render_node_label(
+            &for_measure, lw, lh, &opts,
         ));
     }
     out.push_str("</g>");

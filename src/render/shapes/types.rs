@@ -253,6 +253,107 @@ pub fn emit_polygon_node(
     out
 }
 
+/// Convert a CSS hex colour value (e.g. `#fff`, `#f9a0c2`) to the
+/// `rgb(r, g, b)` notation that upstream mermaid emits when applying
+/// inline label styles via `applyStyle(div, labelStyle)`.
+///
+/// The browser converts hex → rgb when assigning to `element.style.color`;
+/// we replicate that here so the SVG output is byte-identical.
+/// Returns the original string unchanged when it isn't a hex colour.
+pub fn hex_color_to_rgb(value: &str) -> String {
+    let v = value.trim();
+    if !v.starts_with('#') {
+        return v.to_string();
+    }
+    let hex = v.trim_start_matches('#');
+    let parse3 = |s: &str| -> Option<(u8, u8, u8)> {
+        let r = u8::from_str_radix(&s[0..1].repeat(2), 16).ok()?;
+        let g = u8::from_str_radix(&s[1..2].repeat(2), 16).ok()?;
+        let b = u8::from_str_radix(&s[2..3].repeat(2), 16).ok()?;
+        Some((r, g, b))
+    };
+    let parse6 = |s: &str| -> Option<(u8, u8, u8)> {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        Some((r, g, b))
+    };
+    let rgb = if hex.len() == 3 { parse3(hex) } else if hex.len() == 6 { parse6(hex) } else { None };
+    match rgb {
+        Some((r, g, b)) => format!("rgb({}, {}, {})", r, g, b),
+        None => v.to_string(),
+    }
+}
+
+/// CSS keys that apply to the label (text) rather than the node shape.
+/// Matches upstream's `isLabelStyle` predicate in `handDrawnShapeStyles.ts`.
+fn is_label_style_key(key: &str) -> bool {
+    matches!(
+        key,
+        "color" | "font-size" | "font-family" | "font-weight" | "font-style"
+        | "text-decoration" | "text-align" | "text-transform" | "line-height"
+        | "letter-spacing" | "word-spacing" | "text-shadow" | "text-overflow"
+        | "white-space" | "word-wrap" | "word-break" | "overflow-wrap" | "hyphens"
+    )
+}
+
+/// Normalise a single CSS declaration: trim whitespace around `:`, remove
+/// trailing `;`. Returns `(key, value)` or `None` if malformed.
+fn normalise_css_decl(s: &str) -> Option<(String, String)> {
+    let s = s.trim().trim_end_matches(';');
+    if s.is_empty() { return None; }
+    let colon = s.find(':')?;
+    let key = s[..colon].trim().to_string();
+    let value = s[colon + 1..].trim().to_string();
+    Some((key, value))
+}
+
+/// Build node shape inline `style` attribute from a list of CSS declarations.
+/// Filters out label-specific keys (color, font-*, text-*, …) and normalises
+/// each entry as `key:value !important`, joined with `;`.
+pub fn build_inline_style(styles: &[String]) -> String {
+    let parts: Vec<String> = styles.iter()
+        .filter_map(|s| normalise_css_decl(s))
+        .filter(|(key, _)| !is_label_style_key(key))
+        .map(|(k, v)| format!("{}:{} !important", k, v))
+        .collect();
+    parts.join(";")
+}
+
+/// Build label group `style` attribute from a list of CSS declarations.
+/// Keeps only label-specific keys and normalises as `key:value !important`,
+/// joined with `;`. Returns an empty string when none are present.
+pub fn build_label_style(styles: &[String]) -> String {
+    let parts: Vec<String> = styles.iter()
+        .filter_map(|s| normalise_css_decl(s))
+        .filter(|(key, _)| is_label_style_key(key))
+        .map(|(k, v)| format!("{}:{} !important", k, v))
+        .collect();
+    parts.join(";")
+}
+
+/// Build the `div_style_prefix` for a foreignObject label div. Upstream
+/// calls `applyStyle(div, labelStyle)` which sets e.g. `color: rgb(...)`
+/// from the node's label styles. The browser converts hex → rgb.
+///
+/// Output format: `"color: rgb(255,255,255) !important; "` (trailing space).
+pub fn build_div_style_prefix(styles: &[String]) -> String {
+    let parts: Vec<String> = styles.iter()
+        .filter_map(|s| normalise_css_decl(s))
+        .filter(|(key, _)| is_label_style_key(key))
+        .map(|(k, v)| {
+            // For color properties, convert hex to rgb.
+            let converted = if k == "color" { hex_color_to_rgb(&v) } else { v.clone() };
+            format!("{}: {} !important; ", k, converted)
+        })
+        .collect();
+    parts.join("")
+}
+
+/// Escape a text fragment for safe insertion into an SVG attribute or
+/// between tags. This is the escape set upstream mermaid uses in
+/// `sanitizeText`/`decodeEntities` → `&amp; &lt; &gt; &quot;`.
+
 /// Escape a text fragment for safe insertion into an SVG attribute or
 /// between tags. This is the escape set upstream mermaid uses in
 /// `sanitizeText`/`decodeEntities` → `&amp; &lt; &gt; &quot;`.

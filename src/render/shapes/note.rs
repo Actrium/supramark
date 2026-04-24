@@ -225,13 +225,12 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     out.push_str("</g>");
 
     if !label.is_empty() {
-        use crate::render::foreign_object::{measure_html_label, HtmlLabelFont, LabelOpts};
-        // Measure using the RAW label (before xml_escape). measure_html_label
-        // handles HTML tags by stripping them (textContent semantics).
-        // Passing the xml_escaped string would turn `<br>` into `&lt;br&gt;`
-        // which has no `<` so measure_html_label would measure entity chars
-        // as text — producing a wrong (wider) width.
-        let (fw, fh) = measure_html_label(&label, &HtmlLabelFont::default(), 200.0, true);
+        use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont, LabelOpts};
+        // Upstream: `\n` is pre-replaced with `<br/>` before innerHTML-assign,
+        // so jsdom textContent returns the label as a SINGLE logical line.
+        // `measure_html_markup_label` mirrors that — it strips `<br>` and any
+        // other tag, decodes entities, and returns one line-height.
+        let (fw, fh) = measure_html_markup_label(&label, &HtmlLabelFont::default(), 200.0, true);
         // Build the FO HTML body:
         // 1. Normalize all `<br>` variants to `<br/>`.
         // 2. Replace `\n` (multi-line note separator) with `<br/>`.

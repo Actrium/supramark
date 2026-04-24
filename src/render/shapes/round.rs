@@ -9,7 +9,7 @@
 //! take `node.rx` if set, otherwise default to `5` (matching the
 //! stable-v11 default when no theme override is supplied).
 
-use super::types::{fmt_num, get_node_classes, xml_escape};
+use super::types::{build_div_style_prefix, build_inline_style, build_label_style, fmt_num, get_node_classes, xml_escape};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::theme::ThemeVariables;
@@ -42,8 +42,10 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         tx = fmt_num(tx),
         ty = fmt_num(ty),
     ));
+    let rect_style = build_inline_style(node.css_styles.as_deref().unwrap_or(&[]));
     out.push_str(&format!(
-        r#"<rect class="basic label-container" style="" rx="{r}" ry="{r}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        r#"<rect class="basic label-container" style="{rect_style}" rx="{r}" ry="{r}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        rect_style = rect_style,
         r = fmt_num(r),
         x = fmt_num(x),
         y = fmt_num(y),
@@ -52,21 +54,40 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     ));
     if !label.is_empty() {
         let is_markdown = node.label_type.as_deref() == Some("markdown");
-        let label_style = node.label_style.as_deref().unwrap_or("");
-        let escaped = xml_escape(&label);
-        let (lw, lh) = crate::render::foreign_object::measure_html_label(
-            &escaped,
+        let css = node.css_styles.as_deref().unwrap_or(&[]);
+        // Label style from css_styles (color:, font-*, text-*) overrides node.label_style.
+        let css_label_style = build_label_style(css);
+        let fallback_label_style = node.label_style.as_deref().unwrap_or("");
+        let eff_label_style: String = if !css_label_style.is_empty() {
+            css_label_style.clone()
+        } else {
+            fallback_label_style.to_string()
+        };
+        // For "markdown" label types, convert markdown syntax to HTML first.
+        // For all other labels: process embedded HTML tags and escape text chars.
+        let escaped = if is_markdown {
+            crate::render::foreign_object::markdown_label_to_html(&label)
+        } else {
+            crate::render::foreign_object::string_label_to_html(&label)
+        };
+        // Apply FA icon substitution before measuring.
+        let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
+        let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
+            &for_measure,
             &crate::render::foreign_object::HtmlLabelFont::default(),
             200.0,
             true,
         );
+        let div_prefix = build_div_style_prefix(css);
         let opts = crate::render::foreign_object::LabelOpts {
             extra_span_classes: if is_markdown { "markdown-node-label" } else { "" },
-            group_style: if label_style.is_empty() { Some("") } else { Some(label_style) },
+            group_style: if eff_label_style.is_empty() { Some("") } else { Some(&eff_label_style) },
+            label_style: if css_label_style.is_empty() { None } else { Some(&css_label_style) },
+            div_style_prefix: if div_prefix.is_empty() { None } else { Some(&div_prefix) },
             ..crate::render::foreign_object::LabelOpts::default()
         };
         out.push_str(&crate::render::foreign_object::render_node_label(
-            &escaped, lw, lh, &opts,
+            &for_measure, lw, lh, &opts,
         ));
     }
     out.push_str("</g>");

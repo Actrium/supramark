@@ -46,13 +46,40 @@ pub fn open_unified_svg(
     class_attr: Option<&str>,
     aria: &str,
 ) -> String {
+    open_unified_svg_with_a11y(id, max_width, view_box, class_attr, aria, false, false)
+}
+
+/// Like [`open_unified_svg`] but with optional accessibility attributes
+/// (`aria-describedby` / `aria-labelledby`) appended after
+/// `aria-roledescription` when the diagram declares `accDescr` / `accTitle`.
+///
+/// Upstream emits these only when the diagram source contains the
+/// corresponding directives, with element ids `chart-desc-{id}` /
+/// `chart-title-{id}`.
+#[must_use]
+pub fn open_unified_svg_with_a11y(
+    id: &str,
+    max_width: f64,
+    view_box: (f64, f64, f64, f64),
+    class_attr: Option<&str>,
+    aria: &str,
+    has_acc_descr: bool,
+    has_acc_title: bool,
+) -> String {
     let (vx, vy, vw, vh) = view_box;
     let class_frag = match class_attr {
         Some(c) => format!(r#" class="{c}""#),
         None => String::new(),
     };
+    let mut a11y = String::new();
+    if has_acc_descr {
+        a11y.push_str(&format!(r#" aria-describedby="chart-desc-{id}""#));
+    }
+    if has_acc_title {
+        a11y.push_str(&format!(r#" aria-labelledby="chart-title-{id}""#));
+    }
     format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg"{cls} style="max-width: {mw}px;" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" aria-roledescription="{aria}">"#,
+        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg"{cls} style="max-width: {mw}px;" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" aria-roledescription="{aria}"{a11y}>"#,
         id = id,
         cls = class_frag,
         mw = fmt_num(max_width),
@@ -61,7 +88,52 @@ pub fn open_unified_svg(
         vw = fmt_num(vw),
         vh = fmt_num(vh),
         aria = aria,
+        a11y = a11y,
     )
+}
+
+/// Emit `<title>` and/or `<desc>` accessibility elements immediately after
+/// opening the `<svg>` tag. Call this right after `open_unified_svg_with_a11y`
+/// when `acc_title` or `acc_descr` are present.
+#[must_use]
+pub fn emit_a11y_elements(
+    id: &str,
+    acc_title: Option<&str>,
+    acc_descr: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    if let Some(t) = acc_title {
+        out.push_str(&format!(
+            r#"<title id="chart-title-{id}">{t}</title>"#,
+            t = xml_escape_text(t)
+        ));
+    }
+    if let Some(d) = acc_descr {
+        out.push_str(&format!(
+            r#"<desc id="chart-desc-{id}">{d}</desc>"#,
+            d = xml_escape_text(d)
+        ));
+    }
+    out
+}
+
+fn xml_escape_text(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.chars().any(|c| matches!(c, '<' | '>' | '&' | '"' | '\'')) {
+        let mut result = String::with_capacity(s.len() + 8);
+        for c in s.chars() {
+            match c {
+                '<' => result.push_str("&lt;"),
+                '>' => result.push_str("&gt;"),
+                '&' => result.push_str("&amp;"),
+                '"' => result.push_str("&quot;"),
+                '\'' => result.push_str("&#39;"),
+                _ => result.push(c),
+            }
+        }
+        std::borrow::Cow::Owned(result)
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
 }
 
 /// Closing tag of the `<svg>` shell.
