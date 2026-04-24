@@ -23,6 +23,15 @@ pub fn parse(source: &str) -> Result<BlockDiagram> {
     p.parse_start()
 }
 
+/// Same as `parse` but allows specifying the initial `id_cnt` and `rng_state`.
+/// Used to match the cross-fixture cnt accumulation of the batch reference generator.
+pub fn parse_with_state(source: &str, id_cnt_start: u64, rng_state: u32) -> Result<BlockDiagram> {
+    let mut p = Parser::new(source);
+    p.id_cnt = id_cnt_start;
+    p.rng_state = rng_state;
+    p.parse_start()
+}
+
 // ─── Lexer ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -441,6 +450,9 @@ struct Parser<'a> {
     /// `0x12345678` mulberry32 state — seeded to match the jsdom batch
     /// reference generator (tests/support/generate_ref.mjs).
     rng_state: u32,
+    /// Mirrors `edgeCount2` in blockDB.ts: counts how many times an
+    /// edge `{src}-{dst}` ID has been seen.  Prepended as `{count}-{id}`.
+    edge_count: std::collections::HashMap<String, u32>,
 }
 
 /// mulberry32 PRNG — matches upstream (jsdom-seeded) byte for byte.
@@ -464,68 +476,63 @@ fn mulberry32_next(state: &mut u32) -> f64 {
 
 /// JS `Math.random().toString(36).substr(2, 12)`.
 ///
-/// V8's `Number.toString(36)` emits the **shortest round-trippable**
-/// base-36 representation. For `mulberry32()` outputs (uniform doubles
-/// in `[0, 1)`) this is 1–11 digits of `0-9a-z`.
+/// V8's `Number.toString(radix)` for non-decimal radix uses exact
+/// integer (Bignum) arithmetic to emit digits until the ULP boundaries
+/// of `x` fall into different base-36 buckets.  At that point the last
+/// digit is the one containing `x`'s exact position, with a round-up
+/// when the fractional remainder of `x` exceeds half of the current
+/// bucket step.
 ///
-/// Strategy: treat `x` as `num / 2^shift` using its IEEE-754 fields so
-/// each `num *= 36` step is an exact u128 operation. Emit digits until
-/// doing so would leave the remaining fraction below half an ULP of
-/// the original double — at which point the shortest repr is the
-/// current prefix (optionally with the last digit rounded up).
+/// Algorithm:
+///   x = mantissa / 2^shift   (IEEE-754 normal double, shift = 52 - exp)
+///   Track lo = 2*mantissa - 1, hi = 2*mantissa + 1, exact = 2*mantissa
+///   in units of 1 / (2^(shift+1)).  Each step: multiply all three by 36,
+///   extract digit = exact / scale2 (scale2 = 2^(shift+1)).
+///   Terminate when lo/scale2 != hi/scale2 (ULP straddles a bucket
+///   boundary).  Round up if exact_rem >= scale2/2.
 fn js_random_to_base36_prefix(x: f64) -> String {
     if x <= 0.0 { return String::new(); }
     let bits = x.to_bits();
     let raw_exp = ((bits >> 52) & 0x7ff) as i32;
     let exp = raw_exp - 1023;
-    let mantissa = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
-    let shift: i32 = 52 - exp;
-    if !(shift > 0 && shift < 125) { return String::new(); }
-    let shift = shift as u32;
-    // Numerator starts at `mantissa`. Half-ULP boundary shrinks each
-    // step by a factor of 36 too — we track it as `half`.
-    let mut num: u128 = mantissa as u128;
-    let mut half: u128 = 1u128; // represents 1/2 in the same scaling
-    // scale = 2^shift, representing "1" in our fixed-point.
-    let scale: u128 = 1u128 << shift;
-    let mut half_scale = scale; // the "1" against which num/half are compared
+    let mantissa: u64 = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
+    let shift_i: i32 = 52 - exp;
+    // For mulberry32 outputs in (0,1): exp in [-4, -1], shift in [53, 56].
+    // scale2 = 2^(shift+1) <= 2^57, fits in u128.
+    if shift_i <= 0 || shift_i >= 63 { return String::new(); }
+    let shift = shift_i as u32;
+
+    // scale2 = 2^(shift+1).  After modulo, values < scale2, so *36 < 36*2^63 < 2^128.
+    let scale2: u128 = 1u128 << (shift + 1);
+    let mut lo:    u128 = 2 * (mantissa as u128) - 1;
+    let mut hi:    u128 = 2 * (mantissa as u128) + 1;
+    let mut exact: u128 = 2 * (mantissa as u128);
 
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     let mut out = String::with_capacity(12);
     for _ in 0..12 {
-        num = num.wrapping_mul(36);
-        half = half.wrapping_mul(36);
-        let _ = &mut half_scale;
-        let digit = (num / scale) as usize;
-        let remainder = num % scale;
-        // Emit this digit.
-        if digit >= 36 { out.push('z'); } else { out.push(DIGITS[digit] as char); }
-        // Stop when the remaining fraction is within half an ULP of zero
-        // or of "next digit". V8's shortest-repr loop terminates on the
-        // **closer** of the two; if remainder < half-ULP we keep the
-        // current digit, otherwise we round up.
-        let low = remainder;
-        let high_gap = scale - remainder;
-        if low < half || high_gap < half {
-            if high_gap <= low {
-                // Round up: walk carry through the emitted digits.
-                let mut bytes: Vec<u8> = out.bytes().collect();
-                let mut idx = bytes.len();
-                while idx > 0 {
-                    idx -= 1;
-                    let c = bytes[idx];
-                    let dv = DIGITS.iter().position(|&x| x == c).unwrap();
-                    if dv < 35 {
-                        bytes[idx] = DIGITS[dv + 1];
-                        return String::from_utf8(bytes).unwrap();
-                    }
-                    bytes[idx] = DIGITS[0];
-                }
-                return out;
+        lo    *= 36;
+        hi    *= 36;
+        exact *= 36;
+        let lo_d    = lo    / scale2;
+        let hi_d    = hi    / scale2;
+        let ex_d    = exact / scale2;
+        lo    %= scale2;
+        hi    %= scale2;
+        exact %= scale2;
+
+        // Determine digit: exact position, with round-up when remainder
+        // exceeds the halfway point of the bucket.
+        let mut digit = ex_d as usize;
+        if lo_d != hi_d {
+            // ULP straddles a bucket boundary — this is the last digit.
+            if exact >= scale2 / 2 {
+                digit = digit.saturating_add(1);
             }
-            return out;
+            if digit >= 36 { out.push('z'); } else { out.push(DIGITS[digit] as char); }
+            break;
         }
-        num = remainder;
+        if digit >= 36 { out.push('z'); } else { out.push(DIGITS[digit] as char); }
     }
     out
 }
@@ -545,6 +552,7 @@ impl<'a> Parser<'a> {
             apply_style: Vec::new(),
             global_seen: std::collections::HashSet::new(),
             rng_state: 0x12345678,
+            edge_count: std::collections::HashMap::new(),
         }
     }
 
@@ -815,7 +823,15 @@ impl<'a> Parser<'a> {
                     if let Tok::Link { typestr, label } = link_tok {
                         let next_node = self.parse_node()?;
                         let edge_data = edge_str_to_edge_data(&typestr);
-                        let edge_id = format!("{}-{}", current.id, next_node.id);
+                        // Upstream blockDB.ts prepends an occurrence count to
+                        // disambiguate repeated src-dst pairs: id = count + "-" + base_id.
+                        let base_id = format!("{}-{}", current.id, next_node.id);
+                        let count = {
+                            let c = self.edge_count.entry(base_id.clone()).or_insert(0);
+                            *c += 1;
+                            *c
+                        };
+                        let edge_id = format!("{}-{}", count, base_id);
                         self.edges.push(BlockEdge {
                             id: edge_id,
                             start: current.id.clone(),

@@ -43,6 +43,7 @@ pub struct NodeGeom {
     pub width_in_columns: i64,
     pub classes: Vec<String>,
     pub styles: Vec<String>,
+    pub arrow_dirs: Vec<crate::model::block::ArrowDir>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -94,6 +95,7 @@ struct Tree {
     children: Vec<Tree>,
     classes: Vec<String>,
     styles: Vec<String>,
+    arrow_dirs: Vec<crate::model::block::ArrowDir>,
     /// Computed size / position.
     width: f64,
     height: f64,
@@ -114,6 +116,7 @@ impl Tree {
             children: node.children.iter().map(Tree::from_ast).collect(),
             classes: node.classes.clone(),
             styles: node.styles.clone(),
+            arrow_dirs: node.arrow_dirs.clone().unwrap_or_default(),
             width: 0.0,
             height: 0.0,
             x: 0.0,
@@ -141,7 +144,7 @@ impl Tree {
 /// * **Circle / doubleCircle / ellipse** take the circle element's own
 ///   bbox which is `(text_w + padding, text_w + padding)` for circles.
 /// * **BlockArrow** is handled separately.
-fn sized_dims(label: &str, shape: BlockShape) -> (f64, f64, f64, f64) {
+fn sized_dims(label: &str, shape: BlockShape, arrow_dirs: &[crate::model::block::ArrowDir]) -> (f64, f64, f64, f64) {
     // Empty labels still produce a label bbox with `height = LABEL_HEIGHT`
     // (jsdom's `measureTextBlock('')` returns `{width:0, height:lineHeight}`).
     // Width stays 0.
@@ -161,11 +164,21 @@ fn sized_dims(label: &str, shape: BlockShape) -> (f64, f64, f64, f64) {
     // Likewise for height. Shape-specific `drawn_w` / `drawn_h`:
     let (sized_w, sized_h) = match shape {
         BlockShape::Circle | BlockShape::DoubleCircle => {
-            // Upstream circle/doublecircle: updateNodeBounds uses the
-            // CIRCLE element's own bbox (`2r` × `2r`), NOT shapeSvg's
-            // union. r = text_w/2 + halfPadding.
-            let side = text_w + PADDING;
-            (side, side)
+            // jsdom elementBBox on the node <g> returns the UNION of
+            // the <circle> element and the <foreignObject> (transforms
+            // are ignored by the shim).
+            //   r = text_w/2 + PADDING/2
+            //   circle_bbox: x ∈ [-r, r], y ∈ [-r, r]
+            //   foreignObject_bbox: x ∈ [0, text_w], y ∈ [0, text_h]
+            //   (label g transform "-bbox.width/2, -bbox.height/2" is ignored by jsdom)
+            //   union width  = text_w + r = (3*text_w + PADDING) / 2
+            //   union height = max(r, text_h) + r
+            // For typical labels, text_h (16.296875) > r (e.g. 14.84 for short labels),
+            // giving: union height = text_h + r = text_h + text_w/2 + PADDING/2
+            let r = text_w / 2.0 + PADDING / 2.0;
+            let w = (3.0 * text_w + PADDING) / 2.0;
+            let h = r + r.max(text_h);
+            (w, h)
         }
         BlockShape::Stadium => {
             // Stadium rect: w = text_w + (text_h+p)/4 + p; h = text_h + p.
@@ -173,11 +186,103 @@ fn sized_dims(label: &str, shape: BlockShape) -> (f64, f64, f64, f64) {
             let drawn_h = text_h + PADDING;
             (text_w + drawn_w / 2.0, text_h + drawn_h / 2.0)
         }
+        // Polygon shapes using `insertPolygonShape2` with `translate(-w4/2, h3/2)`.
+        // h3 = text_h + PADDING, w4 = text_w + PADDING.
+        // jsdom getBBox of the parent <g> = union of polygon and label foreignObject:
+        //   polygon y: [-h3, 0], foreignObject y: [0, text_h]
+        //   → union height = text_h + h3 = 2*text_h + PADDING
+        // x-range depends on shape-specific polygon x-offsets.
+        BlockShape::LeanRight | BlockShape::Trapezoid | BlockShape::InvTrapezoid => {
+            // lean_right2, trapezoid2, inv_trapezoid2 all have polygon x range
+            // from -2*h3/6 to w4+2*h3/6  →  width = w4 + 2*h3/3.
+            // Union with label [0, text_w]: x-min = -h3/3, x-max = w4+h3/3.
+            let h3 = text_h + PADDING;
+            let w4 = text_w + PADDING;
+            let w = w4 + 2.0 * h3 / 3.0;
+            let h = 2.0 * text_h + PADDING;
+            (w, h)
+        }
+        BlockShape::LeanLeft => {
+            // lean_left2 polygon x range: -h3/6 to w4+h3/6  →  width = w4 + h3/3.
+            let h3 = text_h + PADDING;
+            let w4 = text_w + PADDING;
+            let w = w4 + h3 / 3.0;
+            let h = 2.0 * text_h + PADDING;
+            (w, h)
+        }
+        BlockShape::Diamond => {
+            // question2: s2 = w4 + h3 = text_w + text_h + 2*PADDING.
+            // Polygon x: [0, s2], y: [-s2, 0]. Label x: [0, text_w], y: [0, text_h].
+            // Union: x [0, s2], y [-s2, text_h].
+            // width = s2, height = s2 + text_h.
+            let h3 = text_h + PADDING;
+            let w4 = text_w + PADDING;
+            let s2 = w4 + h3;
+            let w = s2;
+            let h = s2 + text_h;
+            (w, h)
+        }
+        BlockShape::Hexagon => {
+            // hexagon2: h3=text_h+P, m3=h3/4, w4=text_w+2*m3+P = text_w+h3/2+P.
+            // Polygon x: [0, w4], y: [-h3, 0]. Label x: [0, text_w], y: [0, text_h].
+            // Union: x [0, w4], y [-h3, text_h]. Width = w4, height = text_h + h3.
+            let h3 = text_h + PADDING;
+            let m3 = h3 / 4.0;
+            let w4 = text_w + 2.0 * m3 + PADDING;
+            let h = 2.0 * text_h + PADDING;
+            (w4, h)
+        }
+        BlockShape::RectLeftInvArrow => {
+            // rect_left_inv_arrow2: h3=text_h+P, w4=text_w+P.
+            // Polygon x: [-h3/2, w4], y: [-h3, 0]. Label x: [0, text_w], y: [0, text_h].
+            // Union: x [-h3/2, w4], y [-h3, text_h]. Width = w4+h3/2, height = text_h+h3.
+            let h3 = text_h + PADDING;
+            let w4 = text_w + PADDING;
+            let w = w4 + h3 / 2.0;
+            let h = 2.0 * text_h + PADDING;
+            (w, h)
+        }
+        BlockShape::BlockArrow => {
+            // block_arrow: height2 = text_h + 2*P, midpoint3 = height2/2.
+            // width3 = text_w + 2*midpoint3 + P = text_w + height2 + P.
+            // padding2 = P/2.
+            // For most directions, polygon x: [0, width3], y: [-height2, 0].
+            // For "x,y" (all 4 directions), x: [-P, width3+P], y: [-height2, P].
+            // Label: [0, text_w] × [0, text_h].
+            // Union height always = text_h + height2 = 2*text_h + 2*P (text_h > P).
+            // Union width varies by direction:
+            //   "x,y" → width3 + 2*P (wider by 2*P on each side → net +2*P total... wait)
+            //   Actually: union x for "x,y": min(-P, 0)=-P to max(width3+P, text_w)=width3+P
+            //   → width = width3 + 2*P
+            //   Other: min(0, 0)=0 to max(width3, text_w)=width3 → width = width3
+            use crate::model::block::ArrowDir;
+            // "x,y" means both X and Y dirs present → expands to right+left+up+down.
+            // X alone = right+left, Y alone = up+down. X+Y = all 4.
+            let has_all_four = {
+                let has_right = arrow_dirs.contains(&ArrowDir::Right) || arrow_dirs.contains(&ArrowDir::X);
+                let has_left = arrow_dirs.contains(&ArrowDir::Left) || arrow_dirs.contains(&ArrowDir::X);
+                let has_up = arrow_dirs.contains(&ArrowDir::Up) || arrow_dirs.contains(&ArrowDir::Y);
+                let has_down = arrow_dirs.contains(&ArrowDir::Down) || arrow_dirs.contains(&ArrowDir::Y);
+                has_right && has_left && has_up && has_down
+            };
+            // For "all 4 directions" (x+y), the polygon also extends in y:
+            //   y range: -(height2 + 2*padding2) to 2*padding2 = -(height2+P) to P.
+            //   union y: min(-(height2+P), 0)=-(height2+P) to max(P, text_h)=text_h.
+            //   height = text_h + height2 + P = 2*text_h + 3*P.
+            // For all other directions: y range -height2 to 0.
+            //   union y: -height2 to text_h. height = text_h + height2 = 2*text_h + 2*P.
+            let height2 = text_h + 2.0 * PADDING;
+            let width3 = text_w + height2 + PADDING;
+            let w = if has_all_four { width3 + 2.0 * PADDING } else { width3 };
+            let h = if has_all_four { 2.0 * text_h + 3.0 * PADDING } else { 2.0 * text_h + 2.0 * PADDING };
+            (w, h)
+        }
         _ => {
-            // Plain rect: drawn_w = text_w + p, drawn_h = text_h + p.
+            // Plain rect (rect2): drawn_w = text_w + p, drawn_h = text_h + p.
+            // rect: x = -text_w/2-P/2, y = -text_h/2-P/2, w = text_w+P, h = text_h+P.
             // Union with foreignObject at (0, 0, text_w, text_h):
-            //   width = text_w + (text_w + p)/2 = (3*text_w + p) / 2
-            //   height = text_h + (text_h + p)/2 = (3*text_h + p) / 2
+            //   width = text_w - (-text_w/2-P/2) = 1.5*text_w + P/2 = (3*text_w + P) / 2
+            //   height = text_h - (-text_h/2-P/2) = 1.5*text_h + P/2 = (3*text_h + P) / 2
             // Even when text_w=0 (empty label), text_h is still LABEL_HEIGHT.
             let w = (3.0 * text_w + PADDING) / 2.0;
             let h = (3.0 * text_h + PADDING) / 2.0;
@@ -214,7 +319,7 @@ fn size_tree_with_sibling(node: &mut Tree, sibling_w: f64, sibling_h: f64) {
                 // Space stays at (0, 0) — getMaxChildSize ignores it.
             } else {
                 let label = node.label.as_deref().unwrap_or("");
-                let (w, h, tw, th) = sized_dims(label, node.shape);
+                let (w, h, tw, th) = sized_dims(label, node.shape, &node.arrow_dirs);
                 node.width = w;
                 node.height = h;
                 node.text_w = tw;
@@ -456,6 +561,7 @@ fn collect_nodes(node: &Tree, out: &mut Vec<NodeGeom>, is_root: bool) {
             width_in_columns: node.width_in_columns,
             classes: node.classes.clone(),
             styles: node.styles.clone(),
+            arrow_dirs: node.arrow_dirs.clone(),
         });
     }
     for child in &node.children {

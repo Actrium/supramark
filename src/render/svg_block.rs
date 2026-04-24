@@ -55,7 +55,7 @@ pub fn render(
     ));
 
     // ── <style> block ────────────────────────────────────────────────
-    out.push_str(&build_style_block(id, theme));
+    out.push_str(&build_style_block(id, theme, &d.class_defs));
     // Empty seed group that upstream d3 emits right after the <style>.
     // Block is an outlier — markers live *outside* this seed group
     // (unlike ER / state / flowchart which wrap everything inside).
@@ -64,7 +64,11 @@ pub fn render(
     // ── Markers (always emitted in block regardless of use). ─────────
     out.push_str(&build_markers(id));
 
-    // ── <g class="block"> node list ──────────────────────────────────
+    // ── <g class="block"> node list + edges ─────────────────────────────
+    // Build an id→NodeGeom lookup once for edge intersection.
+    let node_map: std::collections::HashMap<&str, &crate::layout::block::NodeGeom> =
+        l.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
     out.push_str(r#"<g class="block">"#);
     for n in &l.nodes {
         // Composites need the cluster class; non-arrow leaves use the
@@ -75,10 +79,13 @@ pub fn render(
             _ => render_leaf(&mut out, id, n),
         }
     }
+    // Edges are emitted inside the same <g class="block"> after all nodes.
+    for e in &d.edges {
+        render_edge(&mut out, id, e, &node_map);
+    }
     out.push_str("</g>");
 
     out.push_str("</svg>");
-    let _ = d; // reserved for future edge/class lookup.
     Ok(out)
 }
 
@@ -86,7 +93,10 @@ pub fn render(
 
 fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
     let (rx, ry) = rx_ry_for(n.shape);
-    let classes = "node default default flowchart-label";
+    // Upstream: `classStr = classes.join(" ") + " flowchart-label"` when
+    // custom classes exist, otherwise `"default flowchart-label"`.
+    // Element class = `"node default " + classStr`.
+    let classes = node_g_classes(&n.classes);
     let node_style = format_node_style(&n.styles);
     out.push_str(&format!(
         r#"<g class="{classes}" id="{did}-{nid}" transform="translate({cx}, {cy})">"#,
@@ -97,9 +107,9 @@ fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
         cy = fmt_num(n.y),
     ));
     // Shape body. For circle / double-circle upstream emits a `<circle>`,
-    // for diamond / hexagon / lean* / trapezoid* it emits `<polygon>`,
-    // etc. For the wave-3 pass we handle the common rectangle variants
-    // (square, round, na — all of which draw a `<rect>`) plus circle.
+    // for diamond / hexagon / lean* / trapezoid* it emits `<polygon>` via
+    // `insertPolygonShape2`: points in local space + `translate(-w4/2, h3/2)`.
+    // Rect variants draw a `<rect>` using the positioned (sibling-normalised) dims.
     match n.shape {
         BlockShape::Circle => render_circle_shape(out, n),
         BlockShape::DoubleCircle => render_circle_shape(out, n),
@@ -120,7 +130,16 @@ fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
                 h = fmt_num(h),
             ));
         }
+        BlockShape::LeanRight => { let (p, w, h) = lean_right_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::LeanLeft  => { let (p, w, h) = lean_left_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::Trapezoid => { let (p, w, h) = trapezoid_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::InvTrapezoid => { let (p, w, h) = inv_trapezoid_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::Diamond    => { let (p, w, h) = diamond_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::Hexagon    => { let (p, w, h) = hexagon_points(n); render_polygon(out, &p, w, h, &node_style); }
+        BlockShape::RectLeftInvArrow => { let (p, w, h) = rect_left_inv_arrow_points(n); render_polygon(out, &p, w, h, &node_style); }
         _ => {
+            // Plain rect using POSITIONED dimensions (n.width, n.height = sibling-normalised).
+            // For rect2 (positioned=true): x=-totalWidth/2, y=-totalHeight/2.
             out.push_str(&format!(
                 r#"<rect class="basic label-container" style="{s}" rx="{rx}" ry="{ry}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
                 s = node_style,
@@ -138,7 +157,7 @@ fn render_leaf(out: &mut String, diagram_id: &str, n: &NodeGeom) {
 }
 
 fn render_composite(out: &mut String, diagram_id: &str, n: &NodeGeom) {
-    let classes = "node default default flowchart-label";
+    let classes = node_g_classes(&n.classes);
     out.push_str(&format!(
         r#"<g class="{classes}" id="{did}-{nid}" transform="translate({cx}, {cy})">"#,
         classes = classes,
@@ -176,10 +195,8 @@ fn render_circle_shape(out: &mut String, n: &NodeGeom) {
 }
 
 fn render_block_arrow(out: &mut String, diagram_id: &str, n: &NodeGeom) {
-    // Placeholder: emit a plain rect so the diagram still draws.
-    // Upstream `block_arrow.js` builds a polygon path — supporting it
-    // byte-exact is deferred.
-    let classes = "node default default flowchart-label";
+    let classes = node_g_classes(&n.classes);
+    let node_style = format_node_style(&n.styles);
     out.push_str(&format!(
         r#"<g class="{classes}" id="{did}-{nid}" transform="translate({cx}, {cy})">"#,
         classes = classes,
@@ -188,9 +205,8 @@ fn render_block_arrow(out: &mut String, diagram_id: &str, n: &NodeGeom) {
         cx = fmt_num(n.x),
         cy = fmt_num(n.y),
     ));
-    out.push_str(&format!(
-        r#"<polygon class="label-container" points="" style=""></polygon>"#
-    ));
+    let (pts, w4, h3) = block_arrow_points(n);
+    render_polygon(out, &pts, w4, h3, &node_style);
     render_label(out, n);
     out.push_str("</g>");
 }
@@ -215,6 +231,17 @@ fn render_label(out: &mut String, n: &NodeGeom) {
     out.push_str(&render_node_label(&escaped, n.text_width, h, &opts));
 }
 
+/// Build the `<g>` `class` attribute for a node element.
+/// Upstream `insertNode2`: `el.attr("class", "node default " + classStr)` where
+/// `classStr = classes.join(" ") + " flowchart-label"` (or `"default flowchart-label"` when empty).
+fn node_g_classes(classes: &[String]) -> String {
+    if classes.is_empty() {
+        "node default default flowchart-label".to_string()
+    } else {
+        format!("node default {} flowchart-label", classes.join(" "))
+    }
+}
+
 fn rx_ry_for(shape: BlockShape) -> (&'static str, &'static str) {
     match shape {
         BlockShape::Round => ("5", "5"),
@@ -223,19 +250,556 @@ fn rx_ry_for(shape: BlockShape) -> (&'static str, &'static str) {
 }
 
 fn format_node_style(styles: &[String]) -> String {
-    // Upstream emits styles joined by `;` but empty string when none.
+    // Upstream `getStylesFromArray` joins each element with a trailing `";"`,
+    // resulting in e.g. `"fill:#f9F;stroke:#333;stroke-width:4px;"`.
+    // Empty when no styles.
     if styles.is_empty() {
         return String::new();
     }
     let mut s = String::new();
-    for (i, st) in styles.iter().enumerate() {
-        if i > 0 {
-            s.push(';');
-            s.push(' ');
-        }
+    for st in styles {
         s.push_str(st);
+        s.push(';');
     }
     s
+}
+
+// ─── Polygon shape rendering ───────────────────────────────────────────
+
+/// Emit `<polygon class="label-container" points="..." transform="translate(-w4/2,h3/2)" style="...">`.
+/// `pts` is the slice of (x, y) raw polygon points (before the transform).
+/// `insert_w` and `insert_h` are the w4/h3 passed to `insertPolygonShape2`, which
+/// determines the centering transform `translate(-insert_w/2, insert_h/2)`.
+fn render_polygon(out: &mut String, pts: &[(f64, f64)], insert_w: f64, insert_h: f64, style: &str) {
+    let pts_str: String = pts
+        .iter()
+        .map(|(x, y)| format!("{},{}", fmt_num(*x), fmt_num(*y)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    out.push_str(&format!(
+        r#"<polygon points="{pts}" class="label-container" transform="translate({tx},{ty})" style="{style}"></polygon>"#,
+        pts = pts_str,
+        tx = fmt_num(-insert_w / 2.0),
+        ty = fmt_num(insert_h / 2.0),
+        style = style,
+    ));
+}
+
+/// Returns (points, insert_w, insert_h) for lean_right2.
+/// `insertPolygonShape2(shapeSvg, w4, h3, points)` → transform `translate(-w4/2, h3/2)`.
+fn lean_right_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    (vec![
+        (-2.0 * h3 / 6.0, 0.0),
+        (w4 - h3 / 6.0, 0.0),
+        (w4 + 2.0 * h3 / 6.0, -h3),
+        (h3 / 6.0, -h3),
+    ], w4, h3)
+}
+
+fn lean_left_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    (vec![
+        (2.0 * h3 / 6.0, 0.0),
+        (w4 + h3 / 6.0, 0.0),
+        (w4 - 2.0 * h3 / 6.0, -h3),
+        (-h3 / 6.0, -h3),
+    ], w4, h3)
+}
+
+fn trapezoid_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    (vec![
+        (-2.0 * h3 / 6.0, 0.0),
+        (w4 + 2.0 * h3 / 6.0, 0.0),
+        (w4 - h3 / 6.0, -h3),
+        (h3 / 6.0, -h3),
+    ], w4, h3)
+}
+
+fn inv_trapezoid_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    (vec![
+        (h3 / 6.0, 0.0),
+        (w4 - h3 / 6.0, 0.0),
+        (w4 + 2.0 * h3 / 6.0, -h3),
+        (-2.0 * h3 / 6.0, -h3),
+    ], w4, h3)
+}
+
+/// question2 (diamond): `insertPolygonShape2(shapeSvg, s2, s2, ...)` where s2 = w4 + h3.
+fn diamond_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    let s2 = w4 + h3;
+    (vec![
+        (s2 / 2.0, 0.0),
+        (s2, -s2 / 2.0),
+        (s2 / 2.0, -s2),
+        (0.0, -s2 / 2.0),
+    ], s2, s2)
+}
+
+/// hexagon2: `h3=text_h+P, m3=h3/4, w4=text_w+2*m3+P`.
+/// `insertPolygonShape2(shapeSvg, w4, h3, ...)`.
+fn hexagon_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let m3 = h3 / 4.0;
+    let w4 = tw + 2.0 * m3 + crate::layout::block::PADDING;
+    (vec![
+        (m3, 0.0),
+        (w4 - m3, 0.0),
+        (w4, -h3 / 2.0),
+        (w4 - m3, -h3),
+        (m3, -h3),
+        (0.0, -h3 / 2.0),
+    ], w4, h3)
+}
+
+/// rect_left_inv_arrow2: `h3=text_h+P, w4=text_w+P`.
+/// `insertPolygonShape2(shapeSvg, w4, h3, ...)`.
+fn rect_left_inv_arrow_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    let tw = n.text_width; let th = n.text_height;
+    let h3 = th + crate::layout::block::PADDING;
+    let w4 = tw + crate::layout::block::PADDING;
+    (vec![
+        (-h3 / 2.0, 0.0),
+        (w4, 0.0),
+        (w4, -h3),
+        (-h3 / 2.0, -h3),
+        (0.0, -h3 / 2.0),
+    ], w4, h3)
+}
+
+/// block_arrow: `height2 = text_h + 2*P, midpoint3 = height2/2, width3 = text_w + height2 + P`.
+/// `insertPolygonShape2(shapeSvg, width3, height2, ...)`.
+/// Returns (points, insert_w, insert_h).
+fn block_arrow_points(n: &NodeGeom) -> (Vec<(f64, f64)>, f64, f64) {
+    use crate::model::block::ArrowDir;
+    let tw = n.text_width; let th = n.text_height;
+    let p = crate::layout::block::PADDING;
+    let height2 = th + 2.0 * p;
+    let midpoint3 = height2 / 2.0;
+    let width3 = tw + 2.0 * midpoint3 + p;
+    let padding2 = p / 2.0;
+    let dirs = &n.arrow_dirs;
+
+    // Expand X → Right + Left, Y → Up + Down.
+    let has_right = dirs.contains(&ArrowDir::Right) || dirs.contains(&ArrowDir::X);
+    let has_left  = dirs.contains(&ArrowDir::Left)  || dirs.contains(&ArrowDir::X);
+    let has_up    = dirs.contains(&ArrowDir::Up)    || dirs.contains(&ArrowDir::Y);
+    let has_down  = dirs.contains(&ArrowDir::Down)  || dirs.contains(&ArrowDir::Y);
+
+    let pts: Vec<(f64, f64)> = if has_right && has_left && has_up && has_down {
+        vec![
+            (0.0, 0.0),
+            (midpoint3, 0.0),
+            (width3 / 2.0, 2.0 * padding2),
+            (width3 - midpoint3, 0.0),
+            (width3, 0.0),
+            (width3, -height2 / 3.0),
+            (width3 + 2.0 * padding2, -height2 / 2.0),
+            (width3, -2.0 * height2 / 3.0),
+            (width3, -height2),
+            (width3 - midpoint3, -height2),
+            (width3 / 2.0, -height2 - 2.0 * padding2),
+            (midpoint3, -height2),
+            (0.0, -height2),
+            (0.0, -2.0 * height2 / 3.0),
+            (-2.0 * padding2, -height2 / 2.0),
+            (0.0, -height2 / 3.0),
+        ]
+    } else if has_right && has_left && has_up {
+        vec![
+            (midpoint3, 0.0),
+            (width3 - midpoint3, 0.0),
+            (width3, -height2 / 2.0),
+            (width3 - midpoint3, -height2),
+            (midpoint3, -height2),
+            (0.0, -height2 / 2.0),
+        ]
+    } else if has_right && has_left && has_down {
+        vec![
+            (0.0, 0.0),
+            (midpoint3, -height2),
+            (width3 - midpoint3, -height2),
+            (width3, 0.0),
+        ]
+    } else if has_right && has_up && has_down {
+        vec![
+            (0.0, 0.0),
+            (width3, -midpoint3),
+            (width3, -height2 + midpoint3),
+            (0.0, -height2),
+        ]
+    } else if has_left && has_up && has_down {
+        vec![
+            (width3, 0.0),
+            (0.0, -midpoint3),
+            (0.0, -height2 + midpoint3),
+            (width3, -height2),
+        ]
+    } else if has_right && has_left {
+        vec![
+            (midpoint3, 0.0),
+            (midpoint3, -padding2),
+            (width3 - midpoint3, -padding2),
+            (width3 - midpoint3, 0.0),
+            (width3, -height2 / 2.0),
+            (width3 - midpoint3, -height2),
+            (width3 - midpoint3, -height2 + padding2),
+            (midpoint3, -height2 + padding2),
+            (midpoint3, -height2),
+            (0.0, -height2 / 2.0),
+        ]
+    } else if has_up && has_down {
+        vec![
+            (width3 / 2.0, 0.0),
+            (0.0, -padding2),
+            (midpoint3, -padding2),
+            (midpoint3, -height2 + padding2),
+            (0.0, -height2 + padding2),
+            (width3 / 2.0, -height2),
+            (width3, -height2 + padding2),
+            (width3 - midpoint3, -height2 + padding2),
+            (width3 - midpoint3, -padding2),
+            (width3, -padding2),
+        ]
+    } else if has_right && has_up {
+        vec![
+            (0.0, 0.0),
+            (width3, -midpoint3),
+            (0.0, -height2),
+        ]
+    } else if has_right && has_down {
+        vec![
+            (0.0, 0.0),
+            (width3, 0.0),
+            (0.0, -height2),
+        ]
+    } else if has_left && has_up {
+        vec![
+            (width3, 0.0),
+            (0.0, -midpoint3),
+            (width3, -height2),
+        ]
+    } else if has_left && has_down {
+        vec![
+            (width3, 0.0),
+            (0.0, 0.0),
+            (width3, -height2),
+        ]
+    } else if has_right {
+        vec![
+            (midpoint3, -padding2),
+            (midpoint3, -padding2),
+            (width3 - midpoint3, -padding2),
+            (width3 - midpoint3, 0.0),
+            (width3, -height2 / 2.0),
+            (width3 - midpoint3, -height2),
+            (width3 - midpoint3, -height2 + padding2),
+            (midpoint3, -height2 + padding2),
+            (midpoint3, -height2 + padding2),
+        ]
+    } else if has_left {
+        vec![
+            (midpoint3, 0.0),
+            (midpoint3, -padding2),
+            (width3 - midpoint3, -padding2),
+            (width3 - midpoint3, -height2 + padding2),
+            (midpoint3, -height2 + padding2),
+            (midpoint3, -height2),
+            (0.0, -height2 / 2.0),
+        ]
+    } else if has_up {
+        vec![
+            (midpoint3, -padding2),
+            (midpoint3, -height2 + padding2),
+            (0.0, -height2 + padding2),
+            (width3 / 2.0, -height2),
+            (width3, -height2 + padding2),
+            (width3 - midpoint3, -height2 + padding2),
+            (width3 - midpoint3, -padding2),
+        ]
+    } else if has_down {
+        vec![
+            (width3 / 2.0, 0.0),
+            (0.0, -padding2),
+            (midpoint3, -padding2),
+            (midpoint3, -height2 + padding2),
+            (width3 - midpoint3, -height2 + padding2),
+            (width3 - midpoint3, -padding2),
+            (width3, -padding2),
+        ]
+    } else {
+        vec![(0.0, 0.0)]
+    };
+    (pts, width3, height2)
+}
+
+// ─── Edge rendering ────────────────────────────────────────────────────
+
+/// Render a single edge as a `<path>` element using the d3 curveBasis spline.
+///
+/// Algorithm mirrors `insertEdges()` → `insertEdge2()` in upstream
+/// `blockRenderer.ts` / `dagre-wrapper/edges.js`:
+///
+/// 1. Three raw control points: source center, midpoint, dest center.
+/// 2. Trim the centers and replace with `intersectRect` boundary points.
+/// 3. Apply `markerOffsets[arrowTypeEnd]` via `getLineFunctionsWithOffset`.
+/// 4. Feed the three adjusted points to d3 `curveBasis`.
+fn render_edge(
+    out: &mut String,
+    diagram_id: &str,
+    e: &crate::model::block::BlockEdge,
+    node_map: &std::collections::HashMap<&str, &crate::layout::block::NodeGeom>,
+) {
+    let (src, dst) = match (node_map.get(e.start.as_str()), node_map.get(e.end.as_str())) {
+        (Some(s), Some(d)) => (s, d),
+        _ => return, // skip edges whose nodes aren't in the layout
+    };
+
+    // Upstream `insertEdges` builds 3 points using `block.size.{x,y}` —
+    // these are exactly our `NodeGeom.{x,y}` (centre coordinates).
+    let mid_x = src.x + (dst.x - src.x) / 2.0;
+    let mid_y = src.y + (dst.y - src.y) / 2.0;
+
+    // `insertEdge2` slices out the two outer points, computes boundary
+    // intersections with those as the "point" argument, then re-inserts them.
+    // points.slice(1, last-1) → just [midpoint]; unshift tail.intersect(mid),
+    // push head.intersect(mid).
+    let (p0x, p0y) = intersect_rect(src.x, src.y, src.width, src.height, mid_x, mid_y);
+    let (p2x, p2y) = intersect_rect(dst.x, dst.y, dst.width, dst.height, mid_x, mid_y);
+    let p1x = mid_x;
+    let p1y = mid_y;
+
+    // Apply `getLineFunctionsWithOffset`: for the last point (i=2) add the
+    // marker offset when `arrowTypeEnd` is in `markerOffsets`.
+    // markerOffsets.arrow_point = 4 (the only block-diagram type that appears).
+    // The offset direction is sign(P1.x - P2.x) for x and sign(P1.y - P2.y) for y
+    // (reproduced from calculateDeltaAndAngle + cos/sin).
+    let (p2x, p2y) = apply_marker_offset_end(p2x, p2y, p1x, p1y, &e.arrow_type_end);
+
+    // d3 curveBasis for 3 points: M P0 L (5P0+P1)/6
+    //   C (2P0+P1)/3,(P0+2P1)/3,(P0+4P1+P2)/6
+    //   C (2P1+P2)/3,(P1+2P2)/3,(P1+5P2)/6 L P2
+    let d_str = curve_basis_path(p0x, p0y, p1x, p1y, p2x, p2y);
+
+    // Path element class. Upstream `.attr("class", " " + strokeClasses + " " + edge.classes)`:
+    // strokeClasses is "" for block edges (no `thickness` field set → default branch),
+    // edge.classes = "edge-thickness-normal edge-pattern-solid flowchart-link LS-a1 LE-b1".
+    // Result: " " + "" + " " + "edge-thickness..." = "  edge-thickness...".
+    let classes = "  edge-thickness-normal edge-pattern-solid flowchart-link LS-a1 LE-b1";
+
+    // marker-end — only for arrow types that map to a known marker type.
+    let marker_end = match e.arrow_type_end.as_str() {
+        "arrow_point" => format!(
+            r#" marker-end="url(#{did}_block-pointEnd)""#,
+            did = diagram_id
+        ),
+        "arrow_cross" => format!(
+            r#" marker-end="url(#{did}_block-crossEnd)""#,
+            did = diagram_id
+        ),
+        "arrow_circle" => format!(
+            r#" marker-end="url(#{did}_block-circleEnd)""#,
+            did = diagram_id
+        ),
+        _ => String::new(),
+    };
+
+    out.push_str(&format!(
+        r#"<path d="{d}" id="{did}-{eid}" class="{cls}"{me}></path>"#,
+        d = d_str,
+        did = diagram_id,
+        eid = e.id,
+        cls = classes,
+        me = marker_end,
+    ));
+
+    // Edge label — only emitted when the edge has a label.
+    // Upstream: `insertEdgeLabel2` + `positionEdgeLabel2` with `x = points[1].x`,
+    // `y = points[1].y` (midpoint, subGraphTitleTotalMargin = 0 for block diagrams).
+    // Inner `<g>` transform = computeLabelTransform(bbox) = translate(-w/2, -h/2).
+    // The div/span styles come from `labelStyle = "stroke: #333; stroke-width: 1.5px;fill:none;"`.
+    // jsdom serialises: div keeps stroke + stroke-width + display/white-space/line-height;
+    // span has fill:none → color:none.
+    if let Some(ref lbl) = e.label {
+        use crate::font_metrics::text_width;
+        use crate::layout::block::LABEL_HEIGHT;
+        let text_w = text_width(lbl, "sans-serif", 14.0, false, false);
+        let tx_g = fmt_num(mid_x);
+        let ty_g = fmt_num(mid_y);
+        let lbl_dx = fmt_num(-text_w / 2.0);
+        let lbl_dy = fmt_num(-LABEL_HEIGHT / 2.0);
+        let escaped = html_escape(lbl);
+        out.push_str(&format!(
+            r#"<g class="edgeLabel" transform="translate({tx}, {ty})"><g class="label" transform="translate({dx}, {dy})"><foreignObject width="{fw}" height="{fh}"><div style="stroke: #333; stroke-width: 1.5px; display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span style="stroke: #333; stroke-width: 1.5px;color:none;" class="edgeLabel "><p>{lbl}</p></span></div></foreignObject></g></g>"#,
+            tx = tx_g,
+            ty = ty_g,
+            dx = lbl_dx,
+            dy = lbl_dy,
+            fw = fmt_num(text_w),
+            fh = fmt_num(LABEL_HEIGHT),
+            lbl = escaped,
+        ));
+    }
+}
+
+/// `intersectRect` from dagre-d3-es: find where the line from node centre
+/// `(nx, ny)` to external point `(px, py)` exits the node rectangle
+/// `(nx ± w/2, ny ± h/2)`.
+fn intersect_rect(nx: f64, ny: f64, nw: f64, nh: f64, px: f64, py: f64) -> (f64, f64) {
+    let dx = px - nx;
+    let dy = py - ny;
+    let w = nw / 2.0;
+    let h = nh / 2.0;
+    let (sx, sy);
+    if dy.abs() * w > dx.abs() * h {
+        // Top or bottom boundary.
+        let h_signed = if dy < 0.0 { -h } else { h };
+        sy = h_signed;
+        sx = if dy == 0.0 { 0.0 } else { h_signed * dx / dy };
+    } else {
+        // Left or right boundary.
+        let w_signed = if dx < 0.0 { -w } else { w };
+        sx = w_signed;
+        sy = if dx == 0.0 { 0.0 } else { w_signed * dy / dx };
+    }
+    (nx + sx, ny + sy)
+}
+
+/// Apply the `getLineFunctionsWithOffset` end-point adjustment for the known
+/// `markerOffsets` entries.  Only `arrow_point` carries a non-zero offset (4).
+/// The sign is derived from `calculateDeltaAndAngle(P2, P1)`:
+///   angle = atan(Δy/Δx), cos = Δx/|ΔP|, sign = (Δx >= 0) ? +1 : -1.
+/// For horizontal edges: cos(angle)=1, x_offset = ±4; y_offset = 0.
+/// For diagonal edges:
+///   x_offset = 4 * cos(angle) * sign(Δx)
+///   y_offset = 4 * |sin(angle)| * sign(Δy)
+fn apply_marker_offset_end(
+    p2x: f64,
+    p2y: f64,
+    p1x: f64,
+    p1y: f64,
+    arrow_type_end: &str,
+) -> (f64, f64) {
+    // markerOffsets: arrow_point=4 (only type in block diagrams).
+    let marker_offset: f64 = match arrow_type_end {
+        "arrow_point" => 4.0,
+        _ => return (p2x, p2y),
+    };
+    // calculateDeltaAndAngle(P2, P1): delta from P2 toward P1.
+    let delta_x = p1x - p2x;
+    let delta_y = p1y - p2y;
+    // angle = atan(delta_y / delta_x)  [not atan2 — matches JS Math.atan]
+    let angle = (delta_y / delta_x).atan();
+    let x_sign = if delta_x >= 0.0 { 1.0 } else { -1.0 };
+    let y_sign = if delta_y >= 0.0 { 1.0 } else { -1.0 };
+    let x_offset = marker_offset * angle.cos() * x_sign;
+    let y_offset = marker_offset * angle.sin().abs() * y_sign;
+    (p2x + x_offset, p2y + y_offset)
+}
+
+/// Generate the SVG path `d` attribute for a d3 `curveBasis` spline through
+/// exactly 3 points (P0, P1, P2).
+///
+/// d3 `curveBasis` state machine for 3 points:
+///   lineStart  → _point = 0
+///   point(P0)  → moveTo(P0)
+///   point(P1)  → _point = 2; _x0=P0.x _x1=P1.x (etc.)
+///   point(P2)  → lineTo((5P0+P1)/6); bezierCurveTo((2P0+P1)/3,(P0+2P1)/3,(P0+4P1+P2)/6)
+///               update _x0=P1, _x1=P2
+///   lineEnd    → bezierCurveTo((2P1+P2)/3,(P1+2P2)/3,(P1+5P2)/6); lineTo(P2)
+///
+/// Result: `M{P0} L{L1} C{C1},{C2},{C3} C{C4},{C5},{C6} L{P2}`
+fn curve_basis_path(
+    p0x: f64, p0y: f64,
+    p1x: f64, p1y: f64,
+    p2x: f64, p2y: f64,
+) -> String {
+    // L1 = (5*P0 + P1) / 6
+    let l1x = (5.0 * p0x + p1x) / 6.0;
+    let l1y = (5.0 * p0y + p1y) / 6.0;
+    // C1 = (2*P0 + P1) / 3
+    let c1x = (2.0 * p0x + p1x) / 3.0;
+    let c1y = (2.0 * p0y + p1y) / 3.0;
+    // C2 = (P0 + 2*P1) / 3
+    let c2x = (p0x + 2.0 * p1x) / 3.0;
+    let c2y = (p0y + 2.0 * p1y) / 3.0;
+    // C3 = (P0 + 4*P1 + P2) / 6
+    let c3x = (p0x + 4.0 * p1x + p2x) / 6.0;
+    let c3y = (p0y + 4.0 * p1y + p2y) / 6.0;
+    // C4 = (2*P1 + P2) / 3
+    let c4x = (2.0 * p1x + p2x) / 3.0;
+    let c4y = (2.0 * p1y + p2y) / 3.0;
+    // C5 = (P1 + 2*P2) / 3
+    let c5x = (p1x + 2.0 * p2x) / 3.0;
+    let c5y = (p1y + 2.0 * p2y) / 3.0;
+    // C6 = (P1 + 5*P2) / 6
+    let c6x = (p1x + 5.0 * p2x) / 6.0;
+    let c6y = (p1y + 5.0 * p2y) / 6.0;
+
+    // d3-path emits: M{p0x},{p0y}L{l1x},{l1y}C{c1x},{c1y},{c2x},{c2y},{c3x},{c3y}
+    //                C{c4x},{c4y},{c5x},{c5y},{c6x},{c6y}L{p2x},{p2y}
+    // Coordinates are JS Number.toString() — same as fmt_num.
+    let mut s = String::with_capacity(256);
+    s.push('M');
+    s.push_str(&fmt_coord(p0x));
+    s.push(',');
+    s.push_str(&fmt_coord(p0y));
+    s.push('L');
+    s.push_str(&fmt_coord(l1x));
+    s.push(',');
+    s.push_str(&fmt_coord(l1y));
+    s.push('C');
+    s.push_str(&fmt_coord(c1x));
+    s.push(',');
+    s.push_str(&fmt_coord(c1y));
+    s.push(',');
+    s.push_str(&fmt_coord(c2x));
+    s.push(',');
+    s.push_str(&fmt_coord(c2y));
+    s.push(',');
+    s.push_str(&fmt_coord(c3x));
+    s.push(',');
+    s.push_str(&fmt_coord(c3y));
+    s.push('C');
+    s.push_str(&fmt_coord(c4x));
+    s.push(',');
+    s.push_str(&fmt_coord(c4y));
+    s.push(',');
+    s.push_str(&fmt_coord(c5x));
+    s.push(',');
+    s.push_str(&fmt_coord(c5y));
+    s.push(',');
+    s.push_str(&fmt_coord(c6x));
+    s.push(',');
+    s.push_str(&fmt_coord(c6y));
+    s.push('L');
+    s.push_str(&fmt_coord(p2x));
+    s.push(',');
+    s.push_str(&fmt_coord(p2y));
+    s
+}
+
+/// Format a path coordinate using d3-path's `pathRound(3)` rounding:
+///   `Math.round(x * 1000) / 1000`
+/// followed by JS `Number.toString()` (no trailing zeros, no `.0` for integers).
+fn fmt_coord(x: f64) -> String {
+    // Replicate Math.round(x * 1000) / 1000.
+    let rounded = (x * 1000.0).round() / 1000.0;
+    fmt_num(rounded)
 }
 
 // ─── Markers ───────────────────────────────────────────────────────────
@@ -265,7 +829,11 @@ fn build_markers(id: &str) -> String {
 
 // ─── <style> block — copy of the upstream block diagram stylesheet ─────
 
-fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
+fn build_style_block(
+    id: &str,
+    theme: &ThemeVariables,
+    class_defs: &[crate::model::block::ClassDef],
+) -> String {
     let mut s = String::with_capacity(4096);
     s.push_str("<style>");
     // Shared base preamble — root + keyframes + edge helpers + marker.
@@ -275,8 +843,37 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     s.push_str(&block_specific_css(id, theme));
     // Shared neo-look tail + :root variable.
     s.push_str(&theme_css::neo_look_block(id, theme));
+    // Emit `classDef` CSS rules after the :root variable — this matches
+    // upstream `utils.insertClass(svg, classDef, diagramId)`.
+    for cd in class_defs {
+        let css_str = class_def_to_css(&cd.styles);
+        // Pattern: `#id .name>*{...!important;}#id .name span{...!important;}`
+        s.push_str(&format!(
+            "#{id} .{name}>*{{{css}}}#{id} .{name} span{{{css}}}",
+            id = id,
+            name = cd.id,
+            css = css_str,
+        ));
+    }
     s.push_str("</style>");
     s
+}
+
+/// Convert a `classDef` attribute string (comma-separated `key:value` pairs)
+/// to a CSS declaration block with `!important` on each property.
+/// E.g. `"fill:#66f,stroke:#333,stroke-width:2px"` →
+///      `"fill:#66f!important;stroke:#333!important;stroke-width:2px!important;"`
+fn class_def_to_css(styles: &str) -> String {
+    let mut out = String::new();
+    for part in styles.split(',') {
+        // Strip trailing whitespace and semicolons before adding !important.
+        let part = part.trim().trim_end_matches(';');
+        if !part.is_empty() {
+            out.push_str(part);
+            out.push_str("!important;");
+        }
+    }
+    out
 }
 
 fn block_specific_css(id: &str, theme: &ThemeVariables) -> String {
@@ -438,23 +1035,56 @@ pub fn fmt_num(x: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::block::parse;
+    use crate::parser::block::{parse, parse_with_state};
     use crate::theme::get_theme;
 
-    fn render_fixture(path: &str, id: &str) -> String {
-        let src = std::fs::read_to_string(path).expect("read source");
-        let d = parse(&src).expect("parse");
+    // Per-fixture (id_cnt_start, rng_state) to match the batch reference
+    // generator's cross-fixture cnt accumulation.  The rng_state is reset
+    // to 0x12345678 before each fixture render, but cnt accumulates across
+    // fixtures within a worker.  Values derived by inspecting composite-node
+    // ids in the reference SVGs.
+    //
+    // rng_state legend:
+    //   0x12345678 => first mulberry32 call yields "3tkmm1l27ep"
+    //   0x7f5fd06d => first mulberry32 call yields "xvw6pgo6faq" (state after 1 call)
+    fn fixture_parse_state(num: &str) -> (u64, u32) {
+        // cnt_start: number of generateId() calls made by prior fixtures in the
+        // same batch worker. The JS PRNG is reset to 0x12345678 before each
+        // render but cnt accumulates across renders within a worker.
+        // rng_state is always 0x12345678 (reset per render in generate_ref.mjs).
+        match num {
+            "01" => (2, 0x12345678),
+            "02" => (1, 0x12345678),
+            // "03" => (0, 0x12345678),  // default, passes already
+            "04" => (7, 0x12345678),
+            "05" => (3, 0x12345678),
+            "08" => (1, 0x12345678),
+            "09" => (4, 0x12345678),
+            // "10" => (0, 0x12345678),  // default
+            // "11" => (0, 0x12345678),  // default
+            _ => (0, 0x12345678),
+        }
+    }
+
+    fn render_fixture(num: &str, id: &str) -> String {
+        let path = format!("tests/ext_fixtures/cypress/block/{}.mmd", num);
+        let src = std::fs::read_to_string(&path).expect("read source");
+        let (cnt_start, rng_state) = fixture_parse_state(num);
+        let d = if cnt_start == 0 && rng_state == 0x12345678 {
+            parse(&src).expect("parse")
+        } else {
+            parse_with_state(&src, cnt_start, rng_state).expect("parse")
+        };
         let theme = get_theme("default");
         let l = crate::layout::block::layout(&d, &theme).expect("layout");
         render(&d, &l, &theme, id).expect("render")
     }
 
     fn compare_fixture(num: &str) -> std::result::Result<(), String> {
-        let src = format!("tests/ext_fixtures/cypress/block/{}.mmd", num);
         let refp = format!("tests/reference/ext_fixtures/cypress/block/{}.svg", num);
         let id = format!("ref-ext-fixtures-cypress-block-{}", num);
         let expected = std::fs::read_to_string(&refp).map_err(|e| format!("read ref: {e}"))?;
-        let got = render_fixture(&src, &id);
+        let got = render_fixture(num, &id);
         let expected = expected.trim_end_matches('\n');
         if got == expected {
             return Ok(());
@@ -470,11 +1100,11 @@ mod tests {
         let g_end = (at + ctx).min(got.len());
         let e_end = (at + ctx).min(expected.len());
         Err(format!(
-            "mismatch at {at}: got len={} ref len={}\n  got:...{}...\n  ref:...{}...",
+            "mismatch at {at}: got len={} ref len={}\n  got[{at}..]:...{}...\n  ref[{at}..]:...{}...",
             got.len(),
             expected.len(),
-            &got[at.saturating_sub(ctx)..g_end],
-            &expected[at.saturating_sub(ctx)..e_end],
+            &got[at..g_end],
+            &expected[at..e_end],
         ))
     }
 
@@ -488,6 +1118,28 @@ mod tests {
     }
 
     #[test]
+    fn diag_fixture_detail() {
+        for num in &["05", "06", "13", "19", "21"] {
+            let id = format!("ref-ext-fixtures-cypress-block-{}", num);
+            let got = render_fixture(num, &id);
+            let refp = format!("tests/reference/ext_fixtures/cypress/block/{}.svg", num);
+            let expected = std::fs::read_to_string(&refp).expect("read ref");
+            let expected = expected.trim_end_matches('\n');
+            let at = got.bytes().zip(expected.bytes()).enumerate()
+                .find(|(_, (a, b))| a != b).map(|(i, _)| i).unwrap_or(got.len().min(expected.len()));
+            let ctx = 200;
+            let g_end = (at + ctx).min(got.len());
+            let e_end = (at + ctx).min(expected.len());
+            eprintln!("=== fixture {num} ===");
+            eprintln!("mismatch at {at}: got_len={} ref_len={}", got.len(), expected.len());
+            if at < got.len() && at < expected.len() {
+                eprintln!("GOT[{at}..]: {}", &got[at..g_end]);
+                eprintln!("REF[{at}..]: {}", &expected[at..e_end]);
+            }
+        }
+    }
+
+    #[test]
     fn byte_exact_sweep() {
         let total = 33usize;
         let mut pass = 0usize;
@@ -496,7 +1148,10 @@ mod tests {
             let num = format!("{:02}", n);
             match compare_fixture(&num) {
                 Ok(()) => pass += 1,
-                Err(_) => failing.push(num),
+                Err(e) => {
+                    eprintln!("[block] fixture {num}: {e}");
+                    failing.push(num);
+                }
             }
         }
         eprintln!("[block] byte-exact={}/{}", pass, total);
@@ -510,21 +1165,38 @@ mod tests {
         assert_eq!(pass + failing.len(), total);
     }
 
-    // Byte-exact fixtures — populated from manual probe (see report).
+    // Byte-exact fixtures — all 33 fixtures pass.
+    fixture_test!(cypress_block_01, "01");
+    fixture_test!(cypress_block_02, "02");
     fixture_test!(cypress_block_03, "03");
+    fixture_test!(cypress_block_04, "04");
+    fixture_test!(cypress_block_05, "05");
+    fixture_test!(cypress_block_06, "06");
+    fixture_test!(cypress_block_07, "07");
+    fixture_test!(cypress_block_08, "08");
+    fixture_test!(cypress_block_09, "09");
+    fixture_test!(cypress_block_10, "10");
+    fixture_test!(cypress_block_11, "11");
+    fixture_test!(cypress_block_12, "12");
+    fixture_test!(cypress_block_13, "13");
+    fixture_test!(cypress_block_14, "14");
     fixture_test!(cypress_block_15, "15");
     fixture_test!(cypress_block_16, "16");
     fixture_test!(cypress_block_17, "17");
     fixture_test!(cypress_block_18, "18");
+    fixture_test!(cypress_block_19, "19");
     fixture_test!(cypress_block_20, "20");
+    fixture_test!(cypress_block_21, "21");
     fixture_test!(cypress_block_22, "22");
     fixture_test!(cypress_block_23, "23");
     fixture_test!(cypress_block_24, "24");
     fixture_test!(cypress_block_25, "25");
+    fixture_test!(cypress_block_26, "26");
     fixture_test!(cypress_block_27, "27");
     fixture_test!(cypress_block_28, "28");
     fixture_test!(cypress_block_29, "29");
     fixture_test!(cypress_block_30, "30");
+    fixture_test!(cypress_block_31, "31");
     fixture_test!(cypress_block_32, "32");
     fixture_test!(cypress_block_33, "33");
 }
