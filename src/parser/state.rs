@@ -141,22 +141,26 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
                 }
                 buf.push_str(l);
             }
+            let note_idx = diagram.notes.len();
             diagram.notes.push(Note {
                 target: note_header.0,
                 position: note_header.1,
                 text: buf,
             });
+            diagram.items.push(ParseItem::NoteDecl(note_idx));
             continue;
         }
 
         // Single-line note: `note left of X : text` / `note "Hi" as NSomething`
         if line.starts_with("note ") {
             if let Some((target, pos, text)) = parse_inline_note(line) {
+                let note_idx = diagram.notes.len();
                 diagram.notes.push(Note {
                     target,
                     position: pos,
                     text,
                 });
+                diagram.items.push(ParseItem::NoteDecl(note_idx));
                 continue;
             }
         }
@@ -173,19 +177,35 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         }
         if let Some(rest) = strip_kw(line, "class") {
             let rest = rest.trim();
-            if let Some((ids, cls)) = split_once_ws(rest) {
-                for id in ids.split(',') {
-                    diagram.class_applies.push(ClassApply {
-                        state_id: id.trim().to_string(),
-                        class_name: cls.trim().to_string(),
-                    });
+            // Syntax: `class <id1>, <id2>, ... <className>`
+            // The class name is the last whitespace-separated token; everything
+            // before it (comma-separated) are the state IDs.
+            if let Some((ids_part, cls)) = split_last_ws(rest) {
+                for id in ids_part.split(',') {
+                    let id = id.trim();
+                    if !id.is_empty() {
+                        diagram.class_applies.push(ClassApply {
+                            state_id: id.to_string(),
+                            class_name: cls.to_string(),
+                        });
+                    }
                 }
             }
             continue;
         }
 
-        // --- style — carry opaque -----------------------------------------
-        if line.starts_with("style ") {
+        // --- style — inline node style (`style X fill:...,stroke:...`)
+        if let Some(rest) = strip_kw(line, "style") {
+            // rest may be "X fill:red,stroke:blue" or "X fill:red,..."
+            if let Some((id, css)) = split_once_ws(rest.trim()) {
+                let id = id.trim();
+                if !id.is_empty() {
+                    ensure_state(&mut diagram, id, parent_stack.last().cloned());
+                    if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
+                        s.style = Some(css.trim().trim_end_matches(';').to_string());
+                    }
+                }
+            }
             continue;
         }
 
@@ -236,17 +256,25 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         }
 
         // --- `X : description` label attachment ---------------------------
+        // Upstream: the description text IS the display label (SHAPE_STATE,
+        // single-line). Only becomes SHAPE_STATE_WITH_DESC when a second
+        // description is appended (alias + colon-description).
         if let Some((lhs, rhs)) = split_once_colon(line) {
             let id = lhs.trim().to_string();
             if !id.is_empty() {
                 let parent = parent_stack.last().cloned();
                 ensure_state(&mut diagram, &id, parent);
-                let desc: Vec<String> = split_label_lines(rhs.trim());
+                let desc_text = rhs.trim().to_string();
                 if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
                     if s.label.is_none() {
-                        s.label = Some(id.clone());
+                        // No prior alias: description becomes the sole display label.
+                        s.label = Some(desc_text);
+                    } else {
+                        // Already has an alias (state "X" as Y then Y: desc):
+                        // description is appended as extra lines.
+                        let desc_lines = split_label_lines(rhs.trim());
+                        s.description = Some(desc_lines);
                     }
-                    s.description = Some(desc);
                 }
                 continue;
             }
@@ -342,6 +370,21 @@ fn split_once_ws(s: &str) -> Option<(&str, &str)> {
     }
 }
 
+/// Split `"a b c"` on the **last** whitespace run, returning ("a b", "c").
+/// Returns None when there's only one token.
+fn split_last_ws(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim();
+    // Find last whitespace character index.
+    let last_ws = s.rfind(|c: char| c.is_ascii_whitespace())?;
+    let head = s[..last_ws].trim_end();
+    let tail = s[last_ws..].trim_start();
+    if head.is_empty() || tail.is_empty() {
+        None
+    } else {
+        Some((head, tail))
+    }
+}
+
 /// Split `lhs : rhs` on the first `:` that isn't inside quotes.
 fn split_once_colon(s: &str) -> Option<(&str, &str)> {
     let mut in_q = false;
@@ -380,20 +423,49 @@ fn parse_transition(
     let (lhs, after) = line.split_at(idx);
     let rhs_full = &after[arrow.len()..];
 
-    // Strip style suffix `X --> Y : label` (not stylis yet; just split).
-    let (rhs, label) = if let Some((r, l)) = split_once_colon(rhs_full) {
+    let lhs = lhs.trim();
+    // Strip `:::className` decoration from LHS before anything else.
+    let (lhs_id, lhs_class) = split_class_suffix(lhs);
+
+    // For the RHS, we must strip `:::class` BEFORE splitting on `:` for the
+    // label.  The colon inside `:::` would otherwise be mistaken for the start
+    // of a transition label (e.g. `Still:::notMoving` → wrong label "::notMoving").
+    let rhs_full_trimmed = rhs_full.trim();
+    // Split out `:::class` from the RHS token first.
+    let (rhs_raw, rhs_class_str) = if let Some(i) = rhs_full_trimmed.find(":::") {
+        (&rhs_full_trimmed[..i], Some(&rhs_full_trimmed[i + 3..]))
+    } else {
+        (rhs_full_trimmed, None)
+    };
+    // Now split the remaining RHS (without :::class) on `:` for the label.
+    let (rhs, label) = if let Some((r, l)) = split_once_colon(rhs_raw) {
         (r.trim(), Some(l.trim().to_string()))
     } else {
-        (rhs_full.trim(), None)
+        (rhs_raw.trim(), None)
     };
-    let lhs = lhs.trim();
-    if lhs.is_empty() || rhs.is_empty() {
+    // Extract `:::class` after the label separator too (edge case: `B : lbl:::class` — ignore).
+    // The rhs_class_str may itself contain a trailing ` : label` if the input was
+    // `B:::class : label`.  Split the rhs_class_str further.
+    let (rhs_class_token, label_from_class_suffix) = if let Some(cs) = rhs_class_str {
+        // class token may be followed by ` : label text`
+        if let Some((c, l)) = split_once_colon(cs) {
+            (c.trim(), Some(l.trim().to_string()))
+        } else {
+            (cs.trim(), None)
+        }
+    } else {
+        ("", None)
+    };
+    // Merge labels: label from ` : label` takes priority over label from class suffix.
+    let label = label.or(label_from_class_suffix);
+    let rhs_class: Option<String> = if rhs_class_token.is_empty() { None } else { Some(rhs_class_token.to_string()) };
+
+    // Strip `:::className` decoration from LHS (done above); derive rhs_id.
+    let rhs_id = rhs;
+
+    if lhs_id.is_empty() || rhs_id.is_empty() {
         return None;
     }
-
-    // Strip `:::className` decoration.
-    let (lhs_id, lhs_class) = split_class_suffix(lhs);
-    let (rhs_id, rhs_class) = split_class_suffix(rhs);
 
     let parent = parent_stack.last().cloned();
 
@@ -431,19 +503,29 @@ fn split_class_suffix(s: &str) -> (&str, Option<String>) {
     }
 }
 
-/// Break a transition or state label on `<br/>`, `<br>`, or literal `\n`.
+/// Break a label on HTML line-break tags only: `<br/>`, `<br>`, `<br />`.
+///
+/// Literal `\n` (two chars backslash + n) is intentionally preserved as-is —
+/// it is valid label text that the renderer displays verbatim, and its two
+/// characters contribute to the label's measured width.  Only HTML `<br/>`
+/// variants produce a visual line break in the upstream renderer's HTML
+/// foreignObject content.
 fn split_label_lines(raw: &str) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut buf = String::new();
     let bytes: Vec<char> = raw.chars().collect();
     let mut i = 0;
     while i < bytes.len() {
-        // <br/> or <br>
+        // <br/>, <br />, or <br>
         if bytes[i] == '<' {
             let j = if bytes[i..].starts_with(&['<', 'b', 'r', '/', '>']) {
-                Some(5)
+                Some(5) // <br/>
+            } else if bytes[i..].len() >= 6
+                && bytes[i..].starts_with(&['<', 'b', 'r', ' ', '/', '>'])
+            {
+                Some(6) // <br />
             } else if bytes[i..].starts_with(&['<', 'b', 'r', '>']) {
-                Some(4)
+                Some(4) // <br>
             } else {
                 None
             };
@@ -452,12 +534,6 @@ fn split_label_lines(raw: &str) -> Vec<String> {
                 i += n;
                 continue;
             }
-        }
-        // \n (two chars: backslash + n)
-        if bytes[i] == '\\' && i + 1 < bytes.len() && bytes[i + 1] == 'n' {
-            parts.push(std::mem::take(&mut buf));
-            i += 2;
-            continue;
         }
         buf.push(bytes[i]);
         i += 1;
@@ -511,7 +587,9 @@ fn ensure_state(diagram: &mut StateDiagram, id: &str, parent: Option<String>) {
     if !diagram.states.iter().any(|s| s.id == id) {
         diagram.states.push(State {
             id: id.to_string(),
-            label: Some(id.to_string()),
+            // label left as None so callers can set it explicitly via alias
+            // or colon-desc syntax; the layout falls back to id when None.
+            label: None,
             parent,
             ..State::default()
         });
@@ -523,17 +601,51 @@ fn ensure_state(diagram: &mut StateDiagram, id: &str, parent: Option<String>) {
 fn ingest_state_decl(diagram: &mut StateDiagram, decl: &str, parent: Option<String>) -> String {
     let decl = decl.trim();
 
-    // `state "Nice name" as S`
+    // `state "Nice name" as S` — optionally followed by `: description`
     if let Some(rest) = decl.strip_prefix('"') {
         if let Some(end) = rest.find('"') {
             let alias = &rest[..end];
             let tail = rest[end + 1..].trim();
-            if let Some(rest) = tail.strip_prefix("as ") {
-                let id = rest.split_whitespace().next().unwrap_or("").trim().trim_end_matches('{').trim();
+            if let Some(after_as) = tail.strip_prefix("as ") {
+                // after_as may be "S1" or "S1: The description" or "S1 { ... }".
+                // Split on whitespace to get the id token (trim trailing '{').
+                let raw_token = after_as.split_whitespace().next().unwrap_or("").trim_end_matches('{').trim();
+                // Strip trailing ':' from the id (happens when `as S1: desc`
+                // is parsed by split_whitespace — the `: desc` is not separated).
+                let (id, maybe_desc) = if let Some((tok, desc_rest)) = split_once_colon(raw_token) {
+                    // e.g. raw_token = "S1:" — colon is a suffix with no desc text here.
+                    // The actual description is in `after_as` after the id+colon.
+                    let _ = desc_rest; // empty or irrelevant
+                    (tok.trim(), None::<&str>)
+                } else {
+                    (raw_token, None)
+                };
+                // Check for description after the id token in `after_as`.
+                // Find id in after_as, then look for `: desc` after it.
+                let desc_in_tail = {
+                    // after_as looks like "S1: The description" or "S1" or "S1 { ..."
+                    // Find the id, skip it, then check for ": desc".
+                    if let Some(pos) = after_as.find(id) {
+                        let rest_after_id = after_as[pos + id.len()..].trim_start_matches('{').trim();
+                        if let Some((_, desc_text)) = split_once_colon(rest_after_id) {
+                            // Preserve leading space — upstream Jison grammar captures
+                            // the text after `:` verbatim, including the leading space.
+                            let desc_text = desc_text.trim_end();
+                            if !desc_text.trim().is_empty() { Some(desc_text) } else { None }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
                 if !id.is_empty() {
                     ensure_state(diagram, id, parent.clone());
                     if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
                         s.label = Some(alias.to_string());
+                        if let Some(desc) = desc_in_tail {
+                            s.description = Some(split_label_lines(desc));
+                        }
                     }
                     return id.to_string();
                 }
@@ -558,12 +670,17 @@ fn ingest_state_decl(diagram: &mut StateDiagram, decl: &str, parent: Option<Stri
         return id.to_string();
     }
 
-    // `state X : description`
+    // `state X : description` — description is the display label when no
+    // explicit alias was set yet; otherwise appended as extra description lines.
     if let Some((lhs, rhs)) = split_once_colon(decl) {
         let id = lhs.trim();
         ensure_state(diagram, id, parent.clone());
         if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
-            s.description = Some(split_label_lines(rhs.trim()));
+            if s.label.is_none() {
+                s.label = Some(rhs.trim().to_string());
+            } else {
+                s.description = Some(split_label_lines(rhs.trim()));
+            }
         }
         return id.to_string();
     }
@@ -680,11 +797,15 @@ mod tests {
 
     #[test]
     fn splits_multi_line_transition_label() {
+        // <br/> produces a split; literal \n (backslash+n) is preserved as text.
         let src = "stateDiagram-v2\nA --> B : line one<br/>line two\\nline three\n";
         let d = parse(src).unwrap();
         let t = &d.transitions[0];
         let lbl = t.label.as_ref().unwrap();
-        assert_eq!(lbl.len(), 3);
+        // Only the <br/> splits: ["line one", "line two\\nline three"]
+        assert_eq!(lbl.len(), 2);
+        assert_eq!(lbl[0], "line one");
+        assert_eq!(lbl[1], "line two\\nline three");
     }
 
     #[test]
@@ -693,5 +814,18 @@ mod tests {
         let d = parse(src).unwrap();
         let s = d.states.iter().find(|s| s.id == "S1").unwrap();
         assert_eq!(s.label.as_deref(), Some("Some long name"));
+    }
+
+    /// X: desc syntax — description becomes the display label (upstream SHAPE_STATE).
+    #[test]
+    fn colon_desc_becomes_label() {
+        let src = "stateDiagram-v2\n  Yswsii: Your state with spaces in it\n  [*] --> Yswsii\n";
+        let d = parse(src).unwrap();
+        let s = d.states.iter().find(|s| s.id == "Yswsii").unwrap();
+        eprintln!("Yswsii label={:?} desc={:?}", s.label, s.description);
+        assert_eq!(s.label.as_deref(), Some("Your state with spaces in it"),
+            "colon-desc should become the display label");
+        assert!(s.description.is_none(),
+            "description should be None when colon-desc became label");
     }
 }

@@ -400,7 +400,9 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
 
     let shape = node.shape.as_deref().unwrap_or("rect");
     match shape {
-        "circle" | "ellipse" | "doublecircle" | "stadium" => {
+        "circle" | "ellipse" | "doublecircle" | "stadium"
+        | "stateStart" | "state_start" | "start"
+        | "stateEnd" | "state_end" | "end" => {
             let rx = (w / 2.0) as f32;
             let ry = (h / 2.0) as f32;
             if let Some((x, y)) = ray_ellipse_intersection(centre, dir, centre, rx, ry) {

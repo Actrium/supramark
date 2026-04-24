@@ -27,6 +27,11 @@ pub enum ParseItem {
     StateDecl(String),
     /// `A --> B` transition — carries the index into `transitions`.
     Relation(usize),
+    /// `note X of Y` block or `note X of Y : text` — carries the note index
+    /// into `notes` and the target state id. Added to items so the note
+    /// counter matches upstream's graphItemCount at the time the STMT_STATE
+    /// with the note is processed.
+    NoteDecl(usize),
 }
 
 /// Top-level state-diagram model.
@@ -82,6 +87,9 @@ pub struct State {
     /// Hidden from main rendering — used by the fake start/end marker
     /// injection when `[*]` appears at the top level.
     pub implicit: bool,
+    /// Inline style from `style X fill:...,stroke:...` directive.
+    /// Stored as raw CSS (comma-separated properties).
+    pub style: Option<String>,
 }
 
 /// State variant — drives shape selection.
