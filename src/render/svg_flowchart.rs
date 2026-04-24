@@ -105,11 +105,11 @@ fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
         // The jsdom shim's getBBox treats each foreignObject as {x:0, y:0, w, h}.
         let label_text = n.label.as_deref().unwrap_or("");
         if !label_text.is_empty() {
-            let is_html = n.label_type.as_deref() == Some("string");
-            let label_escaped = if is_html {
-                label_text.to_string()
+            let is_markdown = n.label_type.as_deref() == Some("markdown");
+            let label_escaped = if is_markdown {
+                crate::render::foreign_object::markdown_label_to_html(label_text)
             } else {
-                crate::render::shapes::types::xml_escape(label_text)
+                crate::render::foreign_object::string_label_to_html(label_text)
             };
             let processed = crate::render::foreign_object::replace_fa_icons(&label_escaped);
             let (lw, lh) = measure_html_label(&processed, &font, 200.0, true);
@@ -227,33 +227,85 @@ pub fn render(
     inner.push_str(unified_shell::open_root_group());
 
     // Clusters (subgraphs).
+    // Isolated clusters are rendered inside <g class="nodes"> instead (as
+    // inner <g class="root"> groups — see below). Only non-isolated clusters
+    // that are NOT descendants of isolated clusters appear here.
     inner.push_str(&unified_shell::open_layer("clusters"));
     for cluster in &l.clusters {
+        if l.isolated_cluster_ids.contains(&cluster.id) {
+            continue;
+        }
+        // Skip clusters that are descendants of any isolated cluster.
+        if is_child_of_isolated(Some(&cluster.id), l) {
+            continue;
+        }
         if let Some(cnode) = l.nodes.iter().find(|n| n.id == cluster.id && n.is_group) {
             inner.push_str(&render_cluster(cnode, cluster, theme, id));
         }
     }
     inner.push_str(unified_shell::close_layer());
 
-    // Edge paths.
+    // Edge paths (outer level — only non-isolated-cluster edges).
     inner.push_str(&unified_shell::open_layer("edgePaths"));
     for (i, e) in l.edges.iter().enumerate() {
+        // Skip edges whose endpoints are children of an isolated cluster —
+        // those are rendered in the inner root group below.
+        let src_isolated = is_child_of_isolated(e.start.as_deref(), l);
+        let dst_isolated = is_child_of_isolated(e.end.as_deref(), l);
+        if src_isolated || dst_isolated {
+            continue;
+        }
         inner.push_str(&render_edge_path(e, i, id, &l.aria_kind));
     }
     inner.push_str(unified_shell::close_layer());
 
-    // Edge labels.
+    // Edge labels (outer level).
     inner.push_str(&unified_shell::open_layer("edgeLabels"));
     for e in l.edges.iter() {
+        let src_isolated = is_child_of_isolated(e.start.as_deref(), l);
+        let dst_isolated = is_child_of_isolated(e.end.as_deref(), l);
+        if src_isolated || dst_isolated {
+            continue;
+        }
         inner.push_str(&render_edge_label(e));
     }
     inner.push_str(unified_shell::close_layer());
 
-    // Nodes.
+    // Nodes (outer level).
+    // Top-level isolated clusters (those whose parent is not also isolated)
+    // are inserted here as inner root groups; regular (non-cluster) nodes
+    // whose parent is not any isolated cluster follow.
     inner.push_str(&unified_shell::open_layer("nodes"));
+
+    // Render top-level isolated clusters as inner <g class="root"> groups.
+    // "Top-level" = isolated cluster whose parent is NOT also isolated.
+    for cluster_id in &l.isolated_cluster_ids {
+        if let Some(cnode) = l.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
+            // Skip if parent is also an isolated cluster (nested, handled recursively).
+            let parent_also_isolated = cnode.parent_id.as_deref()
+                .map(|p| l.isolated_cluster_ids.contains(p))
+                .unwrap_or(false);
+            if parent_also_isolated {
+                continue;
+            }
+            inner.push_str(&render_isolated_cluster_inner_root(cnode, l, theme, id));
+        }
+    }
+
+    // Render non-isolated-cluster child nodes at the outer level.
     for n in &l.nodes {
         if n.is_group {
             continue;
+        }
+        // Skip descendants of any isolated cluster.
+        if is_child_of_isolated(Some(&n.id), l) {
+            continue;
+        }
+        // Compatibility: also skip if direct parent is isolated.
+        if let Some(parent) = n.parent_id.as_deref() {
+            if l.isolated_cluster_ids.contains(parent) {
+                continue;
+            }
         }
         // Prepend SVG id to dom_id — upstream prefixes the stored
         // domId with the diagram's SVG element id at lookup time
@@ -365,17 +417,278 @@ fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables, svg
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
         let label_tx = cx - lw / 2.0;
         let label_ty = ry;
+        // Label-style (color, font-*) extracted from css_styles — applied to the span.
+        let label_style = crate::render::shapes::types::build_label_style(css_styles);
+        let span_style_attr = if label_style.is_empty() {
+            String::new()
+        } else {
+            format!(r#" style="{label_style}""#)
+        };
         out.push_str(&format!(
-            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{escaped}</p></span></div></foreignObject></g>"#,
+            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "{span_style_attr}><p>{escaped}</p></span></div></foreignObject></g>"#,
             label_tx = fmt_num(label_tx),
             label_ty = fmt_num(label_ty),
             lw = fmt_num(lw),
             lh = fmt_num(lh),
+            span_style_attr = span_style_attr,
             escaped = escaped,
         ));
     }
     out.push_str("</g>");
     out
+}
+
+/// Return true if `node_id` has any ancestor that is an isolated cluster.
+/// Used to skip nodes/edges at the outer render level that belong inside
+/// an isolated cluster's inner root group.
+fn is_child_of_isolated(node_id: Option<&str>, l: &FlowchartLayout) -> bool {
+    let id = match node_id {
+        Some(s) => s,
+        None => return false,
+    };
+    // Walk up the parent chain.
+    let mut current = id;
+    loop {
+        if let Some(n) = l.nodes.iter().find(|n| n.id == current) {
+            if let Some(parent) = n.parent_id.as_deref() {
+                if l.isolated_cluster_ids.contains(parent) {
+                    return true;
+                }
+                current = parent;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+}
+
+/// Return true if `node_id` is a descendant of `cluster_id` (transitively).
+fn is_descendant_of(node_id: &str, cluster_id: &str, l: &FlowchartLayout) -> bool {
+    let mut current = node_id;
+    loop {
+        if let Some(n) = l.nodes.iter().find(|n| n.id == current) {
+            if let Some(parent) = n.parent_id.as_deref() {
+                if parent == cluster_id {
+                    return true;
+                }
+                current = parent;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+}
+
+/// Render an isolated cluster as an inner `<g class="root" transform="...">` group.
+///
+/// Upstream mermaid's `recursiveRender` wraps an isolated cluster's inner
+/// layout in a `<g class="root">` placed in the outer `<g class="nodes">` section.
+/// The `transform="translate(tx, ty)"` is pre-computed by the layout engine
+/// (`dagre_bridge`) using the `positionNode` formula:
+///
+///   tx = outer_x + diff - bbox_w/2   (diff = -padding = -8)
+///   ty = outer_y - bbox_h/2 - padding
+///
+/// The pre-computed values are stored in `cnode.extra["outer_tx"]` and
+/// `cnode.extra["outer_ty"]`. When absent (no outer dagre pass, e.g. nested
+/// isolated clusters handled by parent), fall back to the classic formula
+/// using inner dagre coords: `tx = cx - padding - cluster_w/2`.
+///
+/// `cnode.x/y/width/height` always hold the INNER dagre coords (cluster center
+/// and cluster rect dimensions) used by `render_cluster` for the cluster rect.
+///
+/// This function is recursive: isolated sub-clusters within `cnode` are
+/// themselves rendered as nested inner root groups.
+fn render_isolated_cluster_inner_root(
+    cnode: &UNode,
+    l: &FlowchartLayout,
+    theme: &ThemeVariables,
+    svg_id: &str,
+) -> String {
+    // Retrieve pre-computed outer translate from the layout engine.
+    let tx = cnode.extra.get("outer_tx")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| {
+            // Fallback: classic formula using inner dagre coords.
+            let cx = cnode.x.unwrap_or(0.0);
+            let w  = cnode.width.unwrap_or(0.0);
+            let padding = cnode.padding.unwrap_or(8.0);
+            cx - padding - w / 2.0
+        });
+    let ty = cnode.extra.get("outer_ty")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| {
+            let cy = cnode.y.unwrap_or(0.0);
+            let h  = cnode.height.unwrap_or(0.0);
+            let padding = cnode.padding.unwrap_or(8.0);
+            cy - h / 2.0 - padding
+        });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="root" transform="translate({tx}, {ty})">"#,
+        tx = fmt_num(tx),
+        ty = fmt_num(ty),
+    ));
+
+    // Inner <g class="clusters"> — this cluster's own rect plus
+    // child cluster rects that are NOT themselves isolated.
+    out.push_str(&unified_shell::open_layer("clusters"));
+    // This cluster's own rect.
+    let dummy_cluster = crate::layout::unified::Cluster {
+        id: cnode.id.clone(),
+        representative: None,
+        bounds: None,
+    };
+    out.push_str(&render_cluster(cnode, &dummy_cluster, theme, svg_id));
+    // Non-isolated child cluster rects (direct children only).
+    for n in &l.nodes {
+        if !n.is_group {
+            continue;
+        }
+        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if l.isolated_cluster_ids.contains(&n.id) {
+            continue; // isolated sub-clusters get their own inner root
+        }
+        let dummy = crate::layout::unified::Cluster {
+            id: n.id.clone(),
+            representative: None,
+            bounds: None,
+        };
+        out.push_str(&render_cluster(n, &dummy, theme, svg_id));
+    }
+    out.push_str(unified_shell::close_layer());
+
+    // Inner <g class="edgePaths"> — edges between descendants of this
+    // cluster, excluding edges between descendants of isolated sub-clusters.
+    out.push_str(&unified_shell::open_layer("edgePaths"));
+    for (i, e) in l.edges.iter().enumerate() {
+        let src = match e.start.as_deref() { Some(s) => s, None => continue };
+        let dst = match e.end.as_deref() { Some(s) => s, None => continue };
+        // Both endpoints must be descendants of this cluster.
+        if !is_descendant_of(src, &cnode.id, l) || !is_descendant_of(dst, &cnode.id, l) {
+            continue;
+        }
+        // Skip if BOTH endpoints are inside the same isolated sub-cluster
+        // (those edges are handled in the sub-cluster's inner root).
+        // cnode.id is itself isolated, so exclude it from the "sub-isolated" check.
+        let src_in_sub_iso = l.nodes.iter().find(|n| n.id == src)
+            .and_then(|n| n.parent_id.as_deref())
+            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
+            .unwrap_or(false);
+        let dst_in_sub_iso = l.nodes.iter().find(|n| n.id == dst)
+            .and_then(|n| n.parent_id.as_deref())
+            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
+            .unwrap_or(false);
+        if src_in_sub_iso || dst_in_sub_iso {
+            continue;
+        }
+        out.push_str(&render_edge_path(e, i, svg_id, &l.aria_kind));
+    }
+    out.push_str(unified_shell::close_layer());
+
+    // Inner <g class="edgeLabels">.
+    out.push_str(&unified_shell::open_layer("edgeLabels"));
+    for e in l.edges.iter() {
+        let src = match e.start.as_deref() { Some(s) => s, None => continue };
+        let dst = match e.end.as_deref() { Some(s) => s, None => continue };
+        if !is_descendant_of(src, &cnode.id, l) || !is_descendant_of(dst, &cnode.id, l) {
+            continue;
+        }
+        let src_in_sub_iso = l.nodes.iter().find(|n| n.id == src)
+            .and_then(|n| n.parent_id.as_deref())
+            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
+            .unwrap_or(false);
+        let dst_in_sub_iso = l.nodes.iter().find(|n| n.id == dst)
+            .and_then(|n| n.parent_id.as_deref())
+            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
+            .unwrap_or(false);
+        if src_in_sub_iso || dst_in_sub_iso {
+            continue;
+        }
+        out.push_str(&render_edge_label(e));
+    }
+    out.push_str(unified_shell::close_layer());
+
+    // Inner <g class="nodes">:
+    // 1. Isolated sub-clusters as nested inner roots.
+    // 2. Direct leaf nodes.
+    out.push_str(&unified_shell::open_layer("nodes"));
+
+    // Render isolated sub-clusters (those whose parent is cnode.id and
+    // that are in isolated_cluster_ids).
+    for n in &l.nodes {
+        if !n.is_group {
+            continue;
+        }
+        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if !l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
+        out.push_str(&render_isolated_cluster_inner_root(n, l, theme, svg_id));
+    }
+
+    // Render direct leaf nodes.
+    for n in &l.nodes {
+        if n.is_group {
+            continue;
+        }
+        // Only direct children of this cluster, or children of non-isolated sub-clusters.
+        // We emit nodes whose parent is in the subtree of this cluster but NOT
+        // in any isolated sub-cluster.
+        if !is_descendant_of(&n.id, &cnode.id, l) {
+            continue;
+        }
+        // Skip if the node is inside an isolated sub-cluster of cnode
+        // (those are handled recursively in sub-cluster's inner root).
+        // Note: cnode.id itself is in isolated_cluster_ids, so we must
+        // exclude it from the "sub-isolated" check.
+        let in_sub_isolated = n.parent_id.as_deref()
+            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
+            .unwrap_or(false);
+        if in_sub_isolated {
+            continue;
+        }
+        let mut prefixed = n.clone();
+        if let Some(did) = &prefixed.dom_id {
+            prefixed.dom_id = Some(format!("{svg_id}-{did}", svg_id = svg_id));
+        }
+        let shape_id = prefixed.shape.clone().unwrap_or_else(|| "rect".to_string());
+        match crate::render::shapes::draw(&shape_id, &prefixed, theme) {
+            Ok(svg) => out.push_str(&svg),
+            Err(_) => {
+                if let Ok(svg) = crate::render::shapes::draw("rect", &prefixed, theme) {
+                    out.push_str(&svg);
+                }
+            }
+        }
+    }
+    out.push_str(unified_shell::close_layer());
+
+    out.push_str("</g>"); // close inner root
+    out
+}
+
+/// Return true if `node_id`'s parent is `cluster_id`.
+fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) -> bool {
+    let id = match node_id {
+        Some(s) => s,
+        None => return false,
+    };
+    l.nodes
+        .iter()
+        .find(|n| n.id == id)
+        .and_then(|n| n.parent_id.as_deref())
+        .map(|p| p == cluster_id)
+        .unwrap_or(false)
 }
 
 /// Apply the upstream `markerOffsets` visual offset to path endpoints.
