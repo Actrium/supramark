@@ -220,7 +220,7 @@ fn flowchart_byte_exact_sweep() {
         }
     }
     eprintln!("[flowchart] byte-exact={}/{}", pass, total);
-    for (r, d) in diffs.iter().take(5) {
+    for (r, d) in diffs.iter().take(30) {
         eprintln!("[flowchart] diff {r}: {d}");
     }
     // This test is aspirational for the MVP: it exists so the CI / harness
@@ -229,7 +229,7 @@ fn flowchart_byte_exact_sweep() {
 
 #[test]
 fn flowchart_single_diff_report() {
-    let rel = "ext_fixtures/cypress/flowchart/02";
+    let rel = "ext_fixtures/cypress/flowchart/114";
     let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mmd = base.join("tests").join(format!("{}.mmd", rel));
     let svg_path = base.join("tests/reference").join(format!("{}.svg", rel));
@@ -239,6 +239,17 @@ fn flowchart_single_diff_report() {
     let d = fcp::parse(&source).unwrap();
     let th = theme::get_theme("default");
     let l = fcl::layout(&d, &th).unwrap();
+    eprintln!("diagram_padding={}", l.diagram_padding);
+    for n in &l.nodes {
+        eprintln!("  node id={} x={:?} y={:?} w={:?} h={:?} shape={:?} is_group={}", n.id, n.x, n.y, n.width, n.height, n.shape, n.is_group);
+    }
+    for e in &l.edges {
+        eprintln!("  edge id={} lx={:?} ly={:?}", e.id, e.label_x, e.label_y);
+        if let Some(pts) = &e.points {
+            let s: Vec<String> = pts.iter().map(|p| format!("({:.3},{:.3})", p.x, p.y)).collect();
+            eprintln!("    pts: {}", s.join(" "));
+        }
+    }
     let got = svg_flowchart::render(&d, &l, &th, &id).unwrap();
     let byte = got.bytes().zip(expected.bytes()).position(|(a, b)| a != b).unwrap_or(0);
     let context = 160usize;

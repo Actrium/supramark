@@ -64,13 +64,14 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         edges,
         clusters,
         bounds,
-        diagram_padding: 20.0,
+        diagram_padding: 8.0,
+        // Upstream always uses "flowchart-v2" for the aria-roledescription,
+        // even for diagrams that start with the `graph` keyword. Only
+        // flowchart-elk gets its own label.
         aria_kind: if d.header_keyword == "flowchart-elk" {
             "flowchart-elk".to_string()
-        } else if d.is_v2 {
-            "flowchart-v2".to_string()
         } else {
-            "flowchart-v1".to_string()
+            "flowchart-v2".to_string()
         },
     })
 }
@@ -99,8 +100,18 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         }
     }
 
+    // Set of subgraph IDs — used to skip vertices that are actually subgraph
+    // references (e.g. `B` inside `subgraph A` when `B` is itself a subgraph).
+    let subgraph_ids: std::collections::HashSet<&str> =
+        d.subgraphs.iter().map(|sg| sg.id.as_str()).collect();
+
     // Nodes: vertices.
     for v in &d.vertices {
+        // Skip vertices whose ID matches a subgraph — they are cluster references,
+        // not standalone nodes, and will be rendered as clusters.
+        if subgraph_ids.contains(v.id.as_str()) {
+            continue;
+        }
         let shape_id = canon_shape(v.shape.as_deref().unwrap_or("rect"));
         let (w, h) = measure_vertex_box(v);
         let label_text = display_label(v);
@@ -150,7 +161,9 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         let (w, h) = measure_subgraph_title_box(sg.title.as_ref());
         let mut node = unified::Node::default();
         node.id = sg.id.clone();
-        node.dom_id = Some(format!("flowchart-{}", sg.id));
+        // Upstream cluster DOM id is just the subgraph id — no "flowchart-" prefix.
+        // render_cluster prepends the SVG element id when emitting.
+        node.dom_id = Some(sg.id.clone());
         node.label = sg.title.as_ref().map(|l| l.text.clone());
         node.shape = Some("rect".into());
         node.width = Some(w);
@@ -160,7 +173,16 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.look = Some("classic".into());
         node.dir = sg.dir.map(|d| d.as_str().to_string());
         node.parent_id = parent_of.get(&sg.id).cloned();
-        node.css_classes = Some("default".into());
+        // Cluster CSS class: empty string so render_cluster emits `class="cluster "`.
+        node.css_classes = None;
+        // `style <subgraph-id> ...` directives land on the matching Vertex (if any)
+        // because the parser calls `ensure_vertex` on the id. Apply those styles here.
+        if let Some(sv) = d.find_vertex(&sg.id) {
+            let merged = collect_styles(sv, &class_map);
+            if !merged.is_empty() {
+                node.css_styles = Some(merged);
+            }
+        }
         data.nodes.push(node);
     }
 
@@ -306,12 +328,95 @@ fn measure_vertex_box(v: &Vertex) -> (f64, f64) {
     (tw + pad_x, th + pad_y)
 }
 
+/// Strip FontAwesome icon prefixes from a label string before measurement.
+/// Upstream replaces `fa:fa-car` with `<i class="fa fa-car"></i>` at render
+/// time; the `<i>` element contributes negligible width under the jsdom shim,
+/// so we remove those tokens before measuring text width.
+fn strip_fa_icons(text: &str) -> String {
+    // Match patterns like `fa:fa-car`, `fas:fa-spinner`, `fab:fa-github`, etc.
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find("fa") {
+        // Check whether this starts a "fa[bklrs]?:fa-<name>" sequence.
+        let tail = &rest[pos..];
+        // Find the colon.
+        let prefix_end = tail.find(':').unwrap_or(tail.len());
+        let prefix = &tail[..prefix_end];
+        // Valid FA prefixes: fa, fab, fak, fal, far, fas
+        let valid_prefix = matches!(prefix, "fa" | "fab" | "fak" | "fal" | "far" | "fas");
+        if valid_prefix && tail[prefix_end + 1..].starts_with("fa-") {
+            // Consume leading text up to this match.
+            out.push_str(&rest[..pos]);
+            // Skip past "prefix:fa-name" where name is [a-z0-9-]+.
+            let icon_tail = &tail[prefix_end + 1 + 3..]; // after "fa-"
+            let icon_end = icon_tail.find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                .unwrap_or(icon_tail.len());
+            rest = &rest[pos + prefix_end + 1 + 3 + icon_end..];
+        } else {
+            // Not a valid FA token — emit up to and including "fa" and move on.
+            out.push_str(&rest[..pos + 2]);
+            rest = &rest[pos + 2..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Strip HTML tags from label text for width measurement.
+/// Handles `<br>` / `<br/>` as line breaks and tracks bold state via
+/// `<strong>` / `<b>` tags. Returns a list of (text, bold) line segments.
+fn strip_html_for_measure(s: &str) -> Vec<(String, bool)> {
+    let mut lines: Vec<(String, bool)> = vec![(String::new(), false)];
+    let mut bold = false;
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            // Find closing '>'
+            let end = s[i..].find('>').map(|n| i + n + 1).unwrap_or(s.len());
+            let tag = &s[i + 1..end - 1].trim_start_matches('/').to_ascii_lowercase();
+            let tag_lc = tag.trim();
+            match tag_lc {
+                "br" | "br/" => {
+                    lines.push((String::new(), bold));
+                }
+                "strong" | "b" => bold = true,
+                "/strong" | "/b" => bold = false,
+                _ => {}
+            }
+            i = end;
+        } else {
+            let line = lines.last_mut().unwrap();
+            line.0.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    lines
+}
+
 /// Measure the overall width/height of the (possibly multi-line) label.
+/// Handles HTML labels (containing tags like `<strong>`, `<br/>`) by
+/// stripping tags and measuring the visible text content only.
 fn measure_text(label: &str) -> (f64, f64) {
     if label.is_empty() {
         return (0.0, LABEL_FONT_SIZE);
     }
-    let lines: Vec<&str> = label.split("<br/>").flat_map(|s| s.split('\n')).collect();
+    // Strip FA icon tokens first — they render as <i> elements with no width.
+    let stripped = strip_fa_icons(label);
+    let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
+
+    // Check whether the label contains HTML tags.
+    if stripped.contains('<') {
+        // HTML label — strip tags, treat <br> as line break, <strong>/<b> as bold.
+        let segments = strip_html_for_measure(&stripped);
+        let line_count = segments.len().max(1) as f64;
+        let max_w = segments.iter().map(|(text, bold)| {
+            font_metrics::text_width(text, DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, *bold, false)
+        }).fold(0.0f64, f64::max);
+        return (max_w, lh * line_count);
+    }
+
+    let lines: Vec<&str> = stripped.split("<br/>").flat_map(|s| s.split('\n')).collect();
     let mut max_w = 0.0f64;
     for line in &lines {
         let w = font_metrics::text_width(line, DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
@@ -319,7 +424,6 @@ fn measure_text(label: &str) -> (f64, f64) {
             max_w = w;
         }
     }
-    let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
     (max_w, lh * lines.len() as f64)
 }
 
@@ -327,6 +431,27 @@ fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
     let text = title.map(|l| l.text.as_str()).unwrap_or("");
     let (w, h) = measure_text(text);
     (w + 16.0, h + 16.0)
+}
+
+/// Measure edge label dimensions to match the foreignObject rendered at runtime.
+/// Upstream edge labels use the jsdom default font: sans-serif 14px non-bold,
+/// which differs from the node-label font (trebuchet ms 14px).
+fn measure_edge_label(text: &str) -> (f64, f64) {
+    const EDGE_LABEL_FONT: &str = "sans-serif";
+    const EDGE_LABEL_SIZE: f64 = 14.0;
+    let h = font_metrics::line_height(EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
+    if text.is_empty() {
+        return (0.0, h);
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut max_w = 0.0f64;
+    for line in &lines {
+        let w = font_metrics::text_width(line, EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
+        if w > max_w {
+            max_w = w;
+        }
+    }
+    (max_w, h * lines.len() as f64)
 }
 
 /// Build a unified::Edge from a model Edge, applying link-style overrides.
@@ -348,6 +473,13 @@ fn build_edge(e: &ModelEdge, d: &FlowchartDiagram, pair_counter: usize) -> unifi
     ue.stroke = Some(thickness.into());
     ue.interpolate = Some("basis".into());
     ue.curve = Some("basis".into());
+    // dagre needs edge label dimensions to reserve space between ranks;
+    // labelpos="c" centres the label on the spline (upstream flowchart default).
+    ue.labelpos = Some("c".into());
+    let label_text = e.label.as_ref().map(|l| l.text.as_str()).unwrap_or("");
+    let (lw, lh) = measure_edge_label(label_text);
+    ue.extra.insert("label_width".into(), lw.to_string());
+    ue.extra.insert("label_height".into(), lh.to_string());
 
     // Apply link-style overrides.
     let mut applied_styles: Vec<String> = Vec::new();

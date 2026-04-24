@@ -26,67 +26,176 @@ use crate::render::unified_shell;
 use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 
-/// Compute the viewBox from the layout bounds and rendered node dimensions.
+/// Compute the viewBox matching the upstream jsdom `getBBox()` shim.
 ///
-/// Upstream uses `svg.getBBox()` after rendering, which returns the
-/// tight axis-aligned bounding box of all rendered content. We
-/// approximate this by computing bounds from the layout nodes,
-/// accounting for shape-specific geometry (e.g. diamonds extend
-/// beyond their node center by s/2).
-fn compute_viewbox(l: &FlowchartLayout, _inner: &str, padding: f64) -> (f64, f64, f64, f64) {
+/// The reference generator patches `SVGElement.prototype.getBBox` with an
+/// implementation that computes the union of all descendant elements' local
+/// bounding boxes WITHOUT applying any `transform` attributes. This means:
+///
+/// - A `<rect x="-w/2" y="-h/2" ...>` inside a `<g transform="translate(cx, cy)">`
+///   contributes `{x: -w/2, y: -h/2, w, h}` — not the global position.
+/// - A diamond `<polygon points="s/2,0 s,-s/2 s/2,-s 0,-s/2">` contributes
+///   `{x: 0, y: -s, w: s, h: s}` (the polygon's own translate is also ignored).
+/// - Edge `<path>` elements live in a group with no transform, so their
+///   coordinates ARE global dagre coordinates.
+/// - Edge-label `<foreignObject width="w" height="h">` contributes `{x:0, y:0, w, h}`
+///   because the outer label `<g>` has a centring transform that is ignored.
+///
+/// `viewBox = "${union.x - p} ${union.y - p} ${union.w + 2p} ${union.h + 2p}"`
+fn compute_viewbox(l: &FlowchartLayout, padding: f64) -> (f64, f64, f64, f64) {
+    use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
 
+    let expand = |min_x: &mut f64, min_y: &mut f64, max_x: &mut f64, max_y: &mut f64,
+                  bx: f64, by: f64, bw: f64, bh: f64| {
+        if bw == 0.0 && bh == 0.0 { return; }
+        if bx < *min_x { *min_x = bx; }
+        if by < *min_y { *min_y = by; }
+        if bx + bw > *max_x { *max_x = bx + bw; }
+        if by + bh > *max_y { *max_y = by + bh; }
+    };
+
+    // Font for foreignObject label measurement.
+    let font = HtmlLabelFont::default();
+
+    // Node local bboxes (transform ignored — matching jsdom shim).
     for n in &l.nodes {
-        let (Some(x), Some(y)) = (n.x, n.y) else {
-            continue;
-        };
         let w = n.width.unwrap_or(0.0);
         let h = n.height.unwrap_or(0.0);
-        // For diamond shapes, w and h both equal s (the diagonal).
-        // The diamond extends s/2 in each direction from center.
-        // For rect shapes, w and h are the actual dimensions,
-        // extending w/2 and h/2 from center.
-        let half_w = w / 2.0;
-        let half_h = h / 2.0;
-        min_x = min_x.min(x - half_w);
-        min_y = min_y.min(y - half_h);
-        max_x = max_x.max(x + half_w);
-        max_y = max_y.max(y + half_h);
-    }
 
-    // Include edge path points in the bounds.
-    for e in &l.edges {
-        if let Some(points) = &e.points {
-            for p in points {
-                min_x = min_x.min(p.x);
-                min_y = min_y.min(p.y);
-                max_x = max_x.max(p.x);
-                max_y = max_y.max(p.y);
+        if n.is_group {
+            // Cluster (subgraph) rect: the cluster <g> has NO transform in upstream SVG;
+            // the rect uses absolute coordinates x = node.x - w/2, y = node.y - h/2.
+            // jsdom shim reads these absolute values directly.
+            let cx = n.x.unwrap_or(0.0);
+            let cy = n.y.unwrap_or(0.0);
+            let rx = cx - w / 2.0;
+            let ry = cy - h / 2.0;
+            expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, rx, ry, w, h);
+            // Cluster label foreignObject: cluster-label <g> has transform (ignored).
+            // foreignObject sits at (0,0) relative to the cluster-label <g>.
+            let label_text = n.label.as_deref().unwrap_or("");
+            if !label_text.is_empty() {
+                let processed = crate::render::foreign_object::replace_fa_icons(label_text);
+                let (lw, lh) = measure_html_label(&processed, &font, 200.0, true);
+                expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
+            }
+            continue;
+        }
+
+        let shape = n.shape.as_deref().unwrap_or("rect");
+        match shape {
+            "diamond" | "question" => {
+                // polygon points="s/2,0 s,-s/2 s/2,-s 0,-s/2"
+                // polygon has its own transform="translate(-s/2+0.5, s/2)" which is ignored.
+                // polyBBox of points = {x:0, y:-s, w:s, h:s}
+                let s = w; // w == h == s for diamond
+                expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, -s, s, s);
+            }
+            _ => {
+                // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
+                expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, -w / 2.0, -h / 2.0, w, h);
             }
         }
+        // Node label foreignObject: at (0,0) in local coords (label <g> transform ignored).
+        // The jsdom shim's getBBox treats each foreignObject as {x:0, y:0, w, h}.
+        let label_text = n.label.as_deref().unwrap_or("");
+        if !label_text.is_empty() {
+            let is_html = n.label_type.as_deref() == Some("string");
+            let label_escaped = if is_html {
+                label_text.to_string()
+            } else {
+                crate::render::shapes::types::xml_escape(label_text)
+            };
+            let processed = crate::render::foreign_object::replace_fa_icons(&label_escaped);
+            let (lw, lh) = measure_html_label(&processed, &font, 200.0, true);
+            expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
+        }
     }
 
-    // Include edge label positions.
+    // Edge paths: coordinates are already global (edgePaths <g> has no transform).
+    // Round to 3 decimal places to match fmt_coord() applied when building the
+    // SVG path d attribute — the upstream pathBBox parses the rendered d string.
+    //
+    // Additionally apply the marker visual offset (`markerOffsets.arrow_point = 4`)
+    // to the path endpoints, matching upstream's `getLineFunctionsWithOffset`.
+    // The offset shortens the path at arrow ends so the arrowhead doesn't
+    // overlap the node boundary. For a vertical edge going downward:
+    //   last_y_adjusted = last_y - 4
+    // For a diagonal edge, it is proportional to sin(angle).
+    const ARROW_POINT_OFFSET: f64 = 4.0;
     for e in &l.edges {
-        if let (Some(lx), Some(ly)) = (e.label_x, e.label_y) {
-            min_x = min_x.min(lx);
-            min_y = min_y.min(ly);
-            max_x = max_x.max(lx);
-            max_y = max_y.max(ly);
+        let Some(points) = &e.points else { continue };
+        let n = points.len();
+        if n == 0 { continue }
+
+        for (i, p) in points.iter().enumerate() {
+            let (mut px, mut py) = (p.x, p.y);
+
+            // Apply arrow_point end offset to the last point.
+            // Upstream getLineFunctionsWithOffset: offset applied along the
+            // backward direction vector from endpoint toward prev point.
+            //   angle = atan2(bdy, bdx)
+            //   px += cos(angle) * offset * sign_x
+            //   py += sin(angle) * offset * sign_y
+            if i == n - 1 && n >= 2 {
+                let prev = &points[n - 2];
+                let bdx = prev.x - px;
+                let bdy = prev.y - py;
+                let blen = (bdx * bdx + bdy * bdy).sqrt();
+                if blen > 0.0 {
+                    let cos_a = bdx / blen;
+                    let sin_a = bdy / blen;
+                    px += ARROW_POINT_OFFSET * cos_a;
+                    py += ARROW_POINT_OFFSET * sin_a;
+                }
+            }
+            // Apply arrow_point start offset to the first point (arrow_barb start = 0,
+            // but arrow_point start is uncommon; skip for now).
+
+            let rx = (px * 1000.0).round() / 1000.0;
+            let ry = (py * 1000.0).round() / 1000.0;
+            if rx < min_x { min_x = rx; }
+            if ry < min_y { min_y = ry; }
+            if rx > max_x { max_x = rx; }
+            if ry > max_y { max_y = ry; }
         }
+    }
+
+    // Edge labels: foreignObject at (0,0) with measured width/height.
+    // The label <g> has a centring transform which is ignored by the shim.
+    // Upstream replaces FA icon tokens with <i> elements (zero width under
+    // jsdom shim) before measuring, so we apply the same substitution.
+    for e in &l.edges {
+        let label_text = e.label.as_deref().unwrap_or("");
+        let is_empty = label_text.is_empty();
+        let (lw, lh) = if is_empty {
+            let (_, h) = measure_html_label("X", &font, 200.0, true);
+            (0.0, h)
+        } else {
+            // replace_fa_icons converts `fa:fa-car` → `<i class="fa fa-car"></i>`
+            // which measure_html_label strips as a zero-width HTML tag.
+            let processed = crate::render::foreign_object::replace_fa_icons(label_text);
+            measure_html_label(&processed, &font, 200.0, true)
+        };
+        // foreignObject x=0, y=0 (no transform applied)
+        expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
     }
 
     if !min_x.is_finite() {
         return (0.0, 0.0, 1.0, 1.0);
     }
 
+    let content_w = max_x - min_x;
+    let content_h = max_y - min_y;
     let vb_x = min_x - padding;
     let vb_y = min_y - padding;
-    let vb_w = (max_x - min_x + 2.0 * padding).max(1.0);
-    let vb_h = (max_y - min_y + 2.0 * padding).max(1.0);
+    let vb_w = (content_w + 2.0 * padding).max(1.0);
+    let vb_h = (content_h + 2.0 * padding).max(1.0);
 
     (vb_x, vb_y, vb_w, vb_h)
 }
@@ -174,7 +283,7 @@ pub fn render(
     // Upstream uses `svg.getBBox()` which returns the actual rendered
     // bounds including shape geometry, edge curves, and label
     // positions. We compute from layout nodes and edges.
-    let (vb_x, vb_y, vb_w, vb_h) = compute_viewbox(l, &inner, padding);
+    let (vb_x, vb_y, vb_w, vb_h) = compute_viewbox(l, padding);
 
     // ── Assemble final SVG ─────────────────────────────────────────
     let mut out = String::new();
@@ -201,60 +310,160 @@ pub fn render(
 }
 
 fn render_cluster(node: &UNode, _cluster: &Cluster, _theme: &ThemeVariables, svg_id: &str) -> String {
+    use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
-    let x = node.x.unwrap_or(0.0);
-    let y = node.y.unwrap_or(0.0);
+    let cx = node.x.unwrap_or(0.0);
+    let cy = node.y.unwrap_or(0.0);
+    // Absolute rect coordinates — cluster <g> has no transform in upstream SVG.
+    let rx = cx - w / 2.0;
+    let ry = cy - h / 2.0;
     let base_id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
-    let id = format!("{svg_id}-{base_id}");
+    let cluster_id = format!("{svg_id}-{base_id}");
     let label = node.label.clone().unwrap_or_default();
+
+    // data-look attribute from node.look.
+    let data_look = match node.look.as_deref() {
+        Some(look) if !look.is_empty() => format!(r#" data-look="{}""#, look),
+        _ => String::new(),
+    };
+
+    // CSS class: "cluster <css_classes>" — look class not prepended here.
+    // Upstream emits `class="cluster "` (with trailing space when no extra class).
+    let extra_classes = node.css_classes.as_deref().unwrap_or("");
+    let class_attr = if extra_classes.is_empty() {
+        "cluster ".to_string()
+    } else {
+        format!("cluster {}", extra_classes)
+    };
+
+    // Inline style for rect from css_styles.
+    let css_styles = node.css_styles.as_deref().unwrap_or(&[]);
+    let rect_style = crate::render::shapes::types::build_inline_style(css_styles);
 
     let mut out = String::new();
     out.push_str(&format!(
-        r#"<g class="cluster default" id="{id}" transform="translate({tx}, {ty})">"#,
-        id = xml_escape(&id),
-        tx = fmt_num(x),
-        ty = fmt_num(y),
+        r#"<g class="{class_attr}" id="{id}"{data_look}>"#,
+        class_attr = class_attr,
+        id = xml_escape(&cluster_id),
+        data_look = data_look,
     ));
     out.push_str(&format!(
-        r#"<rect class="label-container" x="{x}" y="{y}" width="{w}" height="{h}"/>"#,
-        x = fmt_num(-w / 2.0),
-        y = fmt_num(-h / 2.0),
+        r#"<rect style="{rect_style}" x="{rx}" y="{ry}" width="{w}" height="{h}"></rect>"#,
+        rect_style = rect_style,
+        rx = fmt_num(rx),
+        ry = fmt_num(ry),
         w = fmt_num(w),
         h = fmt_num(h),
     ));
     if !label.is_empty() {
+        // Measure label for foreignObject dimensions.
+        let font = HtmlLabelFont::default();
+        let escaped = xml_escape(&label);
+        let (lw, lh) = measure_html_label(&escaped, &font, 200.0, true);
+        // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
+        let label_tx = cx - lw / 2.0;
+        let label_ty = ry;
         out.push_str(&format!(
-            r#"<g class="cluster-label" transform="translate(0, {})"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml" class="nodeLabel"><span class="nodeLabel">{}</span></div></foreignObject></g>"#,
-            fmt_num(-h / 2.0 + 12.0),
-            xml_escape(&label),
+            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{escaped}</p></span></div></foreignObject></g>"#,
+            label_tx = fmt_num(label_tx),
+            label_ty = fmt_num(label_ty),
+            lw = fmt_num(lw),
+            lh = fmt_num(lh),
+            escaped = escaped,
         ));
     }
     out.push_str("</g>");
     out
 }
 
+/// Apply the upstream `markerOffsets` visual offset to path endpoints.
+///
+/// Upstream's `getLineFunctionsWithOffset` adjusts the first/last path
+/// point by `markerOffset * sin(angle)` so the arrowhead doesn't overlap
+/// the node boundary. `arrow_point` has offset 4, `arrow_cross/circle` 12.5.
+fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str) {
+    fn marker_offset_for(arrow: &str) -> Option<f64> {
+        match arrow {
+            "arrow_point" => Some(4.0),
+            "arrow_cross" | "arrow_circle" => Some(12.5),
+            _ => None,
+        }
+    }
+
+    let n = pts.len();
+    if n < 2 { return; }
+
+    // End offset: applied to last point.
+    // Upstream calculateDeltaAndAngle(last, prev): deltaX = prev.x - last.x.
+    // x_offset = mo * cos(atan(dy/dx)) * sign(deltaX) = mo * deltaX/len
+    // y_offset = mo * |sin(atan(dy/dx))| * sign(deltaY) = mo * |deltaY|/len * sign(deltaY)
+    if let Some(mo) = marker_offset_for(arrow_end) {
+        let last = pts[n - 1];
+        let prev = pts[n - 2];
+        let dx = prev.x - last.x;
+        let dy = prev.y - last.y;
+        let blen = (dx * dx + dy * dy).sqrt();
+        if blen > 0.0 {
+            // x: mo * cos(atan(dy/dx)) * sign(dx) = mo * |dx|/len * sign(dx) = mo * dx/len
+            pts[n - 1].x += mo * dx / blen;
+            // y: mo * |sin| * sign(dy) = mo * |dy|/len * sign(dy) = mo * |dy|/len * (dy/|dy|)
+            pts[n - 1].y += mo * dy.abs() / blen * if dy >= 0.0 { 1.0 } else { -1.0 };
+        }
+    }
+
+    // Start offset: applied to first point.
+    // calculateDeltaAndAngle(first, second): deltaX = second.x - first.x.
+    if let Some(mo) = marker_offset_for(arrow_start) {
+        let first = pts[0];
+        let next = pts[1];
+        let dx = next.x - first.x;
+        let dy = next.y - first.y;
+        let flen = (dx * dx + dy * dy).sqrt();
+        if flen > 0.0 {
+            pts[0].x += mo * dx / flen;
+            pts[0].y += mo * dy.abs() / flen * if dy >= 0.0 { 1.0 } else { -1.0 };
+        }
+    }
+}
+
 fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> String {
-    let pts: Vec<Point> = e
+    // `pts` used for data-points (original dagre coordinates, matching upstream
+    // `pointsStr` = btoa(JSON.stringify(points)) which precedes the offset step).
+    let pts_raw: Vec<Point> = e
         .points
         .as_ref()
         .map(|v| v.iter().map(|p| Point { x: p.x, y: p.y }).collect())
         .unwrap_or_default();
-    if pts.is_empty() {
+    if pts_raw.is_empty() {
         return String::new();
     }
-    // Build `d=` via the curve configured on this edge.
+    // Apply marker visual offsets to get the rendered path points.
+    let mut pts = pts_raw.clone();
+    let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
+    let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
+    apply_marker_offsets(&mut pts, arrow_end, arrow_start);
+
+    // Build `d=` via the curve configured on this edge (offset-adjusted pts).
     let curve = e.curve.as_deref().unwrap_or("basis");
     let ctype = edges::CurveType::parse(curve).unwrap_or(edges::CurveType::Basis);
     let d_attr = edges::build_path(&pts, ctype);
 
     let thickness = e.thickness.as_deref().unwrap_or("normal");
     let pattern = e.pattern.as_deref().unwrap_or("solid");
-    // Upstream duplicates thickness/pattern classes — see insertEdge in
-    // dagre-wrapper index.js. Leading space is intentional (matches upstream).
-    let class_attr = format!(
-        " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-{thickness} edge-pattern-{pattern} flowchart-link"
-    );
+    // Upstream class format: `" {strokeClasses} {edge.classes}"` where
+    //   strokeClasses = "edge-thickness-{t} edge-pattern-{p}" (from edge's stroke type)
+    //   edge.classes   = "edge-thickness-normal edge-pattern-solid flowchart-link" (always,
+    //                    unless invisible).
+    // Leading space is intentional (upstream emits `" " + strokeClasses + edge.classes`).
+    let class_attr = if thickness == "invisible" {
+        String::new()
+    } else {
+        format!(
+            " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-normal edge-pattern-solid flowchart-link"
+        )
+    };
 
     // Upstream writes `style=";"` when no explicit edge style is set.
     let style_val = e
@@ -272,9 +481,10 @@ fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> 
     let edge_id = format!("{svg_id}-{id}", id = e.id.clone());
 
     // data-points: base64-encoded JSON array of {x, y} objects.
+    // Upstream encodes raw dagre points BEFORE marker offset adjustments.
     let data_points_b64 = {
         let mut json = String::from("[");
-        for (i, p) in pts.iter().enumerate() {
+        for (i, p) in pts_raw.iter().enumerate() {
             if i > 0 {
                 json.push(',');
             }
@@ -329,11 +539,14 @@ fn render_edge_path(e: &UEdge, _index: usize, svg_id: &str, aria_kind: &str) -> 
 
 fn render_edge_label(e: &UEdge) -> String {
     use crate::render::foreign_object::{
-        measure_html_label, render_edge_label as fo_edge, HtmlLabelFont, LabelOpts,
+        measure_html_label, render_edge_label as fo_edge, replace_fa_icons, HtmlLabelFont, LabelOpts,
     };
     let label_text = e.label.clone().unwrap_or_default();
-    let esc = xml_escape(&label_text);
-    let is_empty = esc.is_empty();
+    // Apply FA icon substitution (fa:fa-car → <i class="fa fa-car"></i>) before
+    // measuring, matching upstream's createText path. The <i> element contributes
+    // zero width under the jsdom shim.
+    let processed = replace_fa_icons(&label_text);
+    let is_empty = processed.is_empty();
     // Upstream always measures the label height (even when empty),
     // using the font's line-height. For empty labels, width=0 but
     // height is still the font's line-height.
@@ -341,7 +554,7 @@ fn render_edge_label(e: &UEdge) -> String {
         let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
         (0.0, lh)
     } else {
-        measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true)
+        measure_html_label(&processed, &HtmlLabelFont::default(), 200.0, true)
     };
     let lx = e.label_x.unwrap_or(0.0);
     let ly = e.label_y.unwrap_or(0.0);
@@ -351,7 +564,7 @@ fn render_edge_label(e: &UEdge) -> String {
         wrap_in_p: !is_empty,
         ..LabelOpts::default()
     };
-    fo_edge(&esc, lx, ly, w, h, opts)
+    fo_edge(&processed, lx, ly, w, h, opts)
 }
 
 /// Build the flowchart-specific CSS slice — a complete port of upstream's
@@ -632,12 +845,13 @@ mod tests {
 
     #[test]
     fn renders_graph_lr_as_flowchart_v1() {
+        // Upstream uses "flowchart-v2" for all non-ELK flowchart/graph diagrams.
         let src = "graph LR\nA-->B\n";
         let d = fcp::parse(src).unwrap();
         let th = theme::get_theme("default");
         let l = fcl::layout(&d, &th).unwrap();
         let svg = render(&d, &l, &th, "t").unwrap();
-        assert!(svg.contains(r#"aria-roledescription="flowchart-v1""#));
+        assert!(svg.contains(r#"aria-roledescription="flowchart-v2""#));
     }
 
     #[test]
