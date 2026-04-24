@@ -43,7 +43,12 @@ pub fn parse(source: &str) -> Result<RequirementDiagram> {
     let mut pending_elem_type = String::new();
     let mut pending_elem_docref = String::new();
 
-    let src = strip_frontmatter(source);
+    let (src, fm_title) = strip_frontmatter(source);
+    if let Some(t) = fm_title {
+        if diag.meta.title.is_none() {
+            diag.meta.title = Some(t);
+        }
+    }
     let src = strip_init_directive(&src);
 
     // Tokenise into logical statements. A block body counts as a
@@ -286,22 +291,29 @@ pub fn parse(source: &str) -> Result<RequirementDiagram> {
 }
 
 /// Strip a leading `---\n…\n---` YAML frontmatter block, if present.
-fn strip_frontmatter(src: &str) -> String {
+/// Returns the stripped source and an optional `title:` value extracted from the block.
+fn strip_frontmatter(src: &str) -> (String, Option<String>) {
     if !src.trim_start().starts_with("---") {
-        return src.to_string();
+        return (src.to_string(), None);
     }
     let mut lines = src.lines();
     let first = lines.next().unwrap_or("");
     if first.trim() != "---" {
-        return src.to_string();
+        return (src.to_string(), None);
     }
-    let mut out = String::new();
     let mut found_end = false;
     let mut tail = String::new();
+    let mut fm_title: Option<String> = None;
     for l in lines {
         if !found_end {
             if l.trim() == "---" {
                 found_end = true;
+                continue;
+            }
+            // Extract `title: ...` from frontmatter
+            let trimmed = l.trim();
+            if let Some(rest) = trimmed.strip_prefix("title:") {
+                fm_title = Some(rest.trim().to_string());
             }
             continue;
         }
@@ -309,10 +321,9 @@ fn strip_frontmatter(src: &str) -> String {
         tail.push('\n');
     }
     if found_end {
-        out.push_str(&tail);
-        out
+        (tail, fm_title)
     } else {
-        src.to_string()
+        (src.to_string(), None)
     }
 }
 

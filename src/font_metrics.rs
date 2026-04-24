@@ -224,4 +224,94 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn measure_requirement_labels() {
+        use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+        let labels = [
+            "<<Requirement>>",
+            "&lt;&lt;Requirement&gt;&gt;",
+            "test_req",
+            "ID: 1",
+            "Text: the test text.",
+            "Risk: High",
+            "Verification: Test",
+            "<<Element>>",
+            "&lt;&lt;Element&gt;&gt;",
+            "test_entity",
+            "Type: simulation",
+        ];
+        let font = HtmlLabelFont::default();
+        for l in &labels {
+            let (w, _h) = measure_html_label(l, &font, 200.0, true);
+            let w16 = text_width(l, "sans-serif", 16.0, false, false);
+            eprintln!("label={:40} fo_w={:20} w16={:20} w16+50={}", l, w, w16, w16 + 50.0);
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+    #[test]
+    fn measure_markdown_segments() {
+        eprintln!("Text: = {}", text_width("Text: ", "sans-serif", 14.0, false, false));
+        eprintln!("Bolded text (bold) = {}", text_width("Bolded text", "sans-serif", 14.0, true, false));
+        eprintln!("  (space) = {}", text_width(" ", "sans-serif", 14.0, false, false));
+        eprintln!("italicized text = {}", text_width("italicized text", "sans-serif", 14.0, false, false));
+        eprintln!("Sum = {}",
+            text_width("Text: ", "sans-serif", 14.0, false, false) +
+            text_width("Bolded text", "sans-serif", 14.0, true, false) +
+            text_width(" ", "sans-serif", 14.0, false, false) +
+            text_width("italicized text", "sans-serif", 14.0, false, false)
+        );
+        eprintln!("my bolded name (bold) = {}", text_width("my bolded name", "sans-serif", 14.0, true, false));
+        eprintln!("my italicized name (plain) = {}", text_width("my italicized name", "sans-serif", 14.0, false, false));
+        eprintln!("Bolded type (bold) = {}", text_width("Bolded type", "sans-serif", 14.0, true, false));
+        eprintln!("italicized type (plain) = {}", text_width("italicized type", "sans-serif", 14.0, false, false));
+        eprintln!("Type: Bolded type italicized type = {}",
+            text_width("Type: ", "sans-serif", 14.0, false, false) +
+            text_width("Bolded type", "sans-serif", 14.0, true, false) +
+            text_width(" ", "sans-serif", 14.0, false, false) +
+            text_width("italicized type", "sans-serif", 14.0, false, false)
+        );
+        eprintln!("Italicized (plain) = {}", text_width("Italicized", "sans-serif", 14.0, false, false));
+        eprintln!("Bolded (bold) = {}", text_width("Bolded", "sans-serif", 14.0, true, false));
+        eprintln!("Doc Ref: Italicized Bolded = {}",
+            text_width("Doc Ref: ", "sans-serif", 14.0, false, false) +
+            text_width("Italicized", "sans-serif", 14.0, false, false) +
+            text_width(" ", "sans-serif", 14.0, false, false) +
+            text_width("Bolded", "sans-serif", 14.0, true, false)
+        );
+        // Plain widths for comparison
+        eprintln!("my bolded name (PLAIN) = {}", text_width("my bolded name", "sans-serif", 14.0, false, false));
+        eprintln!("Type: Bolded type italicized type (PLAIN all) = {}",
+            text_width("Type: Bolded type italicized type", "sans-serif", 14.0, false, false));
+        eprintln!("Doc Ref: Italicized Bolded (PLAIN all) = {}",
+            text_width("Doc Ref: Italicized Bolded", "sans-serif", 14.0, false, false));
+        // Reference expected widths
+        eprintln!("Ref: 118.2548828125 (my bolded name)");
+        eprintln!("Ref: 230.0224609375 (Type: **Bolded type** _italicized type_)");
+        eprintln!("Ref: 179.23828125 (Doc Ref: *Italicized* __Bolded__)");
+
+        // test_entity (bold) name
+        eprintln!("test_entity (PLAIN) = {}", text_width("test_entity", "sans-serif", 14.0, false, false));
+        eprintln!("test_entity (BOLD) = {}", text_width("test_entity", "sans-serif", 14.0, true, false));
+        eprintln!("Ref: 84.984375 (test_entity name FO width from fixture 38)");
+        eprintln!("sys_req (PLAIN) = {}", text_width("sys_req", "sans-serif", 14.0, false, false));
+        eprintln!("sys_req (BOLD) = {}", text_width("sys_req", "sans-serif", 14.0, true, false));
+        eprintln!("test_req (PLAIN) = {}", text_width("test_req", "sans-serif", 14.0, false, false));
+        eprintln!("test_req (BOLD) = {}", text_width("test_req", "sans-serif", 14.0, true, false));
+        eprintln!("Ref fixture 38 test_req name: 64.6337890625");
+        eprintln!("<<Requirement>> (PLAIN) = {}", text_width("<<Requirement>>", "sans-serif", 14.0, false, false));
+        eprintln!("<<Requirement>> (BOLD) = {}", text_width("<<Requirement>>", "sans-serif", 14.0, true, false));
+        // Fixture 34: all bold
+        eprintln!("<<Element>> (BOLD) = {}", text_width("<<Element>>", "sans-serif", 14.0, true, false));
+        eprintln!("ID: 1 (BOLD) = {}", text_width("ID: 1", "sans-serif", 14.0, true, false));
+        eprintln!("Text: the test text. (BOLD) = {}", text_width("Text: the test text.", "sans-serif", 14.0, true, false));
+        eprintln!("Risk: High (BOLD) = {}", text_width("Risk: High", "sans-serif", 14.0, true, false));
+        eprintln!("Verification: Test (BOLD) = {}", text_width("Verification: Test", "sans-serif", 14.0, true, false));
+        eprintln!("Type: simulation (BOLD) = {}", text_width("Type: simulation", "sans-serif", 14.0, true, false));
+    }
 }

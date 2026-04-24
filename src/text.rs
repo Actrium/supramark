@@ -3,6 +3,146 @@
 //! Vendored from plantuml-little (https://github.com/kookyleo/plantuml-little)
 //! at commit b32d6aa, MIT-compatible multi-license.
 
+/// Extract the plain-text content that `markdownToHTML` would produce from a
+/// markdown-formatted string, matching what JSDOM's `el.textContent` returns
+/// after mermaid renders the label.
+///
+/// `marked` (the markdown library used by upstream) processes:
+/// - `**text**` and `__text__` → `<strong>text</strong>` → textContent = `text`
+/// - `*text*` and `_text_` → `<em>text</em>` → textContent = `text`
+/// - `` `code` `` → `<code>code</code>` → textContent = `code`
+///
+/// CommonMark rules for `_` delimiters: a `_` can open emphasis only when NOT
+/// immediately preceded by an ASCII alphanumeric character (letter or digit),
+/// and can close emphasis only when NOT immediately followed by one. This prevents
+/// `word_with_underscores` from being treated as markdown. `*` delimiters are
+/// processed unconditionally (as `marked` does).
+///
+/// HTML entities (e.g. `&lt;&lt;Requirement&gt;&gt;`) are passed through
+/// unchanged — they are already the serialized form of the label text
+/// and are measured as-is.
+///
+/// Precedence: process `**` and `__` (two-char markers) before `*` and `_`
+/// (single-char) to avoid over-matching.
+pub fn markdown_text_content(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut result = String::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        // ** bold ** — * delimiters are always processed
+        if i + 1 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 2, "**") {
+                result.push_str(&markdown_text_content(&s[i + 2..end]));
+                i = end + 2;
+                continue;
+            }
+        }
+        // __ bold __ — only when NOT preceded by alphanumeric (CommonMark rule)
+        if i + 1 < n && bytes[i] == b'_' && bytes[i + 1] == b'_' {
+            let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            if !preceded_by_alnum {
+                if let Some(end) = find_closing_underscore2(s, i + 2) {
+                    result.push_str(&markdown_text_content(&s[i + 2..end]));
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // If __ was rejected (preceded by alnum) or no matching __ was found,
+            // output both underscores and skip them so the single-_ path doesn't
+            // incorrectly process the second one.
+            result.push('_');
+            result.push('_');
+            i += 2;
+            continue;
+        }
+        // * italic * — * delimiters are always processed
+        if bytes[i] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 1, "*") {
+                if end > i + 1 {
+                    result.push_str(&markdown_text_content(&s[i + 1..end]));
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        // _ italic _ — only when NOT preceded by alphanumeric (CommonMark rule).
+        // Note: the __ case above already handled and consumed `__` sequences.
+        if bytes[i] == b'_' {
+            let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            if !preceded_by_alnum {
+                if let Some(end) = find_closing_underscore1(s, i + 1) {
+                    if end > i + 1 {
+                        result.push_str(&markdown_text_content(&s[i + 1..end]));
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        // ` code `
+        if bytes[i] == b'`' {
+            if let Some(end) = find_marker_str(s, i + 1, "`") {
+                result.push_str(&s[i + 1..end]);
+                i = end + 1;
+                continue;
+            }
+        }
+        // Append one byte as a char (safe since we only check ASCII markers)
+        // SAFETY: push char-by-char to handle multi-byte UTF-8 correctly
+        let ch = s[i..].chars().next().unwrap_or('\0');
+        result.push(ch);
+        i += ch.len_utf8();
+    }
+    result
+}
+
+/// Find a closing `_` (single) that is not immediately followed by an ASCII
+/// alphanumeric (CommonMark close-emphasis rule). Searches from `from` onwards
+/// in the byte slice.
+fn find_closing_underscore1(s: &str, from: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut pos = from;
+    while pos < bytes.len() {
+        if bytes[pos] == b'_' {
+            // Closing `_` must not be followed by alphanumeric
+            let followed_by_alnum = pos + 1 < bytes.len() && bytes[pos + 1].is_ascii_alphanumeric();
+            if !followed_by_alnum {
+                return Some(pos);
+            }
+        }
+        pos += 1;
+    }
+    None
+}
+
+/// Find a closing `__` (double) where the second `_` is not followed by an
+/// ASCII alphanumeric (CommonMark close-emphasis rule).
+fn find_closing_underscore2(s: &str, from: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut pos = from;
+    while pos + 1 < bytes.len() {
+        if bytes[pos] == b'_' && bytes[pos + 1] == b'_' {
+            // Closing `__` must not be followed by alphanumeric
+            let followed_by_alnum = pos + 2 < bytes.len() && bytes[pos + 2].is_ascii_alphanumeric();
+            if !followed_by_alnum {
+                return Some(pos);
+            }
+        }
+        pos += 1;
+    }
+    None
+}
+
+fn find_marker_str(s: &str, from: usize, marker: &str) -> Option<usize> {
+    s.get(from..)
+        .and_then(|tail| tail.find(marker))
+        .map(|pos| pos + from)
+}
+
 /// Estimate display width of a string, treating CJK characters as double-width.
 ///
 /// ASCII and most Latin characters count as 1 unit; CJK ideographs and
@@ -10,6 +150,101 @@
 /// estimate than `str::len()` (byte count) for mixed-script text.
 pub fn display_width(s: &str) -> usize {
     s.chars().map(|c| if is_cjk(c) { 2 } else { 1 }).sum()
+}
+
+/// Convert markdown inline markup to HTML, matching what `marked` (the library
+/// used by upstream mermaid) produces for single-line label text.
+///
+/// Supported constructs (in precedence order):
+/// - `**text**` → `<strong>text</strong>`
+/// - `__text__` → `<strong>text</strong>` (only at non-alphanumeric boundary)
+/// - `*text*` → `<em>text</em>`
+/// - `_text_` → `<em>text</em>` (only at non-alphanumeric boundary)
+/// - `` `text` `` → `<code>text</code>`
+/// - Plain text is passed through unchanged
+///
+/// This is used to emit the rendered HTML content for `<foreignObject>` spans,
+/// so that JSDOM's `el.innerHTML` matches what upstream's `markdownToHTML` produces.
+pub fn markdown_to_html(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut result = String::with_capacity(n + 32);
+    let mut i = 0;
+    while i < n {
+        // ** bold **
+        if i + 1 < n && bytes[i] == b'*' && bytes[i + 1] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 2, "**") {
+                result.push_str("<strong>");
+                result.push_str(&markdown_to_html(&s[i + 2..end]));
+                result.push_str("</strong>");
+                i = end + 2;
+                continue;
+            }
+        }
+        // __ bold __ — only when NOT preceded by alphanumeric
+        if i + 1 < n && bytes[i] == b'_' && bytes[i + 1] == b'_' {
+            let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            if !preceded_by_alnum {
+                if let Some(end) = find_closing_underscore2(s, i + 2) {
+                    result.push_str("<strong>");
+                    result.push_str(&markdown_to_html(&s[i + 2..end]));
+                    result.push_str("</strong>");
+                    i = end + 2;
+                    continue;
+                }
+            }
+            // Rejected or no match — output both underscores and skip
+            result.push('_');
+            result.push('_');
+            i += 2;
+            continue;
+        }
+        // * italic *
+        if bytes[i] == b'*' {
+            if let Some(end) = find_marker_str(s, i + 1, "*") {
+                if end > i + 1 {
+                    result.push_str("<em>");
+                    result.push_str(&markdown_to_html(&s[i + 1..end]));
+                    result.push_str("</em>");
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        // _ italic _ — only when NOT preceded by alphanumeric
+        if bytes[i] == b'_' {
+            let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            if !preceded_by_alnum {
+                if let Some(end) = find_closing_underscore1(s, i + 1) {
+                    if end > i + 1 {
+                        result.push_str("<em>");
+                        result.push_str(&markdown_to_html(&s[i + 1..end]));
+                        result.push_str("</em>");
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        // ` code `
+        if bytes[i] == b'`' {
+            if let Some(end) = find_marker_str(s, i + 1, "`") {
+                result.push_str("<code>");
+                result.push_str(&s[i + 1..end]);
+                result.push_str("</code>");
+                i = end + 1;
+                continue;
+            }
+        }
+        // Append char as-is
+        let ch = s[i..].chars().next().unwrap_or('\0');
+        result.push(ch);
+        i += ch.len_utf8();
+    }
+    result
 }
 
 /// Returns `true` if the character is a CJK ideograph or fullwidth form
@@ -28,6 +263,43 @@ pub fn is_cjk(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_strip_basic() {
+        assert_eq!(markdown_text_content("**bold**"), "bold");
+        assert_eq!(markdown_text_content("__bold__"), "bold");
+        assert_eq!(markdown_text_content("*italic*"), "italic");
+        assert_eq!(markdown_text_content("_italic_"), "italic");
+        assert_eq!(markdown_text_content("`code`"), "code");
+        assert_eq!(markdown_text_content("__my bolded name__"), "my bolded name");
+        assert_eq!(markdown_text_content("*my italicized name*"), "my italicized name");
+        assert_eq!(markdown_text_content("Text: **Bolded text** _italicized text_"), "Text: Bolded text italicized text");
+        assert_eq!(markdown_text_content("Doc Ref: *Italicized* __Bolded__"), "Doc Ref: Italicized Bolded");
+        assert_eq!(markdown_text_content("&lt;&lt;Requirement&gt;&gt;"), "&lt;&lt;Requirement&gt;&gt;");
+        assert_eq!(markdown_text_content("plain text"), "plain text");
+    }
+
+    #[test]
+    fn markdown_underscore_word_boundary_rules() {
+        // CommonMark: `_` cannot open/close emphasis when adjacent to alphanumeric.
+        // Identifiers with underscores must be preserved as-is.
+        assert_eq!(
+            markdown_text_content("test_entity_name_that_is_extra_long"),
+            "test_entity_name_that_is_extra_long"
+        );
+        // Standalone `_word_` at start of string is processed
+        assert_eq!(markdown_text_content("_italic_"), "italic");
+        // `_italic_` preceded by space is processed
+        assert_eq!(markdown_text_content("prefix _italic_ suffix"), "prefix italic suffix");
+        // `_italic_` preceded by non-alphanumeric (colon) — should process
+        assert_eq!(markdown_text_content("Text: _italicized text_"), "Text: italicized text");
+        // word_underscore_word — NOT processed (underscore between alphanumerics)
+        assert_eq!(markdown_text_content("word_italic_word"), "word_italic_word");
+        // `__bold__` at start of string is processed
+        assert_eq!(markdown_text_content("__bold text__"), "bold text");
+        // word__bold__word — NOT processed
+        assert_eq!(markdown_text_content("word__bold__word"), "word__bold__word");
+    }
 
     #[test]
     fn ascii_only() {
