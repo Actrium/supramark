@@ -22,6 +22,9 @@ use crate::model::flowchart::{
 pub fn parse(source: &str) -> Result<FlowchartDiagram> {
     // --- preprocess ---------------------------------------------------
     let (fm, body) = frontmatter::parse_frontmatter(source);
+    // Capture init directives BEFORE stripping them out of the body, so
+    // we can lift `flowchart.htmlLabels` and other CSS-affecting flags.
+    let init_cfgs = directive::parse_directives(body);
     let body = directive::remove_directives(body);
 
     let mut diag = FlowchartDiagram::default();
@@ -30,6 +33,25 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
         if let Some(cfg) = fm.config.as_ref() {
             if let Some(t) = cfg.theme.as_ref() {
                 diag.theme_override = Some(t.clone());
+            }
+            if let Some(b) = cfg.html_labels {
+                diag.html_labels = Some(b);
+            }
+            if let Some(fcc) = cfg.flowchart.as_ref() {
+                if let Some(b) = fcc.html_labels {
+                    diag.html_labels = Some(b);
+                }
+            }
+        }
+    }
+    // `%%{init: {flowchart: {htmlLabels: false}}}%%` overrides frontmatter.
+    for cfg in &init_cfgs {
+        if let Some(b) = cfg.html_labels {
+            diag.html_labels = Some(b);
+        }
+        if let Some(fcc) = cfg.flowchart.as_ref() {
+            if let Some(b) = fcc.html_labels {
+                diag.html_labels = Some(b);
             }
         }
     }
@@ -415,12 +437,18 @@ impl<'a> LineParser<'a> {
                 // Markdown labels (`"`...`"`) carry the inner content WITHOUT
                 // surrounding backticks as both the id and the rendered title.
                 let inner = &line[1..line.len() - 1];
-                let label = parse_label_text(inner);
-                let id_text = if inner.starts_with('`') && inner.ends_with('`') && inner.len() >= 2
-                {
+                let is_markdown = inner.starts_with('`')
+                    && inner.ends_with('`')
+                    && inner.len() >= 2;
+                let id_text = if is_markdown {
                     &inner[1..inner.len() - 1]
                 } else {
                     inner
+                };
+                let label = if is_markdown {
+                    Label::markdown(id_text)
+                } else {
+                    Label::string(inner)
                 };
                 if id_text.is_empty() || id_text.contains(|c: char| c.is_whitespace()) {
                     (format!("subGraph{}", order), Some(label))
@@ -536,11 +564,18 @@ impl<'a> LineParser<'a> {
             interpolate = Some(name.to_string());
             styles_str = remainder.trim().to_string();
         }
-        let styles: Vec<String> = styles_str
+        let mut styles: Vec<String> = styles_str
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+        // Upstream `flowDb.updateLink` appends `fill:none` to the styles
+        // when the user-supplied list is non-empty and contains no fill
+        // property. Mirroring that here keeps the rendered `style="..."`
+        // attribute byte-exact.
+        if !styles.is_empty() && !styles.iter().any(|s| s.starts_with("fill")) {
+            styles.push("fill:none".to_string());
+        }
         self.diag.link_styles.push(LinkStyle {
             indices,
             is_default,

@@ -339,6 +339,15 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         // render_cluster prepends the SVG element id when emitting.
         node.dom_id = Some(sg.id.clone());
         node.label = sg.title.as_ref().map(|l| l.text.clone());
+        node.label_type = sg.title.as_ref().map(|l| {
+            use crate::model::flowchart::LabelKind;
+            match l.kind {
+                LabelKind::Markdown => "markdown",
+                LabelKind::String => "string",
+                LabelKind::Text => "text",
+            }
+            .to_string()
+        });
         node.shape = Some("rect".into());
         node.width = Some(w);
         node.height = Some(h);
@@ -702,8 +711,21 @@ fn measure_text(label: &str) -> (f64, f64) {
 }
 
 fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
-    let text = title.map(|l| l.text.as_str()).unwrap_or("");
-    let (w, h) = measure_text(text);
+    let Some(label) = title else {
+        let (w, h) = measure_text("");
+        return (w + 16.0, h + 16.0);
+    };
+    // Markdown labels render through `markdownToHtml`, which expands
+    // `**bold**` / `*italic*` into `<strong>`/`<em>` tags. Width measurement
+    // must therefore strip those backtick markers and measure the inner
+    // text with the appropriate weight.
+    let measure_input: String = match label.kind {
+        crate::model::flowchart::LabelKind::Markdown => {
+            crate::render::foreign_object::markdown_label_to_html(&label.text)
+        }
+        _ => label.text.clone(),
+    };
+    let (w, h) = measure_text(&measure_input);
     (w + 16.0, h + 16.0)
 }
 

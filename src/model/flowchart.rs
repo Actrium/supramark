@@ -195,6 +195,10 @@ pub struct FlowchartDiagram {
     pub theme_override: Option<String>,
     /// Optional `%%{init: {"themeVariables": {...}}}%%` content, JSON.
     pub theme_variables_raw: Option<String>,
+    /// Effective `flowchart.htmlLabels` from frontmatter / `%%{init}%%`.
+    /// `None` keeps the upstream default (`true`); `Some(false)` switches
+    /// CSS selectors and label rendering to the non-HTML shape path.
+    pub html_labels: Option<bool>,
     /// All vertices declared, in source order. Duplicates coalesce —
     /// the first declaration wins, subsequent refs just need to exist.
     pub vertices: Vec<Vertex>,

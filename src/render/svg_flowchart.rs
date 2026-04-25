@@ -608,7 +608,16 @@ fn render_cluster(
     if !label.is_empty() {
         // Measure label for foreignObject dimensions.
         let font = HtmlLabelFont::default();
-        let escaped = xml_escape(&label);
+        // Markdown subgraph titles (e.g. `subgraph "`**strong**`"`) need the
+        // bold/italic markup expanded to HTML before measuring + emitting,
+        // so the foreignObject dimensions and the inner `<p>` content match
+        // upstream byte-for-byte.
+        let is_markdown = node.label_type.as_deref() == Some("markdown");
+        let escaped = if is_markdown {
+            crate::render::foreign_object::markdown_label_to_html(&label)
+        } else {
+            xml_escape(&label)
+        };
         let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
         let label_tx = cx - lw / 2.0;
@@ -620,12 +629,24 @@ fn render_cluster(
         } else {
             format!(r#" style="{label_style}""#)
         };
+        // Markdown labels render with extra `max-width` (= rect inner width) and
+        // centred text — upstream's `createText` adds those when `useHtmlLabels`
+        // is on and the label is markdown.
+        let div_style = if is_markdown {
+            format!(
+                "display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;",
+                mw = fmt_num(w),
+            )
+        } else {
+            "display: table-cell; white-space: nowrap; line-height: 1.5;".to_string()
+        };
         out.push_str(&format!(
-            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "{span_style_attr}><p>{escaped}</p></span></div></foreignObject></g>"#,
+            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="{div_style}" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "{span_style_attr}><p>{escaped}</p></span></div></foreignObject></g>"#,
             label_tx = fmt_num(label_tx),
             label_ty = fmt_num(label_ty),
             lw = fmt_num(lw),
             lh = fmt_num(lh),
+            div_style = div_style,
             span_style_attr = span_style_attr,
             escaped = escaped,
         ));
@@ -1274,18 +1295,28 @@ fn render_edge_path(
         )
     };
 
-    // Upstream writes `style=";"` when no explicit edge style is set.
-    let style_val = e
-        .style
-        .as_ref()
-        .map(|v| {
-            if v.is_empty() || v.iter().all(|s| s.is_empty()) {
-                ";".to_string()
-            } else {
-                v.join(";")
-            }
-        })
-        .unwrap_or_else(|| ";".to_string());
+    // Edge style emission mirrors upstream's `pathStyle` formula in
+    // `rendering-elements/edges.js`:
+    //   styles  = edgeStyles.reduce(acc + style + ';', '')   // "s1;s2;"
+    //   second  = edgeStyles.reduce(acc + ';' + style, '')   // ";s1;s2"
+    //   pathStyle = styles + ';' + second                    // "s1;s2;;;s1;s2"
+    // and falls back to `";"` when the edge has no inline style at all.
+    let style_val = match e.style.as_ref() {
+        Some(v) if !v.is_empty() && v.iter().any(|s| !s.is_empty()) => {
+            let first: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            let second: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!(";{}", s))
+                .collect();
+            format!("{first};{second}")
+        }
+        _ => ";".to_string(),
+    };
 
     let edge_id = format!("{svg_id}-{id}", id = e.id.clone());
 
@@ -1391,12 +1422,18 @@ fn render_edge_label(e: &UEdge) -> String {
 /// Generate CSS rules for `classDef` directives.
 ///
 /// Mirrors upstream `utils.insertClass(svg, classDef, diagramId)` which calls
-/// `createCssStyles` to produce:
-/// - `#id .name>*{<all styles>!important;}`
-/// - `#id .name span{<all styles>!important;}`
-/// - `#id .name tspan{<color→fill styles>!important;}`
+/// `createCssStyles`. Selectors depend on `flowchart.htmlLabels`:
+/// - htmlLabels=true (default): `> *`, `span`
+/// - htmlLabels=false: `rect`, `polygon`, `ellipse`, `circle`, `path`
+/// Plus a `tspan` rule with `color → fill` rewrites for text styles.
 fn flowchart_class_def_css(id: &str, d: &FlowchartDiagram) -> String {
     let mut out = String::new();
+    let html_labels = d.html_labels.unwrap_or(true);
+    let elements: &[&str] = if html_labels {
+        &["> *", "span"]
+    } else {
+        &["rect", "polygon", "ellipse", "circle", "path"]
+    };
     for def in &d.class_defs {
         // Build the "all styles" block.
         let mut all_props: Vec<String> = Vec::new();
@@ -1424,17 +1461,19 @@ fn flowchart_class_def_css(id: &str, d: &FlowchartDiagram) -> String {
             continue;
         }
         let all_css: String = all_props.join("");
-        // >* and span rules use all styles
-        out.push_str(&format!(
-            "#{id} .{name}>*{{{css}}}",
-            name = def.name,
-            css = all_css
-        ));
-        out.push_str(&format!(
-            "#{id} .{name} span{{{css}}}",
-            name = def.name,
-            css = all_css
-        ));
+        // Emit one rule per element selector. Upstream collapses `> *` into
+        // `>*` (no space) when stylis serialises, so do the same by hand.
+        for el in elements {
+            let el_str = if *el == "> *" { ">*" } else { *el };
+            let separator = if *el == "> *" { "" } else { " " };
+            out.push_str(&format!(
+                "#{id} .{name}{sep}{el}{{{css}}}",
+                name = def.name,
+                sep = separator,
+                el = el_str,
+                css = all_css
+            ));
+        }
         // tspan rule uses only text (color) styles
         if !text_props.is_empty() {
             let text_css: String = text_props.join("");
