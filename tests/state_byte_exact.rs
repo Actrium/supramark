@@ -65,7 +65,10 @@ fn assert_byte_exact(rel: &str) {
 #[test]
 #[ignore]
 fn sweep_all_state_fixtures() {
-    sweep_dir("tests/ext_fixtures/cypress/state", "ext_fixtures/cypress/state");
+    sweep_dir(
+        "tests/ext_fixtures/cypress/state",
+        "ext_fixtures/cypress/state",
+    );
     sweep_dir("tests/ext_fixtures/demos/state", "ext_fixtures/demos/state");
 }
 
@@ -279,6 +282,27 @@ fn cypress_33() {
     assert_byte_exact("ext_fixtures/cypress/state/33");
 }
 
+/// Single TB column of ten composite states whose long titles
+/// (`StateN_____________`) widen each cluster's outer rect via
+/// `expand_cluster_width_for_label`. Frontmatter declares `look: default`
+/// (custom override) which the renderer forwards to every `data-look="…"`
+/// attribute on cluster / node / edge elements.
+///
+/// Byte-exactness requires:
+/// 1. Parser lifting `config.look` from frontmatter into
+///    `StateDiagram::look_override` and the renderer threading that value
+///    through every `data-look` slot via `with_look(...)`.
+/// 2. The post-widen outer-shift in `expand_cluster_width_for_label`:
+///    when every top-level cluster widens by the same amount, the entire
+///    outer-level layout (top-level leaf nodes + outer edge points) gets
+///    shifted by `delta - LABEL_PADDING` to mirror upstream's pre-layout
+///    widening. Without this every outer edge anchored to root_start
+///    sits ~13px left of where mermaid-js puts it.
+#[test]
+fn cypress_47() {
+    assert_byte_exact("ext_fixtures/cypress/state/47");
+}
+
 /// Dump diff for one fixture (set FIXTURE env var or default 26).
 #[test]
 #[ignore]
@@ -325,4 +349,3 @@ fn debug_cy11_output() {
         println!("SVG CONTENT:\n{}", &got[start..nodes_end.min(start + 3000)]);
     }
 }
-

@@ -40,8 +40,48 @@ use crate::render::shapes::{self, types::fmt_num};
 use crate::render::unified_shell;
 use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
+use std::cell::Cell;
+
+thread_local! {
+    /// Effective `look` value for the current `render(..)` call. Set on entry
+    /// from `StateDiagram::look_override` (frontmatter `config.look`); falls
+    /// back to upstream default `"classic"`. Cluster / node / edge emitters
+    /// read this to populate their `data-look="..."` attribute.
+    static CURRENT_LOOK: Cell<&'static str> = const { Cell::new("classic") };
+}
+
+/// Set `CURRENT_LOOK` for the duration of `f`. We intern a small set of
+/// known look identifiers to `&'static str`; unknown values fall back to
+/// upstream `"classic"` (silently, mirroring upstream's no-op behaviour).
+fn with_look<R>(look: Option<&str>, f: impl FnOnce() -> R) -> R {
+    let resolved: &'static str = match look {
+        Some("default") => "default",
+        Some("classic") => "classic",
+        Some("neo") => "neo",
+        Some("handDrawn") => "handDrawn",
+        _ => "classic",
+    };
+    let prev = CURRENT_LOOK.with(|c| c.replace(resolved));
+    let r = f();
+    CURRENT_LOOK.with(|c| c.set(prev));
+    r
+}
+
+#[inline]
+fn current_look() -> &'static str {
+    CURRENT_LOOK.with(|c| c.get())
+}
 
 pub fn render(
+    d: &StateDiagram,
+    l: &StateLayout,
+    theme: &ThemeVariables,
+    id: &str,
+) -> Result<String> {
+    with_look(d.look_override.as_deref(), || render_inner(d, l, theme, id))
+}
+
+fn render_inner(
     d: &StateDiagram,
     l: &StateLayout,
     theme: &ThemeVariables,
@@ -167,7 +207,9 @@ pub fn render(
             if parent_also_isolated {
                 continue;
             }
-            out.push_str(&render_isolated_cluster_inner_root(node, &l.result, theme, id));
+            out.push_str(&render_isolated_cluster_inner_root(
+                node, &l.result, theme, id,
+            ));
         } else {
             if node.extra.get("__skip_render").is_some() {
                 continue;
@@ -658,7 +700,11 @@ fn has_isolated_ancestor(
 ) -> bool {
     let mut current = node_id;
     loop {
-        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+        match nodes
+            .iter()
+            .find(|n| n.id == current)
+            .and_then(|n| n.parent_id.as_deref())
+        {
             Some(p) => {
                 if iso_ids.contains(p) {
                     return true;
@@ -709,7 +755,11 @@ fn edge_endpoint_is_isolated(
 fn is_descendant_of(node_id: &str, cluster_id: &str, nodes: &[Node]) -> bool {
     let mut current = node_id;
     loop {
-        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+        match nodes
+            .iter()
+            .find(|n| n.id == current)
+            .and_then(|n| n.parent_id.as_deref())
+        {
             Some(p) => {
                 if p == cluster_id {
                     return true;
@@ -899,7 +949,11 @@ fn endpoint_in_sub_isolated(
 ) -> bool {
     let mut current = node_id;
     loop {
-        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+        match nodes
+            .iter()
+            .find(|n| n.id == current)
+            .and_then(|n| n.parent_id.as_deref())
+        {
             Some(p) => {
                 if p == parent_cluster_id {
                     return false;
@@ -941,33 +995,35 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
     if n.shape.as_deref() == Some("divider") {
         let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
         let trimmed = css.trim();
-        let css_attr = if trimmed.contains("statediagram-state") && trimmed.contains("statediagram-cluster") {
-            // Keep the full class string verbatim, prefixed with a leading
-            // space so the resulting attribute reads ` statediagram-state ...`
-            // exactly like upstream's dataFetcher template.
-            let last_is_cluster = trimmed
-                .split_ascii_whitespace()
-                .next_back()
-                .map(|t| t == "statediagram-cluster")
-                .unwrap_or(false);
-            if last_is_cluster {
-                format!(" {} ", trimmed)
+        let css_attr =
+            if trimmed.contains("statediagram-state") && trimmed.contains("statediagram-cluster") {
+                // Keep the full class string verbatim, prefixed with a leading
+                // space so the resulting attribute reads ` statediagram-state ...`
+                // exactly like upstream's dataFetcher template.
+                let last_is_cluster = trimmed
+                    .split_ascii_whitespace()
+                    .next_back()
+                    .map(|t| t == "statediagram-cluster")
+                    .unwrap_or(false);
+                if last_is_cluster {
+                    format!(" {} ", trimmed)
+                } else {
+                    format!(" {}", trimmed)
+                }
             } else {
-                format!(" {}", trimmed)
-            }
-        } else {
-            // Synthesize a default for safety; layout normally provides the
-            // full string.
-            " statediagram-state statediagram-cluster ".to_string()
-        };
+                // Synthesize a default for safety; layout normally provides the
+                // full string.
+                " statediagram-state statediagram-cluster ".to_string()
+            };
 
         let rx = cx - w / 2.0;
         let ry = cy - h / 2.0;
         return format!(
-            r#"<g class="{css}" id="{svg_id}-{dom_id}" data-look="classic"><g><rect class="divider" x="{x}" y="{y}" width="{w}" height="{h}" data-look="classic"></rect></g></g>"#,
+            r#"<g class="{css}" id="{svg_id}-{dom_id}" data-look="{look}"><g><rect class="divider" x="{x}" y="{y}" width="{w}" height="{h}" data-look="{look}"></rect></g></g>"#,
             css = css_attr,
             svg_id = svg_id,
             dom_id = xml_escape(dom_id),
+            look = current_look(),
             x = fmt_num(rx),
             y = fmt_num(ry),
             w = fmt_num(w),
@@ -1048,18 +1104,20 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
 
     let mut out = String::new();
     out.push_str(&format!(
-        r#"<g class="{css}" id="{svg_id}-{dom_id}" data-id="{data_id}" data-look="classic">"#,
+        r#"<g class="{css}" id="{svg_id}-{dom_id}" data-id="{data_id}" data-look="{look}">"#,
         css = css_attr,
         svg_id = svg_id,
         dom_id = xml_escape(dom_id),
         data_id = xml_escape(raw_id),
+        look = current_look(),
     ));
     out.push_str(&format!(
-        r#"<g><rect class="outer" x="{rx}" y="{ry}" width="{w}" height="{h}" data-look="classic"></rect></g>"#,
+        r#"<g><rect class="outer" x="{rx}" y="{ry}" width="{w}" height="{h}" data-look="{look}"></rect></g>"#,
         rx = fmt_num(rx),
         ry = fmt_num(ry),
         w = fmt_num(w),
         h = fmt_num(h),
+        look = current_look(),
     ));
     if !escaped.is_empty() {
         out.push_str(&format!(
@@ -1124,21 +1182,23 @@ fn emit_edge_path(id: &str, e: &Edge) -> String {
         .map_or(false, |c| c.contains("note-edge"));
     if is_note_edge {
         format!(
-            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic"></path>"##,
+            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="{look}"></path>"##,
             d = d,
             id = id,
             eid = e.id,
             cls = class,
             b64 = data_points_b64,
+            look = current_look(),
         )
     } else {
         format!(
-            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic" marker-end="url(#{id}_stateDiagram-barbEnd)"></path>"##,
+            r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="{look}" marker-end="url(#{id}_stateDiagram-barbEnd)"></path>"##,
             d = d,
             id = id,
             eid = e.id,
             cls = class,
             b64 = data_points_b64,
+            look = current_look(),
         )
     }
 }
@@ -1252,11 +1312,12 @@ fn emit_state_start(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<Strin
     let tx = n.x.unwrap_or(0.0);
     let ty = n.y.unwrap_or(0.0);
     Some(format!(
-        r#"<g class="node default" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})"><circle class="state-start" r="{r}" width="{w}" height="{w}"></circle></g>"#,
+        r#"<g class="node default" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})"><circle class="state-start" r="{r}" width="{w}" height="{w}"></circle></g>"#,
         id = id,
         nid = xml_escape(&nid),
         tx = fmt_num(tx),
         ty = fmt_num(ty),
+        look = current_look(),
         r = fmt_num(r),
         w = fmt_num(w),
     ))
@@ -1281,7 +1342,7 @@ fn emit_state_end(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
     Some(format!(
         concat!(
-            r#"<g class="node default" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+            r#"<g class="node default" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})">"#,
             r#"<g class="outer-path">"#,
             r#"<path d="{outer_fill}" stroke="none" stroke-width="0" fill="{mb}" style=""></path>"#,
             r#"<path d="{outer_stroke}" stroke="{lc}" stroke-width="2" fill="none" stroke-dasharray="0 0" style=""></path>"#,
@@ -1296,6 +1357,7 @@ fn emit_state_end(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
         nid = xml_escape(&nid),
         tx = fmt_num(tx),
         ty = fmt_num(ty),
+        look = current_look(),
         outer_fill = STATE_END_OUTER_PATH,
         outer_stroke = STATE_END_OUTER_PATH,
         inner_fill = STATE_END_INNER_PATH,
@@ -1327,7 +1389,7 @@ fn emit_fork_join(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
         // upstream's <g><path/><path/></g> shape instead of a flat <rect>.
         Some(format!(
             concat!(
-                r#"<g class="{classes}" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+                r#"<g class="{classes}" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})">"#,
                 r#"<g>"#,
                 r#"<path d="{fill}" stroke="none" stroke-width="0" fill="{line}" style=""></path>"#,
                 r#"<path d="{stroke_d}" stroke="{line}" stroke-width="1.3" fill="none" stroke-dasharray="0 0" style=""></path>"#,
@@ -1342,6 +1404,7 @@ fn emit_fork_join(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
             fill = FORK_JOIN_HORIZONTAL_FILL,
             stroke_d = FORK_JOIN_HORIZONTAL_STROKE,
             line = line,
+            look = current_look(),
         ))
     } else {
         // Vertical (LR/RL) bar — fall back to the legacy flat-rect emission
@@ -1352,7 +1415,7 @@ fn emit_fork_join(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
         let x = -w / 2.0;
         let y = -h / 2.0;
         Some(format!(
-            r#"<g class="{classes}" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})"><rect class="fork-join" x="{x}" y="{y}" width="{w}" height="{h}" style="fill:{line};stroke:{line}"></rect></g>"#,
+            r#"<g class="{classes}" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})"><rect class="fork-join" x="{x}" y="{y}" width="{w}" height="{h}" style="fill:{line};stroke:{line}"></rect></g>"#,
             classes = classes,
             id = id,
             nid = xml_escape(&nid),
@@ -1363,6 +1426,7 @@ fn emit_fork_join(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> 
             w = fmt_num(w),
             h = fmt_num(h),
             line = line,
+            look = current_look(),
         ))
     }
 }
@@ -1401,12 +1465,13 @@ fn emit_state_node(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<String
 
     let mut out = String::new();
     out.push_str(&format!(
-        r#"<g class="{classes}" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        r#"<g class="{classes}" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})">"#,
         classes = classes,
         id = id,
         nid = xml_escape(&nid),
         tx = fmt_num(tx),
         ty = fmt_num(ty),
+        look = current_look(),
     ));
     out.push_str(&format!(
         r#"<rect class="basic label-container" style="{node_styles}" rx="{r}" ry="{r}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
@@ -1554,12 +1619,13 @@ fn emit_rect_with_title(id: &str, n: &Node, _theme: &ThemeVariables) -> Option<S
 
     let mut out = String::new();
     out.push_str(&format!(
-        r#"<g class="{classes}" id="{id}-{nid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        r#"<g class="{classes}" id="{id}-{nid}" data-look="{look}" transform="translate({tx}, {ty})">"#,
         classes = classes,
         id = id,
         nid = xml_escape(&nid),
         tx = fmt_num(tx),
         ty = fmt_num(ty),
+        look = current_look(),
     ));
     // Outer group with rect and divider.
     out.push_str("<g>");

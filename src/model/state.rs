@@ -45,6 +45,10 @@ pub struct StateDiagram {
     pub direction: Option<String>,
     /// Theme name lifted from `%%{init:{theme:"..."}}%%` or frontmatter.
     pub theme_override: Option<String>,
+    /// Look variant lifted from frontmatter `config.look` (e.g. `default`,
+    /// `classic`, `neo`). When `None` we fall back to upstream default
+    /// (`classic`) at render time.
+    pub look_override: Option<String>,
     /// All states (including nested); composite children reference a
     /// parent by id.
     pub states: Vec<State>,

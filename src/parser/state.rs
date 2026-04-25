@@ -39,6 +39,9 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
             if let Some(theme) = config.theme {
                 diagram.theme_override = Some(theme);
             }
+            if let Some(look) = config.look {
+                diagram.look_override = Some(look);
+            }
         }
     }
 
@@ -396,9 +399,12 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
         .iter()
         .filter(|s| {
             // Only consider parents whose direct children include a divider.
-            s.children
-                .iter()
-                .any(|cid| matches!(diagram.states.iter().find(|c| &c.id == cid).map(|c| c.kind), Some(StateKind::Divider)))
+            s.children.iter().any(|cid| {
+                matches!(
+                    diagram.states.iter().find(|c| &c.id == cid).map(|c| c.kind),
+                    Some(StateKind::Divider)
+                )
+            })
         })
         .map(|s| s.id.clone())
         .collect();
@@ -428,11 +434,7 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
         let mut chunks: Vec<(Option<String>, Vec<String>)> = Vec::new();
         let mut current: Vec<String> = Vec::new();
         for cid in &children_list {
-            let kind = diagram
-                .states
-                .iter()
-                .find(|s| &s.id == cid)
-                .map(|s| s.kind);
+            let kind = diagram.states.iter().find(|s| &s.id == cid).map(|s| s.kind);
             if matches!(kind, Some(StateKind::Divider)) {
                 // Close the current chunk with this divider's id.
                 chunks.push((Some(cid.clone()), std::mem::take(&mut current)));
