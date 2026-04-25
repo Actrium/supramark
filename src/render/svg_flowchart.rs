@@ -576,6 +576,12 @@ pub fn render(
         if src_isolated || dst_isolated {
             continue;
         }
+        // Skip the original user self-edge: upstream `expand_self_edge`
+        // replaces it with helper nodes plus three cyclic-special sub-edges
+        // (which arrive separately via dagre_bridge synthetic exposure).
+        if is_replaced_self_loop(e) {
+            continue;
+        }
         inner.push_str(&render_edge_path(e, i, id, &l.aria_kind, &cluster_bounds));
     }
     inner.push_str(unified_shell::close_layer());
@@ -586,6 +592,9 @@ pub fn render(
         let src_isolated = is_child_of_isolated(e.start.as_deref(), l);
         let dst_isolated = is_child_of_isolated(e.end.as_deref(), l);
         if src_isolated || dst_isolated {
+            continue;
+        }
+        if is_replaced_self_loop(e) {
             continue;
         }
         inner.push_str(&render_edge_label(e));
@@ -1035,6 +1044,33 @@ fn render_cluster(
     out
 }
 
+/// Upstream's dagre `expand_self_edge` replaces every user self-edge with two
+/// helper labelRect nodes plus three `cyclic-special` sub-edges; the original
+/// `setEdge(src, dst, …)` call for the self-loop is skipped at index.js:307.
+/// Detect that case here so the renderer can drop the original edge's path /
+/// label and avoid double-rendering alongside the synthetic segments.
+///
+/// `orig_start` / `orig_end` are written by `flowchart::build_layout_data`
+/// before any cluster-anchor retargeting, so they reflect what the user
+/// actually typed. Cluster-to-cluster self-edges (where the owner is itself a
+/// subgraph) are also skipped here — upstream feeds them through the same
+/// `expand_self_edge` path, so the renderer must not emit the original.
+fn is_replaced_self_loop(e: &UEdge) -> bool {
+    let os = e
+        .extra
+        .get("orig_start")
+        .map(|s| s.as_str())
+        .or(e.start.as_deref())
+        .unwrap_or("");
+    let od = e
+        .extra
+        .get("orig_end")
+        .map(|s| s.as_str())
+        .or(e.end.as_deref())
+        .unwrap_or("");
+    !os.is_empty() && os == od
+}
+
 /// Return true if `node_id` has any ancestor that is an isolated cluster.
 /// Used to skip nodes/edges at the outer render level that belong inside
 /// an isolated cluster's inner root group.
@@ -1286,6 +1322,11 @@ fn render_isolated_cluster_inner_root(
         if src_in_sub_iso || dst_in_sub_iso {
             continue;
         }
+        // Drop the original user self-edge (replaced by cyclic-special segments
+        // in upstream `expand_self_edge`).
+        if is_replaced_self_loop(e) {
+            continue;
+        }
         out.push_str(&render_edge_path(
             e,
             i,
@@ -1325,6 +1366,9 @@ fn render_isolated_cluster_inner_root(
             .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
             .unwrap_or(false);
         if src_in_sub_iso || dst_in_sub_iso {
+            continue;
+        }
+        if is_replaced_self_loop(e) {
             continue;
         }
         out.push_str(&render_edge_label(e));

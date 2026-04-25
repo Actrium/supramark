@@ -6,7 +6,17 @@ use std::env;
 use std::fs;
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let raw: Vec<String> = env::args().skip(1).collect();
+    let mut dump = false;
+    let mut detail = false;
+    let mut args: Vec<String> = Vec::new();
+    for a in raw {
+        match a.as_str() {
+            "--dump" => dump = true,
+            "--detail" => detail = true,
+            _ => args.push(a),
+        }
+    }
     let mut names: Vec<(String, String)> = Vec::new();
     if args.is_empty() {
         names.push(("ext_fixtures/cypress/flowchart".into(), "134".into()));
@@ -75,6 +85,25 @@ fn main() {
             Ok(Ok(s)) => s,
             _ => { println!("FC{} render fail", name); continue; }
         };
+        if dump {
+            let outp = format!("/tmp/fc_{}_got.svg", name);
+            let outwant = format!("/tmp/fc_{}_want.svg", name);
+            std::fs::write(&outp, &got).unwrap();
+            std::fs::write(&outwant, &expected).unwrap();
+            println!("dumped {} (got, {} bytes) and {} (want, {} bytes)", outp, got.len(), outwant, expected.len());
+        }
+        if detail {
+            println!("nodes: {}", l.nodes.len());
+            for n in &l.nodes {
+                println!("  node id={} shape={:?} extra={:?} pos=({:?},{:?}) wh=({:?},{:?}) parent={:?} is_group={}",
+                    n.id, n.shape, n.extra, n.x, n.y, n.width, n.height, n.parent_id, n.is_group);
+            }
+            println!("edges: {}", l.edges.len());
+            for e in &l.edges {
+                println!("  edge id={} src={:?} dst={:?} extra={:?} pts_len={:?}",
+                    e.id, e.start, e.end, e.extra, e.points.as_ref().map(|p| p.len()));
+            }
+        }
         let a = got.as_bytes();
         let b = expected.as_bytes();
         let n = a.len().min(b.len());
