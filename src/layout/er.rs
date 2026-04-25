@@ -25,9 +25,9 @@
 use crate::error::Result;
 use crate::font_metrics::{line_height, text_width};
 use crate::layout::unified::render as unified_render;
-use crate::text::markdown_text_content;
 use crate::layout::unified::types::{Edge, LayoutData, LayoutResult, Node};
 use crate::model::er::{ErDiagram, Relationship};
+use crate::text::markdown_text_content;
 use crate::theme::ThemeVariables;
 
 /// Trebuchet/etc. CSS default in the reference SVG — kept as a constant
@@ -215,7 +215,13 @@ fn measure_label_height() -> f64 {
 fn entity_box_size(label_w: f64, label_h: f64, rendered_label: &str) -> (f64, f64) {
     // Upstream's minEntityWidth check uses calculateTextWidth which
     // reads config.fontSize (16 px by default), NOT the label's 14 px.
-    let check_w = text_width(rendered_label, LABEL_FONT_FAMILY, THEME_FONT_SIZE, false, false);
+    let check_w = text_width(
+        rendered_label,
+        LABEL_FONT_FAMILY,
+        THEME_FONT_SIZE,
+        false,
+        false,
+    );
     let width = if check_w + PADDING * 2.0 < MIN_ENTITY_WIDTH {
         MIN_ENTITY_WIDTH
     } else {
@@ -395,11 +401,17 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         } else {
             entity.label.clone()
         };
-        
+
         // Collect styled font properties from classDefs + style commands.
         let (styled_size, styled_bold) = resolve_styled_font(entity, &d.classes);
         let label_w = if styled_size != LABEL_FONT_SIZE || styled_bold {
-            text_width(&rendered_label, LABEL_FONT_FAMILY, styled_size, styled_bold, false)
+            text_width(
+                &rendered_label,
+                LABEL_FONT_FAMILY,
+                styled_size,
+                styled_bold,
+                false,
+            )
         } else {
             measure_width(&rendered_label)
         };
@@ -408,7 +420,7 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         } else {
             label_h
         };
-        
+
         let (w, h) = if entity.attributes.is_empty() {
             entity_box_size(label_w, label_h_s, &rendered_label)
         } else {
@@ -481,7 +493,13 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
         };
         let (styled_size, styled_bold) = resolve_styled_font(entity, &d.classes);
         let label_w = if styled_size != LABEL_FONT_SIZE || styled_bold {
-            text_width(&rendered_label, LABEL_FONT_FAMILY, styled_size, styled_bold, false)
+            text_width(
+                &rendered_label,
+                LABEL_FONT_FAMILY,
+                styled_size,
+                styled_bold,
+                false,
+            )
         } else {
             measure_width(&rendered_label)
         };
@@ -590,20 +608,79 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
     }
     for e in &out.edges {
         // The reference `pathBBox` parses the emitted `d` attribute which
-        // uses 3-decimal rounding (d3-path's `.appendRound(3)`). We mirror
-        // that rounding here so bounds match.
+        // uses 3-decimal rounding (d3-path's `.appendRound(3)`). The actual
+        // path d is a `curveBasis` spline; pathBBox unions every M/L/C anchor
+        // and control point. The raw dagre waypoints are NOT directly visible
+        // in the path (basis only interpolates the endpoints), so unioning
+        // raw points overshoots / undershoots the true rendered envelope.
+        // Mirror `render::edges::path_basis` to collect the exact set of
+        // (x,y) tokens the renderer will emit.
         let r3 = |v: f64| (v * 1000.0).round() / 1000.0;
-        for (x, y) in &e.points {
+        let mut acc_pt = |x: f64, y: f64| {
             acc(
                 &mut min_x,
                 &mut min_y,
                 &mut max_x,
                 &mut max_y,
-                r3(*x),
-                r3(*y),
+                r3(x),
+                r3(y),
                 0.0,
                 0.0,
             );
+        };
+        let n = e.points.len();
+        if n == 1 {
+            acc_pt(e.points[0].0, e.points[0].1);
+        } else if n >= 2 {
+            // M p0
+            let (mut x0, mut y0) = (f64::NAN, f64::NAN);
+            let (mut x1, mut y1) = (f64::NAN, f64::NAN);
+            let mut state = 0u8;
+            for &(x, y) in &e.points {
+                match state {
+                    0 => {
+                        acc_pt(x, y); // M
+                        state = 1;
+                    }
+                    1 => {
+                        state = 2;
+                    }
+                    2 => {
+                        // L (5*x0+x1)/6, ...
+                        acc_pt((5.0 * x0 + x1) / 6.0, (5.0 * y0 + y1) / 6.0);
+                        // C c1, c2, e
+                        acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                        acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                        acc_pt((x0 + 4.0 * x1 + x) / 6.0, (y0 + 4.0 * y1 + y) / 6.0);
+                        state = 3;
+                    }
+                    _ => {
+                        acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                        acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                        acc_pt((x0 + 4.0 * x1 + x) / 6.0, (y0 + 4.0 * y1 + y) / 6.0);
+                    }
+                }
+                x0 = x1;
+                x1 = x;
+                y0 = y1;
+                y1 = y;
+            }
+            // lineEnd
+            match state {
+                3 => {
+                    // emit_basis_cubic(p_{n-2}, p_{n-1}, p_{n-1})
+                    acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                    acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                    acc_pt((x0 + 5.0 * x1) / 6.0, (y0 + 5.0 * y1) / 6.0);
+                    // L p_{n-1}
+                    acc_pt(x1, y1);
+                }
+                2 => {
+                    // L p1
+                    acc_pt(x1, y1);
+                }
+                _ => {}
+            }
         }
         // Edge label FO at (0, 0, label_w, label_h)
         acc(
@@ -677,7 +754,9 @@ fn resolve_styled_font(
 
     for style in &all_styles {
         let style = style.trim();
-        if style.is_empty() { continue; }
+        if style.is_empty() {
+            continue;
+        }
         if let Some((prop, val)) = style.split_once(':') {
             let prop = prop.trim();
             let val = val.trim();
@@ -688,7 +767,12 @@ fn resolve_styled_font(
                     }
                 }
                 "font-weight" => {
-                    if val == "bold" || val == "bolder" || val.starts_with('7') || val.starts_with('8') || val.starts_with('9') {
+                    if val == "bold"
+                        || val == "bolder"
+                        || val.starts_with('7')
+                        || val.starts_with('8')
+                        || val.starts_with('9')
+                    {
                         bold = true;
                     }
                 }
@@ -745,30 +829,53 @@ mod tests {
         let ref_positions: &[(&str, f64, f64, f64)] = &[
             ("entity-CUSTOMER-0", 347.3310546875, 46.1484375, 119.1328125),
             ("entity-ORDER-1", 184.915283203125, 218.7421875, 100.0),
-            ("entity-LINE-ITEM-2", 62.9521484375, 391.3359375, 109.904296875),
-            ("entity-ADDRESS-3", 428.657470703125, 218.7421875, 107.484375),
-            ("entity-INVOICE-4", 306.87841796875, 391.3359375, 97.9482421875),
+            (
+                "entity-LINE-ITEM-2",
+                62.9521484375,
+                391.3359375,
+                109.904296875,
+            ),
+            (
+                "entity-ADDRESS-3",
+                428.657470703125,
+                218.7421875,
+                107.484375,
+            ),
+            (
+                "entity-INVOICE-4",
+                306.87841796875,
+                391.3359375,
+                97.9482421875,
+            ),
         ];
 
         for (id, ref_x, ref_y, ref_w) in ref_positions {
-            let entity = l.entities.iter().find(|e| e.id == *id)
+            let entity = l
+                .entities
+                .iter()
+                .find(|e| e.id == *id)
                 .unwrap_or_else(|| panic!("entity {} not found", id));
             assert!(
                 (entity.x - ref_x).abs() < 1e-3,
                 "{} x: got {}, expected {}",
-                id, entity.x, ref_x
+                id,
+                entity.x,
+                ref_x
             );
             assert!(
                 (entity.y - ref_y).abs() < 1e-3,
                 "{} y: got {}, expected {}",
-                id, entity.y, ref_y
+                id,
+                entity.y,
+                ref_y
             );
             assert!(
                 (entity.width - ref_w).abs() < 1e-3,
                 "{} width: got {}, expected {}",
-                id, entity.width, ref_w
+                id,
+                entity.width,
+                ref_w
             );
         }
     }
-
 }
