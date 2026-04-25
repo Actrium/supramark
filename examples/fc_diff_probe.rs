@@ -1,6 +1,8 @@
 use mermaid_little::layout::flowchart as layout_fc;
 use mermaid_little::parser::flowchart as parser_fc;
+use mermaid_little::preprocess;
 use mermaid_little::render::svg_flowchart;
+use mermaid_little::theme;
 use mermaid_little::theme::get_theme;
 use std::env;
 use std::fs;
@@ -62,7 +64,17 @@ fn main() {
             Ok(Ok(d)) => d,
             _ => { println!("FC{} parse fail", name); continue; }
         };
-        let theme = get_theme("default");
+        // Mirror lib.rs::convert_with_id so `%%{init: { theme,
+        // themeVariables }}%%` directives propagate to layout & render.
+        let pre = match preprocess::preprocess(&source) {
+            Ok(p) => p,
+            Err(_) => { let _ = get_theme; continue; }
+        };
+        let theme_name = pre.config.theme.as_deref().unwrap_or("default");
+        let mut theme = theme::get_theme(theme_name);
+        if let Some(tv) = pre.config.theme_variables.as_ref() {
+            theme::apply_theme_variables(&mut theme, tv);
+        }
         let l = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout_fc::layout(&d, &theme))) {
             Ok(Ok(l)) => l,
             _ => { println!("FC{} layout fail", name); continue; }
@@ -102,7 +114,12 @@ fn main() {
             for e in &l.edges {
                 println!("  edge id={} src={:?} dst={:?} extra={:?} pts_len={:?}",
                     e.id, e.start, e.end, e.extra, e.points.as_ref().map(|p| p.len()));
+                if let Some(pts) = &e.points {
+                    let s: Vec<String> = pts.iter().map(|p| format!("({:.3},{:.3})", p.x, p.y)).collect();
+                    println!("    pts: {}", s.join(" "));
+                }
             }
+            println!("isolated_cluster_ids: {:?}", l.isolated_cluster_ids);
         }
         let a = got.as_bytes();
         let b = expected.as_bytes();

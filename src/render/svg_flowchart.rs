@@ -566,14 +566,17 @@ pub fn render(
     }
     inner.push_str(unified_shell::close_layer());
 
-    // Edge paths (outer level — only non-isolated-cluster edges).
+    // Edge paths (outer level).
+    //
+    // An edge is rendered at the outer level UNLESS both endpoints share
+    // the same outermost isolated cluster ancestor — in which case the
+    // edge renders inside that cluster's inner root group instead.
+    // Cross-cluster edges (e.g. `A --> B` where A and B are isolated
+    // subgraphs) belong here because the routed points are in the outer
+    // (top-level) coordinate space.
     inner.push_str(&unified_shell::open_layer("edgePaths"));
     for (i, e) in l.edges.iter().enumerate() {
-        // Skip edges whose endpoints are children of an isolated cluster —
-        // those are rendered in the inner root group below.
-        let src_isolated = is_child_of_isolated(e.start.as_deref(), l);
-        let dst_isolated = is_child_of_isolated(e.end.as_deref(), l);
-        if src_isolated || dst_isolated {
+        if edge_is_inside_isolated(e.start.as_deref(), e.end.as_deref(), l) {
             continue;
         }
         // Skip the original user self-edge: upstream `expand_self_edge`
@@ -586,12 +589,10 @@ pub fn render(
     }
     inner.push_str(unified_shell::close_layer());
 
-    // Edge labels (outer level).
+    // Edge labels (outer level — same selection rule as edge paths).
     inner.push_str(&unified_shell::open_layer("edgeLabels"));
     for e in l.edges.iter() {
-        let src_isolated = is_child_of_isolated(e.start.as_deref(), l);
-        let dst_isolated = is_child_of_isolated(e.end.as_deref(), l);
-        if src_isolated || dst_isolated {
+        if edge_is_inside_isolated(e.start.as_deref(), e.end.as_deref(), l) {
             continue;
         }
         if is_replaced_self_loop(e) {
@@ -609,7 +610,16 @@ pub fn render(
 
     // Render top-level isolated clusters as inner <g class="root"> groups.
     // "Top-level" = isolated cluster whose parent is NOT also isolated.
-    for cluster_id in &l.isolated_cluster_ids {
+    //
+    // Iteration order matches upstream's recursiveRender DFS traversal,
+    // which (because flowDb.getData reverses subgraph insertion order)
+    // visits sibling subgraphs in REVERSED declaration order. Using the
+    // shared `cluster_render_order` keeps isolated and non-isolated
+    // clusters aligned.
+    for cluster_id in &cluster_render_order {
+        if !l.isolated_cluster_ids.contains(cluster_id) {
+            continue;
+        }
         if let Some(cnode) = l.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
             // Skip if parent is also an isolated cluster (nested, handled recursively).
             let parent_also_isolated = cnode
@@ -1105,6 +1115,50 @@ fn is_child_of_isolated(node_id: Option<&str>, l: &FlowchartLayout) -> bool {
         } else {
             return false;
         }
+    }
+}
+
+/// Return the outermost isolated cluster ancestor of `node_id`, or `None`
+/// if `node_id` has no isolated ancestor.
+///
+/// Walks up the parent chain and remembers the topmost ancestor whose id
+/// appears in `l.isolated_cluster_ids`. Used to decide which inner root
+/// (if any) owns an edge: an edge belongs to a cluster's inner root iff
+/// both endpoints share that cluster as their topmost isolated ancestor.
+/// Cross-cluster edges (different topmost ancestors, or one without an
+/// isolated ancestor) render at the outer level instead.
+fn outermost_isolated_ancestor(node_id: &str, l: &FlowchartLayout) -> Option<String> {
+    let mut top: Option<String> = None;
+    let mut current = node_id;
+    loop {
+        if let Some(n) = l.nodes.iter().find(|n| n.id == current) {
+            if let Some(parent) = n.parent_id.as_deref() {
+                if l.isolated_cluster_ids.contains(parent) {
+                    top = Some(parent.to_string());
+                }
+                current = parent;
+            } else {
+                return top;
+            }
+        } else {
+            return top;
+        }
+    }
+}
+
+/// Return true when both endpoints of an edge are descendants of the
+/// same outermost isolated cluster — i.e. the edge is fully contained
+/// inside that cluster and should render at the inner root instead of
+/// the outer level.
+fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLayout) -> bool {
+    let (Some(s), Some(d)) = (src, dst) else {
+        return false;
+    };
+    let s_top = outermost_isolated_ancestor(s, l);
+    let d_top = outermost_isolated_ancestor(d, l);
+    match (s_top, d_top) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
     }
 }
 
