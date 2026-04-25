@@ -909,19 +909,53 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
     let label_tx = cx - lw / 2.0;
     let label_ty = ry + 1.0;
 
-    // CSS class string. Upstream emits `" statediagram-state statediagram-cluster "`
-    // (leading + trailing space). Our state layout sets `n.css_classes` to
-    // `"statediagram-cluster"` for composite states; reuse it but ensure the
-    // final attribute matches upstream's exact spacing.
+    // CSS class string. Upstream `dataFetcher` builds the cluster's class
+    // list as
+    //   `${cssClasses} ${CSS_DIAGRAM_CLUSTER} ${altFlag ? CSS_DIAGRAM_CLUSTER_ALT : ""}`
+    // The final interpolation is empty when the cluster sits at an odd
+    // depth, leaving a TRAILING SPACE; at even depth the suffix is
+    // `statediagram-cluster-alt` and the string has NO trailing space.
+    // Either form gets emitted verbatim as `class=" ${cssClasses}"`.
+    //
+    // Our state layout already mirrors that template into `n.css_classes`
+    // (without the leading space). Prefer it verbatim; fall back to the
+    // canonical default only when missing entirely.
     let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
-    // Some passes overwrite css_classes to " statediagram-state". Detect the
-    // composite-state cluster case and emit the canonical class string.
-    let css_attr = if css.trim() == "statediagram-cluster" {
+    let trimmed = css.trim();
+    let css_attr = if trimmed.is_empty() {
         " statediagram-state statediagram-cluster ".to_string()
-    } else if css.contains("statediagram-cluster") {
-        format!(" statediagram-state {} ", css.trim())
+    } else if trimmed == "statediagram-cluster" {
+        // Bare layout default — wrap with the diagram-state prefix.
+        " statediagram-state statediagram-cluster ".to_string()
+    } else if trimmed.contains("statediagram-state") && trimmed.contains("statediagram-cluster") {
+        // Already a fully-qualified class list. Replicate upstream's exact
+        // trailing-space behaviour: keep the trailing space iff the
+        // statediagram-cluster token is the last token (i.e. no -alt
+        // suffix).
+        let last_is_cluster = trimmed
+            .split_ascii_whitespace()
+            .next_back()
+            .map(|t| t == "statediagram-cluster")
+            .unwrap_or(false);
+        if last_is_cluster {
+            format!(" {} ", trimmed)
+        } else {
+            format!(" {}", trimmed)
+        }
+    } else if trimmed.contains("statediagram-cluster") {
+        // Cluster class present but missing the state prefix — synthesize.
+        let last_is_cluster = trimmed
+            .split_ascii_whitespace()
+            .next_back()
+            .map(|t| t == "statediagram-cluster")
+            .unwrap_or(false);
+        if last_is_cluster {
+            format!(" statediagram-state {} ", trimmed)
+        } else {
+            format!(" statediagram-state {}", trimmed)
+        }
     } else {
-        format!(" statediagram-state statediagram-cluster ")
+        " statediagram-state statediagram-cluster ".to_string()
     };
 
     let mut out = String::new();

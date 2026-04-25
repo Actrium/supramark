@@ -1169,11 +1169,15 @@ fn layout_isolated_cluster(
         g.set_parent(&child.id, Some(cluster_id));
     }
 
-    // Add isolated sub-clusters as opaque leaf nodes with pre-computed dims.
+    // Add isolated sub-clusters as opaque leaf nodes with the bounding-box
+    // dimensions that upstream's `updateNodeBounds(node, el)` would return for
+    // the inner-rendered SVG (matching `recursiveRender` flow). The bbox
+    // includes the cluster rect (at local [8, 8 + cluster_w]) and any leaf
+    // child positioned by the inner dagre, so it is always >= cluster size.
     for (cid, inner) in &sub_isolated {
         let lbl = NodeLabel {
-            width: inner.cluster_width,
-            height: inner.cluster_height,
+            width: inner.bbox_width,
+            height: inner.bbox_height,
             ..NodeLabel::default()
         };
         g.set_node(cid.clone(), Some(lbl));
@@ -1469,13 +1473,22 @@ fn layout_isolated_cluster(
     //
     // Verified against fixtures `cypress/state/30` and `cypress/state/68`,
     // which differ from upstream by exactly this 5×5 swap.
+    //
+    // Sub-isolated cluster children enter the inner dagre as opaque leaf
+    // nodes (set_node with `bbox_width × bbox_height`, no compound parent
+    // relationship), so the divergence pattern applies just as well when
+    // every direct rank participant is either a true leaf or an opaque
+    // sub-isolated leaf. cypress/state/25 and /67 (PilotCockpit > Parent > C)
+    // hit this branch — PilotCockpit's pass sees only a single sub_isolated
+    // entry (Parent) treated as a leaf.
     let all_leaves_unpadded = leaf_children
         .iter()
         .all(|c| c.padding.unwrap_or(0.0) == 0.0);
+    // Treat sub_isolated children as leaves for the purpose of this fix.
+    let leaf_like_count = leaf_children.len() + sub_isolated.len();
     let leaf_only_lr = matches!(inner_rankdir, RankDir::LR)
-        && sub_isolated.is_empty()
         && non_isolated_cluster_children.is_empty()
-        && !leaf_children.is_empty()
+        && leaf_like_count > 0
         && all_leaves_unpadded;
     if leaf_only_lr {
         let dw = -5.0_f64;
@@ -1484,7 +1497,8 @@ fn layout_isolated_cluster(
         let dy = dh / 2.0; // +2.5: cluster center moves down by half the height gain
         log::debug!(
             "dagre_bridge: leaf-only-LR isolated cluster '{}' — applying 5×5 swap fix \
-             (cluster_w {}→{}, cluster_h {}→{}, inner_x {}→{}, inner_y {}→{})",
+             (cluster_w {}→{}, cluster_h {}→{}, inner_x {}→{}, inner_y {}→{}, \
+             sub_isolated={})",
             cluster_id,
             cluster_width,
             cluster_width + dw,
@@ -1494,6 +1508,7 @@ fn layout_isolated_cluster(
             inner_x + dx,
             inner_y,
             inner_y + dy,
+            sub_isolated.len(),
         );
         cluster_width += dw;
         cluster_height += dh;
@@ -1765,13 +1780,33 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
                     out.width = Some(il.cluster_width);
                     out.height = Some(il.cluster_height);
                 }
-                // For top-level isolated clusters, compute the outer translate
-                // (tx, ty) from the outer dagre position and store in extra.
-                // Downstream render uses these directly as the <g transform="translate">.
+                // Compute the outer translate (tx, ty) for the cluster's
+                // <g class="root" transform="translate(tx, ty)"> wrapper.
                 //
-                // Formula (upstream positionNode with diff = -padding = -8):
-                //   tx = outer_x + diff - bbox_width/2 = outer_x - 8 - bbox_w/2
-                //   ty = outer_y - bbox_h/2 - padding
+                // Two cases:
+                //
+                // 1. Top-level isolated cluster — `outer_x/y` come from the
+                //    outer dagre graph, where the cluster was added as a
+                //    `bbox_width × bbox_height` leaf (matching upstream's
+                //    `updateNodeBounds` after `recursiveRender`):
+                //      tx = outer_x - 8 - bbox_width / 2
+                //      ty = outer_y - bbox_height / 2 - 8
+                //
+                // 2. Nested isolated cluster (parent is itself isolated) —
+                //    `outer_x/y` come from the parent isolated cluster's inner
+                //    dagre pass (`inner_positions[id]`). The leaf size used
+                //    inside the parent pass is the nested cluster's own
+                //    `cluster_width × cluster_height` (see line ~1175 where
+                //    `set_node` for sub_isolated uses those dims), so the
+                //    positionNode formula uses cluster_width here, not bbox:
+                //      tx = parent_inner_cx - 8 - cluster_width / 2
+                //      ty = parent_inner_cy - cluster_height / 2 - 8
+                //
+                // Without case 2 the nested cluster's <g class="root"> ends up
+                // at translate(0, 0), which is the symptom that block fixtures
+                // such as cypress/state/25 + 67 rendered the nested Parent
+                // cluster at the inner-pass origin instead of its assigned
+                // position inside PilotCockpit.
                 let parent_is_isolated = orig
                     .parent_id
                     .as_deref()
@@ -1798,6 +1833,34 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
                                 ty
                             );
                         }
+                    }
+                } else if let Some(&(parent_cx, parent_cy, _, _)) =
+                    inner_positions.get(&orig.id)
+                {
+                    if let Some(il) = find_inner_layout(&orig.id, &isolated_layouts) {
+                        // Leaf width inside the parent isolated pass is the
+                        // nested cluster's own `bbox_width × bbox_height`
+                        // (matching upstream's `updateNodeBounds` after
+                        // `recursiveRender`), so the positionNode formula
+                        // `tx = node.x + diff - node.width/2`
+                        // (with `diff = -padding = -8`) becomes:
+                        //   tx = parent_cx - 8 - bbox_width / 2
+                        //   ty = parent_cy - bbox_height / 2 - 8
+                        let tx = parent_cx - cluster_padding - il.bbox_width / 2.0;
+                        let ty = parent_cy - il.bbox_height / 2.0 - cluster_padding;
+                        out.extra.insert("outer_tx".to_string(), tx.to_string());
+                        out.extra.insert("outer_ty".to_string(), ty.to_string());
+                        log::debug!(
+                            "dagre_bridge: nested isolated cluster '{}' \
+                             parent_cx={} parent_cy={} bbox_w={} bbox_h={} → tx={} ty={}",
+                            orig.id,
+                            parent_cx,
+                            parent_cy,
+                            il.bbox_width,
+                            il.bbox_height,
+                            tx,
+                            ty
+                        );
                     }
                 }
                 out.is_group = orig.is_group;

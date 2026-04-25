@@ -195,6 +195,23 @@ fn cypress_15() {
     assert_byte_exact("ext_fixtures/cypress/state/15");
 }
 
+/// Nested isolated cluster: `state PilotCockpit { state Parent { C } }`.
+/// Exercises the dagre_bridge fix that propagates `outer_tx/outer_ty` to a
+/// nested isolated cluster (whose parent is itself isolated). Without it
+/// Parent's inner-root `<g>` ended up at translate(0, 0). Also exercises
+/// the depth-toggled `statediagram-cluster-alt` class on Parent (depth 2).
+#[test]
+fn cypress_25() {
+    assert_byte_exact("ext_fixtures/cypress/state/25");
+}
+
+/// Same nested-isolated-cluster shape as cypress/25 but using the v1
+/// `stateDiagram` keyword (no `-v2` suffix).
+#[test]
+fn cypress_67() {
+    assert_byte_exact("ext_fixtures/cypress/state/67");
+}
+
 /// Composite state with a single leaf child, default rankdir TB so the
 /// inner pass runs LR.  Exercises the leaf-only-LR upstream-alignment
 /// post-process inside `dagre_bridge::layout_isolated_cluster`.

@@ -35,6 +35,27 @@ pub struct StateLayout {
 /// Removes all `<...>` HTML tags. Used to measure note text width since
 /// upstream measures via `getBoundingClientRect` on jsdom which strips all
 /// HTML (including `<br/>`, `<br>`, etc.) before returning text width.
+/// Walk up `state_id`'s parent chain in `states` and count cluster ancestors.
+///
+/// Returns the depth where the root level = 1 (a state with no parent), each
+/// nested level adding one. Used to mirror upstream `dataFetcher`'s altFlag
+/// toggling for `statediagram-cluster-alt` class assignment.
+fn composite_depth(state_id: &str, states: &[crate::model::state::State]) -> usize {
+    let mut depth = 1usize;
+    let mut current_parent: Option<&str> = states
+        .iter()
+        .find(|s| s.id == state_id)
+        .and_then(|s| s.parent.as_deref());
+    while let Some(pid) = current_parent {
+        depth += 1;
+        current_parent = states
+            .iter()
+            .find(|s| s.id == pid)
+            .and_then(|s| s.parent.as_deref());
+    }
+    depth
+}
+
 fn strip_html_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -185,6 +206,10 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             StateKind::Composite => {
                 n.is_group = true;
                 n.shape = Some("rect".into());
+                // The cluster CSS class is appended below alongside the
+                // applied-class handling, mirroring upstream `dataFetcher`'s
+                // order (state classes first, then cluster classes with the
+                // depth-toggled alt suffix).
                 n.css_classes = Some("statediagram-cluster".into());
                 n.padding = Some(8.0);
             }
@@ -256,7 +281,7 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 .filter(|ca| ca.state_id == state.id)
                 .map(|ca| ca.class_name.as_str())
                 .collect();
-            let css_classes = if applied.is_empty() {
+            let mut css_classes = if applied.is_empty() {
                 // Default: leading space before "statediagram-state" —
                 // upstream produces `" statediagram-state"` (note the space).
                 " statediagram-state".to_string()
@@ -265,6 +290,21 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 // leading space when there are applied classes.
                 format!("{} statediagram-state", applied.join(" "))
             };
+            // For composite states, upstream `dataFetcher` then appends
+            // ` statediagram-cluster ${altFlag ? statediagram-cluster-alt : ""}`.
+            // The altFlag toggles each time `setupDoc` recurses into a doc:
+            // root level uses `!true = false`, depth 2 uses `true`, etc. So a
+            // Composite at depth 2/4/6/... gets the alt class, while
+            // Composites at depth 1/3/5/... get only the plain cluster class.
+            if matches!(state.kind, StateKind::Composite) {
+                let depth = composite_depth(&state.id, &d.states);
+                let alt = depth >= 2 && depth % 2 == 0;
+                if alt {
+                    css_classes.push_str(" statediagram-cluster statediagram-cluster-alt");
+                } else {
+                    css_classes.push_str(" statediagram-cluster");
+                }
+            }
             n.css_classes = Some(css_classes);
 
             // Populate css_compiled_styles from classDef styles.
