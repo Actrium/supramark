@@ -556,6 +556,10 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                         e.curve = Some("basis".into());
                         e.thickness = Some("normal".into());
                         e.pattern = Some("solid".into());
+                        // Record original endpoints so is_isolated_cluster can
+                        // detect cluster-to-cluster edges (mirrors flowchart layout).
+                        e.extra.insert("orig_start".into(), t.source.clone());
+                        e.extra.insert("orig_end".into(), t.target.clone());
                         if let Some(lines) = &t.label {
                             let raw_label = lines.join("\n");
                             let decoded = decode_label_entities(&raw_label);
@@ -591,6 +595,10 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             e.curve = Some("basis".into());
             e.thickness = Some("normal".into());
             e.pattern = Some("solid".into());
+            // Record original endpoints so is_isolated_cluster can
+            // detect cluster-to-cluster edges (mirrors flowchart layout).
+            e.extra.insert("orig_start".into(), t.source.clone());
+            e.extra.insert("orig_end".into(), t.target.clone());
             if let Some(lines) = &t.label {
                 let raw_label = lines.join("\n");
                 let decoded = decode_label_entities(&raw_label);

@@ -598,24 +598,10 @@ fn emit_cluster(svg_id: &str, n: &Node) -> String {
             h = fmt_num(h),
         );
     }
-    let label = n.label.as_deref().unwrap_or("");
-    let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
-    format!(
-        concat!(
-            r#"<g class=" statediagram-state {css}" id="{svg_id}-{dom_id}" data-id="{dom_id}" data-look="classic">"#,
-            r#"<g><rect class="outer" x="{rx}" y="{ry}" width="{w}" height="{h}" data-look="classic"></rect></g>"#,
-            r#"<g class="cluster-label"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml">{lbl}</div></foreignObject></g>"#,
-            r#"</g>"#,
-        ),
-        css = css,
-        svg_id = svg_id,
-        dom_id = xml_escape(dom_id),
-        rx = fmt_num(-w / 2.0),
-        ry = fmt_num(-h / 2.0),
-        w = fmt_num(w),
-        h = fmt_num(h),
-        lbl = xml_escape(label),
-    )
+    // Regular composite state cluster — share the rich-shape emitter with
+    // the isolated-cluster path so that data-id, class, label translate, and
+    // inner-rect attributes match upstream's `roundedWithTitle` shape.
+    emit_isolated_cluster_shape(n, svg_id)
 }
 
 /// Walk up the parent chain from `node_id`. Return true if any ancestor is in
@@ -643,11 +629,25 @@ fn has_isolated_ancestor(
 
 /// Return true if either of the edge's endpoints (or any ancestor of either)
 /// is an isolated cluster.
+///
+/// Cluster-to-cluster edges (where both endpoints are themselves cluster ids)
+/// are NOT considered "inside" any isolated cluster — they connect two
+/// boundaries and belong in the top-level `<g class="edgePaths">`.
 fn edge_endpoint_is_isolated(
     e: &Edge,
     nodes: &[Node],
     iso_ids: &std::collections::HashSet<String>,
 ) -> bool {
+    let cluster_ids: std::collections::HashSet<&str> = nodes
+        .iter()
+        .filter(|n| n.is_group)
+        .map(|n| n.id.as_str())
+        .collect();
+    if let (Some(s), Some(d)) = (e.start.as_deref(), e.end.as_deref()) {
+        if cluster_ids.contains(s) && cluster_ids.contains(d) {
+            return false;
+        }
+    }
     let in_iso = |id: &str| iso_ids.contains(id) || has_isolated_ancestor(id, nodes, iso_ids);
     if let Some(s) = e.start.as_deref() {
         if in_iso(s) {
