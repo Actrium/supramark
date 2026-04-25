@@ -59,7 +59,7 @@ pub fn render(
     // their **local** coords. To stay byte-exact we mimic the same
     // quirk here.
     let pad = 8.0_f64;
-    let svg_bbox = compute_svg_bbox_local(l);
+    let svg_bbox = compute_svg_bbox_local(l, d);
     let (mut bx, mut by, mut bw, mut bh) = svg_bbox;
     // Pre-title bounds — used for the title's `x` anchor. Mermaid sets
     // the title `x` to the centre of the pre-title bbox so the title
@@ -158,7 +158,7 @@ pub fn render(
     // Nodes
     out.push_str(r#"<g class="nodes">"#);
     for n in l.unified.nodes.iter().filter(|n| !n.is_group) {
-        out.push_str(&render_node(id, n, theme));
+        out.push_str(&render_node(id, n, theme, d));
     }
     out.push_str("</g>");
 
@@ -260,8 +260,46 @@ fn render_cluster(id: &str, n: &LayoutNode, _theme: &ThemeVariables) -> String {
 // `roughjs@4.6.6` with `seed: 1`, `roughness: 0`, `fillStyle: 'solid'`.
 // Both pieces are deterministic — see `rough_rect_outline_path`.
 // ──────────────────────────────────────────────────────────────────────
-fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables) -> String {
+/// Strip the leading visibility escape (`\+`, `\-`, `\#`, `\~`) and
+/// decode the `&lt;`/`&gt;` entities back to literal angle brackets — the
+/// text the upstream markdown→`<p>` pipeline ends up displaying.
+fn displayed_member_text_local(text: &str) -> String {
+    let mut s = text.to_string();
+    if let Some(rest) = s.strip_prefix('\\') {
+        s = rest.to_string();
+    }
+    s.replace("&lt;", "<").replace("&gt;", ">")
+}
+
+/// Emit one `<g class="label">` child inside members- or methods-group.
+/// The inner foreignObject layout matches upstream `addText()` for a
+/// single-line html label (`numberOfLines = 1` → translate(0, -bbox_h/2)).
+fn render_class_text_row(m: &crate::model::class::ClassMember) -> String {
+    let family = "trebuchet ms,verdana,arial,sans-serif";
+    let font = 14.0_f64;
+    let line_h = 16.296875_f64;
+    let display = displayed_member_text_local(&m.text);
+    let display_w = crate::font_metrics::text_width(&display, family, font, false, false);
+    let span_max_w =
+        crate::font_metrics::text_width(&display, family, 16.0, false, false).round() + 50.0;
+    let escaped = html_escape(&display);
+    let style = m.css_style.clone();
+    format!(
+        r#"<g class="label" style="{cls}" transform="translate(0,{ty})"><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel markdown-node-label" style=""><p>{txt}</p></span></div></foreignObject></g>"#,
+        cls = style,
+        ty = fmt_num(-line_h / 2.0),
+        w = fmt_num(display_w),
+        h = fmt_num(line_h),
+        mw = fmt_num(span_max_w),
+        txt = escaped,
+    )
+}
+
+fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagram) -> String {
     let _ = theme;
+    // Pull the matching parsed ClassNode for member/method/annotation
+    // text — needed when the classBox renders non-empty group rows.
+    let class_node = d.classes.iter().find(|c| c.id == n.id);
     let label = n.label.as_deref().unwrap_or("");
     let cx = n.x.unwrap_or(0.0);
     let cy = n.y.unwrap_or(0.0);
@@ -381,26 +419,151 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables) -> String {
     out.push_str("</g>");
     out.push_str("</g>");
 
-    // Members and methods groups: translate(-bbox_w/2, …). Upstream's
-    // classBox.ts uses `x = -w / 2` where `w = max(node.width,
-    // bbox.width)`. classBox runs BEFORE updateNodeBounds, so node.width
-    // is the diagram-author-supplied value (typically 0); thus `w`
-    // collapses to `bbox.width`, which for class/186 equals the label
-    // width (only foreignObject in the bbox).
-    let bbox_w = label_w;
+    // Members and methods groups: translate(x, y) — derived from
+    // upstream classBox.ts + textHelper.ts:
+    //   x = -w/2     where w = max(node.width ?? 0, bbox.width)
+    //   y_internal_h = h_internal (= drawn_h - 4*PADDING when renderExtraBox,
+    //                              drawn_h - 2*PADDING + PADDING otherwise)
+    //   members translateY = annotationGroupHeight + labelGroupHeight + GAP*2 + (y_internal + PADDING - extraBoxOffset)
+    //   methods translateY = annotationGroupHeight + labelGroupHeight + membersGroupHeight + (y_internal + PADDING - extraBoxOffset) + GAP*4 + PADDING ? wait no
+    //
+    // For empty-members/methods with renderExtraBox=true the upstream
+    // formulas collapse to the original constants we already use;
+    // for non-empty rows, we replicate the textHelper transform plus the
+    // classBox post-adjustment loop.
+    let has_members = class_node.map_or(false, |c| !c.members.is_empty());
+    let has_methods = class_node.map_or(false, |c| !c.methods.is_empty());
+    let render_extra_box = !has_members && !has_methods;
+    // bbox.width as seen by classBox = max foreignObject width across
+    // all visible groups. For empty members/methods this is just the
+    // label's foreignObject width.
+    let label_family_member = "trebuchet ms,verdana,arial,sans-serif";
+    let label_font_member = 14.0_f64;
+    let display_widths = |members: &[crate::model::class::ClassMember]| -> Vec<f64> {
+        members
+            .iter()
+            .map(|m| {
+                let s = displayed_member_text_local(&m.text);
+                crate::font_metrics::text_width(
+                    &s,
+                    label_family_member,
+                    label_font_member,
+                    false,
+                    false,
+                )
+            })
+            .collect()
+    };
+    let mut bbox_w = label_w;
+    let member_widths: Vec<f64> = class_node
+        .map(|c| display_widths(&c.members))
+        .unwrap_or_default();
+    let method_widths: Vec<f64> = class_node
+        .map(|c| display_widths(&c.methods))
+        .unwrap_or_default();
+    for w in &member_widths {
+        if *w > bbox_w {
+            bbox_w = *w;
+        }
+    }
+    for w in &method_widths {
+        if *w > bbox_w {
+            bbox_w = *w;
+        }
+    }
     let group_x = -bbox_w / 2.0;
-    let members_y = drawn_h / 2.0 - padding;
-    let methods_y = drawn_h / 2.0 + padding + padding / 2.0;
+
+    // Reproduce textHelper's intra-group translateY + classBox's post
+    // adjustment.  See `classBox.ts` lines 94–166.
+    //
+    // classBox reads the *post-textHelper* getBBox().height of each
+    // group, and then subtracts `PADDING/2` if `renderExtraBox` is true
+    // — but importantly the JS `|| 0` fallback is only triggered when
+    // the *expression value* is falsy (0, NaN, undefined). A negative
+    // number stays as-is, hence `0 - PADDING/2 = -6` survives.
+    let raw_annotation_h = 0.0_f64; // empty annotation
+    let raw_label_h = label_h; // single foreignObject
+    // members getBBox(): for non-empty groups every row's foreignObject
+    // sits at intrinsic (0,0); the union therefore collapses to a single
+    // (0, 0, max_w, line_h) box regardless of row count (see notes in
+    // layout/class.rs::estimate_classbox_dimensions).
+    let raw_members_h = if has_members { label_h } else { 0.0 };
+    let extra_sub = if render_extra_box {
+        padding / 2.0
+    } else {
+        0.0
+    };
+    let annotation_h_cb = if raw_annotation_h - extra_sub == 0.0 {
+        0.0
+    } else {
+        raw_annotation_h - extra_sub
+    };
+    let label_h_cb = if raw_label_h - extra_sub == 0.0 {
+        0.0
+    } else {
+        raw_label_h - extra_sub
+    };
+    let members_h_cb = if raw_members_h - extra_sub == 0.0 {
+        0.0
+    } else {
+        raw_members_h - extra_sub
+    };
+    let h_internal_real = if render_extra_box {
+        drawn_h - 4.0 * padding
+    } else {
+        drawn_h - 2.0 * padding
+    };
+    let y_internal_real = -h_internal_real / 2.0;
+    let extra_box_offset = if render_extra_box {
+        padding
+    } else if !has_members && !has_methods {
+        -padding / 2.0
+    } else {
+        0.0
+    };
+    // Initial translateY set by textHelper for members:
+    //   annotationGroupHeight (raw, untouched by classBox subtraction)
+    //   + labelGroupHeight (raw)
+    //   + GAP * 2
+    // Note: textHelper uses the *raw* heights. classBox's subtracted
+    // values are only used in its own newTranslateY formula.
+    let members_translate_y_initial = raw_annotation_h + raw_label_h + 2.0 * padding;
+    let members_translate_y =
+        members_translate_y_initial + y_internal_real + padding - extra_box_offset;
+
+    // textHelper methods translateY uses post-set membersGroupHeight,
+    // but classBox *overrides* this for the methods-group with
+    //   newTranslateY = annotation_cb + label_cb + max(members_cb, GAP/2) + y + GAP*4 + PADDING
+    // (when `nodeHeightGreater` is false, the common case here).
+    let members_h_for_methods = members_h_cb.max(padding / 2.0);
+    let methods_translate_y =
+        annotation_h_cb + label_h_cb + members_h_for_methods + y_internal_real + 4.0 * padding + padding;
+
+    // Emit members-group.
     out.push_str(&format!(
-        r#"<g class="members-group text" transform="translate({mx}, {my})"></g>"#,
+        r#"<g class="members-group text" transform="translate({mx}, {my})">"#,
         mx = fmt_num(group_x),
-        my = fmt_num(members_y),
+        my = fmt_num(members_translate_y),
     ));
+    if let Some(c) = class_node {
+        for (m, _w) in c.members.iter().zip(member_widths.iter()) {
+            out.push_str(&render_class_text_row(m));
+        }
+    }
+    out.push_str("</g>");
+
+    // Emit methods-group.
     out.push_str(&format!(
-        r#"<g class="methods-group text" transform="translate({mx}, {my})"></g>"#,
+        r#"<g class="methods-group text" transform="translate({mx}, {my})">"#,
         mx = fmt_num(group_x),
-        my = fmt_num(methods_y),
+        my = fmt_num(methods_translate_y),
     ));
+    if let Some(c) = class_node {
+        for (m, _w) in c.methods.iter().zip(method_widths.iter()) {
+            out.push_str(&render_class_text_row(m));
+        }
+    }
+    out.push_str("</g>");
 
     // Divider lines. Upstream emits these whenever
     // `members.len() > 0 || methods.len() > 0 || renderExtraBox`. For
@@ -411,12 +574,18 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables) -> String {
     // The `*Height` values are reduced by `PADDING/2` for the
     // renderExtraBox path (truthy in JS even when negative, hence we
     // reproduce the same "-6 / 10.296875 / -6" fall-out byte-for-byte).
-    let annotation_h = -padding / 2.0;
-    let label_group_h = label_h - padding / 2.0;
-    let members_group_h = -padding / 2.0;
-    let first_line_y = annotation_h + label_group_h + y_internal + padding;
-    let second_line_y =
-        annotation_h + label_group_h + members_group_h + y_internal + 2.0 * padding + padding;
+    // Use the same group heights classBox itself uses (the *_cb values),
+    // not the raw textHelper values. With `renderExtraBox=true` the
+    // empty-group case collapses into the legacy `-6 / 10.296875 / -6`
+    // constants byte-for-byte; non-empty groups go through the populated
+    // formula.
+    let first_line_y = annotation_h_cb + label_h_cb + y_internal_real + padding;
+    let second_line_y = annotation_h_cb
+        + label_h_cb
+        + members_h_cb
+        + y_internal_real
+        + 2.0 * padding
+        + padding;
 
     out.push_str(&format!(
         r#"<g class="divider" style="{gs}"><path d=""#,
@@ -524,7 +693,7 @@ fn rough_curve(
 // their `pathBBox` is computed by parsing the same `d=` string the
 // renderer emits — i.e. apply marker offsets and walk the curveBasis
 // spline expansion.
-fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
+fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, f64) {
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
@@ -551,6 +720,7 @@ fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
         }
     };
 
+    let padding = 12.0_f64;
     for n in l.unified.nodes.iter().filter(|n| !n.is_group) {
         let w = n.width.unwrap_or(0.0);
         let h = n.height.unwrap_or(0.0);
@@ -562,6 +732,70 @@ fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
             if lw > 0.0 {
                 visit(0.0, 0.0, lw, label_h);
             }
+        }
+        // Member / method foreignObject contributions: each row sits at
+        // intrinsic (0, 0, display_w, line_h). Mirrors `addText()` →
+        // foreignObject which `generate_ref.mjs`'s getBBox shim treats as
+        // a transform-less box at the parent origin.
+        let class_node = d.classes.iter().find(|c| c.id == n.id);
+        if let Some(c) = class_node {
+            for m in c.members.iter().chain(c.methods.iter()) {
+                let display = displayed_member_text_local(&m.text);
+                let dw = crate::font_metrics::text_width(
+                    &display,
+                    label_family,
+                    label_font,
+                    false,
+                    false,
+                );
+                if dw > 0.0 {
+                    visit(0.0, 0.0, dw, label_h);
+                }
+            }
+            for a in &c.annotations {
+                let aw = crate::font_metrics::text_width(
+                    &format!("«{}»", a),
+                    label_family,
+                    label_font,
+                    false,
+                    false,
+                );
+                if aw > 0.0 {
+                    visit(0.0, 0.0, aw, label_h);
+                }
+            }
+        }
+        // Divider lines — these are absolute-coord paths and may extend
+        // *below* the outer rect (e.g. when the second divider sits on
+        // the gap *between* the outer rect and the methods band). Mirror
+        // the y math from render_node so the bbox catches them.
+        if w > 0.0 {
+            let drawn_w = w;
+            let drawn_h = h;
+            let has_members = class_node.map_or(false, |c| !c.members.is_empty());
+            let has_methods = class_node.map_or(false, |c| !c.methods.is_empty());
+            let render_extra_box = !has_members && !has_methods;
+            let h_internal_real = if render_extra_box {
+                drawn_h - 4.0 * padding
+            } else {
+                drawn_h - 2.0 * padding
+            };
+            let y_internal_real = -h_internal_real / 2.0;
+            let extra_sub = if render_extra_box { padding / 2.0 } else { 0.0 };
+            let raw_label_h = label_h;
+            let raw_members_h = if has_members { label_h } else { 0.0 };
+            let cb = |v: f64| if v == 0.0 { 0.0 } else { v };
+            let label_h_cb = cb(raw_label_h - extra_sub);
+            let members_h_cb = cb(raw_members_h - extra_sub);
+            let first_line_y = label_h_cb + y_internal_real + padding;
+            let second_line_y =
+                label_h_cb + members_h_cb + y_internal_real + 2.0 * padding + padding;
+            // The lines stretch from x=-drawn_w/2 to +drawn_w/2 with
+            // a 0.001 vertical span, which the path bbox parser sees as
+            // a thin (0.001-tall) box.
+            let lx = -drawn_w / 2.0;
+            visit(lx, first_line_y, drawn_w, 0.001);
+            visit(lx, second_line_y, drawn_w, 0.001);
         }
     }
 

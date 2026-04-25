@@ -298,12 +298,17 @@ fn estimate_classbox_dimensions(c: &ClassNode) -> (f64, f64) {
     // members/methods this is just the label width.
     let mut bbox_w: f64 = label_w;
     let mut bbox_h: f64 = line_h;
+    // Upstream renders `m.text` through markdown → HTML → div.textContent,
+    // which strips the leading `\` visibility escape and the `&lt;`/`&gt;`
+    // entities are restored to literal `<`/`>` before measurement.
     for m in &c.members {
-        let w = font_metrics::text_width(&m.text, family, font, false, false);
+        let display = displayed_member_text(&m.text);
+        let w = font_metrics::text_width(&display, family, font, false, false);
         bbox_w = bbox_w.max(w);
     }
     for m in &c.methods {
-        let w = font_metrics::text_width(&m.text, family, font, false, false);
+        let display = displayed_member_text(&m.text);
+        let w = font_metrics::text_width(&display, family, font, false, false);
         bbox_w = bbox_w.max(w);
     }
     // Annotations contribute too but render in a separate group above
@@ -316,15 +321,12 @@ fn estimate_classbox_dimensions(c: &ClassNode) -> (f64, f64) {
     let has_members = !c.members.is_empty();
     let has_methods = !c.methods.is_empty();
 
-    // bbox.height — only foreignObjects within the *empty* group case
-    // contribute the label height; non-empty member/method rows extend
-    // the bbox below the label by their own foreignObjects.
-    if has_members {
-        bbox_h += c.members.len() as f64 * line_h;
-    }
-    if has_methods {
-        bbox_h += c.methods.len() as f64 * line_h;
-    }
+    // bbox.height — `generate_ref.mjs`'s getBBox shim *ignores* transforms
+    // when computing the union, and every foreignObject (label / each
+    // member / each method) starts at intrinsic (0, 0, w, line_h). Their
+    // union therefore collapses to a single (0, 0, max_w, line_h) box.
+    // We intentionally do NOT add per-row height here.
+    let _ = (has_members, has_methods);
 
     // h adjustments per classBox.ts:
     let mut h = bbox_h;
@@ -345,6 +347,19 @@ fn estimate_classbox_dimensions(c: &ClassNode) -> (f64, f64) {
     let drawn_w = bbox_w + 2.0 * padding;
     let drawn_h = h + 2.0 * padding + extra_h;
     (drawn_w, drawn_h)
+}
+
+/// Strip the leading visibility escape (`\+`, `\-`, `\#`, `\~`) and decode
+/// the `&lt;`/`&gt;` entities back to literal angle brackets — what
+/// upstream's `markdown → div.textContent` pipeline ends up measuring.
+fn displayed_member_text(text: &str) -> String {
+    let mut s = text.to_string();
+    if let Some(rest) = s.strip_prefix('\\') {
+        // Drop only the backslash, keep the visibility glyph itself.
+        s = rest.to_string();
+    }
+    s = s.replace("&lt;", "<").replace("&gt;", ">");
+    s
 }
 
 fn end_marker_name(end: RelationEnd) -> String {
