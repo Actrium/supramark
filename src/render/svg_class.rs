@@ -241,11 +241,33 @@ pub fn render(
 
     // Edge labels
     out.push_str(r#"<g class="edgeLabels">"#);
+    // Precompute node id -> parent_id map. When an edge crosses a
+    // cluster boundary (source.parent != target.parent or one inside /
+    // one outside), upstream's `insertEdge` flips
+    // `pointsHasChanged = true` and `positionEdgeLabel` re-derives the
+    // label centre via `utils.calcLabelPosition` (i.e. the
+    // arc-length midpoint of the post-clip polyline) instead of
+    // dagre's per-vertex `edge.x / edge.y`.
+    let parent_of: std::collections::HashMap<&str, &str> = l
+        .unified
+        .nodes
+        .iter()
+        .filter_map(|n| {
+            n.parent_id
+                .as_deref()
+                .map(|p| (n.id.as_str(), p))
+        })
+        .collect();
     for e in &l.unified.edges {
         if e.thickness.as_deref() == Some("invisible") {
             continue;
         }
-        out.push_str(&render_edge_label(e));
+        let src = e.source.as_deref().unwrap_or("");
+        let dst = e.target.as_deref().unwrap_or("");
+        let sp = parent_of.get(src).copied();
+        let dp = parent_of.get(dst).copied();
+        let cross_cluster = sp != dp;
+        out.push_str(&render_edge_label(e, cross_cluster));
     }
     // Edge terminal labels — upstream emits these inside the same
     // `<g class="edgeLabels">` group, after all `edgeLabel`s. With
@@ -1796,21 +1818,49 @@ fn base64_points(points: &[crate::layout::unified::types::Point]) -> String {
 // ──────────────────────────────────────────────────────────────────────
 // Edge label — <g class="edgeLabel" transform="translate(lx, ly)">…</g>
 // ──────────────────────────────────────────────────────────────────────
-fn render_edge_label(e: &crate::layout::unified::types::Edge) -> String {
+fn render_edge_label(e: &crate::layout::unified::types::Edge, cross_cluster: bool) -> String {
     let label_text = e.label.as_deref().unwrap_or("");
-    let lx = e.label_x.unwrap_or(0.0);
-    let ly = e.label_y.unwrap_or(0.0);
+    let mut lx = e.label_x.unwrap_or(0.0);
+    let mut ly = e.label_y.unwrap_or(0.0);
+
+    // Mirror upstream `positionEdgeLabel`: when the edge has a label
+    // AND crosses a cluster boundary (so `pointsHasChanged` was set),
+    // re-derive (lx, ly) as the polyline's arc-length midpoint via
+    // `utils.calcLabelPosition`. Otherwise keep dagre's `edge.x/edge.y`.
+    if cross_cluster && !label_text.trim().is_empty() {
+        if let Some(pts) = e.points.as_deref() {
+            if pts.len() >= 2 {
+                let total: f64 = pts
+                    .windows(2)
+                    .map(|w| {
+                        let dx = w[1].x - w[0].x;
+                        let dy = w[1].y - w[0].y;
+                        (dx * dx + dy * dy).sqrt()
+                    })
+                    .sum();
+                if let Some(mid) = calc_point_along(pts, total / 2.0) {
+                    lx = mid.x;
+                    ly = mid.y;
+                }
+            }
+        }
+    }
 
     // If no label and no start/end labels, emit a minimal edge label
     // placeholder to match upstream's empty edge label positions.
+    //
+    // Upstream sets foreignObject `<p>` content via d3 `.html()` so
+    // textual quote characters survive verbatim — only `<>&` need
+    // escaping for an HTML body. (Inside attribute values quotes still
+    // need `&quot;`, but here we are emitting body text.)
     let (body, wrap_in_p) = if label_text.trim().is_empty() {
         if label_text.is_empty() {
             (String::new(), false)
         } else {
-            (format!("<p>{}</p>", html_escape(label_text)), false)
+            (format!("<p>{}</p>", edge_label_escape(label_text)), false)
         }
     } else {
-        (html_escape(label_text), true)
+        (edge_label_escape(label_text), true)
     };
 
     // Calculate label dimensions. When the edge has no label text
@@ -2520,6 +2570,23 @@ fn html_escape(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Edge-label body escape — mirrors upstream's `d3.html()` behaviour
+/// where text inside the foreignObject `<p>` survives literally except
+/// for the three structural HTML chars (`<`, `>`, `&`). Quote
+/// characters stay as-is so labels like `"Logo Shape"` round-trip.
+fn edge_label_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
             _ => out.push(c),
         }
     }
