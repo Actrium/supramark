@@ -2,11 +2,40 @@
 //!
 //! Used for edge labels and block-diagram labels that need to
 //! participate in layout but carry no visible container. Emits a
-//! degenerate 0.1×0.1 `<rect>` plus the centred `<text>`.
+//! degenerate 0.1×0.1 `<rect>` plus the centred `<text>` (or, for
+//! empty labels, a zero-width `<foreignObject>` block matching
+//! upstream's `labelHelper` output for label-less nodes).
+//!
+//! Upstream reference DOM (cypress/flowchart/187 helper):
+//!
+//! ```text
+//! <g class="label edgeLabel" id="…" transform="translate(tx, ty)">
+//!   <rect width="0.1" height="0.1"></rect>
+//!   <g class="label" style="" transform="translate(0, -8.1484375)">
+//!     <rect></rect>
+//!     <foreignObject width="0" height="16.296875">
+//!       <div style="display: table-cell; white-space: nowrap;
+//!                   line-height: 1.5; max-width: 10px; text-align: center;"
+//!            xmlns="http://www.w3.org/1999/xhtml">
+//!         <span class="nodeLabel "></span>
+//!       </div>
+//!     </foreignObject>
+//!   </g>
+//! </g>
+//! ```
+//!
+//! Notes that affect byte-exact output:
+//! * The outer `<rect width="0.1" height="0.1"></rect>` MUST be emitted
+//!   as paired tags — upstream's d3 `.append("rect")` always serialises
+//!   to an opened element rather than a self-closing one.
+//! * Empty labels still produce a full `<foreignObject>` body. Upstream's
+//!   `labelHelper` does not short-circuit on empty text; the inner
+//!   `<span class="nodeLabel "></span>` is what consumers measure.
 
 use super::types::{fmt_num, xml_escape};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
+use crate::render::foreign_object::{render_node_label, LabelOpts};
 use crate::theme::ThemeVariables;
 
 pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
@@ -22,8 +51,38 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         tx = fmt_num(tx),
         ty = fmt_num(ty),
     ));
-    out.push_str(r#"<rect width="0.1" height="0.1"/>"#);
-    if !label.is_empty() {
+    // Outer placeholder rect — emitted in the paired `<rect></rect>` form
+    // to match upstream's d3 serialiser. Self-closing here would diverge
+    // byte-for-byte from the reference SVG.
+    out.push_str(r#"<rect width="0.1" height="0.1"></rect>"#);
+
+    if label.is_empty() {
+        // Empty-label helper: upstream's `labelHelper` emits a full
+        // `<foreignObject>` body even when the label text is zero
+        // characters wide. The width budget for the inner `<div>` is
+        // taken from the helper rect (10 px in cypress/flowchart/187),
+        // and the inner foreignObject geometry is `width=0` /
+        // `height=line_height(14px sans-serif)` ≈ 16.296875.
+        let mut opts = LabelOpts::default();
+        opts.is_node = true;
+        opts.add_background = false;
+        opts.wrap_in_p = false;
+        // 10 px is the post-shape width upstream stamps on these
+        // `expand_self_edge` helper nodes. `node.width` is set to 10 by
+        // `dagre_bridge::expand_self_edge`; falling back to 10 keeps
+        // legacy callers (no width set) byte-stable for the canonical
+        // upstream emission.
+        let helper_width = node.width.unwrap_or(10.0);
+        opts.max_width = helper_width;
+        // Match upstream's `<g class="label" style="" transform="translate(0, -8.1484375)">`.
+        // The translate is `(0, -line_height/2)` for empty labels — they
+        // are not bbox-centred (width=0 ⇒ `-w/2 == 0`). 16.296875 is
+        // `line_height("sans-serif", 14px, !bold)` from `font_metrics`.
+        let inner_h = 16.296875_f64;
+        opts.group_transform = Some(format!("translate(0, {})", fmt_num(-inner_h / 2.0)));
+        let inner = render_node_label("", 0.0, inner_h, &opts);
+        out.push_str(&inner);
+    } else {
         out.push_str(&crate::render::foreign_object::shape_label_block(
             &xml_escape(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
@@ -44,7 +103,25 @@ mod tests {
         n.label = Some("edge".into());
         let got = draw(&n, &ThemeVariables::default()).unwrap();
         assert!(got.contains(r#"class="label edgeLabel""#));
-        assert!(got.contains(r#"<rect width="0.1" height="0.1"/>"#));
+        assert!(got.contains(r#"<rect width="0.1" height="0.1"></rect>"#));
         assert!(got.contains("edge"));
+    }
+
+    #[test]
+    fn label_rect_empty_label_emits_helper_block() {
+        // Upstream `labelHelper` emits a full <foreignObject> body even
+        // for empty text — verify we mirror it.
+        let mut n = Node::default();
+        n.id = "A---A---1".into();
+        n.x = Some(100.0);
+        n.y = Some(200.0);
+        n.width = Some(10.0);
+        // n.label left as None → empty.
+        let got = draw(&n, &ThemeVariables::default()).unwrap();
+        assert!(got.contains(r#"<rect width="0.1" height="0.1"></rect>"#));
+        assert!(got.contains(r#"<g class="label" style="" transform="translate(0, -8.1484375)">"#));
+        assert!(got.contains(r#"<rect></rect><foreignObject width="0" height="16.296875">"#));
+        assert!(got.contains(r#"<span class="nodeLabel "></span>"#));
+        assert!(got.contains("max-width: 10px"));
     }
 }
