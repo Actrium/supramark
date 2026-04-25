@@ -328,16 +328,27 @@ pub fn render(
     // Isolated clusters are rendered inside <g class="nodes"> instead (as
     // inner <g class="root"> groups — see below). Only non-isolated clusters
     // that are NOT descendants of isolated clusters appear here.
+    //
+    // Cluster rendering order matches upstream: `recursiveRender` walks the
+    // dagre graph via `sortNodesByHierarchy` (DFS from `g.children()` in
+    // insertion order), and inserts each cluster as it is visited.
+    // Upstream `flowDb.getData()` pushes subgraphs in REVERSED declaration
+    // order before vertex nodes, so the top-level graph children begin with
+    // the last-declared subgraph and end with the first-declared one.
     inner.push_str(&unified_shell::open_layer("clusters"));
-    for cluster in &l.clusters {
-        if l.isolated_cluster_ids.contains(&cluster.id) {
+    let cluster_render_order = upstream_cluster_render_order(d, l);
+    for cluster_id in &cluster_render_order {
+        if l.isolated_cluster_ids.contains(cluster_id) {
             continue;
         }
         // Skip clusters that are descendants of any isolated cluster.
-        if is_child_of_isolated(Some(&cluster.id), l) {
+        if is_child_of_isolated(Some(cluster_id), l) {
             continue;
         }
-        if let Some(cnode) = l.nodes.iter().find(|n| n.id == cluster.id && n.is_group) {
+        let Some(cluster) = l.clusters.iter().find(|c| &c.id == cluster_id) else {
+            continue;
+        };
+        if let Some(cnode) = l.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
             inner.push_str(&render_cluster(cnode, cluster, theme, id));
         }
     }
@@ -621,6 +632,90 @@ fn is_descendant_of(node_id: &str, cluster_id: &str, l: &FlowchartLayout) -> boo
             return false;
         }
     }
+}
+
+/// Compute the cluster rendering order matching upstream mermaid's
+/// `recursiveRender` traversal.
+///
+/// Upstream `flowDb.getData()` (in flowchart/flowDb.ts) pushes subgraphs in
+/// REVERSED declaration order before vertex nodes. The dagre/index.js then
+/// runs `data4Layout.nodes.forEach(n => graph.setNode(n.id, ...))`, so the
+/// graphlib insertion order is `[reverse_subgraphs..., vertices...]`.
+///
+/// During rendering, `sortNodesByHierarchy(graph)` walks `graph.children()`
+/// (top-level nodes in insertion order) DFS, pulling each node's children
+/// (also in insertion order). The cluster (subgraph) ids encountered during
+/// this walk define the order in which `<g class="cluster">` elements are
+/// emitted.
+///
+/// Mirroring that traversal here is what gives us byte-exact cluster order
+/// without disturbing dagre's geometry pass.
+fn upstream_cluster_render_order(d: &FlowchartDiagram, l: &FlowchartLayout) -> Vec<String> {
+    use std::collections::HashSet;
+
+    // Build the upstream-style insertion list:
+    //   reversed subgraphs (clusters), then vertices in declaration order.
+    // We restrict to ids that exist in `l.nodes` to stay aligned with the
+    // post-layout state.
+    let layout_ids: HashSet<&str> = l.nodes.iter().map(|n| n.id.as_str()).collect();
+    let mut insertion: Vec<String> = Vec::new();
+    for sg in d.subgraphs.iter().rev() {
+        if layout_ids.contains(sg.id.as_str()) {
+            insertion.push(sg.id.clone());
+        }
+    }
+    let subgraph_ids: HashSet<&str> = d.subgraphs.iter().map(|s| s.id.as_str()).collect();
+    for v in &d.vertices {
+        // Vertices with the same id as a subgraph are cluster references — skip
+        // (matches the filter in `flowchart::build_layout_data`).
+        if subgraph_ids.contains(v.id.as_str()) {
+            continue;
+        }
+        if layout_ids.contains(v.id.as_str()) {
+            insertion.push(v.id.clone());
+        }
+    }
+
+    // Map id -> insertion index (used for ordering siblings).
+    let pos: std::collections::HashMap<&str, usize> = insertion
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    // Build child lists per parent in insertion order.
+    let mut children_of: std::collections::HashMap<Option<String>, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut sorted_nodes: Vec<&UNode> = l.nodes.iter().collect();
+    sorted_nodes.sort_by_key(|n| pos.get(n.id.as_str()).copied().unwrap_or(usize::MAX));
+    for n in sorted_nodes {
+        children_of
+            .entry(n.parent_id.clone())
+            .or_default()
+            .push(n.id.clone());
+    }
+
+    // DFS from top-level (parent = None), collecting cluster ids.
+    let mut order: Vec<String> = Vec::new();
+    let mut stack: Vec<String> = children_of
+        .get(&None)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .collect();
+    while let Some(id) = stack.pop() {
+        // Emit this id if it is a cluster (group).
+        if l.nodes.iter().any(|n| n.id == id && n.is_group) {
+            order.push(id.clone());
+        }
+        if let Some(kids) = children_of.get(&Some(id.clone())) {
+            for k in kids.iter().rev() {
+                stack.push(k.clone());
+            }
+        }
+    }
+    order
 }
 
 /// Render an isolated cluster as an inner `<g class="root" transform="...">` group.
