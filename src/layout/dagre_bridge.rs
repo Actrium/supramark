@@ -437,7 +437,37 @@ fn build_graph_filtered_ex<'a>(
 
         if dagre_src == dagre_dst {
             // Self-edge expansion — see upstream index.ts:308-364.
-            expand_self_edge(&mut g, edge, dagre_src);
+            //
+            // When the user-level endpoint is a cluster (effective_src ==
+            // effective_dst is a cluster id), upstream:
+            //   1. expands the self-edge BEFORE adjustClustersAndEdges, using
+            //      the cluster id as the dagre endpoint and the cluster's
+            //      PARENT as the helper-parent (so helpers are siblings of
+            //      the cluster, not children); and
+            //   2. only AFTER expansion does adjustClustersAndEdges rewrite
+            //      cluster endpoints in remaining (non-self) edges to anchor
+            //      leaves.
+            //
+            // The net effect: helpers/cyclic edges are NAMED after the
+            // cluster (`Active---Active---1`, `Active-cyclic-special-1`),
+            // helpers live at root, and the dagre chain hops through the
+            // cluster's anchor leaf. Match that here by passing the cluster
+            // id as `owner_override` (for helper naming + parent lookup) and
+            // keeping `dagre_src` (the anchor leaf) as the actual dagre
+            // edge endpoint.
+            let owner_override = if effective_src == effective_dst
+                && effective_src != dagre_src
+            {
+                log::debug!(
+                    "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
+                    effective_src,
+                    dagre_src
+                );
+                Some(effective_src)
+            } else {
+                None
+            };
+            expand_self_edge_owned(&mut g, edge, dagre_src, owner_override);
         } else {
             let name = if edge.id.is_empty() {
                 None
@@ -456,8 +486,32 @@ fn build_graph_filtered_ex<'a>(
 /// to the ranking essentials — visual self-loop smoothing is the job
 /// of `routing::smooth_self_loop` later.
 fn expand_self_edge(g: &mut Graph<NodeLabel, EdgeLabel>, edge: &Edge, node_id: &str) {
-    let sid1 = format!("{node_id}---{node_id}---1");
-    let sid2 = format!("{node_id}---{node_id}---2");
+    expand_self_edge_owned(g, edge, node_id, None)
+}
+
+/// Variant of [`expand_self_edge`] that supports a separate "owner" id used
+/// for helper node ids and edge name suffixes, while the dagre edge
+/// endpoints still use `node_id` (the leaf anchor). This is the cluster-on-
+/// cluster self-loop case from upstream: the cyclic helpers and dom ids are
+/// named after the cluster (e.g. `Active---Active---1`,
+/// `Active-cyclic-special-1`), but dagre routes the chain through the
+/// cluster's anchor leaf so the self-edge can be ranked against leaf
+/// neighbours rather than the compound parent.
+///
+/// When `owner_override` is provided AND the dagre graph is compound, the
+/// helpers are parented to the `owner_override` node's parent (i.e. the
+/// cluster's parent — root in the common case) so the helpers do not widen
+/// the cluster's bbox.  When it is `None`, behaviour matches a regular
+/// leaf-on-leaf self-edge: helpers inherit the leaf's parent.
+fn expand_self_edge_owned(
+    g: &mut Graph<NodeLabel, EdgeLabel>,
+    edge: &Edge,
+    node_id: &str,
+    owner_override: Option<&str>,
+) {
+    let owner = owner_override.unwrap_or(node_id);
+    let sid1 = format!("{owner}---{owner}---1");
+    let sid2 = format!("{owner}---{owner}---2");
 
     let helper = || NodeLabel {
         width: 10.0,
@@ -471,9 +525,14 @@ fn expand_self_edge(g: &mut Graph<NodeLabel, EdgeLabel>, edge: &Edge, node_id: &
     g.set_node(sid1.clone(), Some(helper()));
     g.set_node(sid2.clone(), Some(helper()));
 
-    // Mirror parent-id when inside a cluster.
+    // Determine helper parent. For cluster self-loops (owner_override set)
+    // the helpers must NOT live inside the cluster — upstream parents them
+    // to the cluster's parent (root in the common case).  For leaf
+    // self-loops, mirror the leaf's parent so the helpers sit alongside
+    // their owner inside the same cluster.
     if g.is_compound() {
-        if let Some(parent) = g.parent(node_id).map(|s| s.to_string()) {
+        let parent_anchor = owner_override.unwrap_or(node_id);
+        if let Some(parent) = g.parent(parent_anchor).map(|s| s.to_string()) {
             g.set_parent(&sid1, Some(&parent));
             g.set_parent(&sid2, Some(&parent));
         }
@@ -484,19 +543,19 @@ fn expand_self_edge(g: &mut Graph<NodeLabel, EdgeLabel>, edge: &Edge, node_id: &
         node_id,
         &sid1,
         Some(base_label.clone()),
-        Some(&format!("{node_id}-cyclic-special-0")),
+        Some(&format!("{owner}-cyclic-special-0")),
     );
     g.set_edge(
         &sid1,
         &sid2,
         Some(base_label.clone()),
-        Some(&format!("{node_id}-cyclic-special-1")),
+        Some(&format!("{owner}-cyclic-special-1")),
     );
     g.set_edge(
         &sid2,
         node_id,
         Some(base_label),
-        Some(&format!("{node_id}-cyclic-special-2")),
+        Some(&format!("{owner}-cyclic-special-2")),
     );
 }
 

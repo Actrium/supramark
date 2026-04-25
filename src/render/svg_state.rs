@@ -169,6 +169,11 @@ fn render_inner(
         if edge_endpoint_is_isolated(e, &l.result.nodes, iso_ids) {
             continue;
         }
+        // Skip the original self-loop edge — replaced by 3 cyclic-special
+        // segments in `dagre_bridge::expand_self_edge`.
+        if is_replaced_self_loop(e) {
+            continue;
+        }
         out.push_str(&emit_edge_path(id, e));
     }
     out.push_str("</g>");
@@ -177,6 +182,9 @@ fn render_inner(
     out.push_str(r#"<g class="edgeLabels">"#);
     for e in &l.result.edges {
         if edge_endpoint_is_isolated(e, &l.result.nodes, iso_ids) {
+            continue;
+        }
+        if is_replaced_self_loop(e) {
             continue;
         }
         out.push_str(&emit_edge_label(e));
@@ -714,6 +722,35 @@ fn has_isolated_ancestor(
             None => return false,
         }
     }
+}
+
+/// True for the user-level edge that has been replaced by `expand_self_edge`
+/// in `dagre_bridge`. Its `start` and `end` are equal — the dagre graph
+/// dropped the direct `setEdge(v, v)` call and inserted three cyclic-special
+/// segments instead. The original user-level Edge is still in
+/// `LayoutData.edges` (we keep it for label/styling templates), but the
+/// renderer must not emit a path or label for it; that role is taken over by
+/// the synthetic `cyclic-special-mid` segment.
+///
+/// Synthetic cyclic-special segments themselves carry `synthetic="cyclic_segment"`
+/// — they are NOT replaced and must still be rendered.
+fn is_replaced_self_loop(e: &Edge) -> bool {
+    if e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment") {
+        return false;
+    }
+    let os = e
+        .extra
+        .get("orig_start")
+        .map(|s| s.as_str())
+        .or(e.start.as_deref())
+        .unwrap_or("");
+    let od = e
+        .extra
+        .get("orig_end")
+        .map(|s| s.as_str())
+        .or(e.end.as_deref())
+        .unwrap_or("");
+    !os.is_empty() && os == od
 }
 
 /// Return true if either of the edge's endpoints (or any ancestor of either)
@@ -1295,12 +1332,26 @@ fn emit_node(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> {
         // matching the convention used by every dedicated state-node emitter
         // above. Without this, shapes like `choice` come out with bare
         // `id="state-MyChoice-4"` instead of `id="{svg_id}-state-MyChoice-4"`.
+        //
+        // Exception: synthetic self-loop helper nodes (`labelRect` with
+        // `extra["synthetic"] == "cyclic_helper"`) keep their bare
+        // `{owner}---{owner}---{1|2}` id — upstream emits these helpers
+        // without the diagram-id prefix in the rendered SVG.
         _ => {
             let raw = shapes::draw(shape, n, theme).ok()?;
-            let dom_id = xml_escape(n.dom_id.as_deref().unwrap_or(&n.id));
-            let old_id = format!(r#"id="{}""#, dom_id);
-            let new_id = format!(r#"id="{}-{}""#, id, dom_id);
-            Some(raw.replacen(&old_id, &new_id, 1))
+            let is_cyclic_helper = n
+                .extra
+                .get("synthetic")
+                .map(|s| s.as_str() == "cyclic_helper")
+                .unwrap_or(false);
+            if is_cyclic_helper {
+                Some(raw)
+            } else {
+                let dom_id = xml_escape(n.dom_id.as_deref().unwrap_or(&n.id));
+                let old_id = format!(r#"id="{}""#, dom_id);
+                let new_id = format!(r#"id="{}-{}""#, id, dom_id);
+                Some(raw.replacen(&old_id, &new_id, 1))
+            }
         }
     }
 }
