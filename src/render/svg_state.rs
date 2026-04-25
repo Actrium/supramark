@@ -895,40 +895,42 @@ fn render_isolated_cluster_inner_root(
     out.push_str("</g>");
 
     // Inner <g class="nodes"> — sub-isolated cluster wrappers + leaf nodes.
+    //
+    // Emit in source-declaration order (the layout `nodes` vec is insertion-
+    // ordered by the parser): for each candidate that lives under `cnode`,
+    // dispatch to either the nested-isolated-cluster recursion or the leaf
+    // `emit_node` path. Mixing both kinds in a single insertion-order pass
+    // matches upstream mermaid's `recursiveRender`, which iterates the parent
+    // cluster's children once and renders each in declaration order regardless
+    // of whether it is a leaf or a sub-cluster.
     out.push_str(r#"<g class="nodes">"#);
 
-    // Sub-isolated clusters (direct children of cnode that are themselves isolated).
-    for n in l.nodes.iter() {
-        if !n.is_group {
-            continue;
-        }
-        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
-            continue;
-        }
-        if !iso_ids.contains(&n.id) {
-            continue;
-        }
-        out.push_str(&render_isolated_cluster_inner_root(n, l, theme, svg_id));
-    }
-
-    // Direct + transitive leaf nodes (those NOT inside a sub-isolated cluster).
     for n in l.nodes.iter() {
         if n.is_group {
-            continue;
-        }
-        if n.extra.get("__skip_render").is_some() {
-            continue;
-        }
-        if !is_descendant_of(&n.id, &cnode.id, &l.nodes) {
-            continue;
-        }
-        // Skip leaf nodes whose nearest cluster ancestor (other than cnode itself)
-        // is an isolated sub-cluster.
-        if endpoint_in_sub_isolated(&n.id, cnode.id.as_str(), &l.nodes, iso_ids) {
-            continue;
-        }
-        if let Some(svg) = emit_node(svg_id, n, theme) {
-            out.push_str(&svg);
+            // Direct sub-isolated cluster: recurse into nested inner-root.
+            if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+                continue;
+            }
+            if !iso_ids.contains(&n.id) {
+                continue;
+            }
+            out.push_str(&render_isolated_cluster_inner_root(n, l, theme, svg_id));
+        } else {
+            // Leaf node: any descendant of `cnode` that is not inside a
+            // sub-isolated cluster (those are emitted by the recursive call
+            // above, inside their own inner root).
+            if n.extra.get("__skip_render").is_some() {
+                continue;
+            }
+            if !is_descendant_of(&n.id, &cnode.id, &l.nodes) {
+                continue;
+            }
+            if endpoint_in_sub_isolated(&n.id, cnode.id.as_str(), &l.nodes, iso_ids) {
+                continue;
+            }
+            if let Some(svg) = emit_node(svg_id, n, theme) {
+                out.push_str(&svg);
+            }
         }
     }
     out.push_str("</g>");
@@ -1288,7 +1290,18 @@ fn emit_node(id: &str, n: &Node, theme: &ThemeVariables) -> Option<String> {
         "state" => emit_state_node(id, n, theme),
         "rectWithTitle" => emit_rect_with_title(id, n, theme),
         "note" => emit_note_node(id, n, theme),
-        _ => shapes::draw(shape, n, theme).ok(),
+        // Fallback: delegate to the generic shape drawer, then patch the
+        // emitted `id="{dom_id}"` so it includes the svg_id prefix —
+        // matching the convention used by every dedicated state-node emitter
+        // above. Without this, shapes like `choice` come out with bare
+        // `id="state-MyChoice-4"` instead of `id="{svg_id}-state-MyChoice-4"`.
+        _ => {
+            let raw = shapes::draw(shape, n, theme).ok()?;
+            let dom_id = xml_escape(n.dom_id.as_deref().unwrap_or(&n.id));
+            let old_id = format!(r#"id="{}""#, dom_id);
+            let new_id = format!(r#"id="{}-{}""#, id, dom_id);
+            Some(raw.replacen(&old_id, &new_id, 1))
+        }
     }
 }
 
