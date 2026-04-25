@@ -407,6 +407,35 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
             g_x_max = g_x_max.max(x_right);
             g_y_min = g_y_min.min(y_top);
             g_y_max = g_y_max.max(y_bottom);
+
+            // Cluster-title foreignObject. The label sits in a `<g
+            // class="cluster-label" transform="translate(lx, ly)"><foreignObject
+            // width="lw" height="lh">…</foreignObject></g>` chain. jsdom ignores
+            // every transform, so the foreignObject contributes its LOCAL
+            // bbox `[0, lw] × [0, lh]` to the global getBBox union.
+            //
+            // For composite states (`shape == "rect"`) with a non-empty label,
+            // a wide title can extend beyond the cluster's outer rect on the
+            // right (`lw > w/2 + (cx - 0)`). Mirroring the renderer's
+            // measurement (`measure_html_markup_label` on the xml-escaped
+            // label) ensures the viewbox grows just enough to keep the title
+            // visible.
+            if n.shape.as_deref() == Some("rect") {
+                if let Some(label) = n.label.as_deref() {
+                    if !label.is_empty() {
+                        use crate::render::foreign_object::{
+                            measure_html_markup_label, HtmlLabelFont,
+                        };
+                        let escaped = xml_escape(label);
+                        let font = HtmlLabelFont::default();
+                        let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
+                        g_x_min = g_x_min.min(0.0);
+                        g_x_max = g_x_max.max(lw);
+                        g_y_min = g_y_min.min(0.0);
+                        g_y_max = g_y_max.max(lh);
+                    }
+                }
+            }
         }
     }
 

@@ -227,6 +227,16 @@ fn cypress_68() {
     assert_byte_exact("ext_fixtures/cypress/state/68");
 }
 
+/// Composite state whose title label ("Long state name 2") is wider than
+/// its inner-graph bbox. Exercises the post-layout `expand_cluster_width_for_label`
+/// pass: when the label demands more horizontal room than dagre allocated,
+/// the cluster outer rect grows symmetrically around `cluster.x` and the
+/// renderer's viewbox includes the cluster-label foreignObject local bbox.
+#[test]
+fn cypress_28() {
+    assert_byte_exact("ext_fixtures/cypress/state/28");
+}
+
 /// Composite state with concurrent-region `--` separators. Exercises the
 /// parser's docTranslator pass that partitions the parent's children into
 /// divider-cluster wrappers (one per chunk), the layout's per-cluster `dir`

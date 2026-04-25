@@ -768,6 +768,15 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     // dagre placement (slot positions, slot count, gap) is preserved verbatim
     // — only the wrapper-to-slot mapping is stabilised.
     stabilise_divider_positions(&mut result, d);
+    // Composite-cluster outer rect must accommodate its title label.
+    // Upstream's `roundedWithTitle` cluster shape grows the outer rect to
+    // `max(content_bbox_w, label_w + label_padding)` so a long state name
+    // (e.g. cy/28 "Long state name 2") is never clipped. Dagre returns a
+    // cluster width based purely on the inner-graph bbox, so we widen it
+    // post-layout when the label demands more horizontal room. The cluster
+    // centre (`x`) is preserved, leaving children and edges untouched —
+    // the rect simply expands symmetrically around the centre.
+    expand_cluster_width_for_label(&mut result);
     fix_state_end_edge_endpoints(&mut result, 7.0088621440762111);
     // The vendored dagre version falls back to intersectRect for every
     // shape, which leaves the first edge point at the rect-clip of a
@@ -891,6 +900,82 @@ fn slot_spread<F: Fn(&(f64, f64, Option<String>, Option<String>)) -> f64>(
         }
     }
     max - min
+}
+
+/// Widen each composite-state cluster's outer width so its title label fits.
+///
+/// Mirrors upstream `roundedWithTitle`'s use of `bbox.width` (the label's
+/// `getBBox` from the cluster-label foreignObject) when sizing the outer rect:
+///   width = max(dagre_cluster_w, label_w + label_padding)
+///
+/// The renderer (`emit_isolated_cluster_shape`) measures the same label via
+/// `measure_html_markup_label` and centres the rect at `cluster.x`. Children
+/// and edges are unaffected — they were placed by dagre using the inner-graph
+/// bounding box, not the cluster's outer rect.
+///
+/// Upstream's `node.padding` (composite cluster) is 8, contributing 4 on each
+/// side of the label inside the foreignObject — total 8 added to label_w.
+fn expand_cluster_width_for_label(
+    result: &mut crate::layout::unified::types::LayoutResult,
+) {
+    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
+
+    const LABEL_PADDING: f64 = 8.0;
+
+    for n in result.nodes.iter_mut() {
+        if !n.is_group {
+            continue;
+        }
+        // Skip non-roundedWithTitle clusters: noteGroup wrappers and `--`
+        // dividers have no title and use their own rect-only shape.
+        let shape = n.shape.as_deref().unwrap_or("");
+        if shape != "rect" {
+            continue;
+        }
+        let label = match n.label.as_deref() {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+
+        let font = HtmlLabelFont::default();
+        let escaped = xml_escape_minimal(label);
+        let (lw, _lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
+        let needed = lw + LABEL_PADDING;
+        let cur = n.width.unwrap_or(0.0);
+        if needed > cur {
+            let delta = (needed - cur) / 2.0;
+            n.width = Some(needed);
+            // Inner-root translate must keep the cluster's outer rect anchored
+            // to its original global x (typically `cluster_padding`). Since
+            // `emit_isolated_cluster_shape` derives the rect's local x from
+            // `cnode.x - w/2`, expanding `w` symmetrically while the centre
+            // stays fixed shifts the local left edge by `-delta`. We restore
+            // the global anchor by nudging `outer_tx` by `+delta`.
+            if let Some(prev) = n.extra.get("outer_tx").cloned() {
+                if let Ok(v) = prev.parse::<f64>() {
+                    n.extra.insert("outer_tx".into(), (v + delta).to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Minimal XML escape mirroring `svg_state::xml_escape` for measurement.
+/// We only need this to be consistent with the renderer's HTML markup
+/// measurement of the label; both go through `measure_html_markup_label`.
+fn xml_escape_minimal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Adjust the last edge point for edges ending at a stateEnd node to use
