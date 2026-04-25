@@ -428,9 +428,22 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     // `<span class="..." style="">` (class first), which differs from
     // the order in our shared `foreign_object_body` helper. Replicate
     // upstream's exact byte sequence here.
-    let span_max_w =
-        crate::font_metrics::text_width(label, label_family, 16.0, false, false).round() + 50.0;
+    //
+    // `calculateTextWidth` is fed `node.text` — distinct from `node.label`:
+    //   * default ClassNode (`addClass`): `text = name + (type ? '&lt;T&gt;' : '')`
+    //     — html-entity-encoded angle brackets.
+    //   * `setClassLabel` (with `["…"]` override): `text = label + (type ? '<T>' : '')`
+    //     — literal angle brackets, no escaping of label content.
+    // jsdom's `<text>.textContent` never decodes entities, so the raw
+    // bytes go straight into `text_width`.
     let escaped = html_escape(label);
+    let measure_text: String = class_node
+        .map(|cn| cn.raw_text())
+        .unwrap_or_else(|| label.to_string());
+    let span_max_w =
+        crate::font_metrics::text_width(&measure_text, label_family, 16.0, false, false)
+            .round()
+            + 50.0;
     out.push_str(&format!(
         r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel markdown-node-label" style="{ls}"><p>{txt}</p></span></div></foreignObject>"#,
         w = fmt_num(label_w),

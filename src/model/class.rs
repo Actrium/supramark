@@ -217,6 +217,46 @@ pub struct ClassNode {
 }
 
 impl ClassNode {
+    /// Render-ready display string — what the title `<p>` actually
+    /// shows. Mirrors upstream `node.text` post-decode:
+    /// * default class with generic       → `Foo<T>`
+    /// * default class without generic    → `Foo`
+    /// * `class Foo["X"]` (with override) → `X` (generic appended via
+    ///   `setClassLabel`'s text formula, but only when type is set;
+    ///   override + generic is rare in fixtures and follows the same
+    ///   `<T>` literal form).
+    pub fn display_label(&self) -> String {
+        if self.label != self.base_id {
+            // setClassLabel path
+            match self.generic.as_deref() {
+                Some(g) => format!("{}<{}>", self.label, g),
+                None => self.label.clone(),
+            }
+        } else if let Some(g) = self.generic.as_deref() {
+            format!("{}<{}>", self.base_id, g)
+        } else {
+            self.label.clone()
+        }
+    }
+
+    /// Raw `node.text` — same as display label except generic angles
+    /// are HTML-entity-encoded for the *default* path (mirrors
+    /// upstream `addClass`'s `&lt;`/`&gt;` output). label_override
+    /// path uses literal `<>` per `setClassLabel`. This is what
+    /// jsdom's `<text>.textContent` sees during `calculateTextWidth`.
+    pub fn raw_text(&self) -> String {
+        if self.label != self.base_id {
+            match self.generic.as_deref() {
+                Some(g) => format!("{}<{}>", self.label, g),
+                None => self.label.clone(),
+            }
+        } else if let Some(g) = self.generic.as_deref() {
+            format!("{}&lt;{}&gt;", self.base_id, g)
+        } else {
+            self.label.clone()
+        }
+    }
+
     pub fn new(id: &str) -> Self {
         let (base, generic) = split_generic(id);
         Self {
@@ -251,6 +291,7 @@ fn split_generic(name: &str) -> (&str, Option<&str>) {
         (name, None)
     }
 }
+
 
 /// `namespace Foo { class Bar {} }` — flat list + classes reference via
 /// `ClassNode::parent`.

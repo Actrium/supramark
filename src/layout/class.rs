@@ -206,7 +206,9 @@ fn class_to_node(c: &ClassNode, d: &ClassDiagram) -> Node {
     let mut n = Node::default();
     n.id = c.id.clone();
     n.dom_id = Some(c.dom_id.clone());
-    n.label = Some(c.label.clone());
+    // Title row renders the generic-augmented form (`Foo<T>` after
+    // tilde decoding) — see `ClassNode::display_label`.
+    n.label = Some(c.display_label());
     n.shape = Some("classBox".into());
     n.css_classes = Some(
         std::iter::once("default")
@@ -293,7 +295,10 @@ fn estimate_classbox_dimensions(c: &ClassNode) -> (f64, f64) {
     let padding = 12.0_f64;
 
     // Label width (bold, html-label style — measured via foreignObject).
-    let label_w = font_metrics::text_width(&c.label, family, font, true, false);
+    // The foreignObject width tracks the rendered <p>{display_label}</p>
+    // textContent (entity-decoded — `Foo<T>` rather than `Foo&lt;T&gt;`).
+    let display_label = c.display_label();
+    let label_w = font_metrics::text_width(&display_label, family, font, true, false);
     // bbox.width = max of all visible foreignObjects' widths; with empty
     // members/methods this is just the label width.
     let mut bbox_w: f64 = label_w;
