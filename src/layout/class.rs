@@ -55,11 +55,29 @@ const VIEWBOX_PADDING: f64 = 8.0;
 /// Public entry point.
 pub fn layout(d: &ClassDiagram, theme: &ThemeVariables) -> Result<ClassLayout> {
     let data = build_layout_data(d, theme);
-    let result = unified_render::layout(
+    let mut result = unified_render::layout(
         &data,
         data.layout_algorithm.as_deref().unwrap_or("dagre"),
         theme,
     )?;
+
+    // Synthesise spline waypoints for edges fully contained inside an
+    // isolated cluster. The shared dagre bridge skips routing for these
+    // edges (they live in the inner-pass dagre, but the bridge does not
+    // expose its edge geometry). The result is `Edge::points = None`,
+    // which in turn produces an empty `d=""` attribute and a useless
+    // `data-points="W10="` (base64 of `[]`).
+    //
+    // Upstream's recursive-render path lets the inner dagre lay these
+    // out and then keeps the resulting points. Here we approximate the
+    // same answer for the common 1-edge sibling case (e.g. cypress
+    // class/38 + class/94: `namespace Namespace1 { class C1; class C2 }`
+    // followed by `C1 --> C2`). Both endpoints are leaf siblings of the
+    // same isolated cluster, so dagre would emit three waypoints —
+    // source-side intersection with the source rect, midpoint, and
+    // target-side intersection with the target rect — which we mirror
+    // here via `intersectRect` (the same algorithm dagre-d3-es uses).
+    synthesise_intra_isolated_edge_points(&mut result);
 
     // Derive viewbox. Upstream's `setupViewPortForSVG` grows the tight
     // bounding box by `padding` on every side.
@@ -77,6 +95,110 @@ pub fn layout(d: &ClassDiagram, theme: &ThemeVariables) -> Result<ClassLayout> {
         viewbox_w: vw,
         viewbox_h: vh,
     })
+}
+
+/// Fill in `Edge::points` for any edge whose source and target are both
+/// leaves of the **same** isolated cluster.
+///
+/// We can't reach into `dagre_bridge` to capture inner-pass edge
+/// routing, so for each affected edge we reconstruct three control
+/// points dagre would have emitted for the trivial straight-line case:
+///
+/// 1. Intersect the source rectangle with the segment to the target
+///    centre — the "exit point".
+/// 2. The midpoint between the source and target centres.
+/// 3. Intersect the target rectangle with the segment to the source
+///    centre — the "entry point".
+///
+/// `intersectRect` is the same helper dagre-d3-es uses (and which we
+/// already mirror in `render::svg_block`). Replicated locally to keep
+/// the layout layer free of render-side imports.
+fn synthesise_intra_isolated_edge_points(result: &mut LayoutResult) {
+    if result.isolated_cluster_ids.is_empty() {
+        return;
+    }
+    // Map from node id → (parent_id, x, y, width, height) for fast lookup.
+    let mut node_info: std::collections::HashMap<&str, (Option<&str>, f64, f64, f64, f64)> =
+        std::collections::HashMap::new();
+    for n in &result.nodes {
+        let x = match n.x {
+            Some(v) => v,
+            None => continue,
+        };
+        let y = match n.y {
+            Some(v) => v,
+            None => continue,
+        };
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        node_info.insert(n.id.as_str(), (n.parent_id.as_deref(), x, y, w, h));
+    }
+
+    let isolated: &std::collections::HashSet<String> = &result.isolated_cluster_ids;
+
+    for edge in result.edges.iter_mut() {
+        if edge.points.is_some() {
+            continue;
+        }
+        let src = match edge.source.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let dst = match edge.target.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let (sp, sx, sy, sw, sh) = match node_info.get(src) {
+            Some(t) => *t,
+            None => continue,
+        };
+        let (dp, dx, dy, dw, dh) = match node_info.get(dst) {
+            Some(t) => *t,
+            None => continue,
+        };
+        // Both endpoints must be siblings inside the same isolated cluster.
+        let parent = match (sp, dp) {
+            (Some(a), Some(b)) if a == b => a,
+            _ => continue,
+        };
+        if !isolated.contains(parent) {
+            continue;
+        }
+
+        let mid_x = (sx + dx) / 2.0;
+        let mid_y = (sy + dy) / 2.0;
+        let (p0x, p0y) = intersect_rect(sx, sy, sw, sh, mid_x, mid_y);
+        let (p2x, p2y) = intersect_rect(dx, dy, dw, dh, mid_x, mid_y);
+
+        edge.points = Some(vec![
+            crate::layout::unified::types::Point { x: p0x, y: p0y },
+            crate::layout::unified::types::Point { x: mid_x, y: mid_y },
+            crate::layout::unified::types::Point { x: p2x, y: p2y },
+        ]);
+    }
+}
+
+/// `intersectRect` from dagre-d3-es: find where the line from rect
+/// centre `(nx, ny)` to external probe point `(px, py)` exits the
+/// rectangle `(nx ± nw/2, ny ± nh/2)`.
+fn intersect_rect(nx: f64, ny: f64, nw: f64, nh: f64, px: f64, py: f64) -> (f64, f64) {
+    let dx = px - nx;
+    let dy = py - ny;
+    let w = nw / 2.0;
+    let h = nh / 2.0;
+    let (sx, sy);
+    if dy.abs() * w > dx.abs() * h {
+        // Top or bottom boundary.
+        let h_signed = if dy < 0.0 { -h } else { h };
+        sy = h_signed;
+        sx = if dy == 0.0 { 0.0 } else { h_signed * dx / dy };
+    } else {
+        // Left or right boundary.
+        let w_signed = if dx < 0.0 { -w } else { w };
+        sx = w_signed;
+        sy = if dx == 0.0 { 0.0 } else { w_signed * dy / dx };
+    }
+    (nx + sx, ny + sy)
 }
 
 /// Build the `LayoutData` sent to dagre. Mirrors upstream
