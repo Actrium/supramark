@@ -192,9 +192,13 @@ pub fn render(
 // Cluster rendering — namespace boxes
 // ──────────────────────────────────────────────────────────────────────
 fn render_cluster(id: &str, n: &LayoutNode, _theme: &ThemeVariables) -> String {
-    let cluster_bkg = _theme.cluster_bkg.as_deref().unwrap_or("#ffffde");
-    let cluster_border = _theme.cluster_border.as_deref().unwrap_or("#aaaa33");
-
+    // Class-diagram clusters (namespaces) follow the upstream `cluster.ts`
+    // shape: the outer `<g class="cluster undefined">` carries no transform,
+    // and the inner `<rect>` sits at absolute coords `(cx - w/2, cy - h/2)`
+    // — see `mermaid-official-stable-v11.14.0/.../rendering-elements/clusters.ts`.
+    // The cluster-label is wrapped in its own `<g class="cluster-label ">`
+    // (trailing space mirrors the upstream string concat) with an absolute
+    // translate that anchors the foreignObject to (cx - lw/2, cy - h/2).
     let cx = n.x.unwrap_or(0.0);
     let cy = n.y.unwrap_or(0.0);
     let w = n.width.unwrap_or(100.0);
@@ -202,30 +206,39 @@ fn render_cluster(id: &str, n: &LayoutNode, _theme: &ThemeVariables) -> String {
 
     let mut out = String::with_capacity(512);
     out.push_str(&format!(
-        r#"<g class="cluster" id="{sid}-{eid}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        r#"<g class="cluster undefined" id="{sid}-{eid}" data-look="classic">"#,
         sid = id,
         eid = n.id,
-        tx = fmt_num(cx),
-        ty = fmt_num(cy),
     ));
-    // Rect
+    // Rect — absolute coords, no fill/stroke override (defers to CSS `.cluster rect`).
     out.push_str(&format!(
-        r#"<rect style="" width="{w}" height="{h}" x="{x}" y="{y}" fill="{fill}" stroke="{stroke}" stroke-width="1px"></rect>"#,
+        r#"<rect style="" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
         w = fmt_num(w),
         h = fmt_num(h),
-        x = fmt_num(-w / 2.0),
-        y = fmt_num(-h / 2.0),
-        fill = cluster_bkg,
-        stroke = cluster_border,
+        x = fmt_num(cx - w / 2.0),
+        y = fmt_num(cy - h / 2.0),
     ));
-    // Cluster label
+    // Cluster label — measured via labelHelper at 14 px, sits horizontally
+    // centred inside the cluster rect, vertically pinned to the rect's top
+    // (`y = cy - h/2`). Width is the measured label width (ceil-rounded by
+    // upstream's foreignObject), capped at the cluster's own width.
     let label = n.label.as_deref().unwrap_or("");
     if !label.is_empty() {
+        let label_w = crate::font_metrics::text_width(
+            label,
+            "trebuchet ms,verdana,arial,sans-serif",
+            14.0,
+            false,
+            false,
+        );
+        let lw = label_w.min(w);
+        let lx = cx - lw / 2.0;
+        let ly = cy - h / 2.0;
         out.push_str(&format!(
-            r#"<g class="cluster-label"><foreignObject width="{w}" height="16.296875" x="{x}" y="{y}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{t}</p></span></div></foreignObject></g>"#,
-            w = fmt_num(w),
-            x = fmt_num(-w / 2.0),
-            y = fmt_num(-h / 2.0 + 4.0),
+            r#"<g class="cluster-label " transform="translate({tx}, {ty})"><foreignObject width="{lw}" height="16.296875"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{t}</p></span></div></foreignObject></g>"#,
+            tx = fmt_num(lx),
+            ty = fmt_num(ly),
+            lw = fmt_num(lw),
             t = html_escape(label),
         ));
     }
@@ -840,6 +853,30 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
     };
 
     let padding = 12.0_f64;
+    // Cluster (`<g class="cluster" transform="translate(cx, cy)">`) contributes
+    // its rect *with transform applied* — the jsdom shim that produces the
+    // reference SVGs does honour the cluster `<g>`'s transform. Mirror that
+    // here so namespace-bearing diagrams pick up the right viewBox extents.
+    for n in l.unified.nodes.iter().filter(|n| n.is_group) {
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        if w > 0.0 || h > 0.0 {
+            let cx = n.x.unwrap_or(0.0);
+            let cy = n.y.unwrap_or(0.0);
+            visit(cx - w / 2.0, cy - h / 2.0, w, h);
+        }
+        if let Some(label) = n.label.as_deref() {
+            // Cluster label foreignObject sits at (-w/2, -h/2 + 4) in local
+            // coords, so after the cluster transform the absolute box is at
+            // (cx - w/2, cy - h/2 + 4, w, label_h).
+            if !label.is_empty() {
+                let cx = n.x.unwrap_or(0.0);
+                let cy = n.y.unwrap_or(0.0);
+                let lw = w;
+                visit(cx - w / 2.0, cy - h / 2.0 + 4.0, lw, label_h);
+            }
+        }
+    }
     for n in l.unified.nodes.iter().filter(|n| !n.is_group) {
         let w = n.width.unwrap_or(0.0);
         let h = n.height.unwrap_or(0.0);
@@ -1985,8 +2022,14 @@ mod tests {
         let l = class_layout(&d, &theme).expect("layout");
         for n in &l.unified.nodes {
             eprintln!(
-                "node id={} shape={:?} w={:?} h={:?} x={:?} y={:?}",
-                n.id, n.shape, n.width, n.height, n.x, n.y
+                "node id={} shape={:?} w={:?} h={:?} x={:?} y={:?} group={} parent={:?}",
+                n.id, n.shape, n.width, n.height, n.x, n.y, n.is_group, n.parent_id
+            );
+        }
+        for e in &l.unified.edges {
+            eprintln!(
+                "edge id={} src={:?} tgt={:?} pts={:?}",
+                e.id, e.source, e.target, e.points
             );
         }
         eprintln!("bounds={:?}", l.unified.bounds);
