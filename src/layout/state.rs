@@ -565,13 +565,17 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         }
     }
 
-    // For any nodes not yet assigned a dom_id (e.g. standalone state
-    // declarations that have no edges and were not in items list), assign
-    // one using the current counter.
+    // For any nodes not yet assigned a dom_id (e.g. bare `X: desc`
+    // attachments that ensure_state but never produce a `StateDecl`
+    // item), assign one using the current counter.  Upstream's
+    // `insertOrUpdateNode` reuses the same `graphItemCount` for every
+    // pure-state push without ever bumping it — only relations bump
+    // the counter.  Mirror that here: do NOT increment per-node, so
+    // co-declared states share the same suffix (cypress/42 expects
+    // both `C` and `D` at `-0`).
     for n in data.nodes.iter_mut() {
         if n.dom_id.is_none() {
             n.dom_id = Some(format!("state-{}-{}", n.id, graph_item_count));
-            graph_item_count += 1;
         }
     }
 
