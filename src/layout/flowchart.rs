@@ -530,7 +530,22 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.padding = Some(8.0);
         node.is_group = true;
         node.look = Some("classic".into());
-        node.dir = sg.dir.map(|d| d.as_str().to_string());
+        // Per-cluster direction. Upstream `mermaid-graphlib`'s `extractor.ts`
+        // (line 339) flips inner rankdir as `outer === 'TB' ? 'LR' : 'TB'`,
+        // so any non-TB outer (LR/BT/RL) yields a TB inner pass. Our
+        // `dagre_bridge::opposite_rankdir` does a 4-way symmetric flip
+        // (RL → BT, BT → RL) which produces correctly placed nodes but
+        // reverses the vertical edge point order for inner-pass edges in
+        // BT/RL outer diagrams (cypress fixture 159). Force the inner
+        // cluster to TB whenever the user didn't request an explicit
+        // `direction` line, matching upstream byte-for-byte.
+        node.dir = sg.dir.map(|d| d.as_str().to_string()).or_else(|| {
+            if d.direction.as_str() != "TB" && d.direction.as_str() != "TD" {
+                Some("TB".to_string())
+            } else {
+                None
+            }
+        });
         node.parent_id = parent_of.get(&sg.id).cloned();
         // Cluster CSS class: empty string so render_cluster emits `class="cluster "`.
         node.css_classes = None;
@@ -561,13 +576,29 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
     // resolves parallel-edge ordering between the same (src, dst) pair.
     let mut leaf_edges: Vec<unified::Edge> = Vec::new();
     let mut cluster_edges: Vec<unified::Edge> = Vec::new();
+    // Count how many user edges hit the same (start, end) pair upstream so we
+    // can reproduce upstream's `getEdgeId` index. Upstream's `flowDb.addLink`
+    // invokes both an outer push and an inner `addSingleLink` per user edge,
+    // so the synthetic per-pair counter advances by 2 each iteration.
+    let mut pair_total: HashMap<(String, String), usize> = HashMap::new();
+    for e in &d.edges {
+        *pair_total
+            .entry((e.start.clone(), e.end.clone()))
+            .or_insert(0) += 1;
+    }
     for e in &d.edges {
         let start = e.start.clone();
         let end = e.end.clone();
-        let counter = *pair_count
+        let raw = *pair_count
             .entry((start.clone(), end.clone()))
             .and_modify(|c| *c += 1)
             .or_insert(0);
+        // Only double-step when the same (start, end) pair appears multiple
+        // times in the user input — that is the case where upstream's
+        // `addLink → addSingleLink` double-push is observable in the rendered
+        // edge ids (see cypress/flowchart/159 expecting `_0` / `_2`).
+        let total = *pair_total.get(&(start.clone(), end.clone())).unwrap_or(&1);
+        let counter = if total > 1 { raw * 2 } else { raw };
         let mut ue = build_edge(e, d, counter, &class_map);
         // Record original endpoints before retargeting so the isolation check
         // in dagre_bridge can test against the pre-retarget cluster IDs.

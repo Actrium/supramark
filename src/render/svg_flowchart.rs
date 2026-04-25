@@ -615,6 +615,12 @@ pub fn render(
         if is_replaced_self_loop(e) {
             continue;
         }
+        // Skip synthetic cyclic-special segments that came from anchor
+        // rewriting (e.g. `Sub --> In` where `In` is `Sub`'s anchor):
+        // upstream does not expand those into self-loop helpers.
+        if is_cyclic_segment_from_anchor_rewrite(e) {
+            continue;
+        }
         inner.push_str(&render_edge_path(e, i, id, &l.aria_kind, &cluster_bounds));
     }
     inner.push_str(unified_shell::close_layer());
@@ -626,6 +632,9 @@ pub fn render(
             continue;
         }
         if is_replaced_self_loop(e) {
+            continue;
+        }
+        if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
         inner.push_str(&render_edge_label(e));
@@ -1122,6 +1131,26 @@ fn is_replaced_self_loop(e: &UEdge) -> bool {
     !os.is_empty() && os == od
 }
 
+/// Synthetic cyclic-special segments are inserted by `dagre_bridge` whenever
+/// dagre's `set_edge(v, v)` is called — including the case where a user
+/// edge becomes a self-loop only after cluster-anchor rewriting (e.g.
+/// `Sub --> In` where `In` is `Sub`'s anchor). Upstream mermaid skips the
+/// expansion in that latter case (see `findNonClusterChild` integration in
+/// `mermaid-graphlib`'s `adjustClustersAndEdges`): the original edge keeps
+/// its degenerate single-point path and no helper segments are emitted.
+///
+/// Detect that case by inspecting the synthetic segment's `orig_start` /
+/// `orig_end` (copied from the user edge it replaces): when those differ,
+/// the segment came from anchor-rewriting and must be filtered out.
+fn is_cyclic_segment_from_anchor_rewrite(e: &UEdge) -> bool {
+    if e.extra.get("synthetic").map(|s| s.as_str()) != Some("cyclic_segment") {
+        return false;
+    }
+    let os = e.extra.get("orig_start").map(|s| s.as_str()).unwrap_or("");
+    let od = e.extra.get("orig_end").map(|s| s.as_str()).unwrap_or("");
+    !os.is_empty() && !od.is_empty() && os != od
+}
+
 /// Return true if `node_id` has any ancestor that is an isolated cluster.
 /// Used to skip nodes/edges at the outer render level that belong inside
 /// an isolated cluster's inner root group.
@@ -1422,6 +1451,9 @@ fn render_isolated_cluster_inner_root(
         if is_replaced_self_loop(e) {
             continue;
         }
+        if is_cyclic_segment_from_anchor_rewrite(e) {
+            continue;
+        }
         out.push_str(&render_edge_path(
             e,
             i,
@@ -1464,6 +1496,9 @@ fn render_isolated_cluster_inner_root(
             continue;
         }
         if is_replaced_self_loop(e) {
+            continue;
+        }
+        if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
         out.push_str(&render_edge_label(e));
