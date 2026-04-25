@@ -1927,6 +1927,7 @@ fn render_edge_label(e: &UEdge) -> String {
         measure_html_label, measure_html_markup_label, render_edge_label as fo_edge,
         replace_fa_icons, HtmlLabelFont, LabelOpts,
     };
+    use crate::render::shapes::types::{build_div_style_prefix, build_label_style};
     let label_text = e.label.clone().unwrap_or_default();
     // Apply FA icon substitution (fa:fa-car → <i class="fa fa-car"></i>) before
     // measuring, matching upstream's createText path. The <i> element contributes
@@ -1947,10 +1948,35 @@ fn render_edge_label(e: &UEdge) -> String {
     };
     let lx = e.label_x.unwrap_or(0.0);
     let ly = e.label_y.unwrap_or(0.0);
+    // Inline color/font label styles (from `class <edge-id> myClass`,
+    // i.e. `edge.label_style`). Upstream applies these as a `style=`
+    // prefix on the `<div>` of the edgeLabel via `applyStyle`, which
+    // emits text-only properties before the default `display: table-cell;
+    // …` block. `build_div_style_prefix` mirrors that filter exactly.
+    let div_prefix = e
+        .label_style
+        .as_ref()
+        .map(|styles| build_div_style_prefix(styles))
+        .unwrap_or_default();
+    let span_label_style = e
+        .label_style
+        .as_ref()
+        .map(|styles| build_label_style(styles))
+        .unwrap_or_default();
     let opts = LabelOpts {
         data_id: Some(&e.id),
         group_style: None,
         wrap_in_p: !is_empty,
+        div_style_prefix: if div_prefix.is_empty() {
+            None
+        } else {
+            Some(&div_prefix)
+        },
+        label_style: if span_label_style.is_empty() {
+            None
+        } else {
+            Some(&span_label_style)
+        },
         ..LabelOpts::default()
     };
     fo_edge(&processed, lx, ly, w, h, opts)
