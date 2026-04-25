@@ -62,10 +62,51 @@ pub fn char_width(ch: char, family: &str, size: f64, bold: bool, _italic: bool) 
 }
 
 /// Total width of a text string (sum of character advances).
+///
+/// Robustness shim: certain upstream label-builders cast raw UTF-8 bytes to
+/// `char` (`b as char`), which mis-decodes multi-byte CJK / emoji sequences
+/// into runs of Latin-1 code points (U+0080..U+00FF). DejaVu has glyphs for
+/// most of those Latin-1 supplements, so the inflated widths leak straight
+/// into `<foreignObject>` sizing. Detect that pattern (every non-ASCII char
+/// is in U+0080..U+00FF AND those bytes form valid UTF-8) and measure the
+/// recovered string instead. Strings that are genuinely Latin-1 with stray
+/// accented letters do not round-trip as valid UTF-8, so they are
+/// unaffected.
 pub fn text_width(text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    if let Some(recovered) = recover_mangled_utf8(text) {
+        return recovered
+            .chars()
+            .map(|c| char_width(c, family, size, bold, italic))
+            .sum();
+    }
     text.chars()
         .map(|c| char_width(c, family, size, bold, italic))
         .sum()
+}
+
+/// Detect strings that look like UTF-8 bytes mis-cast to `char` and recover.
+///
+/// Returns `Some(decoded)` only when every non-ASCII char is in U+0080..U+00FF
+/// AND treating them as raw bytes yields a valid UTF-8 sequence. This is
+/// strict enough that a genuine Latin-1 string with a stray accented char is
+/// left alone, because a lone `0xE9` byte is not the start of any valid UTF-8
+/// multi-byte sequence.
+fn recover_mangled_utf8(text: &str) -> Option<String> {
+    let mut has_high = false;
+    for ch in text.chars() {
+        let cp = ch as u32;
+        if cp > 0xFF {
+            return None; // genuine non-Latin-1 char — string isn't mangled
+        }
+        if cp > 0x7F {
+            has_high = true;
+        }
+    }
+    if !has_high {
+        return None;
+    }
+    let bytes: Vec<u8> = text.chars().map(|c| c as u8).collect();
+    std::str::from_utf8(&bytes).ok().map(|s| s.to_string())
 }
 
 /// Line height = ascent + |descent| (leading is 0 for DejaVu fonts).
@@ -422,6 +463,70 @@ mod extra_tests {
             "Type: simulation (BOLD) = {}",
             text_width("Type: simulation", "sans-serif", 14.0, true, false)
         );
+    }
+}
+
+#[cfg(test)]
+mod cjk_recovery_tests {
+    use super::*;
+
+    // Sample CJK text built via codepoints to keep this source file ASCII.
+    // Equivalent to U+63D0 U+4EA4 U+7533 U+8BF7 (a 4-char Chinese label).
+    fn cjk_sample() -> String {
+        ['\u{63D0}', '\u{4EA4}', '\u{7533}', '\u{8BF7}']
+            .iter()
+            .collect()
+    }
+
+    #[test]
+    fn cjk_string_measured_correctly() {
+        // 4 CJK chars, each falls back to space advance (~4.45 @ 14pt sans).
+        let s = cjk_sample();
+        let w = text_width(&s, "sans-serif", 14.0, false, false);
+        assert!((w - 17.80078125).abs() < 1e-6, "cjk width = {w}");
+    }
+
+    #[test]
+    fn mangled_utf8_recovered() {
+        // Simulate the upstream bug: `b as char` over UTF-8 bytes of the CJK
+        // sample. Direct char-by-char measurement would be ~80px (Latin-1
+        // supplement glyphs); the recovery shim should restore the real width.
+        let s = cjk_sample();
+        let mangled: String = s.bytes().map(|b| b as char).collect();
+        let w_mangled = text_width(&mangled, "sans-serif", 14.0, false, false);
+        let w_clean = text_width(&s, "sans-serif", 14.0, false, false);
+        assert!(
+            (w_mangled - w_clean).abs() < 1e-6,
+            "mangled utf8 not recovered: mangled={w_mangled}, clean={w_clean}"
+        );
+    }
+
+    #[test]
+    fn genuine_latin1_unaffected() {
+        // "cafe" with U+00E9 is a real Rust &str; should NOT be re-decoded.
+        // (A lone 0xE9 byte is not a valid UTF-8 start, so the recovery shim
+        // declines to touch it.)
+        let cafe: String = ['c', 'a', 'f', '\u{00E9}'].iter().collect();
+        let w = text_width(&cafe, "sans-serif", 14.0, false, false);
+        let expected: f64 = cafe
+            .chars()
+            .map(|c| char_width(c, "sans-serif", 14.0, false, false))
+            .sum();
+        assert!(
+            (w - expected).abs() < 1e-9,
+            "latin-1 string perturbed: {w} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn pure_ascii_unaffected() {
+        let w = text_width("Hello", "sans-serif", 14.0, false, false);
+        assert!(w > 0.0);
+        let direct: f64 = "Hello"
+            .chars()
+            .map(|c| char_width(c, "sans-serif", 14.0, false, false))
+            .sum();
+        assert!((w - direct).abs() < 1e-9);
     }
 }
 
