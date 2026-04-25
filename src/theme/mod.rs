@@ -785,6 +785,88 @@ pub fn get_theme(name: &str) -> ThemeVariables {
     }
 }
 
+/// Apply a `themeVariables` JSON overlay onto an already-resolved theme.
+///
+/// Handles the small subset of override keys we currently honour
+/// without dragging in upstream's full khroma color math:
+///
+/// * `darkMode` — when `true`, derives `primaryTextColor=#eee` (and so
+///   `textColor=#eee`) unless the user supplied them explicitly. This
+///   mirrors the relevant `theme-base.js::updateColors()` branch:
+///     - `primaryTextColor = primaryTextColor || (darkMode ? '#eee' : '#333')`
+///     - `textColor = textColor || primaryTextColor`
+/// * `primaryColor` / `primaryTextColor` / `textColor` / `titleColor` /
+///   `mainBkg` / `nodeBkg` / `nodeBorder` / `clusterBkg` /
+///   `clusterBorder` / `lineColor` / `arrowheadColor` /
+///   `edgeLabelBackground` — direct field overrides with no derivation.
+///
+/// Anything not listed is ignored. Future passes can extend this
+/// function (or replace it with a full port of `updateColors()`)
+/// without touching the call sites.
+pub fn apply_theme_variables(theme: &mut ThemeVariables, vars: &serde_json::Value) {
+    let serde_json::Value::Object(map) = vars else {
+        return;
+    };
+    let dark_mode = map
+        .get("darkMode")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    // Direct string overrides — applied verbatim. Macro avoids the
+    // boilerplate of an `if let Some(...) = map.get(...)` per slot.
+    macro_rules! over {
+        ($key:literal, $slot:expr) => {
+            if let Some(serde_json::Value::String(s)) = map.get($key) {
+                $slot = Some(s.clone());
+            }
+        };
+    }
+    over!("primaryColor", theme.primary_color);
+    over!("primaryTextColor", theme.primary_text_color);
+    over!("primaryBorderColor", theme.primary_border_color);
+    over!("secondaryColor", theme.secondary_color);
+    over!("secondaryTextColor", theme.secondary_text_color);
+    over!("secondaryBorderColor", theme.secondary_border_color);
+    over!("tertiaryColor", theme.tertiary_color);
+    over!("tertiaryTextColor", theme.tertiary_text_color);
+    over!("tertiaryBorderColor", theme.tertiary_border_color);
+    over!("background", theme.background);
+    over!("textColor", theme.text_color);
+    over!("titleColor", theme.title_color);
+    over!("mainBkg", theme.main_bkg);
+    over!("nodeBkg", theme.node_bkg);
+    over!("nodeBorder", theme.node_border);
+    over!("nodeTextColor", theme.node_text_color);
+    over!("clusterBkg", theme.cluster_bkg);
+    over!("clusterBorder", theme.cluster_border);
+    over!("lineColor", theme.line_color);
+    over!("arrowheadColor", theme.arrowhead_color);
+    over!("edgeLabelBackground", theme.edge_label_background);
+    over!("labelBackground", theme.label_background);
+    over!("labelTextColor", theme.label_text_color);
+    over!("noteBkgColor", theme.note_bkg_color);
+    over!("noteTextColor", theme.note_text_color);
+    over!("noteBorderColor", theme.note_border_color);
+
+    // darkMode-driven derivations — applied AFTER direct overrides so
+    // explicit `textColor` / `primaryTextColor` keys still win.
+    if dark_mode {
+        if theme.primary_text_color.is_none() || theme.primary_text_color.as_deref() == Some("#333")
+        {
+            // Upstream sets primaryTextColor to '#eee' when darkMode and the
+            // user didn't supply one. Our pre-resolved themes hard-code the
+            // light-mode '#333' for `base`, so we replace it here.
+            theme.primary_text_color = Some("#eee".into());
+        }
+        if !map.contains_key("textColor") {
+            // textColor defaults to primaryTextColor when unset.
+            if let Some(ptc) = theme.primary_text_color.as_ref() {
+                theme.text_color = Some(ptc.clone());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

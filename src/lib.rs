@@ -43,7 +43,15 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
     // `parse(&str)` — without a Config parameter.
     let pre = preprocess::preprocess(source)?;
     let theme_name = pre.config.theme.as_deref().unwrap_or("default");
-    let theme = theme::get_theme(theme_name);
+    let mut theme = theme::get_theme(theme_name);
+    // Apply `themeVariables` overlay (init/frontmatter). Currently
+    // covers darkMode-derived text color plus a curated list of direct
+    // string overrides — see `theme::apply_theme_variables` for the
+    // whitelist. Values absent from the overlay leave the theme
+    // intact, so default-theme fixtures are unaffected.
+    if let Some(tv) = pre.config.theme_variables.as_ref() {
+        theme::apply_theme_variables(&mut theme, tv);
+    }
     let kind = detect::detect(&pre.cleaned_source);
 
     match kind {

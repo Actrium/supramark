@@ -722,6 +722,9 @@ pub fn render(
     out.push_str(&inner);
 
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    // Theme gradient defs — see `emit_gradient_defs` for the per-theme
+    // `useGradient` flag (default theme keeps it false).
+    out.push_str(&unified_shell::emit_gradient_defs(id, theme));
 
     // Diagram title — upstream's `utils.insertTitle` appends a centered
     // `<text class="flowchartTitleText">` above the diagram when the

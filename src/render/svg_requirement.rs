@@ -256,6 +256,8 @@ pub fn render(
     out.push_str(unified_shell::close_root_group());
     out.push_str(unified_shell::close_seed_group());
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    // Optional theme gradient defs — see `emit_gradient_defs`.
+    out.push_str(&unified_shell::emit_gradient_defs(id, theme));
     // Diagram title — emitted AFTER the main content (matching upstream's insertTitle
     // which appends the <text> AFTER render() but BEFORE setupViewPortForSVG).
     // When present, the title contributes to the viewBox width (if it's wider than the

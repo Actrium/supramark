@@ -321,6 +321,9 @@ pub fn render(
 
     // ── 6. Trailing drop-shadow filter <defs>s ───────────────────────
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    // Optional theme-driven gradient defs (forest / base / dark /
+    // neutral all set `useGradient=true`). See `emit_gradient_defs`.
+    out.push_str(&unified_shell::emit_gradient_defs(id, theme));
 
     // Optional title text — emitted *after* the drop-shadow defs.
     if let Some(title) = d.meta.title.as_deref() {

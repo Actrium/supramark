@@ -181,6 +181,8 @@ pub fn render(
 
     // Drop-shadow filter defs (match upstream tail).
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    // Optional theme gradient defs — see `emit_gradient_defs`.
+    out.push_str(&unified_shell::emit_gradient_defs(id, theme));
 
     // Diagram title — upstream's `insertTitle` appends a <text> element
     // AFTER the main content and drop-shadow defs but BEFORE </svg>.

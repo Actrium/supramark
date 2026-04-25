@@ -30,6 +30,7 @@
 //! * the base64 `data-points` serializer.
 
 use crate::layout::unified::types::Point;
+use crate::theme::ThemeVariables;
 
 /// Canonical SVG attribute order emitted by mermaid's `appendDivSvgG`
 /// + `setupViewPortForSVG`: `id → width → xmlns → class → style →
@@ -188,6 +189,49 @@ pub fn open_layer(name: &str) -> String {
 #[must_use]
 pub const fn close_layer() -> &'static str {
     "</g>"
+}
+
+/// Emit the optional `<linearGradient>` definition that upstream's
+/// `render6` pipeline appends to the SVG when
+/// [`ThemeVariables::use_gradient`] is `Some(true)`. Returns an empty
+/// string when the theme does not request a gradient.
+///
+/// Layout matches upstream byte-for-byte:
+///
+/// ```svg
+/// <linearGradient id="{id}-gradient" gradientUnits="objectBoundingBox"
+///   x1="0%" y1="0%" x2="100%" y2="0%">
+///   <stop offset="0%"   stop-color="{gradientStart}" stop-opacity="1"></stop>
+///   <stop offset="100%" stop-color="{gradientStop}"  stop-opacity="1"></stop>
+/// </linearGradient>
+/// ```
+///
+/// Upstream reference (`mermaid@11.14.0` minified):
+/// `src/rendering-util/render.ts → render6` — appends the gradient
+/// directly under the root `<svg>` after the two drop-shadow `<defs>`.
+#[must_use]
+pub fn emit_gradient_defs(id: &str, theme: &ThemeVariables) -> String {
+    if theme.use_gradient != Some(true) {
+        return String::new();
+    }
+    // When `useGradient` is true, upstream always supplies both endpoints
+    // (theme-base/dark/forest/neutral all populate `gradientStart` /
+    // `gradientStop`). Empty fall-backs are defensive: even an unset
+    // start/stop produces a syntactically valid `<stop>` (mermaid's JS
+    // would emit `stop-color="undefined"`).
+    let start = theme.gradient_start.as_deref().unwrap_or("");
+    let stop = theme.gradient_stop.as_deref().unwrap_or("");
+    format!(
+        concat!(
+            r#"<linearGradient id="{id}-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%">"#,
+            r#"<stop offset="0%" stop-color="{start}" stop-opacity="1"></stop>"#,
+            r#"<stop offset="100%" stop-color="{stop}" stop-opacity="1"></stop>"#,
+            r#"</linearGradient>"#
+        ),
+        id = id,
+        start = start,
+        stop = stop,
+    )
 }
 
 /// Emit the trailing drop-shadow filter `<defs>` pair that upstream

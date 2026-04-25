@@ -126,6 +126,10 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
 
     // ── 6. Trailing drop-shadow filter <defs>s ───────────────────────
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+    // Theme gradient defs (forest / base / dark / neutral set
+    // `useGradient=true`; default disables it). Upstream appends this
+    // sibling-to-defs immediately after the dropshadow filters.
+    out.push_str(&unified_shell::emit_gradient_defs(id, theme));
 
     // Optional title text — emitted *after* the drop-shadow defs, as
     // upstream `utils.insertTitle` does.
