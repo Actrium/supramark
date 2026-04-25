@@ -69,6 +69,15 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         isolated_cluster_ids,
     } = unified::layout(&layout_data, "dagre", theme)?;
 
+    // Dagre's `assign_node_intersects` always uses `intersect_rect`, which
+    // produces a point on the node's axis-aligned bounding box. Upstream
+    // mermaid instead calls each shape's `intersect()` callback — for the
+    // diamond/question shape this is `intersectPolygon` against the actual
+    // polygon vertices. Recompute the entry/exit point for diamond endpoints
+    // here so the rendered path matches upstream byte-for-byte.
+    let mut edges = edges;
+    fix_diamond_edge_endpoints(&mut edges, &nodes);
+
     Ok(FlowchartLayout {
         nodes,
         edges,
@@ -85,6 +94,158 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
         },
         isolated_cluster_ids,
     })
+}
+
+/// Replace the first/last edge waypoint with the diamond polygon intersection
+/// when the corresponding endpoint node has shape "diamond". Mirrors upstream
+/// `intersectPolygon` for question/diamond shapes; dagre-rs only ever uses
+/// `intersect_rect` and so produces a point on the bounding box, which then
+/// disagrees with mermaid's reference SVG by ~25 px on the lower-left edge.
+fn fix_diamond_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Node]) {
+    use crate::layout::unified::types::Point;
+    // Build a quick lookup of node id → (cx, cy, s) for diamond nodes.
+    let mut diamond_info: BTreeMap<&str, (f64, f64, f64)> = BTreeMap::new();
+    for n in nodes {
+        if n.shape.as_deref() == Some("diamond") {
+            let cx = n.x.unwrap_or(0.0);
+            let cy = n.y.unwrap_or(0.0);
+            // Layout stores width = height = s (full diagonal length).
+            let s = n.width.unwrap_or(0.0);
+            diamond_info.insert(n.id.as_str(), (cx, cy, s));
+        }
+    }
+    if diamond_info.is_empty() {
+        return;
+    }
+
+    // Diamond polygon vertices in absolute coords. Upstream's
+    // `intersectPolygon` recomputes positions from `node.x/y/width/height`
+    // and the polygon's `minX/minY`, IGNORING the render-time +0.5 px
+    // translation that the SVG `<polygon transform>` carries. Mirror that
+    // here so we land on the same intersection coordinates.
+    let polygon_for = |cx: f64, cy: f64, s: f64| -> [(f64, f64); 4] {
+        let half = s / 2.0;
+        [
+            (cx, cy + half),         // bottom
+            (cx + half, cy),         // right
+            (cx, cy - half),         // top
+            (cx - half, cy),         // left
+        ]
+    };
+
+    for e in edges.iter_mut() {
+        let Some(points) = e.points.as_mut() else {
+            continue;
+        };
+        if points.len() < 2 {
+            continue;
+        }
+        // Start endpoint (anchor follows `start` field which may have been
+        // retargeted from a cluster — the actual leaf node is what matters).
+        if let Some(start_id) = e.start.as_deref() {
+            if let Some(&(cx, cy, s)) = diamond_info.get(start_id) {
+                let poly = polygon_for(cx, cy, s);
+                let next = points[1];
+                if let Some(p) = polygon_intersection((cx, cy), (next.x, next.y), &poly) {
+                    // Upstream `question.ts::calcIntersect` subtracts (0.5, 0.5)
+                    // from the raw polygon intersection ("Adjusted result").
+                    points[0] = Point { x: p.0 - 0.5, y: p.1 - 0.5 };
+                }
+            }
+        }
+        if let Some(end_id) = e.end.as_deref() {
+            if let Some(&(cx, cy, s)) = diamond_info.get(end_id) {
+                let poly = polygon_for(cx, cy, s);
+                let n = points.len();
+                let prev = points[n - 2];
+                if let Some(p) = polygon_intersection((cx, cy), (prev.x, prev.y), &poly) {
+                    points[n - 1] = Point { x: p.0 - 0.5, y: p.1 - 0.5 };
+                }
+            }
+        }
+    }
+}
+
+/// Mirror of upstream `intersectPolygon(node, polyPoints, point)` from
+/// `rendering-util/rendering-elements/intersect/intersect-polygon.js`.
+///
+/// Returns the polygon-edge intersection nearest to `target`, or `None` when
+/// no segment intersects the line `(center → target)`. The polygon points
+/// are already in absolute coordinates (caller did the `left/top` shift).
+///
+/// Implementation faithfully reproduces upstream's segment-segment test
+/// (`intersect-line.js`) including the +/- offset rounding trick on the
+/// numerator, which materially affects the last bit of the f64 result and
+/// is required for byte-exact `data-points` parity.
+fn polygon_intersection(
+    center: (f64, f64),
+    target: (f64, f64),
+    poly: &[(f64, f64)],
+) -> Option<(f64, f64)> {
+    let mut hits: Vec<(f64, f64)> = Vec::with_capacity(poly.len());
+    for i in 0..poly.len() {
+        let p1 = poly[i];
+        let p2 = poly[(i + 1) % poly.len()];
+        if let Some(p) = intersect_line(center, target, p1, p2) {
+            hits.push(p);
+        }
+    }
+    if hits.is_empty() {
+        return None;
+    }
+    if hits.len() > 1 {
+        hits.sort_by(|a, b| {
+            let da = (a.0 - target.0).powi(2) + (a.1 - target.1).powi(2);
+            let db = (b.0 - target.0).powi(2) + (b.1 - target.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    Some(hits[0])
+}
+
+/// Mirror of upstream `intersectLine(p1, p2, q1, q2)`. Returns the
+/// intersection of two line *segments* or `None` if they don't intersect.
+fn intersect_line(
+    p1: (f64, f64),
+    p2: (f64, f64),
+    q1: (f64, f64),
+    q2: (f64, f64),
+) -> Option<(f64, f64)> {
+    let a1 = p2.1 - p1.1;
+    let b1 = p1.0 - p2.0;
+    let c1 = p2.0 * p1.1 - p1.0 * p2.1;
+    let r3 = a1 * q1.0 + b1 * q1.1 + c1;
+    let r4 = a1 * q2.0 + b1 * q2.1 + c1;
+    if r3 != 0.0 && r4 != 0.0 && r3 * r4 > 0.0 {
+        return None;
+    }
+    let a2 = q2.1 - q1.1;
+    let b2 = q1.0 - q2.0;
+    let c2 = q2.0 * q1.1 - q1.0 * q2.1;
+    let r1 = a2 * p1.0 + b2 * p1.1 + c2;
+    let r2 = a2 * p2.0 + b2 * p2.1 + c2;
+    let epsilon = 1e-6_f64;
+    if r1.abs() < epsilon && r2.abs() < epsilon && r1 * r2 > 0.0 {
+        return None;
+    }
+    let denom = a1 * b2 - a2 * b1;
+    if denom == 0.0 {
+        return None;
+    }
+    let offset = (denom / 2.0).abs();
+    let num_x = b1 * c2 - b2 * c1;
+    let x = if num_x < 0.0 {
+        (num_x - offset) / denom
+    } else {
+        (num_x + offset) / denom
+    };
+    let num_y = a2 * c1 - a1 * c2;
+    let y = if num_y < 0.0 {
+        (num_y - offset) / denom
+    } else {
+        (num_y + offset) / denom
+    };
+    Some((x, y))
 }
 
 /// Build a unified `LayoutData` from a flowchart AST.
