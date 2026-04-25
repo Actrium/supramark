@@ -283,6 +283,140 @@ pub fn base64_encode(data: &[u8]) -> String {
     out
 }
 
+/// Sanitize a stroke-color string into the DOM id suffix upstream uses
+/// for per-color marker variants.
+///
+/// Upstream `edgeMarker.ts` (`addEdgeMarker`) builds the colored marker
+/// id as:
+///
+/// ```js
+/// const colorId = strokeColor.replace(/[^\dA-Za-z]/g, '_');
+/// const coloredMarkerId = `${originalMarkerId}_${colorId}`;
+/// ```
+///
+/// So `#f66` becomes `_f66` and ` orange` becomes `_orange`. Combined
+/// with the leading separator underscore, the final id reads like
+/// `pointEnd__f66` / `pointEnd__orange` (two underscores).
+#[must_use]
+pub fn marker_color_id(stroke_color: &str) -> String {
+    let mut out = String::with_capacity(stroke_color.len());
+    for c in stroke_color.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// Emit a colored variant of one of the flowchart point/circle/cross
+/// markers. `family` is the marker family name as known by
+/// [`crate::render::markers`] (e.g. `"point"`, `"circle"`, `"cross"`).
+/// `position` is `"End"` or `"Start"`. `id_prefix` / `kind` mirror the
+/// arguments passed to [`crate::render::markers::defs`].
+///
+/// `stroke_color` is the raw style value found after `stroke:` in the
+/// edge `pathStyle`. Returns the empty string for unsupported families
+/// — which today are exactly the three flowchart markers (point /
+/// circle / cross). Class / state / er markers do not get colored
+/// variants.
+#[must_use]
+pub fn colored_marker(
+    family: &str,
+    position: &str,
+    kind: &str,
+    id_prefix: &str,
+    stroke_color: &str,
+) -> String {
+    let color_id = marker_color_id(stroke_color);
+    // Upstream: `${originalMarkerId}_${colorId}` with a single
+    // separator underscore. The visual "double underscore" comes from
+    // colorId itself starting with `_` whenever the color value begins
+    // with a non-alphanumeric character (e.g. `#`, ` `).
+    let raw_id = format!("{id_prefix}_{kind}-{family}{position}_{color_id}");
+    // `stroke_color` is splatted unmodified into `stroke=` / `fill=`
+    // attributes — preserving leading whitespace / the `#` prefix etc.,
+    // exactly as upstream's `setAttribute('stroke', strokeColor)` does.
+    match family {
+        "point" => {
+            // Clone of `markers::point` for End/Start (no `-margin`
+            // suffix — upstream only colors the un-suffixed primary
+            // marker), plus `stroke=` + `fill=` on the `<path>`.
+            let (ref_x, d) = match position {
+                "End" => ("5", "M 0 0 L 10 5 L 0 10 z"),
+                "Start" => ("4.5", "M 0 5 L 10 10 L 10 0 z"),
+                _ => return String::new(),
+            };
+            format!(
+                "<marker id=\"{raw_id}\" class=\"marker {kind}\" viewBox=\"0 0 10 10\" refX=\"{ref_x}\" refY=\"5\" markerUnits=\"userSpaceOnUse\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"{d}\" class=\"arrowMarkerPath\" style=\"stroke-width: 1; stroke-dasharray: 1,0;\" stroke=\"{stroke_color}\" fill=\"{stroke_color}\"></path></marker>"
+            )
+        }
+        "circle" => {
+            let ref_x = match position {
+                "End" => "11",
+                "Start" => "-1",
+                _ => return String::new(),
+            };
+            // Circle markers are NOT filled (`arrow_circle.fill = false`
+            // in upstream `arrowTypesMap`), so only `stroke=` is set.
+            format!(
+                "<marker id=\"{raw_id}\" class=\"marker {kind}\" viewBox=\"0 0 10 10\" refX=\"{ref_x}\" refY=\"5\" markerUnits=\"userSpaceOnUse\" markerWidth=\"11\" markerHeight=\"11\" orient=\"auto\"><circle cx=\"5\" cy=\"5\" r=\"5\" class=\"arrowMarkerPath\" style=\"stroke-width: 1; stroke-dasharray: 1,0;\" stroke=\"{stroke_color}\"></circle></marker>"
+            )
+        }
+        "cross" => {
+            let ref_x = match position {
+                "End" => "12",
+                "Start" => "-1",
+                _ => return String::new(),
+            };
+            // Cross markers are NOT filled (`arrow_cross.fill = false`).
+            format!(
+                "<marker id=\"{raw_id}\" class=\"marker cross {kind}\" viewBox=\"0 0 11 11\" refX=\"{ref_x}\" refY=\"5.2\" markerUnits=\"userSpaceOnUse\" markerWidth=\"11\" markerHeight=\"11\" orient=\"auto\"><path d=\"M 1,1 l 9,9 M 10,1 l -9,9\" class=\"arrowMarkerPath\" style=\"stroke-width: 2; stroke-dasharray: 1,0;\" stroke=\"{stroke_color}\"></path></marker>"
+            )
+        }
+        _ => String::new(),
+    }
+}
+
+/// Extract the stroke color from a flowchart-style `pathStyle` string,
+/// matching upstream's regex `/stroke:([^;]+)/`. Returns the captured
+/// substring **including** leading whitespace (because the regex does
+/// not trim) — that whitespace is part of the byte-exact id mapping
+/// upstream uses for ` orange` vs `orange`.
+///
+/// Returns `None` when the style does not contain a `stroke:` segment.
+#[must_use]
+pub fn extract_stroke_color(path_style: &str) -> Option<String> {
+    // Find the first `stroke:` not preceded by an alphanumeric or dash
+    // (so `stroke-width:` does NOT match). Upstream uses a regex that
+    // anchors via the literal `stroke:` token — `stroke-width:` does
+    // contain `stroke:` as a substring? No: `stroke-width:` contains
+    // the byte sequence `stroke-` then `width:`. Substring `stroke:`
+    // does not appear inside `stroke-width:`, so a plain substring
+    // search suffices for upstream parity.
+    let mut start = 0usize;
+    while let Some(pos) = path_style[start..].find("stroke:") {
+        let abs = start + pos;
+        // Boundary check: `stroke:` must not be preceded by `-` (would
+        // be `stroke-:` which never occurs upstream) or alpha/digit
+        // (would be e.g. `mystroke:` — vanishingly rare but cheap to
+        // guard).
+        let prev = abs.checked_sub(1).and_then(|i| path_style.as_bytes().get(i));
+        if matches!(prev, Some(b) if b.is_ascii_alphanumeric() || *b == b'-') {
+            start = abs + "stroke:".len();
+            continue;
+        }
+        let after = abs + "stroke:".len();
+        let end = path_style[after..]
+            .find(';')
+            .map(|i| after + i)
+            .unwrap_or(path_style.len());
+        return Some(path_style[after..end].to_string());
+    }
+    None
+}
+
 /// Emit the stylis-scoped `<style>` block: opening tag, CSS body, and
 /// closing tag. Caller supplies a pre-composed / pre-minified CSS
 /// string (typically [`crate::theme::css::base_preamble`] plus per-diagram
@@ -342,6 +476,62 @@ mod tests {
         assert!(s.contains(r#"id="svg1-drop-shadow-small""#));
         assert!(s.contains(r#"dx="4""#));
         assert!(s.contains(r#"dx="2""#));
+    }
+
+    #[test]
+    fn marker_color_id_strips_non_alphanum() {
+        assert_eq!(marker_color_id("#f66"), "_f66");
+        assert_eq!(marker_color_id(" orange"), "_orange");
+        assert_eq!(marker_color_id("orange"), "orange");
+        assert_eq!(marker_color_id("#D50000"), "_D50000");
+        assert_eq!(marker_color_id("greenyellow"), "greenyellow");
+    }
+
+    #[test]
+    fn colored_marker_point_end_byte_exact() {
+        // Matches the byte-exact reference snippet from cypress/197.
+        let got = colored_marker(
+            "point",
+            "End",
+            "flowchart-v2",
+            "ref-ext-fixtures-cypress-flowchart-197",
+            "#f66",
+        );
+        let expected = r##"<marker id="ref-ext-fixtures-cypress-flowchart-197_flowchart-v2-pointEnd__f66" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1,0;" stroke="#f66" fill="#f66"></path></marker>"##;
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn colored_marker_with_leading_space_orange() {
+        // cypress/143 stores the color as ` orange` (space-prefixed),
+        // and upstream emits it back as ` orange` in the stroke/fill
+        // attrs while the id strips the space.
+        let got = colored_marker(
+            "point",
+            "End",
+            "flowchart-v2",
+            "ref-ext-fixtures-cypress-flowchart-143",
+            " orange",
+        );
+        let expected = r##"<marker id="ref-ext-fixtures-cypress-flowchart-143_flowchart-v2-pointEnd__orange" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1,0;" stroke=" orange" fill=" orange"></path></marker>"##;
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn extract_stroke_color_finds_first_match() {
+        assert_eq!(
+            extract_stroke_color("fill:#bbf;stroke:#f66;stroke-width:2px;color:white;"),
+            Some("#f66".to_string())
+        );
+        // ` orange` keeps leading whitespace.
+        assert_eq!(
+            extract_stroke_color("color:orange, stroke: orange;"),
+            Some(" orange".to_string())
+        );
+        // `stroke-width:` without `stroke:` returns None.
+        assert_eq!(extract_stroke_color("fill:none;stroke-width:1px;"), None);
+        // No stroke at all.
+        assert_eq!(extract_stroke_color(";;"), None);
     }
 
     #[test]

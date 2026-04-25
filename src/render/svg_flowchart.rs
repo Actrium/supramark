@@ -675,6 +675,14 @@ pub fn render(
     inner.push_str(unified_shell::close_layer());
 
     inner.push_str(unified_shell::close_root_group());
+    // Colored marker variants — upstream's `addEdgeMarker` clones the
+    // base marker once per unique stroke-color found in any edge's
+    // `pathStyle`. The clones live in the same parent as the base
+    // markers (the seed `<g>`), but are appended AFTER the root group
+    // because they are added during edge rendering, which happens
+    // after the root group has already been built up. Mirror that
+    // ordering exactly so byte-for-byte alignment is preserved.
+    inner.push_str(&emit_colored_marker_defs(&l.edges, &l.aria_kind, id));
     inner.push_str(unified_shell::close_seed_group());
 
     // ── Compute viewBox from rendered content ──────────────────────
@@ -1647,6 +1655,122 @@ fn cut_path_at_intersect(
     out
 }
 
+/// Walk the rendered edges, collect unique (family, position, color)
+/// triples implied by each edge's pathStyle stroke color, and emit one
+/// `<marker>` per triple in upstream's order.
+///
+/// Upstream's `addEdgeMarker` only colors the un-suffixed primary
+/// markers (no `-margin` variant). It also only emits the marker that
+/// matches the edge's actual `arrow_type_*` direction — start markers
+/// only when an arrow_type_start is set, end markers only when
+/// arrow_type_end is set.
+///
+/// Emission order matches upstream's `appendChild` walk:
+///   for each edge in render order:
+///     for each end-position with an arrow type:
+///       if (family, position, color) not seen yet → emit marker.
+fn emit_colored_marker_defs(edges: &[UEdge], aria_kind: &str, svg_id: &str) -> String {
+    let mut out = String::new();
+    let mut seen: std::collections::HashSet<(String, String, String)> =
+        std::collections::HashSet::new();
+    for e in edges {
+        let style = compute_edge_path_style(e);
+        let Some(stroke) = unified_shell::extract_stroke_color(&style) else {
+            continue;
+        };
+        if stroke.trim().is_empty() {
+            continue;
+        }
+        // Mirror upstream order: start position first when present,
+        // then end. addEdgeMarkers iterates start, then end.
+        if let Some(arrow) = e.arrow_type_start.as_deref() {
+            if let Some((family, position)) = arrow_marker_family(arrow, "start") {
+                let key = (family.to_string(), position.to_string(), stroke.clone());
+                if seen.insert(key) {
+                    out.push_str(&unified_shell::colored_marker(
+                        family, position, aria_kind, svg_id, &stroke,
+                    ));
+                }
+            }
+        }
+        if let Some(arrow) = e.arrow_type_end.as_deref() {
+            if let Some((family, position)) = arrow_marker_family(arrow, "end") {
+                let key = (family.to_string(), position.to_string(), stroke.clone());
+                if seen.insert(key) {
+                    out.push_str(&unified_shell::colored_marker(
+                        family, position, aria_kind, svg_id, &stroke,
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Build the `style="…"` value for a flowchart edge `<path>`.
+///
+/// Mirrors upstream's `rendering-elements/edges.js` `pathStyle`:
+///   styles  = edgeStyles.reduce(acc + style + ';', '')   // "s1;s2;"
+///   second  = edgeStyles.reduce(acc + ';' + style, '')   // ";s1;s2"
+///   pathStyle = styles + ';' + second                    // "s1;s2;;;s1;s2"
+///
+/// Class-derived styles take a different path: upstream collects the
+/// colour-only entries into `edge.labelStyle` and the renderer emits
+/// `${edgeStyles}${labelStyles};;` instead of doubling the full style
+/// array. Falls back to `";"` when the edge has no inline style at all.
+fn compute_edge_path_style(e: &UEdge) -> String {
+    match (e.style.as_ref(), e.label_style.as_ref()) {
+        (Some(v), Some(ls))
+            if !v.is_empty() && v.iter().any(|s| !s.is_empty()) && !ls.is_empty() =>
+        {
+            let first: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            let labels: String = ls
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            format!("{first}{labels};;")
+        }
+        (Some(v), _) if !v.is_empty() && v.iter().any(|s| !s.is_empty()) => {
+            let first: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            let second: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!(";{}", s))
+                .collect();
+            format!("{first};{second}")
+        }
+        _ => ";".to_string(),
+    }
+}
+
+/// Map `arrow_type_*` value to the `markers.rs` family + position pair
+/// used to look up colored marker variants. Returns `None` for arrow
+/// types that don't have a colored variant ("none", `arrow_open`,
+/// other unknowns).
+fn arrow_marker_family(arrow_type: &str, position: &str) -> Option<(&'static str, &'static str)> {
+    let pos = match position {
+        "start" => "Start",
+        "end" => "End",
+        _ => return None,
+    };
+    match arrow_type {
+        "arrow_circle" => Some(("circle", pos)),
+        "arrow_cross" => Some(("cross", pos)),
+        "none" | "arrow_open" => None,
+        // arrow_point / arrow / etc → point family
+        _ => Some(("point", pos)),
+    }
+}
+
 fn render_edge_path(
     e: &UEdge,
     _index: usize,
@@ -1720,46 +1844,9 @@ fn render_edge_path(
     };
 
     // Edge style emission mirrors upstream's `pathStyle` formula in
-    // `rendering-elements/edges.js`:
-    //   styles  = edgeStyles.reduce(acc + style + ';', '')   // "s1;s2;"
-    //   second  = edgeStyles.reduce(acc + ';' + style, '')   // ";s1;s2"
-    //   pathStyle = styles + ';' + second                    // "s1;s2;;;s1;s2"
-    //
-    // Class-derived styles take a different path: upstream collects the
-    // colour-only entries into `edge.labelStyle` and the renderer emits
-    // `${edgeStyles}${labelStyles};;` instead of doubling the full style
-    // array. Falls back to `";"` when the edge has no inline style at all.
-    let style_val = match (e.style.as_ref(), e.label_style.as_ref()) {
-        (Some(v), Some(ls))
-            if !v.is_empty() && v.iter().any(|s| !s.is_empty()) && !ls.is_empty() =>
-        {
-            let first: String = v
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| format!("{};", s))
-                .collect();
-            let labels: String = ls
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| format!("{};", s))
-                .collect();
-            format!("{first}{labels};;")
-        }
-        (Some(v), _) if !v.is_empty() && v.iter().any(|s| !s.is_empty()) => {
-            let first: String = v
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| format!("{};", s))
-                .collect();
-            let second: String = v
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| format!(";{}", s))
-                .collect();
-            format!("{first};{second}")
-        }
-        _ => ";".to_string(),
-    };
+    // `rendering-elements/edges.js`. Extracted to `compute_edge_path_style`
+    // so the marker-defs pre-pass can reuse it for stroke-color sniffing.
+    let style_val = compute_edge_path_style(e);
     // 'data-id' below uses the original edge id; do not consume style here.
 
     let edge_id = format!("{svg_id}-{id}", id = e.id.clone());
@@ -1782,12 +1869,22 @@ fn render_edge_path(
         unified_shell::base64_encode(json.as_bytes())
     };
 
+    // Per-edge stroke color (from the final pathStyle), used to switch
+    // marker references from the base `pointEnd` to the colored variant
+    // `pointEnd_{colorId}` — matching upstream `addEdgeMarker` exactly.
+    let stroke_color = unified_shell::extract_stroke_color(&style_val)
+        .filter(|s| !s.trim().is_empty());
+    let color_suffix = stroke_color
+        .as_deref()
+        .map(|c| format!("_{}", unified_shell::marker_color_id(c)))
+        .unwrap_or_default();
+
     let marker_end = match e.arrow_type_end.as_deref() {
         Some("arrow_circle") => {
-            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-circleEnd)""#)
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-circleEnd{color_suffix})""#)
         }
         Some("arrow_cross") => {
-            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-crossEnd)""#)
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-crossEnd{color_suffix})""#)
         }
         Some("none") | None => {
             // No arrowhead (arrow_open / open edges like `---`): no marker.
@@ -1796,18 +1893,18 @@ fn render_edge_path(
         _ => {
             // Default arrow (point) — upstream emits marker-end for
             // arrow_point, arrow, etc.
-            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-pointEnd)""#)
+            format!(r#" marker-end="url(#{svg_id}_{aria_kind}-pointEnd{color_suffix})""#)
         }
     };
     let marker_start = match e.arrow_type_start.as_deref() {
         Some("arrow_point") | Some("arrow") => {
-            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-pointStart)""#)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-pointStart{color_suffix})""#)
         }
         Some("arrow_circle") => {
-            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-circleStart)""#)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-circleStart{color_suffix})""#)
         }
         Some("arrow_cross") => {
-            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-crossStart)""#)
+            format!(r#" marker-start="url(#{svg_id}_{aria_kind}-crossStart{color_suffix})""#)
         }
         _ => String::new(),
     };
