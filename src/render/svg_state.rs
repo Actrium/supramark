@@ -394,13 +394,22 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
         }
     }
 
-    // Isolated cluster outer/inner rects. These rects sit inside an inner
-    // <g class="root" transform="translate(tx, ty)">. jsdom getBBox ignores
-    // ALL transforms, so the rect contributes its absolute (cnode-local)
-    // coordinates: outer rect is at (cx - w/2, cy - h/2, w, h).
+    // Composite-state cluster outer/inner rects. These contribute their
+    // absolute coordinates to the global bbox union — jsdom getBBox ignores
+    // ALL transforms, so the rect contributes its cnode-local coordinates
+    // (which equal absolute when the rect sits in an outer `<g class="root">`
+    // or `<g class="clusters">` group with no transform).
+    //
+    // Both isolated clusters (rendered inside an inner-root group) and
+    // non-isolated clusters (rendered directly under the outer cluster group)
+    // emit `<rect class="outer" x="cx - w/2" y="cy - h/2" w h>` in the SVG,
+    // so both must be unioned into the viewbox bbox.
     let iso_ids = &l.result.isolated_cluster_ids;
     for n in l.result.nodes.iter().filter(|n| n.is_group) {
-        if !iso_ids.contains(&n.id) {
+        // Skip noteGroup wrappers (already handled above) and divider clusters
+        // (their rect is included via the `divider` shape branch below).
+        let shape = n.shape.as_deref().unwrap_or("");
+        if shape == "noteGroup" {
             continue;
         }
         if let (Some(cx), Some(cy), Some(w), Some(h)) = (n.x, n.y, n.width, n.height) {
@@ -419,13 +428,12 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
             // every transform, so the foreignObject contributes its LOCAL
             // bbox `[0, lw] × [0, lh]` to the global getBBox union.
             //
-            // For composite states (`shape == "rect"`) with a non-empty label,
-            // a wide title can extend beyond the cluster's outer rect on the
-            // right (`lw > w/2 + (cx - 0)`). Mirroring the renderer's
-            // measurement (`measure_html_markup_label` on the xml-escaped
-            // label) ensures the viewbox grows just enough to keep the title
-            // visible.
-            if n.shape.as_deref() == Some("rect") {
+            // Only `rect` (composite state) and `roundedWithTitle` clusters
+            // emit a label foreignObject. Apply the contribution only to
+            // isolated clusters for now — non-isolated cluster labels already
+            // fit within the outer rect's right edge in known fixtures, and
+            // adding them unconditionally caused width regressions on cy/30.
+            if iso_ids.contains(&n.id) && shape == "rect" {
                 if let Some(label) = n.label.as_deref() {
                     if !label.is_empty() {
                         use crate::render::foreign_object::{
@@ -662,34 +670,34 @@ fn has_isolated_ancestor(
 }
 
 /// Return true if either of the edge's endpoints (or any ancestor of either)
-/// is an isolated cluster.
+/// is an isolated cluster's interior — meaning the edge belongs to that
+/// cluster's inner-root and must be skipped at the top-level edge pass.
 ///
-/// Cluster-to-cluster edges (where both endpoints are themselves cluster ids)
-/// are NOT considered "inside" any isolated cluster — they connect two
-/// boundaries and belong in the top-level `<g class="edgePaths">`.
+/// Cluster-level boundary edges (where an endpoint IS an isolated cluster id
+/// itself, rather than a descendant of one) are NOT considered "inside" — they
+/// connect a cluster super-node to its sibling and belong in the outer
+/// `<g class="edgePaths">`. This includes:
+///   - cluster-to-cluster edges (both endpoints are cluster ids)
+///   - cluster-to-leaf or leaf-to-cluster edges where the cluster is isolated
+///     (e.g. `[*] --> TV` in cy/22 where TV is an isolated composite state).
 fn edge_endpoint_is_isolated(
     e: &Edge,
     nodes: &[Node],
     iso_ids: &std::collections::HashSet<String>,
 ) -> bool {
-    let cluster_ids: std::collections::HashSet<&str> = nodes
-        .iter()
-        .filter(|n| n.is_group)
-        .map(|n| n.id.as_str())
-        .collect();
-    if let (Some(s), Some(d)) = (e.start.as_deref(), e.end.as_deref()) {
-        if cluster_ids.contains(s) && cluster_ids.contains(d) {
-            return false;
-        }
-    }
-    let in_iso = |id: &str| iso_ids.contains(id) || has_isolated_ancestor(id, nodes, iso_ids);
+    // An endpoint is "inside" an isolated cluster only if it is a strict
+    // descendant of the cluster — being the cluster itself does not count.
+    // This matches upstream's recursiveRender flow: outer dagre handles edges
+    // whose endpoints are top-level (including isolated cluster super-nodes);
+    // inner dagre handles edges fully contained within a cluster's interior.
+    let in_iso_interior = |id: &str| has_isolated_ancestor(id, nodes, iso_ids);
     if let Some(s) = e.start.as_deref() {
-        if in_iso(s) {
+        if in_iso_interior(s) {
             return true;
         }
     }
     if let Some(d) = e.end.as_deref() {
-        if in_iso(d) {
+        if in_iso_interior(d) {
             return true;
         }
     }
