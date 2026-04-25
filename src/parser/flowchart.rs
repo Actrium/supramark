@@ -449,9 +449,8 @@ impl<'a> LineParser<'a> {
                 // Markdown labels (`"`...`"`) carry the inner content WITHOUT
                 // surrounding backticks as both the id and the rendered title.
                 let inner = &line[1..line.len() - 1];
-                let is_markdown = inner.starts_with('`')
-                    && inner.ends_with('`')
-                    && inner.len() >= 2;
+                let is_markdown =
+                    inner.starts_with('`') && inner.ends_with('`') && inner.len() >= 2;
                 let id_text = if is_markdown {
                     &inner[1..inner.len() - 1]
                 } else {
@@ -786,6 +785,15 @@ impl<'a> LineParser<'a> {
     /// or `None` if nothing parseable at the head.
     fn parse_node_group(&mut self, s: &str) -> Option<(Vec<String>, usize)> {
         let mut ids: Vec<String> = Vec::new();
+        // Defer the extra `vertexCounter++` that upstream's jison parser
+        // performs for each `id@{...}` shapeData binding (cases 49/52 in
+        // `flow.jison`). Upstream order matters: when shapeData appears
+        // mid-chain (e.g. `B & C@{x} & E@{y}`), the counter bumps only
+        // happen AFTER the next styledVertex on the right has been pushed
+        // through the bare `vertex: idString` rule (case 72). We model that
+        // by collecting the count here and applying the bumps once the
+        // group has finished — that keeps domIds aligned (`E-3`, `D-6`).
+        let mut shape_data_bumps: usize = 0;
         let mut pos: usize = 0;
         loop {
             // Skip leading spaces
@@ -800,7 +808,8 @@ impl<'a> LineParser<'a> {
             if cur_tail.is_empty() {
                 break;
             }
-            let (id, shape_opt, label_opt, class_suffix, consumed) = parse_one_vertex(cur_tail)?;
+            let (id, shape_opt, label_opt, class_suffix, consumed, had_shape_data) =
+                parse_one_vertex(cur_tail)?;
             pos += consumed;
             self.ensure_vertex(&id);
             // Apply shape / label
@@ -819,6 +828,11 @@ impl<'a> LineParser<'a> {
                     v.classes.push(cls);
                 }
             }
+            if had_shape_data {
+                // Defer the extra counter bump until the surrounding `&`
+                // group has finished — see comment at top of this function.
+                shape_data_bumps += 1;
+            }
             ids.push(id);
             // Look for `&` joiner
             let lead2 = s[pos..]
@@ -836,6 +850,9 @@ impl<'a> LineParser<'a> {
         if ids.is_empty() {
             None
         } else {
+            // Apply deferred shapeData counter bumps now that the chain has
+            // closed. See comment at top of `parse_node_group`.
+            self.vertex_counter += shape_data_bumps;
             Some((ids, pos))
         }
     }
@@ -1329,7 +1346,14 @@ fn classify_arrow(arrow: &str) -> Option<(EdgeStroke, usize, ArrowType, ArrowTyp
 /// Returns (id, shape, label, class_suffix, bytes_consumed).
 fn parse_one_vertex(
     s: &str,
-) -> Option<(String, Option<String>, Option<Label>, Option<String>, usize)> {
+) -> Option<(
+    String,
+    Option<String>,
+    Option<Label>,
+    Option<String>,
+    usize,
+    bool,
+)> {
     // Read id up to a shape-starter / whitespace / `&` / link-starter.
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -1490,8 +1514,10 @@ fn parse_one_vertex(
     // upstream — the rendered span gains the `markdown-node-label` class.
     let mut shape = shape;
     let mut label = label;
+    let mut had_shape_data = false;
     let remainder = if let Some(after) = remainder.strip_prefix("@{") {
         if let Some(end) = after.find('}') {
+            had_shape_data = true;
             let data = &after[..end];
             let (lbl, shp) = parse_node_shape_data(data);
             if let Some(l) = lbl {
@@ -1513,7 +1539,7 @@ fn parse_one_vertex(
     };
 
     let consumed = s.len() - remainder.len();
-    Some((id, shape, label, class_suffix, consumed))
+    Some((id, shape, label, class_suffix, consumed, had_shape_data))
 }
 
 fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
