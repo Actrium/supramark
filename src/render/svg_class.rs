@@ -103,13 +103,23 @@ pub fn render(
     // `aria-roledescription="classDiagram"`. The marker IDs follow the
     // same split — kind prefix is "class" for v1 / "classDiagram" for v2.
     let kind = if d.v2 { "classDiagram" } else { "class" };
-    out.push_str(&unified_shell::open_unified_svg(
+    let acc_title = d.meta.acc_title.as_deref();
+    let acc_descr = d.meta.acc_descr.as_deref();
+    out.push_str(&unified_shell::open_unified_svg_with_a11y(
         id,
         vw,
         (vx, vy, vw, vh),
         Some("classDiagram"),
         kind,
+        acc_descr.is_some(),
+        acc_title.is_some(),
     ));
+
+    // Accessibility `<title>` / `<desc>` elements — emitted right after
+    // `<svg>` opens when the source declares `accTitle:` / `accDescr:`.
+    // Upstream's renderer calls `setA11yDiagramInfo` + `addSVGa11yTitleDescription`
+    // before any other content is appended.
+    out.push_str(&unified_shell::emit_a11y_elements(id, acc_title, acc_descr));
 
     // ── 3. <style> block ───────────────────────────────────────────
     out.push_str(&style_block(id, d, theme));
