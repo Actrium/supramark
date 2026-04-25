@@ -940,6 +940,30 @@ fn is_isolated_cluster(cluster_id: &str, data: &LayoutData) -> bool {
     true
 }
 
+/// Inner-pass dagre routing for a single edge inside an isolated cluster.
+///
+/// The inner compound dagre (`layout_isolated_cluster`) computes the full
+/// spline for every edge whose endpoints are both inside the isolated
+/// cluster — including the curveBasis control points injected by the
+/// label-dummy ranks for labeled edges. These would otherwise be lost
+/// because the outer pass never sees these edges; here we expose them so
+/// the public `layout()` entry can merge them back into
+/// `LayoutResult.edges`.
+struct InnerEdgePoints {
+    /// Endpoint identifiers as seen by the inner dagre graph (the same
+    /// ids that go into `g.set_edge(src, dst, name)`).
+    src: String,
+    dst: String,
+    /// Edge `name` (the user `Edge::id` we passed in via
+    /// `g.set_edge(..., Some(name))`). `None` for unnamed edges.
+    name: Option<String>,
+    /// Spline waypoints from the inner dagre pass.
+    points: Vec<crate::layout::unified::types::Point>,
+    /// Label centre (`g.edge(...).x / .y`) — set when the edge has a label.
+    label_x: Option<f64>,
+    label_y: Option<f64>,
+}
+
 /// Result of an inner compound dagre pass for one isolated cluster.
 /// Recursive: isolated sub-clusters within this cluster have their own
 /// `InnerLayout` entries in `sub_isolated`.
@@ -972,6 +996,11 @@ struct InnerLayout {
     /// isolated sub-clusters are carried in their own `InnerLayout`.
     /// Value: (x, y, w, h) as returned by the inner dagre.
     child_positions: std::collections::HashMap<String, (f64, f64, f64, f64)>,
+    /// Routing data for every edge laid out in this inner pass.  The outer
+    /// `layout()` function merges these into the final `LayoutResult.edges`
+    /// since `collect_edges` only looks at the outer dagre graph and would
+    /// otherwise leave intra-cluster edges with empty `points`.
+    inner_edges: Vec<InnerEdgePoints>,
     /// Recursive inner layouts for sub-clusters that are isolated within
     /// this cluster's context.  Keyed by sub-cluster id.
     sub_isolated: std::collections::HashMap<String, InnerLayout>,
@@ -1380,9 +1409,41 @@ fn layout_isolated_cluster(
     let bbox_width = inner_margin + cluster_width + max_half_node_w;
     let bbox_height = inner_margin + cluster_height + max_half_node_h;
 
+    // Read back inner-pass edge routing.  Every edge whose endpoints are both
+    // inside this cluster (excluding self-edges, which are expanded into
+    // helper-node chains by `expand_self_edge` and rerouted at render time)
+    // already has its dagre-computed spline in the inner graph.  The outer
+    // pass never sees these edges, so we capture them here for `layout()` to
+    // merge into the final `LayoutResult.edges`.
+    let mut inner_edges: Vec<InnerEdgePoints> = Vec::new();
+    for e in g.edges() {
+        if e.v == e.w {
+            // Self-edges: routing is regenerated downstream from node bounds.
+            continue;
+        }
+        if let Some(lbl) = g.edge(&e.v, &e.w, e.name.as_deref()) {
+            let points: Vec<crate::layout::unified::types::Point> = lbl
+                .points
+                .iter()
+                .map(|p| crate::layout::unified::types::Point { x: p.x, y: p.y })
+                .collect();
+            if points.is_empty() {
+                continue;
+            }
+            inner_edges.push(InnerEdgePoints {
+                src: e.v.clone(),
+                dst: e.w.clone(),
+                name: e.name.clone(),
+                points,
+                label_x: lbl.x,
+                label_y: lbl.y,
+            });
+        }
+    }
+
     log::debug!(
         "dagre_bridge: inner layout for isolated cluster '{}': cluster_w={}, cluster_h={}, \
-         inner_x={}, inner_y={}, bbox_w={}, bbox_h={}, sub_isolated={:?}",
+         inner_x={}, inner_y={}, bbox_w={}, bbox_h={}, sub_isolated={:?}, inner_edges={}",
         cluster_id,
         cluster_width,
         cluster_height,
@@ -1391,6 +1452,7 @@ fn layout_isolated_cluster(
         bbox_width,
         bbox_height,
         sub_isolated.keys().collect::<Vec<_>>(),
+        inner_edges.len(),
     );
 
     InnerLayout {
@@ -1401,6 +1463,7 @@ fn layout_isolated_cluster(
         bbox_width,
         bbox_height,
         child_positions,
+        inner_edges,
         sub_isolated,
     }
 }
@@ -1671,7 +1734,81 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         })
         .collect();
 
-    let edges_pre = collect_edges(data, &g, &outer_cluster_anchors);
+    let mut edges_pre = collect_edges(data, &g, &outer_cluster_anchors);
+
+    // Merge inner-pass edge routing for edges whose endpoints are both inside
+    // an isolated cluster.  These edges never reach the outer dagre graph —
+    // `collect_edges` would leave their `points` at `None` — but the inner
+    // dagre pass already laid out the full spline (including curveBasis
+    // control points injected by label-dummy ranks for labeled edges).
+    //
+    // We key the inner-pass map by (src_id, dst_id, edge_id) which matches
+    // exactly what was passed into `g.set_edge(...)` inside the inner pass.
+    {
+        // Recursively collect every InnerEdgePoints from this isolated tree.
+        fn gather<'a>(inner: &'a InnerLayout, sink: &mut Vec<&'a InnerEdgePoints>) {
+            for ie in &inner.inner_edges {
+                sink.push(ie);
+            }
+            for sub in inner.sub_isolated.values() {
+                gather(sub, sink);
+            }
+        }
+        let mut all_inner: Vec<&InnerEdgePoints> = Vec::new();
+        for il in isolated_layouts.values() {
+            gather(il, &mut all_inner);
+        }
+        if !all_inner.is_empty() {
+            // Build a lookup: (src, dst, name) → &InnerEdgePoints.
+            let mut by_triple: std::collections::HashMap<
+                (String, String, String),
+                &InnerEdgePoints,
+            > = std::collections::HashMap::new();
+            for ie in &all_inner {
+                by_triple.insert(
+                    (
+                        ie.src.clone(),
+                        ie.dst.clone(),
+                        ie.name.clone().unwrap_or_default(),
+                    ),
+                    ie,
+                );
+            }
+            let mut merged = 0usize;
+            for orig_edge in &mut edges_pre {
+                if orig_edge.points.is_some() {
+                    continue;
+                }
+                let src = match edge_source(orig_edge) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let dst = match edge_target(orig_edge) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let name = orig_edge.id.clone();
+                if let Some(ie) = by_triple.get(&(src.clone(), dst.clone(), name)) {
+                    orig_edge.points = Some(ie.points.clone());
+                    if ie.label_x.is_some() {
+                        orig_edge.label_x = ie.label_x;
+                    }
+                    if ie.label_y.is_some() {
+                        orig_edge.label_y = ie.label_y;
+                    }
+                    merged += 1;
+                }
+            }
+            if merged > 0 {
+                log::debug!(
+                    "dagre_bridge: merged inner-pass routing into {}/{} isolated-cluster edge(s)",
+                    merged,
+                    all_inner.len(),
+                );
+            }
+        }
+    }
+
     // Reorder edges so cluster-endpoint edges come last, matching upstream's
     // behavior where `adjustClustersAndEdges` removes and re-adds such edges.
     let edges_reordered = reorder_cluster_edges(edges_pre, data);
