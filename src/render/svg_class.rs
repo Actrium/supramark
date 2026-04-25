@@ -305,13 +305,22 @@ fn render_class_text_row_indexed(
     let family = "trebuchet ms,verdana,arial,sans-serif";
     let font = 14.0_f64;
     let line_h = 16.296875_f64;
-    let display = displayed_member_text_local(&m.text);
-    let display_w = crate::font_metrics::text_width(&display, family, font, false, false);
+    // The post-decode raw display text — keeps `*`/`_` markers in place.
+    // Used as input to both the markdown-textContent measurement and the
+    // markdown-to-HTML pass that fills the `<p>` element.
+    let display_raw = displayed_member_text_local(&m.text);
+    // Width is measured on the *rendered* div.textContent, which strips
+    // markdown emphasis markers. Mirror upstream's `marked → innerHTML →
+    // textContent` pipeline.
+    let display_stripped = crate::layout::class::md_emphasis_strip(&display_raw);
+    let display_w = crate::font_metrics::text_width(&display_stripped, family, font, false, false);
     // span_max_w is calculated against m.text (raw entity-escaped form),
     // not the decoded display string, mirroring upstream shapeUtil.ts.
     let span_max_w =
         crate::font_metrics::text_width(&m.text, family, 16.0, false, false).round() + 50.0;
-    let escaped = html_escape(&display);
+    // The HTML body of `<p>` is the markdown-rendered form (em / strong
+    // tags inserted, all other characters escaped).
+    let escaped = crate::layout::class::md_emphasis_html(&html_escape(&display_raw));
     let style = m.css_style.clone();
     let _ = total;
     // Upstream `addText.ts`: `transform = translate(0, -bbox.height/(2*n) + yOffset)`.
@@ -411,18 +420,9 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     }
 
     // basic label-container outer-path: rough.js rectangle (two paths).
-    let fill_attr = style_overrides
-        .fill
-        .as_deref()
-        .unwrap_or("#ECECFF");
-    let stroke_attr = style_overrides
-        .stroke
-        .as_deref()
-        .unwrap_or("#9370DB");
-    let stroke_w_attr = style_overrides
-        .stroke_width
-        .as_deref()
-        .unwrap_or("1.3");
+    let fill_attr = style_overrides.fill.as_deref().unwrap_or("#ECECFF");
+    let stroke_attr = style_overrides.stroke.as_deref().unwrap_or("#9370DB");
+    let stroke_w_attr = style_overrides.stroke_width.as_deref().unwrap_or("1.3");
     out.push_str(r#"<g class="basic label-container outer-path">"#);
     out.push_str(&format!(
         r##"<path d="M{x0} {y0} L{x1} {y0} L{x1} {y1} L{x0} {y1}" stroke="none" stroke-width="0" fill="{fill}" style="{st}"></path>"##,
@@ -529,8 +529,7 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
         .map(|cn| cn.raw_text())
         .unwrap_or_else(|| label.to_string());
     let span_max_w =
-        crate::font_metrics::text_width(&measure_text, label_family, 16.0, false, false)
-            .round()
+        crate::font_metrics::text_width(&measure_text, label_family, 16.0, false, false).round()
             + 50.0;
     out.push_str(&format!(
         r#"<foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel markdown-node-label" style="{ls}"><p>{txt}</p></span></div></foreignObject>"#,
@@ -567,7 +566,10 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
         members
             .iter()
             .map(|m| {
-                let s = displayed_member_text_local(&m.text);
+                let raw = displayed_member_text_local(&m.text);
+                // Width is on the markdown-rendered textContent — strip
+                // emphasis markers so `*italic*` is measured as `italic`.
+                let s = crate::layout::class::md_emphasis_strip(&raw);
                 crate::font_metrics::text_width(
                     &s,
                     label_family_member,
@@ -610,16 +612,12 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     // number stays as-is, hence `0 - PADDING/2 = -6` survives.
     // raw_annotation_h is computed earlier alongside annotation_text.
     let raw_label_h = label_h; // single foreignObject
-    // members getBBox(): for non-empty groups every row's foreignObject
-    // sits at intrinsic (0,0); the union therefore collapses to a single
-    // (0, 0, max_w, line_h) box regardless of row count (see notes in
-    // layout/class.rs::estimate_classbox_dimensions).
+                               // members getBBox(): for non-empty groups every row's foreignObject
+                               // sits at intrinsic (0,0); the union therefore collapses to a single
+                               // (0, 0, max_w, line_h) box regardless of row count (see notes in
+                               // layout/class.rs::estimate_classbox_dimensions).
     let raw_members_h = if has_members { label_h } else { 0.0 };
-    let extra_sub = if render_extra_box {
-        padding / 2.0
-    } else {
-        0.0
-    };
+    let extra_sub = if render_extra_box { padding / 2.0 } else { 0.0 };
     let annotation_h_cb = if raw_annotation_h - extra_sub == 0.0 {
         0.0
     } else {
@@ -663,8 +661,12 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     //   newTranslateY = annotation_cb + label_cb + max(members_cb, GAP/2) + y + GAP*4 + PADDING
     // (when `nodeHeightGreater` is false, the common case here).
     let members_h_for_methods = members_h_cb.max(padding / 2.0);
-    let methods_translate_y =
-        annotation_h_cb + label_h_cb + members_h_for_methods + y_internal_real + 4.0 * padding + padding;
+    let methods_translate_y = annotation_h_cb
+        + label_h_cb
+        + members_h_for_methods
+        + y_internal_real
+        + 4.0 * padding
+        + padding;
 
     // Emit members-group.
     out.push_str(&format!(
@@ -709,18 +711,19 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     // constants byte-for-byte; non-empty groups go through the populated
     // formula.
     let first_line_y = annotation_h_cb + label_h_cb + y_internal_real + padding;
-    let second_line_y = annotation_h_cb
-        + label_h_cb
-        + members_h_cb
-        + y_internal_real
-        + 2.0 * padding
-        + padding;
+    let second_line_y =
+        annotation_h_cb + label_h_cb + members_h_cb + y_internal_real + 2.0 * padding + padding;
 
     out.push_str(&format!(
         r#"<g class="divider" style="{gs}"><path d=""#,
         gs = style_overrides.style_str,
     ));
-    out.push_str(&rough_line_path(x0, first_line_y, -x0, first_line_y + 0.001));
+    out.push_str(&rough_line_path(
+        x0,
+        first_line_y,
+        -x0,
+        first_line_y + 0.001,
+    ));
     out.push_str(&format!(
         r##"" stroke="{stroke}" stroke-width="{sw}" fill="none" stroke-dasharray="0 0" style="{st}"></path></g>"##,
         stroke = stroke_attr,
@@ -732,7 +735,12 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
         r#"<g class="divider" style="{gs}"><path d=""#,
         gs = style_overrides.style_str,
     ));
-    out.push_str(&rough_line_path(x0, second_line_y, -x0, second_line_y + 0.001));
+    out.push_str(&rough_line_path(
+        x0,
+        second_line_y,
+        -x0,
+        second_line_y + 0.001,
+    ));
     out.push_str(&format!(
         r##"" stroke="{stroke}" stroke-width="{sw}" fill="none" stroke-dasharray="0 0" style="{st}"></path></g>"##,
         stroke = stroke_attr,
@@ -788,15 +796,7 @@ fn rough_line_path(x1: f64, y1: f64, x2: f64, y2: f64) -> String {
     s
 }
 
-fn rough_curve(
-    out: &mut String,
-    x1: f64,
-    y1: f64,
-    x2: f64,
-    y2: f64,
-    c: f64,
-    first: bool,
-) {
+fn rough_curve(out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64, c: f64, first: bool) {
     if !first {
         out.push(' ');
     }
@@ -896,7 +896,11 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
         let class_node = d.classes.iter().find(|c| c.id == n.id);
         if let Some(c) = class_node {
             for m in c.members.iter().chain(c.methods.iter()) {
-                let display = displayed_member_text_local(&m.text);
+                // Mirror upstream: width is measured on the markdown-
+                // rendered textContent, so emphasis markers (`*`/`_`) are
+                // stripped before measurement.
+                let raw = displayed_member_text_local(&m.text);
+                let display = crate::layout::class::md_emphasis_strip(&raw);
                 let dw = crate::font_metrics::text_width(
                     &display,
                     label_family,
@@ -943,15 +947,13 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
             // Annotation row contributes label_h to the divider-y offset
             // when the class declares any `<<annotation>>`. Mirrors
             // render_node's `annotation_h_cb` term.
-            let has_annotation = class_node
-                .map_or(false, |c| !c.annotations.is_empty());
+            let has_annotation = class_node.map_or(false, |c| !c.annotations.is_empty());
             let raw_annotation_h = if has_annotation { label_h } else { 0.0 };
             let cb = |v: f64| if v == 0.0 { 0.0 } else { v };
             let annotation_h_cb = cb(raw_annotation_h - extra_sub);
             let label_h_cb = cb(raw_label_h - extra_sub);
             let members_h_cb = cb(raw_members_h - extra_sub);
-            let first_line_y =
-                annotation_h_cb + label_h_cb + y_internal_real + padding;
+            let first_line_y = annotation_h_cb + label_h_cb + y_internal_real + padding;
             let second_line_y = annotation_h_cb
                 + label_h_cb
                 + members_h_cb
@@ -975,13 +977,8 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
         if e.thickness.as_deref() == Some("invisible") {
             continue;
         }
-        let raw: Vec<crate::layout::unified::types::Point> = e
-            .points
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .copied()
-            .collect();
+        let raw: Vec<crate::layout::unified::types::Point> =
+            e.points.as_deref().unwrap_or(&[]).iter().copied().collect();
         if raw.is_empty() {
             continue;
         }
@@ -1369,11 +1366,7 @@ fn class_inline_style_css(id: &str, d: &ClassDiagram) -> String {
             continue;
         }
         let css: String = all_props.join("");
-        out.push_str(&format!(
-            "#{id} .{name}>*{{{css}}}",
-            name = c.id,
-            css = css,
-        ));
+        out.push_str(&format!("#{id} .{name}>*{{{css}}}", name = c.id, css = css,));
         out.push_str(&format!(
             "#{id} .{name} span{{{css}}}",
             name = c.id,
@@ -1427,7 +1420,11 @@ fn class_specific_css(id: &str, theme: &ThemeVariables) -> String {
 
     // g.classGroup text — upstream uses `nodeBorder || classText`,
     // so when both are set the node border wins.
-    let group_text_fill = if !node_border.is_empty() { node_border } else { class_text };
+    let group_text_fill = if !node_border.is_empty() {
+        node_border
+    } else {
+        class_text
+    };
     css.push_str(&format!(
         "#{id} g.classGroup text{{fill:{nb};stroke:none;font-family:{ff};font-size:10px;}}",
         nb = group_text_fill,

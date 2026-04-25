@@ -370,6 +370,16 @@ fn estimate_classbox_dimensions(c: &ClassNode) -> (f64, f64) {
 /// the `&lt;`/`&gt;` entities back to literal angle brackets — what
 /// upstream's `markdown → div.textContent` pipeline ends up measuring.
 fn displayed_member_text(text: &str) -> String {
+    let raw = displayed_member_text_raw(text);
+    // Upstream measures the *rendered* div.textContent, which strips
+    // markdown emphasis markers (`*`, `_`, `**`, `__`). Mirror that pass.
+    md_emphasis_strip(&raw)
+}
+
+/// Like [`displayed_member_text`] but does NOT strip markdown emphasis
+/// markers — used for places that need the raw post-decode text (e.g.
+/// the `max-width` heuristic measured against the entity-escaped form).
+pub(crate) fn displayed_member_text_raw(text: &str) -> String {
     let mut s = text.to_string();
     if let Some(rest) = s.strip_prefix('\\') {
         // Drop only the backslash, keep the visibility glyph itself.
@@ -377,6 +387,339 @@ fn displayed_member_text(text: &str) -> String {
     }
     s = s.replace("&lt;", "<").replace("&gt;", ">");
     s
+}
+
+/// CommonMark-style emphasis processor that returns the rendered
+/// `textContent` (i.e. all `*`/`_` emphasis markers stripped, nesting
+/// preserved). Single `*`/`_` ⇒ `<em>`; double ⇒ `<strong>`.
+pub(crate) fn md_emphasis_strip(s: &str) -> String {
+    md_emphasis_render(s, false)
+}
+
+/// CommonMark-style emphasis processor that returns rendered HTML with
+/// `<em>` and `<strong>` tags. Used by the renderer to fill the `<p>` of
+/// each member/method foreignObject.
+pub(crate) fn md_emphasis_html(s: &str) -> String {
+    md_emphasis_render(s, true)
+}
+
+/// Core implementation — runs a CommonMark-flavoured emphasis
+/// delimiter-stack pass over `s`. When `as_html` is true, paired runs
+/// are wrapped in `<em>` / `<strong>`; otherwise the markers are simply
+/// dropped, leaving plain text.
+///
+/// The implementation deliberately approximates the full CommonMark
+/// rules: it tracks left-/right-flanking, intra-word `_` constraints,
+/// and pairs delimiters by walking the stack right-to-left. Tested
+/// patterns (see `tests` module): `*x*`, `**x**`, `_x_`, `__x__`,
+/// nested `_a_b_c_`, and mixed-delimiter inputs.
+fn md_emphasis_render(s: &str, as_html: bool) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    // Tokens: either a Run of `*`/`_` (with metadata) or a Plain text
+    // segment. We process the tokens in two passes per CommonMark.
+    #[derive(Clone, Debug)]
+    enum Tok {
+        Plain(String),
+        Run {
+            ch: char,        // '*' or '_'
+            len: usize,      // 1 or 2 (>2 truncated for our use case)
+            can_open: bool,  // CommonMark left-flanking + extra rules
+            can_close: bool, // CommonMark right-flanking + extra rules
+            // After matching, marks how many chars of this run got
+            // consumed as opener / closer. Remaining are emitted as text.
+            consumed_open: usize,
+            consumed_close: usize,
+            // Set when this run is paired; `pair_idx` points to the
+            // matching opposite end and `wrap_strong` says whether it's
+            // a `<strong>` (true) or `<em>` (false) wrap.
+            paired_with: Option<usize>,
+            wrap_strong: bool,
+            is_opener_paired: bool, // false = closer side of the pair
+        },
+    }
+
+    // Helper: classify a delimiter run's left/right flanking status.
+    fn is_punct(c: char) -> bool {
+        // CommonMark punctuation = ASCII punct OR Unicode punct (we use
+        // ASCII subset, sufficient for member/method labels).
+        matches!(
+            c,
+            '!' | '"'
+                | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '('
+                | ')'
+                | '*'
+                | '+'
+                | ','
+                | '-'
+                | '.'
+                | '/'
+                | ':'
+                | ';'
+                | '<'
+                | '='
+                | '>'
+                | '?'
+                | '@'
+                | '['
+                | '\\'
+                | ']'
+                | '^'
+                | '`'
+                | '{'
+                | '|'
+                | '}'
+                | '~'
+        )
+    }
+    fn is_ws_or_start(c: Option<char>) -> bool {
+        matches!(c, None | Some(' ') | Some('\t') | Some('\n') | Some('\r'))
+    }
+    fn is_ws_or_punct(c: Option<char>) -> bool {
+        c.map(|ch| ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || is_punct(ch))
+            .unwrap_or(true)
+    }
+
+    // Tokenize.
+    let chars: Vec<char> = s.chars().collect();
+    let mut toks: Vec<Tok> = Vec::new();
+    let mut buf = String::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '*' || c == '_' {
+            if !buf.is_empty() {
+                toks.push(Tok::Plain(std::mem::take(&mut buf)));
+            }
+            // Read run.
+            let mut j = i;
+            while j < chars.len() && chars[j] == c {
+                j += 1;
+            }
+            let mut run_len = j - i;
+            // Cap at 2 — CommonMark allows longer but we only need
+            // ** / __ wrapping for our class-member fixtures.
+            if run_len > 2 {
+                // Emit the excess as plain text first.
+                let extra = run_len - 2;
+                let mut extra_s = String::new();
+                for _ in 0..extra {
+                    extra_s.push(c);
+                }
+                toks.push(Tok::Plain(extra_s));
+                run_len = 2;
+            }
+            // Determine flanking.
+            let prev = if i == 0 { None } else { Some(chars[i - 1]) };
+            let next = if j < chars.len() {
+                Some(chars[j])
+            } else {
+                None
+            };
+            let next_is_ws = is_ws_or_start(next);
+            let prev_is_ws = is_ws_or_start(prev);
+            let next_is_punct = next.map(is_punct).unwrap_or(false);
+            let prev_is_punct = prev.map(is_punct).unwrap_or(false);
+            // Left-flanking: not followed by ws AND
+            //   (not followed by punct OR preceded by ws/punct).
+            let left_flank = !next_is_ws && (!next_is_punct || prev_is_ws || prev_is_punct);
+            // Right-flanking: not preceded by ws AND
+            //   (not preceded by punct OR followed by ws/punct).
+            let right_flank = !prev_is_ws && (!prev_is_punct || next_is_ws || next_is_punct);
+            let (can_open, can_close) = if c == '*' {
+                (left_flank, right_flank)
+            } else {
+                // `_` adds the intra-word restriction.
+                let can_open = left_flank && (!right_flank || prev_is_punct);
+                let can_close = right_flank && (!left_flank || next_is_punct);
+                (can_open, can_close)
+            };
+            toks.push(Tok::Run {
+                ch: c,
+                len: run_len,
+                can_open,
+                can_close,
+                consumed_open: 0,
+                consumed_close: 0,
+                paired_with: None,
+                wrap_strong: false,
+                is_opener_paired: false,
+            });
+            i = j;
+        } else {
+            buf.push(c);
+            i += 1;
+        }
+    }
+    if !buf.is_empty() {
+        toks.push(Tok::Plain(buf));
+    }
+
+    // Pair delimiters per CommonMark process_emphasis. Walk left-to-right
+    // collecting closers; for each closer, scan back for the nearest
+    // matching opener (same delimiter char, can_open, with un-consumed
+    // chars). Match `**` to `**` first if both have ≥2 chars unused;
+    // otherwise pair single char.
+    // Simplified: iterate `closer_idx` ascending; for each, scan opener
+    // candidates descending.
+    let mut idx = 0usize;
+    while idx < toks.len() {
+        // Snapshot current run as closer if applicable.
+        let (closer_ch, closer_can_close, closer_remaining) = match &toks[idx] {
+            Tok::Run {
+                ch,
+                len,
+                can_close,
+                consumed_open,
+                consumed_close,
+                ..
+            } => (
+                *ch,
+                *can_close,
+                len.saturating_sub(*consumed_open + *consumed_close),
+            ),
+            _ => {
+                idx += 1;
+                continue;
+            }
+        };
+        if !closer_can_close || closer_remaining == 0 {
+            idx += 1;
+            continue;
+        }
+        // Find the nearest preceding compatible opener.
+        let mut found: Option<(usize, usize)> = None; // (opener_idx, pair_size)
+        let mut k = idx;
+        while k > 0 {
+            k -= 1;
+            if let Tok::Run {
+                ch,
+                len,
+                can_open,
+                consumed_open,
+                consumed_close,
+                ..
+            } = &toks[k]
+            {
+                if *ch != closer_ch {
+                    continue;
+                }
+                if !*can_open {
+                    continue;
+                }
+                let opener_remaining = len.saturating_sub(*consumed_open + *consumed_close);
+                if opener_remaining == 0 {
+                    continue;
+                }
+                // CommonMark "rule of 3": when both can_open and can_close,
+                // the sum of their original lengths must not be a multiple
+                // of 3 unless both individually are multiples of 3.
+                // We only deal with len 1 or 2; check anyway.
+                let cur_can_open_too = matches!(
+                    &toks[idx],
+                    Tok::Run { can_open: co, .. } if *co
+                );
+                let opener_can_close_too = matches!(
+                    &toks[k],
+                    Tok::Run { can_close: cc, .. } if *cc
+                );
+                if (cur_can_open_too || opener_can_close_too)
+                    && (len + closer_remaining) % 3 == 0
+                    && (len % 3 != 0 || closer_remaining % 3 != 0)
+                {
+                    continue;
+                }
+                let pair_size = if opener_remaining >= 2 && closer_remaining >= 2 {
+                    2
+                } else {
+                    1
+                };
+                found = Some((k, pair_size));
+                break;
+            }
+        }
+        if let Some((opener_idx, pair_size)) = found {
+            // Consume `pair_size` chars from each side.
+            if let Tok::Run {
+                consumed_open,
+                paired_with,
+                wrap_strong,
+                is_opener_paired,
+                ..
+            } = &mut toks[opener_idx]
+            {
+                *consumed_open += pair_size;
+                *paired_with = Some(idx);
+                *wrap_strong = pair_size == 2;
+                *is_opener_paired = true;
+            }
+            if let Tok::Run {
+                consumed_close,
+                paired_with,
+                wrap_strong,
+                is_opener_paired,
+                ..
+            } = &mut toks[idx]
+            {
+                *consumed_close += pair_size;
+                *paired_with = Some(opener_idx);
+                *wrap_strong = pair_size == 2;
+                *is_opener_paired = false;
+            }
+            // After consumption, this closer might still have leftover
+            // characters that can close (e.g. a 2-char `**` matched a
+            // single `*`). Loop on same idx.
+            continue;
+        }
+        idx += 1;
+    }
+
+    // Emit.
+    let mut out = String::with_capacity(s.len());
+    for tok in &toks {
+        match tok {
+            Tok::Plain(t) => out.push_str(t),
+            Tok::Run {
+                ch,
+                len,
+                consumed_open,
+                consumed_close,
+                paired_with,
+                wrap_strong,
+                is_opener_paired,
+                ..
+            } => {
+                let total_consumed = *consumed_open + *consumed_close;
+                if paired_with.is_some() {
+                    if as_html {
+                        let tag = if *wrap_strong { "strong" } else { "em" };
+                        if *is_opener_paired {
+                            out.push_str(&format!("<{}>", tag));
+                        } else {
+                            out.push_str(&format!("</{}>", tag));
+                        }
+                    }
+                    // Emit any leftover marker chars as plain text.
+                    let leftover = len.saturating_sub(total_consumed);
+                    for _ in 0..leftover {
+                        out.push(*ch);
+                    }
+                } else {
+                    // Unmatched run — emit as plain.
+                    for _ in 0..*len {
+                        out.push(*ch);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 fn end_marker_name(end: RelationEnd) -> String {
