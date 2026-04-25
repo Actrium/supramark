@@ -540,7 +540,10 @@ impl<'a> LineParser<'a> {
             if applied_to_edge {
                 continue;
             }
-            self.ensure_vertex(id);
+            // Upstream `setClass` does NOT auto-create vertices and does NOT
+            // bump `vertexCounter`. Only attach the class when the vertex
+            // already exists; mirrors upstream byte-exactly and keeps the
+            // domId suffix counter in sync.
             if let Some(v) = self.diag.find_vertex_mut(id) {
                 v.classes.push(cls.to_string());
             }
