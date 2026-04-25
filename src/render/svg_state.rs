@@ -148,18 +148,23 @@ pub fn render(
 
     // Top-level isolated clusters → inner <g class="root"> wrappers.
     // "Top-level" = isolated cluster whose parent is NOT itself isolated.
-    for cluster_id in iso_ids {
-        if let Some(cnode) = l.result.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
-            let parent_also_isolated = cnode
-                .parent_id
-                .as_deref()
-                .map(|p| iso_ids.contains(p))
-                .unwrap_or(false);
-            if parent_also_isolated {
-                continue;
-            }
-            out.push_str(&render_isolated_cluster_inner_root(cnode, &l.result, theme, id));
+    //
+    // Iterate via `l.result.nodes` (insertion-ordered) rather than the
+    // `iso_ids` HashSet to keep sibling cluster emission stable across
+    // runs and to match upstream's source-order traversal.
+    for cnode in l.result.nodes.iter().filter(|n| n.is_group) {
+        if !iso_ids.contains(&cnode.id) {
+            continue;
         }
+        let parent_also_isolated = cnode
+            .parent_id
+            .as_deref()
+            .map(|p| iso_ids.contains(p))
+            .unwrap_or(false);
+        if parent_also_isolated {
+            continue;
+        }
+        out.push_str(&render_isolated_cluster_inner_root(cnode, &l.result, theme, id));
     }
 
     // Regular leaf nodes — skip those inside any isolated cluster.

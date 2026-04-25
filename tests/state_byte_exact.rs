@@ -252,6 +252,17 @@ fn cypress_44() {
     assert_byte_exact("ext_fixtures/cypress/state/44");
 }
 
+/// Two sibling composite states (`state A {…}` / `state C {…}`), each with
+/// its own `direction`. Both are top-level isolated clusters. Byte-exactness
+/// requires that the renderer emits the inner `<g class="root">` wrappers in
+/// source-declaration order (A before C). The fix iterates `result.nodes`
+/// (insertion-ordered) and filters by `isolated_cluster_ids` instead of
+/// iterating the HashSet directly.
+#[test]
+fn cypress_33() {
+    assert_byte_exact("ext_fixtures/cypress/state/33");
+}
+
 /// Dump diff for one fixture (set FIXTURE env var or default 26).
 #[test]
 #[ignore]
