@@ -393,11 +393,19 @@ fn find_unquoted_colon(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut in_str = false;
     let mut in_gen = false;
+    let mut in_bq = false;
     for (i, &b) in bytes.iter().enumerate() {
         match b {
-            b'"' if !in_gen => in_str = !in_str,
-            b'~' if !in_str => in_gen = !in_gen,
-            b':' if !in_str && !in_gen => return Some(i),
+            // Upstream's lexer protects `\`...\``-quoted ids from any
+            // tokenising performed on the unquoted parts. Mirror that:
+            // colons (and quotes / generic-tildes) inside a backtick pair
+            // do NOT split the relation `id1 ... id2 : label` into a
+            // labelled form. Without this, `RenderProcessHost --|> \`IPC::Sender\``
+            // would be sliced at the first `:` inside `IPC::Sender`.
+            b'`' if !in_str => in_bq = !in_bq,
+            b'"' if !in_gen && !in_bq => in_str = !in_str,
+            b'~' if !in_str && !in_bq => in_gen = !in_gen,
+            b':' if !in_str && !in_gen && !in_bq => return Some(i),
             _ => {}
         }
     }
@@ -410,10 +418,23 @@ fn parse_namespace(
     d: &mut ClassDiagram,
     note_counter: &mut usize,
 ) -> Result<()> {
-    let (name, body) = if let Some(brace) = rest.find('{') {
+    let (name_raw, body) = if let Some(brace) = rest.find('{') {
         (rest[..brace].trim(), &rest[brace + 1..])
     } else {
         (rest.trim(), "")
+    };
+    // Upstream classDiagram parser unwraps backtick-quoted ids: `\`A::B\``
+    // becomes `A::B` for both the diagram-level namespace key and the
+    // resulting cluster dom-id. Strip a single matched pair of leading
+    // and trailing backticks if present (anything else is left verbatim,
+    // mirroring jison's lenient handling).
+    let name: &str = if name_raw.len() >= 2
+        && name_raw.starts_with('`')
+        && name_raw.ends_with('`')
+    {
+        &name_raw[1..name_raw.len() - 1]
+    } else {
+        name_raw
     };
     let body = body.trim_end_matches('}').trim_end();
     if name.is_empty() {
@@ -485,6 +506,14 @@ fn parse_class_decl(
         (head2.trim().to_string(), None)
     };
     name = name.split_whitespace().collect::<Vec<_>>().join("");
+    // Upstream's jison classDiagram parser unwraps backtick-quoted class
+    // ids — `\`IPC::Sender\`` ends up keyed as `IPC::Sender` in `classDb`
+    // and the rendered dom-id strips the backticks too. Mirror that here:
+    // a leading + trailing backtick pair is stripped (anything else stays
+    // intact for forward compat with non-quoted backtick uses).
+    if name.len() >= 2 && name.starts_with('`') && name.ends_with('`') {
+        name = name[1..name.len() - 1].to_string();
+    }
 
     if name.is_empty() {
         return Err(MermaidError::Parse {
@@ -1098,9 +1127,20 @@ fn extract_relation_parts(
     if toks.len() < 3 {
         return None;
     }
+    // Upstream's classDiagram lexer treats `\`...\`` as a quoted identifier
+    // and stores the inner text as the canonical id. Mirror that here so
+    // relations like `Foo --|> \`IPC::Sender\`` reuse the same `IPC::Sender`
+    // class record that `class \`IPC::Sender\`` declared.
+    fn unbacktick(s: String) -> String {
+        if s.len() >= 2 && s.starts_with('`') && s.ends_with('`') {
+            s[1..s.len() - 1].to_string()
+        } else {
+            s
+        }
+    }
     let mut iter = toks.iter();
     let id1 = match iter.next()? {
-        RelTok::Ident(s) => s.clone(),
+        RelTok::Ident(s) => unbacktick(s.clone()),
         _ => return None,
     };
     let (title1, rel) = match iter.next()? {
@@ -1120,7 +1160,7 @@ fn extract_relation_parts(
         other => (String::new(), other.clone()),
     };
     let id2 = match id2_tok {
-        RelTok::Ident(s) => s,
+        RelTok::Ident(s) => unbacktick(s),
         _ => return None,
     };
     Some((id1, title1, vec![rel], title2, id2))

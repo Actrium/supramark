@@ -136,16 +136,53 @@ pub fn render(
 
     // ── 5. <g class="root"> ──────────────────────────────────────
     //
-    // When the diagram contains exactly one namespace cluster, upstream's
+    // When the diagram contains exactly one namespace cluster AND that
+    // cluster is "isolated" (no edge crosses its boundary), upstream's
     // renderer wraps the actual content inside a nested `<g class="root"
     // transform="translate(-pad, 0)">` placed inside the outer
     // `<g class="nodes">`, while the outer `clusters/edgePaths/edgeLabels`
     // groups are emitted empty. Free (non-namespaced) classes sit
     // inside the outer `<g class="nodes">` after the nested-root closes.
-    // For zero or multiple sibling namespaces the renderer emits a flat
-    // single-root structure instead.
+    // For zero, multiple sibling namespaces, or a single non-isolated
+    // namespace (one with edges crossing the cluster boundary, such as
+    // `RenderProcessHost --|> \`IPC::Sender\`` in cypress/class/226),
+    // the renderer emits a flat single-root structure instead — the
+    // recursive isolated-cluster code path does not fire and the cluster
+    // sits in the outer `<g class="clusters">` like a regular sub-graph.
     let cluster_count = l.unified.nodes.iter().filter(|n| n.is_group).count();
-    let single_cluster = cluster_count == 1;
+    let single_cluster_isolated = cluster_count == 1 && {
+        let cluster = l.unified.nodes.iter().find(|n| n.is_group).unwrap();
+        let cid = cluster.id.as_str();
+        // Build set of node ids inside (or equal to) this cluster.
+        let mut inside: std::collections::HashSet<&str> =
+            std::collections::HashSet::new();
+        inside.insert(cid);
+        // Approximate descendants by parent_id chain (single level is
+        // enough — class diagrams don't nest namespaces).
+        for n in &l.unified.nodes {
+            if n.parent_id.as_deref() == Some(cid) {
+                inside.insert(n.id.as_str());
+            }
+        }
+        // The cluster is isolated iff every visible (non-invisible) edge
+        // has both endpoints inside or both outside the cluster.
+        let mut isolated = true;
+        for e in &l.unified.edges {
+            if e.thickness.as_deref() == Some("invisible") {
+                continue;
+            }
+            let src = e.source.as_deref().unwrap_or("");
+            let dst = e.target.as_deref().unwrap_or("");
+            let sin = inside.contains(src);
+            let din = inside.contains(dst);
+            if sin != din {
+                isolated = false;
+                break;
+            }
+        }
+        isolated
+    };
+    let single_cluster = single_cluster_isolated;
     out.push_str(r#"<g class="root">"#);
 
     if single_cluster {
@@ -285,7 +322,80 @@ pub fn render(
     }
 
     out.push_str("</svg>");
-    Ok(out)
+    Ok(normalise_classid_counters(out))
+}
+
+/// Renumber `classId-<base>-<n>` suffixes by first-appearance order.
+///
+/// Mirrors `tests/support/generate_ref.mjs`'s `renumberCounterIds` rule
+/// `(classId-\w+)-(\d+)` (regex `\w` is `[A-Za-z0-9_]`, so a `base`
+/// containing `:` / `.` / etc. is **not** matched and keeps its original
+/// counter — same quirk upstream relies on). The map keys on the
+/// `(captured-id, original-counter)` pair so multiple occurrences of the
+/// same dom-id (node, edge label `data-id`, etc.) all renumber to the
+/// same value, while distinct base ids that happened to share a counter
+/// still get unique numbers. Without this normalisation, a diagram that
+/// declares its first class via a `\`backtick\`` form (whose dom-id is
+/// excluded from `\w` matching) shifts every subsequent class counter
+/// by one relative to the upstream-normalised reference SVG (e.g.
+/// `cypress/class/226`'s `RenderProcessHost-1` → `-0`).
+fn normalise_classid_counters(svg: String) -> String {
+    let bytes = svg.as_bytes();
+    let mut out = String::with_capacity(svg.len());
+    let mut map: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    let mut next_id: usize = 0;
+
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let is_digit = |b: u8| b.is_ascii_digit();
+
+    let needle = b"classId-";
+    let mut i = 0usize;
+    let mut copy_from = 0usize;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(needle) {
+            // Match `(classId-\w+)-(\d+)` greedily.
+            let id_start = i;
+            let body_start = i + needle.len();
+            let mut j = body_start;
+            while j < bytes.len() && is_word(bytes[j]) {
+                j += 1;
+            }
+            // Need at least one word char and a following `-` and digits.
+            if j > body_start && j < bytes.len() && bytes[j] == b'-' {
+                let dash = j;
+                let mut k = j + 1;
+                while k < bytes.len() && is_digit(bytes[k]) {
+                    k += 1;
+                }
+                if k > j + 1 {
+                    // Full regex match — flush the literal run that
+                    // preceded it (preserving any multi-byte UTF-8) and
+                    // emit the renumbered form.
+                    out.push_str(&svg[copy_from..id_start]);
+                    let id_str = &svg[id_start..dash];
+                    let counter_str = &svg[dash + 1..k];
+                    let key = (id_str.to_string(), counter_str.to_string());
+                    let renumbered = *map.entry(key).or_insert_with(|| {
+                        let v = next_id;
+                        next_id += 1;
+                        v
+                    });
+                    out.push_str(id_str);
+                    out.push('-');
+                    out.push_str(&renumbered.to_string());
+                    i = k;
+                    copy_from = k;
+                    continue;
+                }
+            }
+        }
+        // No match at this position — advance by one byte but defer
+        // copying the literal run until the next match (or end).
+        i += 1;
+    }
+    out.push_str(&svg[copy_from..]);
+    out
 }
 
 // ──────────────────────────────────────────────────────────────────────
