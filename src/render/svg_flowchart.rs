@@ -1031,16 +1031,13 @@ fn render_edge_path(
     if pts_raw.is_empty() {
         return String::new();
     }
-    // Apply marker visual offsets to get the rendered path points.
-    let mut pts = pts_raw.clone();
-    let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
-    let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
-    apply_marker_offsets(&mut pts, arrow_end, arrow_start);
-
     // Clip rendered path at cluster boundaries when the original edge endpoint
     // was a cluster. The `data-points` attribute keeps the full path (pts_raw),
     // but the visual `d=` path is clipped to the cluster border.
-    // Upstream renders the edge path stopping at the cluster rect boundary.
+    // Upstream renders the edge path stopping at the cluster rect boundary —
+    // and crucially performs the clip BEFORE applying marker visual offsets,
+    // so the arrow head sits inside the cluster border by `markerOffset`px.
+    let mut pts = pts_raw.clone();
     use crate::layout::routing::clip_to_cluster_border;
     let orig_dst = e
         .extra
@@ -1060,6 +1057,11 @@ fn render_edge_path(
         pts = clip_to_cluster_border(&pts, bounds);
         pts.reverse();
     }
+
+    // Apply marker visual offsets to get the rendered path points.
+    let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
+    let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
+    apply_marker_offsets(&mut pts, arrow_end, arrow_start);
 
     // Build `d=` via the curve configured on this edge (offset-adjusted pts).
     let curve = e.curve.as_deref().unwrap_or("basis");
