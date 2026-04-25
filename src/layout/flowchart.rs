@@ -372,8 +372,8 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
     let mut data = LayoutData::default();
     data.diagram_type = Some("flowchart-v2".into());
     data.direction = Some(d.direction.as_str().into());
-    data.node_spacing = Some(50.0);
-    data.rank_spacing = Some(50.0);
+    data.node_spacing = Some(d.node_spacing.map(f64::from).unwrap_or(50.0));
+    data.rank_spacing = Some(d.rank_spacing.map(f64::from).unwrap_or(50.0));
     data.layout_algorithm = Some("dagre".into());
 
     // Class-def lookup for inline CSS.
@@ -381,13 +381,61 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         d.class_defs.iter().map(|c| (c.name.as_str(), c)).collect();
 
     // Build a parent-id map from subgraph membership.
+    //
+    // Subtlety: a vertex may appear in multiple subgraphs' membership
+    // (e.g. declared in `subcontainer`, then re-referenced inside the
+    // outer `main` via an edge). Upstream's flowDb assigns the parent
+    // based on the deepest enclosing subgraph at the time the vertex
+    // was actually FIRST declared. We approximate that by preferring
+    // the deepest subgraph (max depth from root) when a vertex is
+    // claimed by more than one — this matches upstream for nested cases
+    // like fixture 136 (subcontainer-child belongs to `subcontainer`,
+    // not the outer `main`) while leaving flat cases alone.
+    let depth_of: BTreeMap<&str, usize> = {
+        // Compute depth via parent links inferred from `children`.
+        let mut parent_link: BTreeMap<&str, &str> = BTreeMap::new();
+        for sg in &d.subgraphs {
+            for ch in &sg.children {
+                parent_link.insert(ch.as_str(), sg.id.as_str());
+            }
+        }
+        let mut depth: BTreeMap<&str, usize> = BTreeMap::new();
+        for sg in &d.subgraphs {
+            let mut d_count = 0usize;
+            let mut cur = sg.id.as_str();
+            while let Some(&p) = parent_link.get(cur) {
+                d_count += 1;
+                cur = p;
+                if d_count > 64 {
+                    break; // safety
+                }
+            }
+            depth.insert(sg.id.as_str(), d_count);
+        }
+        depth
+    };
     let mut parent_of: BTreeMap<String, String> = BTreeMap::new();
+    let upsert_deeper = |map: &mut BTreeMap<String, String>, key: &str, sg_id: &str| {
+        let cand_depth = depth_of.get(sg_id).copied().unwrap_or(0);
+        match map.get(key) {
+            None => {
+                map.insert(key.to_string(), sg_id.to_string());
+            }
+            Some(prev) => {
+                let prev_depth = depth_of.get(prev.as_str()).copied().unwrap_or(0);
+                if cand_depth > prev_depth {
+                    map.insert(key.to_string(), sg_id.to_string());
+                }
+            }
+        }
+    };
     for sg in &d.subgraphs {
         for child in &sg.children {
+            // children link is unambiguous — parent must be `sg`.
             parent_of.insert(child.clone(), sg.id.clone());
         }
         for m in &sg.members {
-            parent_of.insert(m.clone(), sg.id.clone());
+            upsert_deeper(&mut parent_of, m, &sg.id);
         }
     }
 

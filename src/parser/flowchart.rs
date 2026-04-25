@@ -41,6 +41,12 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
                 if let Some(b) = fcc.html_labels {
                     diag.html_labels = Some(b);
                 }
+                if let Some(n) = fcc.node_spacing {
+                    diag.node_spacing = Some(n);
+                }
+                if let Some(n) = fcc.rank_spacing {
+                    diag.rank_spacing = Some(n);
+                }
             }
         }
     }
@@ -52,6 +58,12 @@ pub fn parse(source: &str) -> Result<FlowchartDiagram> {
         if let Some(fcc) = cfg.flowchart.as_ref() {
             if let Some(b) = fcc.html_labels {
                 diag.html_labels = Some(b);
+            }
+            if let Some(n) = fcc.node_spacing {
+                diag.node_spacing = Some(n);
+            }
+            if let Some(n) = fcc.rank_spacing {
+                diag.rank_spacing = Some(n);
             }
         }
     }

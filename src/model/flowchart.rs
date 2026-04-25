@@ -204,6 +204,12 @@ pub struct FlowchartDiagram {
     /// `None` keeps the upstream default (`true`); `Some(false)` switches
     /// CSS selectors and label rendering to the non-HTML shape path.
     pub html_labels: Option<bool>,
+    /// Effective `flowchart.nodeSpacing` (dagre `nodesep`) from frontmatter
+    /// / `%%{init}%%`. `None` keeps the upstream default (50).
+    pub node_spacing: Option<u32>,
+    /// Effective `flowchart.rankSpacing` (dagre `ranksep`) from frontmatter
+    /// / `%%{init}%%`. `None` keeps the upstream default (50).
+    pub rank_spacing: Option<u32>,
     /// All vertices declared, in source order. Duplicates coalesce —
     /// the first declaration wins, subsequent refs just need to exist.
     pub vertices: Vec<Vertex>,
