@@ -517,10 +517,27 @@ impl<'a> LineParser<'a> {
 
     fn parse_class_stmt(&mut self, rest: &str) {
         // `class id1,id2 cls`
+        //
+        // Upstream mermaid only applies `class id cls` to existing vertices;
+        // when the id refers to a custom edge id (`A name@-->B`) the class
+        // is attached to the edge instead and surfaces as inline edge style
+        // at render time. Creating a phantom vertex would otherwise render
+        // an extra orphan default node (see cypress fixture 197).
         let (ids, cls) = split_once_ws(rest);
         for id in ids.split(',') {
             let id = id.trim();
             if id.is_empty() {
+                continue;
+            }
+            // Edge-id match: attach the class to all matching edges.
+            let mut applied_to_edge = false;
+            for e in self.diag.edges.iter_mut() {
+                if e.id.as_deref() == Some(id) {
+                    e.classes.push(cls.to_string());
+                    applied_to_edge = true;
+                }
+            }
+            if applied_to_edge {
                 continue;
             }
             self.ensure_vertex(id);
@@ -723,6 +740,7 @@ impl<'a> LineParser<'a> {
                                 arrow_start: link.arrow_start,
                                 label: link.label.clone(),
                                 index: idx,
+                                classes: Vec::new(),
                             };
                             self.diag.edges.push(edge);
                         }

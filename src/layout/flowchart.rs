@@ -396,7 +396,7 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
             .entry((start.clone(), end.clone()))
             .and_modify(|c| *c += 1)
             .or_insert(0);
-        let mut ue = build_edge(e, d, counter);
+        let mut ue = build_edge(e, d, counter, &class_map);
         // Record original endpoints before retargeting so the isolation check
         // in dagre_bridge can test against the pre-retarget cluster IDs.
         ue.extra.insert("orig_start".into(), e.start.clone());
@@ -642,46 +642,50 @@ fn strip_fa_icons(text: &str) -> String {
     out
 }
 
-/// Strip HTML tags from label text for width measurement.
+/// Split label text into measurement lines, treating `<br>` / `<br/>` /
+/// `<br />` as line breaks. All other HTML tags are stripped and `\n`
+/// characters are dropped.
 ///
-/// Mirrors jsdom's `textContent` semantics: ALL HTML tags (including `<br>`)
-/// are stripped, text nodes are concatenated, and only `\n` (actual newline
-/// characters) create new measurement lines. This matches how the upstream
-/// getBBox shim calls `measureTextBlock(el.textContent, ...)`.
-///
-/// Bold state is tracked for accurate width: `<strong>`/`<b>` toggles bold.
-/// Strip HTML tags from `s` to get the plain text as jsdom `textContent` would.
-///
-/// `textContent` strips ALL HTML tags (including `<br>`, `<strong>`, etc.)
-/// and returns a single concatenated plain text string. Bold markup is NOT
-/// accounted for in textContent — it returns plain text regardless.
-///
-/// `\n` was already converted to `<br/>` in HTML before measurement;
-/// textContent strips `<br/>` — so `\n` contributes nothing to the text.
-///
-/// Returns a single-element vec with the concatenated plain text and bold=false.
-fn strip_html_for_measure(s: &str) -> Vec<(String, bool)> {
-    let mut text = String::with_capacity(s.len());
-    let mut i = 0;
+/// Used by [`measure_text`] when the rendered foreignObject `<div>` needs
+/// the per-line maximum width. Upstream `string_label_to_html` converts
+/// the source `\n` into `<br/>` BEFORE passing the string to the renderer
+/// — but its measurement runs on the post-conversion HTML, so only the
+/// `<br>` variants count as line breaks here. Bare `\n` characters that
+/// survive (e.g. inside a markdown paragraph) are treated like upstream
+/// `textContent` and ignored.
+fn split_html_into_lines(s: &str) -> Vec<String> {
+    let mut lines: Vec<String> = vec![String::new()];
     let bytes = s.as_bytes();
+    let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            // Try to find closing '>'. If not found, treat '<' as literal text.
             if let Some(rel_end) = s[i..].find('>') {
-                i += rel_end + 1; // skip entire tag
+                let tag_full = &s[i..i + rel_end + 1];
+                let lowered: String = tag_full.chars().map(|c| c.to_ascii_lowercase()).collect();
+                let trimmed = lowered
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .trim_end_matches('/')
+                    .trim();
+                if trimmed == "br" {
+                    lines.push(String::new());
+                }
+                i += rel_end + 1;
             } else {
-                text.push('<');
+                lines.last_mut().unwrap().push('<');
                 i += 1;
             }
         } else if bytes[i] == b'\n' {
-            // \n → <br/> in HTML → stripped by textContent
+            // jsdom textContent on `<p>foo\nbar</p>` keeps the newline as
+            // whitespace (or strips it, depending on context). Treat as
+            // dropped to match the legacy single-line behaviour.
             i += 1;
         } else {
-            text.push(bytes[i] as char);
+            lines.last_mut().unwrap().push(bytes[i] as char);
             i += 1;
         }
     }
-    vec![(text, false)]
+    lines
 }
 
 /// Measure the overall width/height of the (possibly multi-line) label.
@@ -708,24 +712,29 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
     let stripped = strip_fa_icons(label);
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
 
-    // strip_html_for_measure strips all HTML tags (including <br>) and
-    // returns segments split on \n. Since jsdom textContent strips <br/>
-    // and the original \n was converted to <br/> before measurement, we
-    // treat the whole label as ONE line: sum all segment widths.
-    let segments = strip_html_for_measure(&stripped);
-    let total_w: f64 = segments
+    // Upstream's `getBoundingClientRect()` on the foreignObject `<div>` reports
+    // the widest line — `<br>` and `\n` introduce hard line breaks that the
+    // `display: table-cell; white-space: nowrap` div renders on separate
+    // lines. We mirror that here so node sizing tracks the rendered geometry
+    // for multi-line labels (e.g. cypress/200 diamond, 211 hexagon).
+    //
+    // Single-line labels fall through to the same branch (one segment, sum
+    // == max), so behaviour is unchanged for the common case.
+    let lines = split_html_into_lines(&stripped);
+    let max_w = lines
         .iter()
-        .map(|(text, bold)| {
+        .map(|line| {
             font_metrics::text_width(
-                text,
+                line,
                 DEFAULT_FONT_FAMILY,
                 LABEL_FONT_SIZE,
-                *bold || force_bold,
+                force_bold,
                 false,
             )
         })
-        .sum();
-    (total_w, lh)
+        .fold(0.0_f64, f64::max);
+    let height = lh * lines.len().max(1) as f64;
+    (max_w, height)
 }
 
 fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
@@ -771,9 +780,20 @@ fn measure_edge_label(text: &str) -> (f64, f64) {
 /// Build a unified::Edge from a model Edge, applying link-style overrides.
 /// `pair_counter` is the per-(start,end) duplicate count — 0 for the first
 /// edge between a given pair, 1 for the second, etc. (upstream `getEdgeId`).
-fn build_edge(e: &ModelEdge, d: &FlowchartDiagram, pair_counter: usize) -> unified::Edge {
+fn build_edge<'a>(
+    e: &ModelEdge,
+    d: &FlowchartDiagram,
+    pair_counter: usize,
+    class_map: &BTreeMap<&'a str, &'a ClassDef>,
+) -> unified::Edge {
     let mut ue = unified::Edge::default();
-    ue.id = format!("L_{}_{}_{}", e.start, e.end, pair_counter);
+    // Custom-id syntax `A name@-->B` lets the source set an explicit edge id
+    // (`name`). Upstream uses that id directly; only fall back to the
+    // synthetic `L_{start}_{end}_{counter}` form when no custom id is given.
+    ue.id = match &e.id {
+        Some(custom) if !custom.is_empty() => custom.clone(),
+        _ => format!("L_{}_{}_{}", e.start, e.end, pair_counter),
+    };
     ue.start = Some(e.start.clone());
     ue.end = Some(e.end.clone());
     ue.minlen = Some(e.length as i32);
@@ -795,8 +815,27 @@ fn build_edge(e: &ModelEdge, d: &FlowchartDiagram, pair_counter: usize) -> unifi
     ue.extra.insert("label_width".into(), lw.to_string());
     ue.extra.insert("label_height".into(), lh.to_string());
 
-    // Apply link-style overrides.
+    // Resolve class-based edge styles (`class <edge-id> myClass`). Upstream
+    // pushes the classDef styles into `edge.style` and the colour-subset
+    // (any property whose key contains `color`) into `edge.labelStyle` so
+    // the path style renderer can emit them in the right order.
     let mut applied_styles: Vec<String> = Vec::new();
+    let mut applied_text_styles: Vec<String> = Vec::new();
+    for cls in &e.classes {
+        if let Some(cd) = class_map.get(cls.as_str()) {
+            for s in &cd.styles {
+                applied_styles.push(s.clone());
+                let trimmed = s.trim().trim_end_matches(';');
+                if let Some(colon) = trimmed.find(':') {
+                    let key = trimmed[..colon].trim();
+                    if key.contains("color") {
+                        applied_text_styles.push(s.clone());
+                    }
+                }
+            }
+        }
+    }
+    // Apply link-style overrides.
     let mut interpolate: Option<String> = None;
     for ls in &d.link_styles {
         if apply_link_style(ls, e.index) {
@@ -810,6 +849,9 @@ fn build_edge(e: &ModelEdge, d: &FlowchartDiagram, pair_counter: usize) -> unifi
     }
     if !applied_styles.is_empty() {
         ue.style = Some(applied_styles);
+    }
+    if !applied_text_styles.is_empty() {
+        ue.label_style = Some(applied_text_styles);
     }
     if let Some(i) = interpolate {
         ue.interpolate = Some(i.clone());

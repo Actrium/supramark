@@ -1411,9 +1411,28 @@ fn render_edge_path(
     //   styles  = edgeStyles.reduce(acc + style + ';', '')   // "s1;s2;"
     //   second  = edgeStyles.reduce(acc + ';' + style, '')   // ";s1;s2"
     //   pathStyle = styles + ';' + second                    // "s1;s2;;;s1;s2"
-    // and falls back to `";"` when the edge has no inline style at all.
-    let style_val = match e.style.as_ref() {
-        Some(v) if !v.is_empty() && v.iter().any(|s| !s.is_empty()) => {
+    //
+    // Class-derived styles take a different path: upstream collects the
+    // colour-only entries into `edge.labelStyle` and the renderer emits
+    // `${edgeStyles}${labelStyles};;` instead of doubling the full style
+    // array. Falls back to `";"` when the edge has no inline style at all.
+    let style_val = match (e.style.as_ref(), e.label_style.as_ref()) {
+        (Some(v), Some(ls))
+            if !v.is_empty() && v.iter().any(|s| !s.is_empty()) && !ls.is_empty() =>
+        {
+            let first: String = v
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            let labels: String = ls
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{};", s))
+                .collect();
+            format!("{first}{labels};;")
+        }
+        (Some(v), _) if !v.is_empty() && v.iter().any(|s| !s.is_empty()) => {
             let first: String = v
                 .iter()
                 .filter(|s| !s.is_empty())
@@ -1428,6 +1447,7 @@ fn render_edge_path(
         }
         _ => ";".to_string(),
     };
+    // 'data-id' below uses the original edge id; do not consume style here.
 
     let edge_id = format!("{svg_id}-{id}", id = e.id.clone());
 

@@ -149,6 +149,11 @@ pub struct Edge {
     pub label: Option<Label>,
     /// Edge declaration index — used for `linkStyle N stroke:...` lookup.
     pub index: usize,
+    /// CSS class names applied via `class <edge-id> <className>` directives.
+    /// Resolved against `class_defs` at layout time to populate inline styles
+    /// — mirrors how upstream's `applyClassesToEdge` walks each edge's
+    /// `cssClasses` array.
+    pub classes: Vec<String>,
 }
 
 /// A subgraph (cluster) declaration.
