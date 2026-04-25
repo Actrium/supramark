@@ -442,6 +442,10 @@ fn rough_curve(
 // children and union their *intrinsic* (transform-ignored) bboxes. For
 // class diagrams that means each node's outer rect at `(-w/2, -h/2,
 // w, h)` plus each label's foreignObject at `(0, 0, label_w, label_h)`.
+// Edge paths use **absolute** coordinates (no parent transform), so
+// their `pathBBox` is computed by parsing the same `d=` string the
+// renderer emits — i.e. apply marker offsets and walk the curveBasis
+// spline expansion.
 fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -452,10 +456,9 @@ fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
     let label_family = "trebuchet ms,verdana,arial,sans-serif";
     let label_h = 16.296875_f64;
 
+    // visit() unions a (x, y, w, h) box. Zero-area boxes are accepted so
+    // single-point contributors (spline anchors on edge paths) propagate.
     let mut visit = |x: f64, y: f64, w: f64, h: f64| {
-        if w == 0.0 && h == 0.0 {
-            return;
-        }
         if x < min_x {
             min_x = x;
         }
@@ -473,10 +476,93 @@ fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
     for n in l.unified.nodes.iter().filter(|n| !n.is_group) {
         let w = n.width.unwrap_or(0.0);
         let h = n.height.unwrap_or(0.0);
-        visit(-w / 2.0, -h / 2.0, w, h);
+        if w > 0.0 || h > 0.0 {
+            visit(-w / 2.0, -h / 2.0, w, h);
+        }
         if let Some(label) = n.label.as_deref() {
             let lw = crate::font_metrics::text_width(label, label_family, label_font, true, false);
-            visit(0.0, 0.0, lw, label_h);
+            if lw > 0.0 {
+                visit(0.0, 0.0, lw, label_h);
+            }
+        }
+    }
+
+    // Edge paths — union the M/L/C anchor & control coords the renderer
+    // will emit, after applying the marker visual offsets. Mirrors the
+    // ER fix (commit f56c71e) for class-specific markers.
+    let r3 = |v: f64| (v * 1000.0).round() / 1000.0;
+    for e in &l.unified.edges {
+        if e.thickness.as_deref() == Some("invisible") {
+            continue;
+        }
+        let raw: Vec<crate::layout::unified::types::Point> = e
+            .points
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .collect();
+        if raw.is_empty() {
+            continue;
+        }
+        let mut pts = raw.clone();
+        apply_class_marker_offsets(
+            &mut pts,
+            e.arrow_type_end.as_deref().unwrap_or(""),
+            e.arrow_type_start.as_deref().unwrap_or(""),
+        );
+        let mut acc_pt = |x: f64, y: f64| visit(r3(x), r3(y), 0.0, 0.0);
+        let n = pts.len();
+        if n == 1 {
+            acc_pt(pts[0].x, pts[0].y);
+        } else if n >= 2 {
+            // path_basis state machine — collect every coord token the
+            // emitter writes (M/L anchors + C control + C end).
+            let mut x0 = f64::NAN;
+            let mut x1 = f64::NAN;
+            let mut y0 = f64::NAN;
+            let mut y1 = f64::NAN;
+            let mut state = 0u8;
+            for p in &pts {
+                let (x, y) = (p.x, p.y);
+                match state {
+                    0 => {
+                        acc_pt(x, y);
+                        state = 1;
+                    }
+                    1 => {
+                        state = 2;
+                    }
+                    2 => {
+                        acc_pt((5.0 * x0 + x1) / 6.0, (5.0 * y0 + y1) / 6.0);
+                        acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                        acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                        acc_pt((x0 + 4.0 * x1 + x) / 6.0, (y0 + 4.0 * y1 + y) / 6.0);
+                        state = 3;
+                    }
+                    _ => {
+                        acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                        acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                        acc_pt((x0 + 4.0 * x1 + x) / 6.0, (y0 + 4.0 * y1 + y) / 6.0);
+                    }
+                }
+                x0 = x1;
+                x1 = x;
+                y0 = y1;
+                y1 = y;
+            }
+            match state {
+                3 => {
+                    acc_pt((2.0 * x0 + x1) / 3.0, (2.0 * y0 + y1) / 3.0);
+                    acc_pt((x0 + 2.0 * x1) / 3.0, (y0 + 2.0 * y1) / 3.0);
+                    acc_pt((x0 + 5.0 * x1) / 6.0, (y0 + 5.0 * y1) / 6.0);
+                    acc_pt(x1, y1);
+                }
+                2 => {
+                    acc_pt(x1, y1);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -484,6 +570,63 @@ fn compute_svg_bbox_local(l: &ClassLayout) -> (f64, f64, f64, f64) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
+/// Apply upstream `markerOffsets` to the first/last edge points so the
+/// rendered path stops short of the marker glyph. Only class-diagram
+/// arrow kinds are recognised; everything else is left untouched.
+///
+/// Mirrors `getLineFunctionsWithOffset` in
+/// `mermaid/src/utils/lineWithOffset.ts`. The offset is applied as
+/// `mo * cos(angle)` for x and `mo * |sin(angle)| * sign(deltaY)` for y,
+/// with the sign tied to the incident segment direction.
+fn apply_class_marker_offsets(
+    pts: &mut [crate::layout::unified::types::Point],
+    arrow_end: &str,
+    arrow_start: &str,
+) {
+    fn marker_offset_for(arrow: &str) -> Option<f64> {
+        match arrow {
+            "aggregation" | "extension" | "composition" => Some(17.25),
+            "dependency" => Some(6.0),
+            "lollipop" => Some(13.5),
+            _ => None,
+        }
+    }
+
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+
+    // End offset: applied to last point. Upstream calls
+    // calculateDeltaAndAngle(data[last], data[last-1]) so deltaX =
+    // prev.x - last.x. The y branch uses |sin| * sign(deltaY).
+    if let Some(mo) = marker_offset_for(arrow_end) {
+        let last = pts[n - 1];
+        let prev = pts[n - 2];
+        let dx = prev.x - last.x;
+        let dy = prev.y - last.y;
+        let blen = (dx * dx + dy * dy).sqrt();
+        if blen > 0.0 {
+            pts[n - 1].x += mo * dx / blen;
+            pts[n - 1].y += mo * dy.abs() / blen * if dy >= 0.0 { 1.0 } else { -1.0 };
+        }
+    }
+
+    // Start offset: applied to first point. Upstream calls
+    // calculateDeltaAndAngle(data[0], data[1]) so deltaX = next.x - first.x.
+    if let Some(mo) = marker_offset_for(arrow_start) {
+        let first = pts[0];
+        let next = pts[1];
+        let dx = next.x - first.x;
+        let dy = next.y - first.y;
+        let flen = (dx * dx + dy * dy).sqrt();
+        if flen > 0.0 {
+            pts[0].x += mo * dx / flen;
+            pts[0].y += mo * dy.abs() / flen * if dy >= 0.0 { 1.0 } else { -1.0 };
+        }
+    }
 }
 
 // Class-diagram marker `<defs>` block. Upstream emits one `<defs>` per
@@ -529,8 +672,20 @@ fn class_markers_defs(id: &str, _theme: &ThemeVariables) -> String {
 //   data-points (base64) → data-look → [marker-start] → [marker-end]
 // ──────────────────────────────────────────────────────────────────────
 fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> String {
-    let points: Vec<crate::layout::unified::types::Point> =
+    // Raw waypoints — preserved for `data-points` (upstream base64s the
+    // pre-offset values).
+    let raw: Vec<crate::layout::unified::types::Point> =
         e.points.as_deref().unwrap_or(&[]).iter().copied().collect();
+
+    // Apply marker visual offsets to a clone — the rendered `d=` path
+    // ends a markerOffset short of the node boundary so the arrowhead
+    // glyph fits without overstriking the stroke.
+    let mut points = raw.clone();
+    apply_class_marker_offsets(
+        &mut points,
+        e.arrow_type_end.as_deref().unwrap_or(""),
+        e.arrow_type_start.as_deref().unwrap_or(""),
+    );
 
     let d = build_path(&points, CurveType::Basis);
 
@@ -562,7 +717,9 @@ fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> S
 
     let class = format!(" {} {} {}", thickness_class, pattern_class, relation_class);
 
-    let data_points_b64 = base64_points(&points);
+    // `data-points` carries the raw dagre waypoints — upstream base64s
+    // before applying marker offsets.
+    let data_points_b64 = base64_points(&raw);
 
     let edge_id = &e.id;
 
@@ -642,9 +799,10 @@ fn render_edge_label(e: &crate::layout::unified::types::Edge) -> String {
         (html_escape(label_text), true)
     };
 
-    // Calculate label dimensions — use the label's width/height if
-    // available, otherwise use defaults.
-    let label_w = 1.0; // Will be computed by foreign_object based on text
+    // Calculate label dimensions. When the edge has no label text
+    // upstream's `bbox.width` from `getBBox()` collapses to 0, which
+    // makes the inner `<g class="label">` translate to `(0, -h/2)`.
+    let label_w = if label_text.is_empty() { 0.0 } else { 1.0 };
     let label_h = 16.296875; // Default line height
 
     let opts = LabelOpts {
@@ -1190,6 +1348,19 @@ mod tests {
             exp.len(),
             prefix
         );
+    }
+
+    /// Byte-exact regression: cypress fixtures 88/89/141/178 all share
+    /// a single dependency edge between two classes. They cover the
+    /// edge-spline contribution to viewBox and the markerOffset trim of
+    /// the `d=` path. Pin them down so the dependency-marker geometry
+    /// stays in sync.
+    #[test]
+    fn class_88_89_141_178_are_byte_exact() {
+        for n in &["88", "89", "141", "178"] {
+            let rel = format!("ext_fixtures/cypress/class/{}", n);
+            assert!(check_one(&rel), "{} should be byte-exact", rel);
+        }
     }
 
     /// Full sweep: parser + layout over every class fixture
