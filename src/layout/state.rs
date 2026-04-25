@@ -359,19 +359,53 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                             // inside the noteGroup cluster.
                         }
 
-                        let mut group_node = LNode::default();
-                        group_node.id = parent_id_str.clone();
-                        group_node.dom_id = Some(parent_dom_id);
-                        group_node.is_group = true;
-                        group_node.shape = Some("noteGroup".into());
-                        group_node.padding = Some(16.0);
-                        group_node.css_classes = target_css_classes;
-                        // The parent state's own parent (if any) becomes the noteGroup's parent.
-                        group_node.parent_id = target_parent;
-                        // Insert noteGroup immediately after the target state.
-                        // If state is not found (shouldn't happen), push at end.
-                        let insert_after = target_idx.map(|i| i + 1).unwrap_or(data.nodes.len());
-                        data.nodes.insert(insert_after, group_node);
+                        // Upstream `insertOrUpdateNode` dedups by id: when the
+                        // noteGroup already exists (a prior note for the same
+                        // target was processed), only update its dom_id with
+                        // the latest counter and keep its array position. The
+                        // note node still gets pushed (notes always have a
+                        // unique counter-based id).
+                        //
+                        // `note_insert_pos` ends up as the array index where
+                        // the new note node should be inserted, so layout
+                        // produces the order:
+                        //   [..., noteGroup, note0, note1, ...]
+                        let existing_group_idx = data.nodes.iter().position(|n| {
+                            n.is_group
+                                && n.id == parent_id_str
+                                && n.shape.as_deref() == Some("noteGroup")
+                        });
+                        let note_insert_pos = if let Some(gi) = existing_group_idx {
+                            // Update existing noteGroup's dom_id to the latest
+                            // counter (mirrors upstream re-running insertOrUpdateNode
+                            // with new domId on every note). Keep its position.
+                            data.nodes[gi].dom_id = Some(parent_dom_id);
+                            // Walk past any existing note nodes already parented
+                            // under this group so notes append in counter order.
+                            let mut pos = gi + 1;
+                            while pos < data.nodes.len()
+                                && data.nodes[pos].parent_id.as_deref()
+                                    == Some(parent_id_str.as_str())
+                            {
+                                pos += 1;
+                            }
+                            pos
+                        } else {
+                            let mut group_node = LNode::default();
+                            group_node.id = parent_id_str.clone();
+                            group_node.dom_id = Some(parent_dom_id);
+                            group_node.is_group = true;
+                            group_node.shape = Some("noteGroup".into());
+                            group_node.padding = Some(16.0);
+                            group_node.css_classes = target_css_classes;
+                            // The parent state's own parent (if any) becomes the noteGroup's parent.
+                            group_node.parent_id = target_parent;
+                            // Insert noteGroup immediately after the target state.
+                            // If state is not found (shouldn't happen), push at end.
+                            let after = target_idx.map(|i| i + 1).unwrap_or(data.nodes.len());
+                            data.nodes.insert(after, group_node);
+                            after + 1
+                        };
 
                         // --- note data node ---
                         let note_id = format!("{}----note-{}", target, ctr);
@@ -406,8 +440,9 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                         note_node.width = Some(note_w);
                         note_node.height = Some(NOTE_HEIGHT);
                         note_node.parent_id = Some(parent_id_str.clone());
-                        // Insert note node right after noteGroup (which was inserted at insert_after).
-                        data.nodes.insert(insert_after + 1, note_node);
+                        // Insert note node at computed position (right after the
+                        // noteGroup, or after pre-existing same-group notes).
+                        data.nodes.insert(note_insert_pos, note_node);
 
                         // --- note edge ---
                         // id = "{start}-{end}" (direction determines which end is start).
