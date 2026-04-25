@@ -148,7 +148,12 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
 /// `entity.attributes.length > 0`). Emits the rough.js-generated outer
 /// rectangle, per-row rects, column foreignObjects, and column /
 /// row dividers in the exact order the reference generator produces.
-fn render_entity_node_with_attrs(id: &str, e: &EntityLayout, theme: &ThemeVariables, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> String {
+fn render_entity_node_with_attrs(
+    id: &str,
+    e: &EntityLayout,
+    theme: &ThemeVariables,
+    classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>,
+) -> String {
     let a = match &e.attr_layout {
         Some(a) => a,
         None => return render_entity_node(id, e, classes),
@@ -604,7 +609,10 @@ struct EntityStyles {
 
 /// Collect all styles for an entity from its css_styles (style command)
 /// and any classDef classes it belongs to. Split into rect vs text.
-fn collect_entity_styles(e: &EntityLayout, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> EntityStyles {
+fn collect_entity_styles(
+    e: &EntityLayout,
+    classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>,
+) -> EntityStyles {
     let mut all_styles: Vec<String> = Vec::new();
     for cls_name in e.css_classes.split_whitespace() {
         if let Some(class_def) = classes.get(cls_name) {
@@ -631,7 +639,9 @@ fn collect_entity_styles(e: &EntityLayout, classes: &std::collections::BTreeMap<
     let mut text_parts_compact: Vec<String> = Vec::new();
     for style in &all_styles {
         let style = style.trim();
-        if style.is_empty() { continue; }
+        if style.is_empty() {
+            continue;
+        }
         let prop_name = style.split(':').next().unwrap_or("").trim();
         if prop_name == "fill" || prop_name == "stroke" {
             rect_parts.push(format!("{} !important", style));
@@ -649,17 +659,25 @@ fn collect_entity_styles(e: &EntityLayout, classes: &std::collections::BTreeMap<
     let rect_style = rect_parts.join(";");
     let label_style = text_parts_compact.join(";");
     let span_style = label_style.clone();
-    let div_style_prefix = text_parts.iter().map(|p| {
-        let p_no_imp = p.strip_suffix(" !important").unwrap_or(p);
-        if let Some((prop, val)) = p_no_imp.split_once(':') {
-            let val = val.trim();
-            let normalized_val = normalize_color_for_div(val);
-            format!("{}: {} !important; ", prop, normalized_val)
-        } else {
-            format!("{} ", p)
-        }
-    }).collect::<String>();
-    EntityStyles { rect_style, label_style, span_style, div_style_prefix }
+    let div_style_prefix = text_parts
+        .iter()
+        .map(|p| {
+            let p_no_imp = p.strip_suffix(" !important").unwrap_or(p);
+            if let Some((prop, val)) = p_no_imp.split_once(':') {
+                let val = val.trim();
+                let normalized_val = normalize_color_for_div(val);
+                format!("{}: {} !important; ", prop, normalized_val)
+            } else {
+                format!("{} ", p)
+            }
+        })
+        .collect::<String>();
+    EntityStyles {
+        rect_style,
+        label_style,
+        span_style,
+        div_style_prefix,
+    }
 }
 
 /// Normalize a color value for the `<div>` style attribute. The div's style
@@ -693,7 +711,11 @@ fn normalize_color_for_div(val: &str) -> String {
     val.to_string()
 }
 
-fn render_entity_node(id: &str, e: &EntityLayout, classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>) -> String {
+fn render_entity_node(
+    id: &str,
+    e: &EntityLayout,
+    classes: &std::collections::BTreeMap<String, crate::model::er::EntityClass>,
+) -> String {
     let styles = collect_entity_styles(e, classes);
     let mut out = String::with_capacity(512);
     let class_extra = &e.css_classes;
@@ -727,7 +749,12 @@ fn render_entity_node(id: &str, e: &EntityLayout, classes: &std::collections::BT
 }
 
 /// foreignObject wrapper for styled entity labels.
-fn foreign_object_node_label_styled(width: f64, height: f64, text: &str, styles: &EntityStyles) -> String {
+fn foreign_object_node_label_styled(
+    width: f64,
+    height: f64,
+    text: &str,
+    styles: &EntityStyles,
+) -> String {
     use crate::font_metrics::text_width;
     use crate::render::foreign_object::{foreign_object_body, LabelOpts};
     let w16 = text_width(text, "sans-serif", 16.0, false, false);
@@ -736,8 +763,16 @@ fn foreign_object_node_label_styled(width: f64, height: f64, text: &str, styles:
     let opts = LabelOpts {
         extra_span_classes: "markdown-node-label",
         max_width: maxw,
-        label_style: if styles.span_style.is_empty() { None } else { Some(&styles.span_style) },
-        div_style_prefix: if styles.div_style_prefix.is_empty() { None } else { Some(&styles.div_style_prefix) },
+        label_style: if styles.span_style.is_empty() {
+            None
+        } else {
+            Some(&styles.span_style)
+        },
+        div_style_prefix: if styles.div_style_prefix.is_empty() {
+            None
+        } else {
+            Some(&styles.div_style_prefix)
+        },
         ..LabelOpts::default()
     };
     foreign_object_body(&html_escape(text), width, height, &opts)
@@ -773,12 +808,20 @@ fn render_edge_path(diag_id: &str, e: &EdgeLayout) -> String {
     let marker_start_attr = if e.card_b == "MD_PARENT" {
         String::new()
     } else {
-        format!(r#" marker-start="url(#{did}_er-{sm}Start)""#, did = diag_id, sm = start_marker)
+        format!(
+            r#" marker-start="url(#{did}_er-{sm}Start)""#,
+            did = diag_id,
+            sm = start_marker
+        )
     };
     let marker_end_attr = if e.card_a == "MD_PARENT" {
         String::new()
     } else {
-        format!(r#" marker-end="url(#{did}_er-{em}End)""#, did = diag_id, em = end_marker)
+        format!(
+            r#" marker-end="url(#{did}_er-{em}End)""#,
+            did = diag_id,
+            em = end_marker
+        )
     };
 
     format!(
@@ -825,42 +868,54 @@ fn base64_points(points: &[(f64, f64)]) -> String {
 // translate of (-lw/2, -lh/2).
 // ──────────────────────────────────────────────────────────────────────
 fn render_edge_label(e: &EdgeLayout) -> String {
-    use crate::render::foreign_object::{render_edge_label as fo_edge, LabelOpts};
-    // Reference wraps empty / whitespace-only labels with no `<p>` body
-    // (or keeps the original whitespace intact for the `"   "` case).
-    // Non-empty labels always wrap in `<p>…</p>` post-markdown.
+    use crate::render::foreign_object::{render_node_label, LabelOpts};
+    // Mermaid's `markdownToHTML` lexes a whitespace-only string as a
+    // single `space` token and returns the empty string for it. The
+    // resulting `<span>` is empty, the foreignObject's
+    // `getBoundingClientRect` reports width 0, and the rendered span
+    // carries no `<p>` body. Match that branch for fully-empty and
+    // whitespace-only roles alike.
     let (body, wrap_in_p) = if e.label.trim().is_empty() {
-        // Reproduce the prior exact branch: empty → empty; pure-
-        // whitespace → `<p>{literal}</p>` rendered inline.
-        if e.label.is_empty() {
-            (String::new(), false)
-        } else {
-            (format!("<p>{}</p>", html_escape(&e.label)), false)
-        }
+        (String::new(), false)
     } else {
         // Upstream mermaid's markdown processing renders bold/italic markers
         // and converts `<br />` to `<br/>`.  Apply the same pipeline here.
         (render_attr_markdown(&e.label), true)
     };
-    let opts = LabelOpts {
+    let mut opts = LabelOpts {
         data_id: Some(&e.id),
         group_style: None,
         ..LabelOpts::default()
     };
-    // The inner render_edge_label forces add_background=true +
-    // is_node=false and emits both the outer <g class="edgeLabel"> +
-    // inner <g class="label">.
-    fo_edge(
-        &body,
-        e.label_x,
-        e.label_y,
-        e.label_width,
-        e.label_height,
-        {
-            let mut o = opts;
-            o.wrap_in_p = wrap_in_p;
-            o
-        },
+    opts.is_node = false;
+    opts.add_background = true;
+    opts.wrap_in_p = wrap_in_p;
+    let inner = render_node_label(&body, e.label_width, e.label_height, &opts);
+    // Outer `<g class="edgeLabel">`. Mirror upstream's
+    // `positionEdgeLabel`:
+    //
+    //   * empty label (`if (edge.label)` falsy) → omit the transform
+    //     attribute entirely.
+    //   * label set but dagre never assigned `label.x`/`label.y` (zero-
+    //     width labels skip dagre's position pass) → emit
+    //     `translate(undefined, NaN)` literally, matching the
+    //     `${undefined}` / `undefined + 0` JS coercions.
+    //   * otherwise → `translate(x, y)` with the laid coordinates.
+    let transform_attr = if e.label.is_empty() {
+        String::new()
+    } else if e.label_x.is_none() || e.label_y.is_none() {
+        r#" transform="translate(undefined, NaN)""#.to_string()
+    } else {
+        format!(
+            r#" transform="translate({}, {})""#,
+            fmt_num(e.label_x.unwrap()),
+            fmt_num(e.label_y.unwrap())
+        )
+    };
+    format!(
+        r#"<g class="edgeLabel"{transform}>{inner}</g>"#,
+        transform = transform_attr,
+        inner = inner,
     )
 }
 

@@ -126,9 +126,11 @@ pub struct EdgeLayout {
     pub card_b: String,
     /// Spline waypoints post-dagre.
     pub points: Vec<(f64, f64)>,
-    /// Label center.
-    pub label_x: f64,
-    pub label_y: f64,
+    /// Label centre. `None` when dagre did not assign one — happens for
+    /// zero-width labels and reverse edges in cyclic ranks. Mermaid then
+    /// writes `translate(undefined, NaN)` verbatim, which we mirror.
+    pub label_x: Option<f64>,
+    pub label_y: Option<f64>,
 }
 
 /// Output of the ER layout pass.
@@ -154,6 +156,14 @@ pub struct ErLayout {
 /// across the jsdom foreignObject bbox measurement.
 fn measure_width(text: &str) -> f64 {
     if text.is_empty() {
+        return 0.0;
+    }
+    // Whitespace-only labels: mermaid's `markdownToHTML` lexes them as a
+    // single `space` token and `output()` returns the empty string for
+    // it. The resulting `<span>` is empty, the foreignObject's
+    // `getBoundingClientRect()` reports width 0, and dagre then never
+    // assigns a label centre — so we mirror that here.
+    if !text.contains("<br") && text.chars().all(char::is_whitespace) {
         return 0.0;
     }
     // Split on HTML break tags (<br/>, <br />, <br/> variants), then strip
@@ -548,8 +558,23 @@ pub fn layout(d: &ErDiagram, theme: &ThemeVariables) -> Result<ErLayout> {
             card_a: rel.card_a.as_upper().to_string(),
             card_b: rel.card_b.as_upper().to_string(),
             points,
-            label_x: laid.label_x.unwrap_or(0.0),
-            label_y: laid.label_y.unwrap_or(0.0),
+            // Mermaid only emits a label transform when `if (edge.label)`
+            // is truthy, and the laid coords come from dagre's edge-label
+            // dummy. When the role label is whitespace-only the upstream
+            // markdown lexer drops it (label width = 0), dagre never
+            // creates an edge-label rank, and the routing fallback's mid-
+            // point isn't reflected in the reference. Force `None` so
+            // the renderer prints `translate(undefined, NaN)` to match.
+            label_x: if rel.role_a.trim().is_empty() && !rel.role_a.is_empty() {
+                None
+            } else {
+                laid.label_x
+            },
+            label_y: if rel.role_a.trim().is_empty() && !rel.role_a.is_empty() {
+                None
+            } else {
+                laid.label_y
+            },
         });
     }
 
