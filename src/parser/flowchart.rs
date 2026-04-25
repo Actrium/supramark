@@ -405,11 +405,28 @@ impl<'a> LineParser<'a> {
                     (line.to_string(), None)
                 }
             } else if line.starts_with('"') && line.ends_with('"') && line.len() >= 2 {
-                // Quoted string — upstream treats this as a label-only declaration:
-                // `subgraph "Some Title"` → id = subGraphN (auto), title = "Some Title".
+                // Quoted string — upstream's grammar rule
+                //   `subgraph SPACE textNoTags ...` matches a STR token whose
+                // text is the unquoted body. The `addSubGraph` helper uses that
+                // text for BOTH `_id` and `_title`. If the text contains
+                // whitespace it is then forced to an auto-id; otherwise the
+                // body becomes the cluster id (e.g. `subgraph "subbe"` → id "subbe").
+                //
+                // Markdown labels (`"`...`"`) carry the inner content WITHOUT
+                // surrounding backticks as both the id and the rendered title.
                 let inner = &line[1..line.len() - 1];
                 let label = parse_label_text(inner);
-                (format!("subGraph{}", order), Some(label))
+                let id_text = if inner.starts_with('`') && inner.ends_with('`') && inner.len() >= 2
+                {
+                    &inner[1..inner.len() - 1]
+                } else {
+                    inner
+                };
+                if id_text.is_empty() || id_text.contains(|c: char| c.is_whitespace()) {
+                    (format!("subGraph{}", order), Some(label))
+                } else {
+                    (id_text.to_string(), Some(label))
+                }
             } else {
                 // Maybe just a title without brackets — use as id+title.
                 // Upstream jison grammar rule: `subgraph SPACE textNoTags NEWLINE...`.
