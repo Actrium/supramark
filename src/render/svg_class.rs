@@ -210,6 +210,35 @@ pub fn render(
         }
         out.push_str(&render_edge_label(e));
     }
+    // Edge terminal labels — upstream emits these inside the same
+    // `<g class="edgeLabels">` group, after all `edgeLabel`s. With
+    // `Promise.all` over the per-edge `insertEdgeLabel` calls, the
+    // awaits inside each edge's terminal-creation block interleave
+    // across edges, so each terminal *kind* (startLeft, startRight,
+    // endLeft, endRight) is emitted for every edge before moving on
+    // to the next kind. The class diagram only ever populates
+    // `start_label_right` (multiplicity1) and `end_label_left`
+    // (multiplicity2).
+    for e in &l.unified.edges {
+        if e.thickness.as_deref() == Some("invisible") {
+            continue;
+        }
+        if let Some(t) = e.start_label_right.as_deref() {
+            if !t.is_empty() {
+                out.push_str(&render_edge_terminal(e, TerminalSide::StartRight, t));
+            }
+        }
+    }
+    for e in &l.unified.edges {
+        if e.thickness.as_deref() == Some("invisible") {
+            continue;
+        }
+        if let Some(t) = e.end_label_left.as_deref() {
+            if !t.is_empty() {
+                out.push_str(&render_edge_terminal(e, TerminalSide::EndLeft, t));
+            }
+        }
+    }
     out.push_str("</g>");
 
     // Nodes — when wrapping, only emit nodes that live inside the cluster
@@ -1297,12 +1326,40 @@ fn render_edge_path(diag_id: &str, kind: &str, e: &crate::layout::unified::types
         })
         .unwrap_or_default();
 
+    // Replicate upstream `pathStyle` formula from
+    // `rendering-util/rendering-elements/edges.js`:
+    //   const styles = edgeStyles.reduce((a, s) => a + s + ';', '');  // each `style` postfix-`;`
+    //   const pathStyle = (sfc ? sfc + ';' + styles + ';' : styles)
+    //                   + ';'
+    //                   + edgeStyles.reduce((a, s) => a + ';' + s, ''); // each `style` prefix-`;`
+    // For the class diagram we never set `edgeClassStyles` so `sfc` is
+    // empty. The user-provided `edge.style` array (or an empty `''`
+    // converted to `['']`) feeds both halves.
+    let style_attr = {
+        let edge_styles: Vec<&str> = match e.style.as_ref() {
+            Some(v) if !v.is_empty() => v.iter().map(|s| s.as_str()).collect(),
+            _ => vec![""], // upstream: `Array.isArray(edge.style) ? edge.style : [edge.style]`
+        };
+        let mut styles = String::new();
+        for s in &edge_styles {
+            styles.push_str(s);
+            styles.push(';');
+        }
+        let mut suffix = String::new();
+        for s in &edge_styles {
+            suffix.push(';');
+            suffix.push_str(s);
+        }
+        format!("{}{}{}", styles, ';', suffix)
+    };
+
     format!(
-        r##"<path d="{d}" id="{did}-{eid}" class="{cls}" style=";;;" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic"{ms}{me}></path>"##,
+        r##"<path d="{d}" id="{did}-{eid}" class="{cls}" style="{st}" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="classic"{ms}{me}></path>"##,
         d = d,
         did = diag_id,
         eid = edge_id,
         cls = class,
+        st = style_attr,
         b64 = data_points_b64,
         ms = marker_start,
         me = marker_end,
@@ -1375,6 +1432,177 @@ fn render_edge_label(e: &crate::layout::unified::types::Edge) -> String {
         o.wrap_in_p = wrap_in_p;
         o
     })
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Terminal labels — multiplicity stubs at edge start/end.
+//
+// Upstream: every relation with a `startLabelRight` / `endLabelLeft`
+// (the class-diagram multiplicities) gets one or more
+// `<g class="edgeTerminals" transform="translate(x,y)"><g class="inner"…><foreignObject…></foreignObject></g></g>` blocks.
+// The `(x,y)` is computed by `utils.calcTerminalLabelPosition` from the
+// raw edge waypoints — see `mermaid-official-stable-v11.14.0/.../utils.ts`.
+//
+// In the class-diagram pipeline only two of the four positions ever
+// fire:
+//   * `start_right` ← `e.title1` (multiplicity at the source side)
+//   * `end_left`    ← `e.title2` (multiplicity at the target side)
+//
+// `start_right`'s foreignObject sits *inside* the `<g class="inner">`,
+// while `end_left`'s foreignObject is moved up to be a sibling of inner
+// (`endEdgeLabelLeft.node().appendChild(endLabelElement)` in upstream).
+// ──────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+enum TerminalSide {
+    StartRight,
+    EndLeft,
+}
+
+/// Port of upstream `utils.calculatePoint` — walk along the polyline
+/// `points` for `distance` units, return the (x,y) at that mark.
+/// `distance` is rounded to 5 decimals to match upstream's `roundNumber`.
+fn calc_point_along(
+    points: &[crate::layout::unified::types::Point],
+    distance: f64,
+) -> Option<crate::layout::unified::types::Point> {
+    let mut prev: Option<crate::layout::unified::types::Point> = None;
+    let mut remaining = distance;
+    for &p in points {
+        if let Some(pp) = prev {
+            let dx = p.x - pp.x;
+            let dy = p.y - pp.y;
+            let seg = (dx * dx + dy * dy).sqrt();
+            if seg == 0.0 {
+                return Some(pp);
+            }
+            if seg < remaining {
+                remaining -= seg;
+            } else {
+                let t = remaining / seg;
+                if t <= 0.0 {
+                    return Some(pp);
+                }
+                if t >= 1.0 {
+                    return Some(p);
+                }
+                let x = round5((1.0 - t) * pp.x + t * p.x);
+                let y = round5((1.0 - t) * pp.y + t * p.y);
+                return Some(crate::layout::unified::types::Point { x, y });
+            }
+        }
+        prev = Some(p);
+    }
+    None
+}
+
+fn round5(v: f64) -> f64 {
+    (v * 1e5).round() / 1e5
+}
+
+/// Port of upstream `utils.calcTerminalLabelPosition`. Returns the
+/// translate (x,y) for the `<g class="edgeTerminals">` wrapper.
+fn calc_terminal_pos(
+    terminal_marker_size: f64,
+    side: TerminalSide,
+    points: &[crate::layout::unified::types::Point],
+) -> Option<(f64, f64)> {
+    if points.len() < 2 {
+        return None;
+    }
+    // For `end_*` upstream reverses the points before walking.
+    let mut pts: Vec<crate::layout::unified::types::Point> = points.to_vec();
+    let reverse = matches!(side, TerminalSide::EndLeft);
+    if reverse {
+        pts.reverse();
+    }
+    let dist = 25.0 + terminal_marker_size;
+    let center = calc_point_along(&pts, dist)?;
+    let d = 10.0 + terminal_marker_size * 0.5;
+    let angle = (pts[0].y - center.y).atan2(pts[0].x - center.x);
+
+    let (x, y) = match side {
+        TerminalSide::StartRight => {
+            // sin(angle)*d + (p0.x + center.x)/2
+            let x = angle.sin() * d + (pts[0].x + center.x) / 2.0;
+            let y = -angle.cos() * d + (pts[0].y + center.y) / 2.0;
+            (x, y)
+        }
+        TerminalSide::EndLeft => {
+            // sin(angle)*d + (p0.x + center.x)/2 - 5
+            let x = angle.sin() * d + (pts[0].x + center.x) / 2.0 - 5.0;
+            let y = -angle.cos() * d + (pts[0].y + center.y) / 2.0 - 5.0;
+            (x, y)
+        }
+    };
+    Some((x, y))
+}
+
+/// Emit the `<g class="edgeTerminals">` block for one terminal label.
+fn render_edge_terminal(
+    e: &crate::layout::unified::types::Edge,
+    side: TerminalSide,
+    text: &str,
+) -> String {
+    let points = match e.points.as_ref() {
+        Some(p) if p.len() >= 2 => p.as_slice(),
+        _ => return String::new(),
+    };
+
+    // Upstream's `terminalMarkerSize` = `edge.arrowTypeStart ? 10 : 0`
+    // for start, `edge.arrowTypeEnd ? 10 : 0` for end. Class-diagram
+    // edges always carry a string for `arrowTypeStart/End` (one of
+    // `aggregation`, `extension`, `composition`, `dependency`,
+    // `lollipop`, or `'none'` from `getArrowMarker`); the literal
+    // string `'none'` is still truthy in JS, so the marker size is
+    // effectively always 10 here.
+    let marker_size = 10.0_f64;
+    let (tx, ty) = match calc_terminal_pos(marker_size, side, points) {
+        Some(v) => v,
+        None => return String::new(),
+    };
+
+    // Width: upstream measures the rendered foreignObject's div width.
+    // For a short numeric multiplicity (typical case `"1"`, `"*"`, `"many"`)
+    // the foreignObject width matches `text_width(text, font, 14px)`.
+    let fo_w = crate::font_metrics::text_width(
+        text,
+        "trebuchet ms,verdana,arial,sans-serif",
+        14.0,
+        false,
+        false,
+    );
+    let fo_h = 16.296875_f64;
+    // Inner translate centres the foreignObject around its origin —
+    // upstream's `computeLabelTransform` returns `(-w/2, -h/2)`.
+    let inner_tx = -fo_w / 2.0;
+    let inner_ty = -fo_h / 2.0;
+
+    let fo_block = format!(
+        r#"<foreignObject width="{w}" height="{h}" style="width: 9px; height: 12px;"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="edgeLabel "><p>{txt}</p></span></div></foreignObject>"#,
+        w = fmt_num(fo_w),
+        h = fmt_num(fo_h),
+        txt = html_escape(text),
+    );
+
+    match side {
+        TerminalSide::StartRight => format!(
+            r#"<g class="edgeTerminals" transform="translate({x}, {y})"><g class="inner" transform="translate({ix}, {iy})">{fo}</g></g>"#,
+            x = tx,
+            y = ty,
+            ix = fmt_num(inner_tx),
+            iy = fmt_num(inner_ty),
+            fo = fo_block,
+        ),
+        TerminalSide::EndLeft => format!(
+            r#"<g class="edgeTerminals" transform="translate({x}, {y})"><g class="inner" transform="translate({ix}, {iy})"></g>{fo}</g>"#,
+            x = tx,
+            y = ty,
+            ix = fmt_num(inner_tx),
+            iy = fmt_num(inner_ty),
+            fo = fo_block,
+        ),
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────

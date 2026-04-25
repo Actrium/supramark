@@ -123,13 +123,20 @@ fn build_layout_data(d: &ClassDiagram, _theme: &ThemeVariables) -> LayoutData {
         note.height = Some((h + 20.0).max(30.0));
         data.nodes.push(note);
         if !n.class_id.is_empty() {
-            // Invisible edge so dagre keeps them close.
+            // Upstream `classDb.getData` emits a dotted relation from the
+            // note to its target class. Edge id format is
+            // `edgeNote{note.index}` and `style: ['fill: none']` carries
+            // through to the rendered `style="fill: none;;;fill: none"`.
             let mut e = Edge::default();
-            e.id = format!("edgeNote_{}_{}", n.class_id, n.id);
-            e.source = Some(n.class_id.clone());
-            e.target = Some(n.id.clone());
+            e.id = format!("edgeNote{}", n.index);
+            e.source = Some(n.id.clone());
+            e.target = Some(n.class_id.clone());
             e.classes = Some("relation".into());
-            e.thickness = Some("invisible".into());
+            e.thickness = Some("normal".into());
+            e.pattern = Some("dotted".into());
+            e.style = Some(vec!["fill: none".into()]);
+            // Upstream sets arrowTypeStart/End to 'none' (string), which
+            // renders as no marker reference. Leave both as None here.
             data.edges.push(e);
         }
     }

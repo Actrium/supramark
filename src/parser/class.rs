@@ -1020,6 +1020,16 @@ fn advance_rel(bytes: &[u8], start: usize) -> usize {
             j += 1;
             continue;
         }
+        // `o` as rhs end-marker: when we are already inside a rel (the
+        // previous byte is a rel-continuation char `-` or `.`), accept
+        // a trailing `o` regardless of what follows. This handles
+        // patterns like `A "1" --o "1" B` where the `o` end-marker is
+        // followed by whitespace + a quoted multiplicity rather than
+        // another rel char.
+        if c == b'o' && j > start && matches!(bytes[j - 1], b'-' | b'.') {
+            j += 1;
+            continue;
+        }
         break;
     }
     j
