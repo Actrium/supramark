@@ -1033,8 +1033,19 @@ fn widen_cluster_with_fork_children(
     // (rx = cx - w/2) stays anchored at the original x. Descendant nodes
     // (excluding nested clusters that recursively widen too) shift +1 in x to
     // remain centred under the widened cluster.
+    //
+    // For ISOLATED clusters the dagre_bridge inner pass already applies this
+    // +2 / +1 to `cluster_width` / `inner_x` so the bbox the outer dagre sees
+    // is correctly widened (otherwise outer-level peers connected to the
+    // cluster end up one pixel left of upstream — see cy/22 edge0). For
+    // non-isolated composite clusters dagre-rs lays them out compound and the
+    // post-process is still needed.
+    let isolated_iso_ids = result.isolated_cluster_ids.clone();
     for n in result.nodes.iter_mut() {
         if needs_widen.contains(&n.id) {
+            if isolated_iso_ids.contains(&n.id) {
+                continue;
+            }
             if let Some(w) = n.width {
                 n.width = Some(w + 2.0);
             }

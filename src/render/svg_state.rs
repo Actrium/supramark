@@ -146,37 +146,38 @@ pub fn render(
     // Nodes -----------------------------------------------------
     out.push_str(r#"<g class="nodes">"#);
 
-    // Top-level isolated clusters → inner <g class="root"> wrappers.
-    // "Top-level" = isolated cluster whose parent is NOT itself isolated.
+    // Walk `l.result.nodes` in insertion (source) order, emitting:
+    //   - top-level isolated clusters as inner `<g class="root">` wrappers,
+    //   - regular leaf nodes that live outside any isolated cluster.
     //
-    // Iterate via `l.result.nodes` (insertion-ordered) rather than the
-    // `iso_ids` HashSet to keep sibling cluster emission stable across
-    // runs and to match upstream's source-order traversal.
-    for cnode in l.result.nodes.iter().filter(|n| n.is_group) {
-        if !iso_ids.contains(&cnode.id) {
-            continue;
-        }
-        let parent_also_isolated = cnode
-            .parent_id
-            .as_deref()
-            .map(|p| iso_ids.contains(p))
-            .unwrap_or(false);
-        if parent_also_isolated {
-            continue;
-        }
-        out.push_str(&render_isolated_cluster_inner_root(cnode, &l.result, theme, id));
-    }
-
-    // Regular leaf nodes — skip those inside any isolated cluster.
-    for n in l.result.nodes.iter().filter(|n| !n.is_group) {
-        if n.extra.get("__skip_render").is_some() {
-            continue;
-        }
-        if has_isolated_ancestor(&n.id, &l.result.nodes, iso_ids) {
-            continue;
-        }
-        if let Some(svg) = emit_node(id, n, theme) {
-            out.push_str(&svg);
+    // Iterating once preserves the parser's source-declaration order — the
+    // upstream renderer's `recursiveRender` walks the doc in declaration
+    // order, so an outer `[*]` declared before `state TV { … }` must be
+    // emitted before the TV cluster's inner root group.
+    for node in l.result.nodes.iter() {
+        if node.is_group {
+            if !iso_ids.contains(&node.id) {
+                continue;
+            }
+            let parent_also_isolated = node
+                .parent_id
+                .as_deref()
+                .map(|p| iso_ids.contains(p))
+                .unwrap_or(false);
+            if parent_also_isolated {
+                continue;
+            }
+            out.push_str(&render_isolated_cluster_inner_root(node, &l.result, theme, id));
+        } else {
+            if node.extra.get("__skip_render").is_some() {
+                continue;
+            }
+            if has_isolated_ancestor(&node.id, &l.result.nodes, iso_ids) {
+                continue;
+            }
+            if let Some(svg) = emit_node(id, node, theme) {
+                out.push_str(&svg);
+            }
         }
     }
     out.push_str("</g>");

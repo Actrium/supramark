@@ -221,6 +221,19 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         if let Some(rest) = strip_kw(line, "state") {
             // Might open a composite — `state Foo {` / `state "Name" as Foo {` /
             // `state Foo <<fork>>` / `state Foo` (plain).
+            //
+            // Upstream's Jison grammar accepts the opening `{` either glued
+            // to the state line OR on a subsequent (possibly blank-line
+            // separated) line.  The byte-exact fixtures `cypress/state/47`
+            // and the `Multiple States` demo rely on the latter form, e.g.
+            //   ```
+            //   state State1
+            //   {
+            //      c0
+            //   }
+            //   ```
+            // Mirror that by peeking ahead for a standalone `{` token after
+            // skipping blank/comment lines.
             let rest = rest.trim();
             if let Some(stripped) = rest.strip_suffix('{') {
                 let decl = stripped.trim();
@@ -233,6 +246,25 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
                     }
                 }
                 parent_stack.push(id);
+                continue;
+            }
+            // Peek ahead — does the next non-empty line open a composite?
+            let mut peek = i;
+            while peek < lines.len() && lines[peek].trim().is_empty() {
+                peek += 1;
+            }
+            if peek < lines.len() && lines[peek].trim() == "{" {
+                let id = ingest_state_decl(&mut diagram, rest, parent_stack.last().cloned());
+                diagram.items.push(ParseItem::StateDecl(id.clone()));
+                if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
+                    if s.kind == StateKind::Simple {
+                        s.kind = StateKind::Composite;
+                    }
+                }
+                parent_stack.push(id);
+                // Consume the lookahead `{` line so the main loop does not
+                // re-process it as a stray identifier.
+                i = peek + 1;
                 continue;
             }
             let id = ingest_state_decl(&mut diagram, rest, parent_stack.last().cloned());
@@ -789,9 +821,18 @@ fn resolve_endpoint(
     is_source: bool,
 ) -> String {
     if tok == "[*]" {
-        let root = parent.clone().unwrap_or_else(|| "root".into());
+        // Upstream `stateDb` namespaces start/end ids by scope: at root level
+        // it emits `root_start` / `root_end`, and inside a composite `Foo` it
+        // emits `Foo_start` / `Foo_end`.  Without this scoping the outer
+        // `[*]` and an inner `[*]` collapse onto the same id, which then
+        // confuses both the dagre extractor (the inner clone is excluded
+        // from the outer graph as a "descendant" of its parent cluster but
+        // shares its id with the legitimate outer node) and the renderer
+        // (one inner-pass `[*]` would steal the outer `<g class="root">`
+        // wrapper).
+        let scope = parent.clone().unwrap_or_else(|| "root".into());
         let role = if is_source { "start" } else { "end" };
-        let id = format!("root_{}", role);
+        let id = format!("{}_{}", scope, role);
         // Reuse existing start/end node within the same parent scope,
         // matching upstream where [*] always maps to a single node per scope.
         if !diagram

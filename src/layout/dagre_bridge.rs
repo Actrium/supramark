@@ -1324,6 +1324,28 @@ fn layout_isolated_cluster(
             (0.0, 0.0, 0.0, 0.0)
         };
 
+    // Composite states whose direct children include a fork/join bar are
+    // widened by +2 with the cluster center shifted +1 to keep the left
+    // edge anchored. Upstream applies this before the outer pass picks up
+    // the cluster's bbox, so we mirror that here — otherwise the outer
+    // dagre would lay out connected outer-level peers (e.g. a top-level
+    // `[*]` connected to the cluster) one pixel left of upstream.
+    //
+    // The post-process `widen_cluster_with_fork_children` in
+    // `layout/state.rs` handles edge spline + descendant centring; here we
+    // only need to make sure the bbox the outer dagre sees is widened too.
+    let has_forkjoin_child = data
+        .nodes
+        .iter()
+        .any(|n| {
+            n.parent_id.as_deref() == Some(cluster_id)
+                && n.shape.as_deref() == Some("forkJoin")
+        });
+    if has_forkjoin_child {
+        cluster_width += 2.0;
+        inner_x += 1.0;
+    }
+
     // Read back positions (and dagre-computed dimensions) for all nodes in this dagre.
     let mut child_positions = std::collections::HashMap::new();
     for child in &leaf_children {

@@ -252,6 +252,22 @@ fn cypress_44() {
     assert_byte_exact("ext_fixtures/cypress/state/44");
 }
 
+/// `[*] --> TV` outer transition with a `state TV { … }` composite child.
+/// Exercises the parser's scope-prefixed `[*]` ids (outer `root_start`
+/// vs inner `TV_start`/`TV_end`) AND the dagre_bridge isolated cluster
+/// fork-widening so the outer pass places `root_start` at the correct
+/// column under TV. v2 grammar.
+#[test]
+fn cypress_22() {
+    assert_byte_exact("ext_fixtures/cypress/state/22");
+}
+
+/// Same shape as cypress/22 with `stateDiagram` (v1) keyword.
+#[test]
+fn cypress_64() {
+    assert_byte_exact("ext_fixtures/cypress/state/64");
+}
+
 /// Two sibling composite states (`state A {…}` / `state C {…}`), each with
 /// its own `direction`. Both are top-level isolated clusters. Byte-exactness
 /// requires that the renderer emits the inner `<g class="root">` wrappers in
@@ -309,3 +325,4 @@ fn debug_cy11_output() {
         println!("SVG CONTENT:\n{}", &got[start..nodes_end.min(start + 3000)]);
     }
 }
+
