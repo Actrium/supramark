@@ -666,12 +666,35 @@ fn parse_class_def(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<
 }
 
 fn parse_css_class(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<()> {
+    // Upstream syntax:
+    //     cssClass "id1, id2, ..." styleName
+    // The id list lives inside double or single quotes — splitting on the
+    // first whitespace would slice through the quoted body if any id is
+    // followed by a space, so honour the quotes when present.
     let s = rest.trim();
-    let (quoted, second) = split_whitespace_once(s);
-    let list = unquote(quoted.trim());
+    let (id_list_raw, second) = if let Some(stripped) = s.strip_prefix('"') {
+        match stripped.find('"') {
+            Some(end) => (&stripped[..end], stripped[end + 1..].trim_start()),
+            None => split_whitespace_once(s),
+        }
+    } else if let Some(stripped) = s.strip_prefix('\'') {
+        match stripped.find('\'') {
+            Some(end) => (&stripped[..end], stripped[end + 1..].trim_start()),
+            None => split_whitespace_once(s),
+        }
+    } else {
+        split_whitespace_once(s)
+    };
+    let list = unquote(id_list_raw.trim());
+    let style = second.trim().to_string();
     for id in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        let c = d.class_mut(id);
-        c.css_classes.push(second.trim().to_string());
+        // Upstream `setCssClass` only mutates classes that already exist;
+        // unknown ids are silently ignored. Using `class_mut` here would
+        // auto-create phantom classes (we used to render a `"class20"`
+        // node for fixture cypress/class/169).
+        if let Some(c) = d.classes.iter_mut().find(|c| c.id == id) {
+            c.css_classes.push(style.clone());
+        }
     }
     Ok(())
 }
