@@ -520,6 +520,192 @@ fn collect_nodes(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Node
         .collect()
 }
 
+/// Scan the post-layout dagre graph for self-loop helper nodes inserted
+/// by [`expand_self_edge`] and return synthetic [`Node`] records for each.
+///
+/// Helper nodes have ids matching `{owner}---{owner}---1` or `{owner}---{owner}---2`
+/// where `{owner}` is the node id of the self-edge owner. Each helper carries
+/// the dagre-computed (x, y, width, height) and is tagged via
+/// `extra["synthetic"] = "cyclic_helper"` so renderers can identify them.
+///
+/// `extra["cyclic_owner"]` holds the owner node id, and `extra["cyclic_index"]`
+/// is `"1"` or `"2"` matching the upstream DOM id suffix.
+fn collect_self_loop_helpers(g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Node> {
+    let mut out = Vec::new();
+    for nid in g.nodes() {
+        // Helper node id pattern: `{owner}---{owner}---{1|2}`. Detect by
+        // suffix and middle separator to avoid false positives on user-
+        // supplied ids that legitimately contain `---`.
+        let suffix = if nid.ends_with("---1") {
+            "1"
+        } else if nid.ends_with("---2") {
+            "2"
+        } else {
+            continue;
+        };
+        // Strip the trailing `---{suffix}` and verify the remainder is
+        // `{owner}---{owner}` shape (i.e. middle `---` splits two equal halves).
+        let trimmed = &nid[..nid.len() - 4]; // remove "---1" / "---2"
+        let mid = match trimmed.find("---") {
+            Some(i) => i,
+            None => continue,
+        };
+        let left = &trimmed[..mid];
+        let right = &trimmed[mid + 3..];
+        if left != right || left.is_empty() {
+            continue;
+        }
+        let owner = left.to_string();
+        let lbl = match g.node(&nid) {
+            Some(l) => l,
+            None => continue,
+        };
+        let mut h = Node::default();
+        h.id = nid.clone();
+        h.label = Some(String::new());
+        h.shape = Some("labelRect".to_string());
+        h.width = Some(lbl.width);
+        h.height = Some(lbl.height);
+        h.x = lbl.x;
+        h.y = lbl.y;
+        h.padding = Some(0.0);
+        h.extra
+            .insert("synthetic".to_string(), "cyclic_helper".to_string());
+        h.extra.insert("cyclic_owner".to_string(), owner);
+        h.extra
+            .insert("cyclic_index".to_string(), suffix.to_string());
+        // Mirror parent if the dagre graph is compound — the helper was
+        // attached to the same parent as its owner inside `expand_self_edge`.
+        if g.is_compound() {
+            if let Some(parent) = g.parent(&nid) {
+                h.parent_id = Some(parent.to_string());
+            }
+        }
+        out.push(h);
+    }
+    out
+}
+
+/// Scan the post-layout dagre graph for the three cyclic-special sub-edges
+/// inserted by [`expand_self_edge`] and return synthetic [`Edge`] records
+/// for each, in segment order (0 → 1 → 2).
+///
+/// The 3 segments share an `owner` (the self-edge's source/target node id)
+/// and are keyed by the dagre edge name suffix `-cyclic-special-{0|1|2}`.
+/// Each synthetic Edge carries the dagre-computed spline points and is
+/// tagged via `extra["synthetic"] = "cyclic_segment"`.
+///
+/// The middle segment (`-1`) carries the original edge label; the start
+/// (`-0`) and end (`-2`) segments do not. Upstream uses DOM ids
+/// `{owner}-cyclic-special-1`, `{owner}-cyclic-special-mid`, and
+/// `{owner}-cyclic-special-2` respectively (note: the dagre name suffix
+/// numbers are off-by-one from the DOM id labels — that mirrors mermaid's
+/// own `index.js:343-361` naming).
+fn collect_self_loop_segments(
+    data: &LayoutData,
+    g: &Graph<NodeLabel, EdgeLabel>,
+) -> Vec<Edge> {
+    use std::collections::HashMap;
+    // Build a quick lookup: owner node id → original Edge (so the synthetic
+    // segments can inherit pattern/style/label/look from the user-provided
+    // self-edge).
+    let mut owner_template: HashMap<String, &Edge> = HashMap::new();
+    for e in &data.edges {
+        let (Some(s), Some(t)) = (edge_source(e), edge_target(e)) else {
+            continue;
+        };
+        if s == t {
+            owner_template.insert(s.to_string(), e);
+        }
+    }
+
+    let mut out = Vec::new();
+    for ed in g.edges() {
+        let name = match ed.name.as_deref() {
+            Some(n) => n,
+            None => continue,
+        };
+        // Recognised suffixes: `-cyclic-special-0`, `-cyclic-special-1`,
+        // `-cyclic-special-2`. Anything else is a regular edge.
+        let (owner, seg_idx, dom_suffix) = if let Some(rest) = name.strip_suffix("-cyclic-special-0") {
+            (rest, 0u8, "1")
+        } else if let Some(rest) = name.strip_suffix("-cyclic-special-1") {
+            (rest, 1u8, "mid")
+        } else if let Some(rest) = name.strip_suffix("-cyclic-special-2") {
+            (rest, 2u8, "2")
+        } else {
+            continue;
+        };
+        let lbl = match g.edge(&ed.v, &ed.w, ed.name.as_deref()) {
+            Some(l) => l,
+            None => continue,
+        };
+        let template = owner_template.get(owner);
+        let mut e = match template {
+            Some(t) => (*t).clone(),
+            None => Edge::default(),
+        };
+        // DOM id matches upstream's `edge.id` assignments at index.js:348-357.
+        e.id = format!("{}-cyclic-special-{}", owner, dom_suffix);
+        // Endpoints: source/target reflect the helper-segment chain so
+        // routing/clipping code can still infer geometry from them.
+        e.source = Some(ed.v.clone());
+        e.target = Some(ed.w.clone());
+        e.start = Some(ed.v.clone());
+        e.end = Some(ed.w.clone());
+        // Carry dagre-computed routing back.
+        e.points = Some(
+            lbl.points
+                .iter()
+                .map(|p| Point { x: p.x, y: p.y })
+                .collect(),
+        );
+        e.label_x = lbl.x;
+        e.label_y = lbl.y;
+        // Upstream blanks the labels on segments 0 and 2; only segment 1
+        // (the mid run) keeps the original label. Mirror that here so the
+        // renderer doesn't need a special case.
+        if seg_idx != 1 {
+            e.label = None;
+            // Segment 0 also clears arrowTypeEnd; segment 2 clears
+            // arrowTypeStart (see index.js:347/349/358).
+            if seg_idx == 0 {
+                e.arrow_type_end = Some("none".to_string());
+            } else {
+                e.arrow_type_start = Some("none".to_string());
+            }
+        } else {
+            // Mid segment: no arrows on either end.
+            e.arrow_type_start = Some("none".to_string());
+            e.arrow_type_end = Some("none".to_string());
+        }
+        e.extra
+            .insert("synthetic".to_string(), "cyclic_segment".to_string());
+        e.extra
+            .insert("cyclic_owner".to_string(), owner.to_string());
+        e.extra
+            .insert("cyclic_index".to_string(), seg_idx.to_string());
+        out.push(e);
+    }
+    // Stable sort: group by owner, then segment index ascending.
+    out.sort_by(|a, b| {
+        let ao = a.extra.get("cyclic_owner").map(|s| s.as_str()).unwrap_or("");
+        let bo = b.extra.get("cyclic_owner").map(|s| s.as_str()).unwrap_or("");
+        let ai = a
+            .extra
+            .get("cyclic_index")
+            .and_then(|s| s.parse::<u8>().ok())
+            .unwrap_or(0);
+        let bi = b
+            .extra
+            .get("cyclic_index")
+            .and_then(|s| s.parse::<u8>().ok())
+            .unwrap_or(0);
+        ao.cmp(bo).then(ai.cmp(&bi))
+    });
+    out
+}
+
 /// Pull post-layout edge spline points + label centres.
 ///
 /// `cluster_anchors`: optional map from cluster-id to the anchor leaf node
@@ -1408,7 +1594,7 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
 
     let cluster_padding = 8.0_f64; // upstream insertCluster padding
 
-    let mut nodes: Vec<Node> = data
+    let nodes: Vec<Node> = data
         .nodes
         .iter()
         .map(|orig| {
@@ -1491,11 +1677,47 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     let edges_reordered = reorder_cluster_edges(edges_pre, data);
     let edges = routing::refine_edges(&nodes, &edges_reordered);
     let clusters = collect_clusters(&nodes);
-    let bounds = compute_bounds(&nodes, &edges);
+
+    // Self-loop helper exposure ------------------------------------------------
+    // [`expand_self_edge`] inserts two `labelRect` helper nodes plus three
+    // `cyclic-special` sub-edges into the dagre graph for each user self-edge.
+    // These survived only inside the dagre layout state until now; expose them
+    // on the LayoutResult so downstream renderers (ER, flowchart, …) can emit
+    // them in the SVG matching upstream `index.js:308-364`.
+    //
+    // We append them AFTER all original user nodes/edges so existing
+    // index-based access patterns (e.g. ER's `result.edges.get(i)` keyed off
+    // the relationship index) keep their meaning. Renderers that care about
+    // the helpers/segments must opt-in by checking `extra["synthetic"]`.
+    let mut all_nodes = nodes;
+    let mut all_edges = edges;
+    {
+        let helpers = collect_self_loop_helpers(&g);
+        if !helpers.is_empty() {
+            log::debug!(
+                "dagre_bridge: exposing {} self-loop helper node(s) on outer pass",
+                helpers.len()
+            );
+            all_nodes.extend(helpers);
+        }
+        let segments = collect_self_loop_segments(data, &g);
+        if !segments.is_empty() {
+            log::debug!(
+                "dagre_bridge: exposing {} cyclic-special sub-edge(s) on outer pass",
+                segments.len()
+            );
+            // Sub-edges already carry dagre points; routing::refine_edges
+            // would recompute label_x/label_y for them — apply the same
+            // dedupe/midpoint pipeline so they look like the rest.
+            let refined = routing::refine_edges(&all_nodes, &segments);
+            all_edges.extend(refined);
+        }
+    }
+    let bounds = compute_bounds(&all_nodes, &all_edges);
 
     Ok(LayoutResult {
-        nodes,
-        edges,
+        nodes: all_nodes,
+        edges: all_edges,
         clusters,
         bounds,
         isolated_cluster_ids: all_isolated_ids,
@@ -1601,6 +1823,87 @@ mod tests {
             a.y,
             b.y
         );
+    }
+
+    #[test]
+    fn self_loop_exposes_helpers_and_cyclic_segments() {
+        // Single node with a self-edge. The dagre adapter should expand
+        // it into 2 helper nodes (`---1` / `---2`) plus 3 cyclic-special
+        // sub-edges (segments 0/1/2). Both must surface on the
+        // LayoutResult after the layout call.
+        let mut a = Node::default();
+        a.id = "A".into();
+        a.label = Some("A".into());
+        a.width = Some(60.0);
+        a.height = Some(30.0);
+
+        let mut b = Node::default();
+        b.id = "B".into();
+        b.label = Some("B".into());
+        b.width = Some(60.0);
+        b.height = Some(30.0);
+
+        let mut self_e = Edge::default();
+        self_e.id = "loop".into();
+        self_e.start = Some("A".into());
+        self_e.end = Some("A".into());
+        self_e.label = Some("again".into());
+
+        // Plus a regular edge so the graph isn't degenerate.
+        let mut ab = Edge::default();
+        ab.id = "ab".into();
+        ab.start = Some("A".into());
+        ab.end = Some("B".into());
+
+        let data = LayoutData {
+            nodes: vec![a, b],
+            edges: vec![self_e, ab],
+            direction: Some("TB".into()),
+            ..LayoutData::default()
+        };
+        let theme = ThemeVariables::default();
+        let out = layout(&data, &theme).expect("layout");
+
+        // Original 2 user nodes + 2 helper nodes.
+        assert_eq!(out.nodes.len(), 4, "2 user + 2 helper nodes");
+        let helpers: Vec<&Node> = out
+            .nodes
+            .iter()
+            .filter(|n| n.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_helper"))
+            .collect();
+        assert_eq!(helpers.len(), 2, "two `---1` / `---2` helpers");
+        let ids: std::collections::HashSet<&str> =
+            helpers.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains("A---A---1"));
+        assert!(ids.contains("A---A---2"));
+        for h in &helpers {
+            assert!(h.x.is_some() && h.y.is_some(), "helper coords populated");
+            assert_eq!(h.shape.as_deref(), Some("labelRect"));
+        }
+
+        // 2 user edges (self-edge + ab) + 3 cyclic-special segments.
+        let segs: Vec<&Edge> = out
+            .edges
+            .iter()
+            .filter(|e| e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment"))
+            .collect();
+        assert_eq!(segs.len(), 3, "three cyclic-special sub-edges");
+        // Segment ids match upstream's DOM naming: -1, -mid, -2.
+        let seg_ids: std::collections::HashSet<&str> =
+            segs.iter().map(|e| e.id.as_str()).collect();
+        assert!(seg_ids.contains("A-cyclic-special-1"));
+        assert!(seg_ids.contains("A-cyclic-special-mid"));
+        assert!(seg_ids.contains("A-cyclic-special-2"));
+        // Mid segment carries the original label.
+        let mid = segs.iter().find(|e| e.id == "A-cyclic-special-mid").unwrap();
+        assert_eq!(mid.label.as_deref(), Some("again"));
+        for s in &segs {
+            assert!(
+                s.points.as_ref().map(|p| p.len() >= 2).unwrap_or(false),
+                "segment {} has spline points",
+                s.id
+            );
+        }
     }
 
     #[test]
