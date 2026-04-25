@@ -288,7 +288,22 @@ fn parse_entity_block(d: &mut ErDiagram, raw: &str) -> Result<()> {
         }
     }
     if let Some(e) = d.entities.get_mut(&name) {
-        e.attributes = attrs;
+        // Multiple attribute blocks for the same entity merge by
+        // appending — upstream `erDb.addAttributes` simply pushes new
+        // attribute rows into the entity's existing list (e.g. a
+        // fixture may declare `BOOK { string title }` and later
+        // `BOOK { float price }`, expecting two rows in the rendered
+        // entity). Avoid re-adding rows that already exist with the
+        // same `(type, name)` pair to keep idempotent reload-safe.
+        for a in attrs {
+            let dup = e
+                .attributes
+                .iter()
+                .any(|prev| prev.attr_type == a.attr_type && prev.name == a.name);
+            if !dup {
+                e.attributes.push(a);
+            }
+        }
     }
     Ok(())
 }
