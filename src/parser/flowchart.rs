@@ -884,7 +884,11 @@ fn parse_label_text(raw: &str) -> Label {
         return Label::markdown(inner);
     }
     if let Some(inner) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
-        return Label::string(inner);
+        // Upstream mermaid trims leading/trailing whitespace (incl. newlines)
+        // from the quoted string body before HTML-conversion. Otherwise a
+        // node like ["\n\nfoo\nbar\n"] would emit `<br/><br/>foo<br/>bar<br/>`
+        // instead of `foo<br/>bar`. See ext_fixtures/demos/flowchart/48.
+        return Label::string(inner.trim());
     }
     Label::text(trimmed)
 }
