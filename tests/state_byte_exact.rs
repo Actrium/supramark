@@ -233,14 +233,11 @@ fn cypress_68() {
 /// default (`TB`) so disconnected divider siblings flow horizontally inside
 /// the parent, and the renderer's dashed-rect divider cluster shape.
 ///
-/// Currently disabled because byte-exact reproducibility is blocked on a
-/// non-deterministic `HashMap` iteration inside `dagre_bridge::layout_isolated_cluster`
-/// (`sub_isolated`). Sibling divider clusters end up with width-dependent
-/// slot positions that differ by ~1–3 px depending on which order Rust's
-/// `RandomState` happens to yield. Structural rendering (id sequence, css
-/// classes, divider rect dimensions) IS already byte-exact.
+/// Byte-exactness depends on deterministic iteration over the `sub_isolated`
+/// HashMap inside `dagre_bridge::layout_isolated_cluster`; the bridge now
+/// sorts sub-cluster ids before feeding them to dagre, so sibling divider
+/// slot positions are stable across runs.
 #[test]
-#[ignore]
 fn cypress_44() {
     assert_byte_exact("ext_fixtures/cypress/state/44");
 }

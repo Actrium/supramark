@@ -1202,13 +1202,20 @@ fn layout_isolated_cluster(
     // the inner-rendered SVG (matching `recursiveRender` flow). The bbox
     // includes the cluster rect (at local [8, 8 + cluster_w]) and any leaf
     // child positioned by the inner dagre, so it is always >= cluster size.
-    for (cid, inner) in &sub_isolated {
+    //
+    // NOTE: iterate by sorted cid to keep dagre's `set_node` order
+    // deterministic; `HashMap` iteration uses `RandomState`, which produces
+    // sibling-divider slot positions that differ by 1-3 px between runs.
+    let mut sub_isolated_sorted_ids: Vec<&String> = sub_isolated.keys().collect();
+    sub_isolated_sorted_ids.sort();
+    for cid in &sub_isolated_sorted_ids {
+        let inner = &sub_isolated[*cid];
         let lbl = NodeLabel {
             width: inner.bbox_width,
             height: inner.bbox_height,
             ..NodeLabel::default()
         };
-        g.set_node(cid.clone(), Some(lbl));
+        g.set_node((*cid).clone(), Some(lbl));
         g.set_parent(cid, Some(cluster_id));
     }
 
@@ -1407,7 +1414,8 @@ fn layout_isolated_cluster(
             }
         }
         // Sub-isolated clusters appear as leaf nodes with preset dims.
-        for (cid, _) in &sub_isolated {
+        // Iterate by sorted id for deterministic float-summation order.
+        for cid in &sub_isolated_sorted_ids {
             if let Some(lbl) = g.node(cid) {
                 v = v.max(lbl.width / 2.0);
             }
@@ -1427,7 +1435,7 @@ fn layout_isolated_cluster(
                 v = v.max(lbl.height / 2.0);
             }
         }
-        for (cid, _) in &sub_isolated {
+        for cid in &sub_isolated_sorted_ids {
             if let Some(lbl) = g.node(cid) {
                 v = v.max(lbl.height / 2.0);
             }
@@ -1689,7 +1697,12 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         for (id, &(cx, cy, w, h)) in &inner.child_positions {
             positions.insert(id.clone(), (cx, cy, w, h));
         }
-        for (sub_id, sub_inner) in &inner.sub_isolated {
+        // Iterate by sorted sub-cluster id for deterministic recursion
+        // (HashMap RandomState would otherwise vary positions overwrites).
+        let mut sub_ids: Vec<&String> = inner.sub_isolated.keys().collect();
+        sub_ids.sort();
+        for sub_id in sub_ids {
+            let sub_inner = &inner.sub_isolated[sub_id];
             collect_inner(sub_inner, sub_id, all_iso, positions);
         }
     }
