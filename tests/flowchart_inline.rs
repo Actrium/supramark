@@ -8,6 +8,7 @@
 
 use mermaid_little::layout::flowchart as fcl;
 use mermaid_little::parser::flowchart as fcp;
+use mermaid_little::preprocess;
 use mermaid_little::render::svg_flowchart;
 use mermaid_little::theme;
 
@@ -87,7 +88,15 @@ fn run_one(rel: &str) -> Result<(bool, String), String> {
         fs::read_to_string(&svg_path).map_err(|e| format!("read {:?}: {e}", svg_path))?;
     let id = id_for(rel);
     let d = fcp::parse(&source).map_err(|e| format!("parse: {e}"))?;
-    let th = theme::get_theme("default");
+    // Mirror lib.rs's `convert_with_id` pipeline so `%%{init: { theme,
+    // themeVariables }}%%` directives propagate to the renderer the
+    // same way as production.
+    let pre = preprocess::preprocess(&source).map_err(|e| format!("preprocess: {e}"))?;
+    let theme_name = pre.config.theme.as_deref().unwrap_or("default");
+    let mut th = theme::get_theme(theme_name);
+    if let Some(tv) = pre.config.theme_variables.as_ref() {
+        theme::apply_theme_variables(&mut th, tv);
+    }
     let l = fcl::layout(&d, &th).map_err(|e| format!("layout: {e}"))?;
     let got = svg_flowchart::render(&d, &l, &th, &id).map_err(|e| format!("render: {e}"))?;
     Ok((
@@ -264,7 +273,13 @@ fn flowchart_single_diff_report() {
             .collect::<Vec<_>>()
     );
     eprintln!("edges: {}", d.edges.len());
-    let th = theme::get_theme("default");
+    // Mirror the production pipeline so `%%{init}%%` themes propagate.
+    let pre = preprocess::preprocess(&source).unwrap();
+    let theme_name = pre.config.theme.as_deref().unwrap_or("default");
+    let mut th = theme::get_theme(theme_name);
+    if let Some(tv) = pre.config.theme_variables.as_ref() {
+        theme::apply_theme_variables(&mut th, tv);
+    }
     let l = fcl::layout(&d, &th).unwrap();
     eprintln!("diagram_padding={}", l.diagram_padding);
     eprintln!("isolated_cluster_ids: {:?}", l.isolated_cluster_ids);

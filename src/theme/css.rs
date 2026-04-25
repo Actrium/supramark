@@ -193,6 +193,20 @@ pub fn base_preamble(id: &str, theme: &ThemeVariables) -> String {
 pub fn neo_look_block(id: &str, theme: &ThemeVariables) -> String {
     let v = BaseVars::resolve(theme);
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
+    // When the theme requests a gradient (base / forest / dark all set
+    // `useGradient = true`), upstream substitutes `url(#<id>-gradient)`
+    // for the stroke / fill in the `data-look="neo"` rules so the
+    // shape inherits the linear gradient defined later under `<defs>`.
+    // The plain `nodeBorder` literal is still used for `.neo-node` /
+    // `.neo-line path` since those don't paint via the gradient.
+    let use_gradient = theme.use_gradient == Some(true);
+    let gradient_ref;
+    let stroke_or_fill: &str = if use_gradient {
+        gradient_ref = format!("url(#{id}-gradient)");
+        gradient_ref.as_str()
+    } else {
+        node_border
+    };
     // Upstream's `dropShadow` theme variable defaults to
     // `drop-shadow(1px 2px 2px rgba(185, 185, 185, 1))`. Not all themes
     // set it; when unset (common) mermaid substitutes the literal
@@ -210,13 +224,13 @@ pub fn neo_look_block(id: &str, theme: &ThemeVariables) -> String {
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].node rect,#{id} [data-look="neo"].cluster rect,#{id} [data-look="neo"].node polygon{{stroke:{nb};filter:{ds};}}"#,
         id = id,
-        nb = node_border,
+        nb = stroke_or_fill,
         ds = drop_shadow,
     ));
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].node path{{stroke:{nb};stroke-width:{sw}px;}}"#,
         id = id,
-        nb = node_border,
+        nb = stroke_or_fill,
         sw = v.stroke_width,
     ));
     s.push_str(&format!(
@@ -224,6 +238,8 @@ pub fn neo_look_block(id: &str, theme: &ThemeVariables) -> String {
         id = id,
         ds = drop_shadow,
     ));
+    // `.neo-line path` keeps the literal node-border colour even when
+    // `useGradient` is on — upstream paints the line shape directly.
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].node .neo-line path{{stroke:{nb};filter:none;}}"#,
         id = id,
@@ -232,7 +248,7 @@ pub fn neo_look_block(id: &str, theme: &ThemeVariables) -> String {
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].node circle{{stroke:{nb};filter:{ds};}}"#,
         id = id,
-        nb = node_border,
+        nb = stroke_or_fill,
         ds = drop_shadow,
     ));
     s.push_str(&format!(
@@ -242,13 +258,13 @@ pub fn neo_look_block(id: &str, theme: &ThemeVariables) -> String {
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].icon-shape .icon{{fill:{nb};filter:{ds};}}"#,
         id = id,
-        nb = node_border,
+        nb = stroke_or_fill,
         ds = drop_shadow,
     ));
     s.push_str(&format!(
         r#"#{id} [data-look="neo"].icon-shape .icon-neo path{{stroke:{nb};filter:{ds};}}"#,
         id = id,
-        nb = node_border,
+        nb = stroke_or_fill,
         ds = drop_shadow,
     ));
     s.push_str(&format!(

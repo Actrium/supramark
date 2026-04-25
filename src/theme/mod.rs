@@ -32,6 +32,7 @@ pub mod color;
 pub mod css;
 pub mod dark;
 pub mod default;
+pub mod derive;
 pub mod forest;
 pub mod neutral;
 
@@ -864,6 +865,26 @@ pub fn apply_theme_variables(theme: &mut ThemeVariables, vars: &serde_json::Valu
                 theme.text_color = Some(ptc.clone());
             }
         }
+    }
+
+    // Re-derive every dependent theme variable when the user changed
+    // any of the seed colors. Without this, base.rs's pre-resolved
+    // colors (`primaryColor=#fff4dd`-derived) leak into the output and
+    // CSS rules like `.error-icon{fill:tertiaryColor}` keep emitting
+    // the wrong hue. Triggers conservatively on the keys that
+    // upstream's `theme-base.js#updateColors()` reads as inputs.
+    let seed_changed = [
+        "primaryColor",
+        "secondaryColor",
+        "tertiaryColor",
+        "background",
+        "noteBkgColor",
+        "darkMode",
+    ]
+    .iter()
+    .any(|k| map.contains_key(*k));
+    if seed_changed {
+        derive::re_derive_base(theme, map, dark_mode);
     }
 }
 
