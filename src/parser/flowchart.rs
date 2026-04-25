@@ -167,11 +167,11 @@ impl<'a> LineParser<'a> {
         if let Some(d) = self.acc_descr.take() {
             self.diag.meta.acc_descr = Some(d);
         }
-        // If the title is absent and we got one from accTitle, surface
-        // it as the meta title.
-        if self.diag.meta.title.is_none() {
-            self.diag.meta.title = self.diag.meta.acc_title.clone();
-        }
+        // Note: upstream keeps frontmatter `title:` and `accTitle:` as
+        // separate fields. accTitle becomes the SVG `<title>` element
+        // (a11y), while only the frontmatter title becomes the
+        // `flowchartTitleText` rendered above the diagram. Do not
+        // promote acc_title into meta.title here.
         Ok(())
     }
 

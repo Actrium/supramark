@@ -467,6 +467,29 @@ pub fn render(
     out.push_str(&inner);
 
     out.push_str(&unified_shell::emit_defs_shell(id, true, true));
+
+    // Diagram title — upstream's `utils.insertTitle` appends a centered
+    // `<text class="flowchartTitleText">` above the diagram when the
+    // frontmatter (or directive) supplied a `title:`. The element is
+    // appended to the SVG element AFTER the inner content but BEFORE
+    // setupViewPortForSVG measures bbox, so it ends up as a sibling of
+    // the seed group (and any drop-shadow defs). Position uses the
+    // pre-title bbox's horizontal center, which here equals the
+    // viewBox center because the title's text-anchor is `middle` and
+    // its width is bounded by the diagram (so it does not push bbox).
+    if let Some(title) = d.meta.title.as_deref() {
+        if !title.is_empty() {
+            let title_top_margin = 25.0_f64;
+            let cx = vb_x + vb_w / 2.0;
+            out.push_str(&format!(
+                r#"<text text-anchor="middle" x="{cx}" y="-{tm}" class="flowchartTitleText">{t}</text>"#,
+                cx = cx,
+                tm = title_top_margin,
+                t = xml_escape(title),
+            ));
+        }
+    }
+
     out.push_str(unified_shell::close_unified_svg());
     Ok(out)
 }
