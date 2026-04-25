@@ -110,6 +110,15 @@ pub fn render(d: &ErDiagram, l: &ErLayout, theme: &ThemeVariables, id: &str) -> 
             out.push_str(&render_entity_node(id, ent, &l.classes));
         }
     }
+    // Self-loop helper placeholders — upstream's `expand_self_edge` emits
+    // them as `<g class="label edgeLabel">` siblings of the entity nodes.
+    // Each helper carries an empty foreignObject whose width is 0 (the
+    // `max-width:10px` cap ensures the inner div has a 10 px column),
+    // which lets dagre place them on a real rank without contributing
+    // visible label text.
+    for h in &l.self_loop_helpers {
+        out.push_str(&render_self_loop_helper(h));
+    }
     out.push_str("</g>");
 
     out.push_str("</g>"); // </g class="root">
@@ -805,7 +814,11 @@ fn render_edge_path(diag_id: &str, e: &EdgeLayout) -> String {
     let end_marker = card_to_marker(&e.card_a);
 
     // Upstream omits marker-start entirely when the cardinality is MD_PARENT.
-    let marker_start_attr = if e.card_b == "MD_PARENT" {
+    // Self-loop synthetic segments use the `"NONE"` sentinel to suppress the
+    // marker on segments where the original arrow head doesn't apply
+    // (cyclic-special-1's marker-end, cyclic-special-mid's both,
+    // cyclic-special-2's marker-start).
+    let marker_start_attr = if e.card_b == "MD_PARENT" || e.card_b == "NONE" {
         String::new()
     } else {
         format!(
@@ -814,7 +827,7 @@ fn render_edge_path(diag_id: &str, e: &EdgeLayout) -> String {
             sm = start_marker
         )
     };
-    let marker_end_attr = if e.card_a == "MD_PARENT" {
+    let marker_end_attr = if e.card_a == "MD_PARENT" || e.card_a == "NONE" {
         String::new()
     } else {
         format!(
@@ -915,6 +928,58 @@ fn render_edge_label(e: &EdgeLayout) -> String {
     format!(
         r#"<g class="edgeLabel"{transform}>{inner}</g>"#,
         transform = transform_attr,
+        inner = inner,
+    )
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Self-loop helper placeholder — `<g class="label edgeLabel" id="…">`
+// emitted inside the nodes block. Mirrors upstream `expand_self_edge`'s
+// labelRect helper (a node whose label has zero text but a 10 px wide
+// hidden bbox so dagre can position the cyclic-special segments).
+//
+// Reference DOM (cypress/er/04 helper 1):
+//
+// ```
+// <g class="label edgeLabel" id="entity-CUSTOMER-0---entity-CUSTOMER-0---1"
+//    transform="translate(28.48046875, 218.7421875)">
+//   <rect width="0.1" height="0.1"></rect>
+//   <g class="label" style="" transform="translate(0, -8.1484375)">
+//     <rect></rect>
+//     <foreignObject width="0" height="16.296875">
+//       <div style="display: table-cell; white-space: nowrap;
+//                   line-height: 1.5; max-width: 10px; text-align: center;"
+//            xmlns="http://www.w3.org/1999/xhtml">
+//         <span class="nodeLabel "></span>
+//       </div>
+//     </foreignObject>
+//   </g>
+// </g>
+// ```
+//
+// The outer rect is the dagre placeholder (10 px wide post-shape). The
+// inner block is upstream's `labelHelper` output for an empty-label node.
+// ──────────────────────────────────────────────────────────────────────
+fn render_self_loop_helper(h: &crate::layout::er::SelfLoopHelper) -> String {
+    use crate::render::foreign_object::{render_node_label, LabelOpts};
+    let mut opts = LabelOpts::default();
+    opts.is_node = true;
+    opts.add_background = false;
+    opts.wrap_in_p = false;
+    // Helper foreignObject width is 0 (empty label) but the div's
+    // `max-width: 10px` matches the helper rect width — upstream uses the
+    // node's `width` (10) as the wrap budget. See `labelHelper` /
+    // `node-html-tree.ts` in the upstream renderer.
+    opts.max_width = h.width;
+    // Inner foreignObject geometry: width=0 (empty span), height=label_h.
+    let inner_w = 0.0;
+    let inner_h = h.label_height;
+    let inner = render_node_label("", inner_w, inner_h, &opts);
+    format!(
+        r#"<g class="label edgeLabel" id="{id}" transform="translate({tx}, {ty})"><rect width="0.1" height="0.1"></rect>{inner}</g>"#,
+        id = h.id,
+        tx = fmt_num(h.x),
+        ty = fmt_num(h.y),
         inner = inner,
     )
 }
