@@ -110,16 +110,21 @@ fn logical_lines(body: &str) -> Vec<LogicalLine> {
     let mut cur_start = 0usize;
     let mut depth: i32 = 0;
     let mut in_quote = false;
+    // Track unclosed backtick-quoted ids that span lines, e.g.
+    // ``RenderProcessHost --|> `Du\nck` ``. Upstream's jison lexer treats
+    // a backtick pair as a single token and the buffered NL ends up
+    // verbatim inside the resulting id.
+    let mut in_backtick = false;
     for (idx, raw) in body.lines().enumerate() {
         let line_no = idx + 1;
         // Comments inside a quoted string ("…%% …") are not comments — only
         // strip when we're not currently in a multi-line string.
-        let stripped = if in_quote {
+        let stripped = if in_quote || in_backtick {
             raw
         } else {
             strip_line_comment(raw)
         };
-        if depth == 0 && !in_quote && cur.is_empty() {
+        if depth == 0 && !in_quote && !in_backtick && cur.is_empty() {
             cur_start = line_no;
         }
         if in_quote {
@@ -144,15 +149,40 @@ fn logical_lines(body: &str) -> Vec<LogicalLine> {
             }
             continue;
         }
+        if in_backtick {
+            // Continuation of a multi-line backtick-quoted id. Preserve the
+            // newline so the rendered dom-id keeps the literal `\n`.
+            cur.push('\n');
+            cur.push_str(stripped);
+            in_backtick = backtick_state_after(stripped, in_backtick);
+            if !in_backtick {
+                let deltas = brace_delta(&cur);
+                if depth + deltas <= 0 {
+                    out.push(LogicalLine {
+                        text: std::mem::take(&mut cur),
+                        line_no: cur_start,
+                    });
+                    depth = 0;
+                } else {
+                    depth += deltas;
+                }
+            }
+            continue;
+        }
         let deltas = brace_delta(stripped);
         // Detect whether *this* line opens a string that doesn't close
         // before EOL — if so, latch into multi-line-string mode.
         let opens_quote = quote_state_after(stripped, false);
+        let opens_backtick = backtick_state_after(stripped, false);
         if depth > 0 {
             cur.push('\n');
             cur.push_str(stripped);
             in_quote = opens_quote;
             if in_quote {
+                continue;
+            }
+            in_backtick = opens_backtick;
+            if in_backtick {
                 continue;
             }
             depth += deltas;
@@ -167,11 +197,17 @@ fn logical_lines(body: &str) -> Vec<LogicalLine> {
             cur.push_str(stripped);
             depth = deltas;
             in_quote = opens_quote;
+            in_backtick = opens_backtick;
         } else if opens_quote {
             // Single statement opens an unclosed string — stitch following
             // lines until the closing quote.
             cur.push_str(stripped);
             in_quote = true;
+        } else if opens_backtick {
+            // Single statement opens an unclosed backtick id — stitch
+            // following lines until the closing backtick.
+            cur.push_str(stripped);
+            in_backtick = true;
         } else {
             let t = stripped.trim();
             if !t.is_empty() {
@@ -189,6 +225,21 @@ fn logical_lines(body: &str) -> Vec<LogicalLine> {
         });
     }
     out
+}
+
+/// Track whether we're inside a `\`…\`` backtick-quoted id after consuming
+/// `line`, given the entry state. A `"`-string suspends backtick toggling
+/// (mirrors `quote_state_after`'s symmetric exclusion).
+fn backtick_state_after(line: &str, mut in_bq: bool) -> bool {
+    let mut in_str = false;
+    for &b in line.as_bytes() {
+        match b {
+            b'"' if !in_bq => in_str = !in_str,
+            b'`' if !in_str => in_bq = !in_bq,
+            _ => {}
+        }
+    }
+    in_bq
 }
 
 /// Track whether we're inside a `"…"` string after consuming `line`,
@@ -504,14 +555,22 @@ fn parse_class_decl(
     } else {
         (head2.trim().to_string(), None)
     };
-    name = name.split_whitespace().collect::<Vec<_>>().join("");
     // Upstream's jison classDiagram parser unwraps backtick-quoted class
     // ids — `\`IPC::Sender\`` ends up keyed as `IPC::Sender` in `classDb`
     // and the rendered dom-id strips the backticks too. Mirror that here:
     // a leading + trailing backtick pair is stripped (anything else stays
     // intact for forward compat with non-quoted backtick uses).
-    if name.len() >= 2 && name.starts_with('`') && name.ends_with('`') {
+    //
+    // When the id is backtick-quoted, embedded whitespace (incl. newlines
+    // for multi-line ids like ``This\nTitle\nHas\nMany\nNewlines``) is
+    // preserved verbatim — upstream keeps the literal NL inside the
+    // resulting domId. For unquoted ids we still collapse internal
+    // whitespace as before so syntactic tokens stay glued.
+    let backtick_quoted = name.len() >= 2 && name.starts_with('`') && name.ends_with('`');
+    if backtick_quoted {
         name = name[1..name.len() - 1].to_string();
+    } else {
+        name = name.split_whitespace().collect::<Vec<_>>().join("");
     }
 
     if name.is_empty() {

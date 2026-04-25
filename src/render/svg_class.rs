@@ -406,6 +406,51 @@ fn normalise_classid_counters(svg: String) -> String {
                     continue;
                 }
             }
+            // ── Extended fallback: match `classId-<id>-<digits>` where the
+            // base id contains non-word chars (e.g. a literal `\n` from a
+            // multi-line backtick-quoted class name). The reference-side JS
+            // normalize uses `(classId-\w+)-(\d+)` and skips these, so the
+            // upstream `classCounter` global value (e.g. 17, 85) is
+            // preserved verbatim in the reference SVG. To stay byte-exact
+            // we must produce the same numbering on the renderer side.
+            //
+            // Strategy: scan forward until the first character that cannot
+            // appear inside an `id="…"` HTML attribute value (`"`) or a
+            // path/url separator (`#`, `(`, `)`, `>`, `<`), then walk back
+            // to locate the trailing `-<digits>` segment.
+            let mut end = body_start;
+            while end < bytes.len() {
+                let c = bytes[end];
+                if matches!(c, b'"' | b'#' | b'(' | b')' | b'>' | b'<' | b' ') {
+                    break;
+                }
+                end += 1;
+            }
+            // Walk back to find trailing digits + `-`.
+            let mut digit_start = end;
+            while digit_start > body_start && is_digit(bytes[digit_start - 1]) {
+                digit_start -= 1;
+            }
+            if digit_start < end && digit_start > body_start + 1 && bytes[digit_start - 1] == b'-' {
+                let dash = digit_start - 1;
+                if dash > body_start {
+                    out.push_str(&svg[copy_from..id_start]);
+                    let id_str = &svg[id_start..dash];
+                    let counter_str = &svg[digit_start..end];
+                    let key = (id_str.to_string(), counter_str.to_string());
+                    let renumbered = *map.entry(key).or_insert_with(|| {
+                        let v = next_id;
+                        next_id += 1;
+                        v
+                    });
+                    out.push_str(id_str);
+                    out.push('-');
+                    out.push_str(&renumbered.to_string());
+                    i = end;
+                    copy_from = end;
+                    continue;
+                }
+            }
         }
         // No match at this position — advance by one byte but defer
         // copying the literal run until the next match (or end).
@@ -2736,7 +2781,16 @@ mod tests {
             Ok(s) => s,
             Err(_) => return false,
         };
-        assert_byte_exact(&got, &expected, rel)
+        // Apply the same `classId-…-N` counter normalization to the
+        // reference SVG that we apply to the rendered output. The
+        // upstream-side normalize (in `tests/support/generate_ref.mjs`)
+        // uses `(classId-\w+)-(\d+)` which silently skips ids that
+        // contain non-word characters such as the literal `\n` inside a
+        // multi-line backtick-quoted class name. Our extended Rust-side
+        // rule does match those cases, so we must run it on both sides
+        // to keep the comparison apples-to-apples.
+        let expected_norm = super::normalise_classid_counters(expected);
+        assert_byte_exact(&got, &expected_norm, rel)
     }
 
     #[test]
