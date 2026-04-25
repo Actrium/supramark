@@ -601,10 +601,15 @@ impl<'a> LineParser<'a> {
             .filter(|s| !s.is_empty())
             .collect();
         // Upstream `flowDb.updateLink` appends `fill:none` to the styles
-        // when the user-supplied list is non-empty and contains no fill
-        // property. Mirroring that here keeps the rendered `style="..."`
-        // attribute byte-exact.
-        if !styles.is_empty() && !styles.iter().any(|s| s.starts_with("fill")) {
+        // ONLY for index-targeted updates, never for `linkStyle default`.
+        // For default style: `this.edges.defaultStyle = style;` (no push).
+        // For specific index: pushes `fill:none` when style is non-empty
+        // and contains no `fill` property. Mirroring that keeps the
+        // rendered `style="..."` attribute byte-exact.
+        if !is_default
+            && !styles.is_empty()
+            && !styles.iter().any(|s| s.starts_with("fill"))
+        {
             styles.push("fill:none".to_string());
         }
         self.diag.link_styles.push(LinkStyle {

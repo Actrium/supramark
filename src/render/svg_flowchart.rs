@@ -1586,12 +1586,17 @@ fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) 
 ///
 /// Upstream's `getLineFunctionsWithOffset` adjusts the first/last path
 /// point by `markerOffset * sin(angle)` so the arrowhead doesn't overlap
-/// the node boundary. `arrow_point` has offset 4, `arrow_cross/circle` 12.5.
+/// the node boundary. Only `arrow_point` (and the barb variants) carry an
+/// offset in the active `markerOffsets` table — `arrow_cross` and
+/// `arrow_circle` are intentionally absent (`markerOffsets2` defines them
+/// but is unused), so circle/cross arrowheads sit flush against the node
+/// boundary with no path retraction.
 fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str) {
     fn marker_offset_for(arrow: &str) -> Option<f64> {
         match arrow {
             "arrow_point" => Some(4.0),
-            "arrow_cross" | "arrow_circle" => Some(12.5),
+            "arrow_barb_neo" => Some(5.5),
+            // arrow_cross / arrow_circle: NO offset (see comment above).
             _ => None,
         }
     }
