@@ -687,7 +687,13 @@ fn parse_css_class(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<
     };
     let list = unquote(id_list_raw.trim());
     let style = second.trim().to_string();
-    for id in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+    // Upstream `setCssClass` (class diagram) splits the id list on `,`
+    // *without* trimming, so any id after the first carries the leading
+    // space from `"a, b"` and the `Map.get(" b")` lookup silently fails.
+    // We replicate that exact quirk to stay byte-exact with the
+    // reference SVG (e.g. cypress/class/217 where `cssClass "Class10,
+    // Class20" exClass2` only ever tags `Class10`).
+    for id in list.split(',').filter(|s| !s.is_empty()) {
         // Upstream `setCssClass` only mutates classes that already exist;
         // unknown ids are silently ignored. Using `class_mut` here would
         // auto-create phantom classes (we used to render a `"class20"`
