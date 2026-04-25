@@ -58,17 +58,31 @@ pub struct ClassDiagram {
 impl ClassDiagram {
     /// Find (mutable) a class by its id, or create it if missing.
     /// Upstream's `addClass` idempotently appends.
+    ///
+    /// Class identity in mermaid is keyed by *base id* (the part before
+    /// any generic tail). `Foo~T~` and a later bare `Foo` reference the
+    /// same class — the generic is stored separately and merged on the
+    /// existing record when supplied. Storing both as `c.id == "Foo"` lets
+    /// downstream lookups (relations, css class, members) match upstream.
     pub fn class_mut(&mut self, id: &str) -> &mut ClassNode {
-        if let Some(idx) = self.classes.iter().position(|c| c.id == id) {
+        let (base, generic) = split_generic(id);
+        if let Some(idx) = self.classes.iter().position(|c| c.id == base) {
+            if let Some(g) = generic {
+                if self.classes[idx].generic.is_none() {
+                    self.classes[idx].generic = Some(g.to_string());
+                }
+            }
             return &mut self.classes[idx];
         }
         self.classes.push(ClassNode::new(id));
         self.classes.last_mut().unwrap()
     }
 
-    /// Look a class up by id (read-only).
+    /// Look a class up by id (read-only). Matches by base id so `Foo~T~`
+    /// and `Foo` resolve to the same record.
     pub fn class(&self, id: &str) -> Option<&ClassNode> {
-        self.classes.iter().find(|c| c.id == id)
+        let (base, _) = split_generic(id);
+        self.classes.iter().find(|c| c.id == base)
     }
 }
 
@@ -260,7 +274,7 @@ impl ClassNode {
     pub fn new(id: &str) -> Self {
         let (base, generic) = split_generic(id);
         Self {
-            id: id.to_string(),
+            id: base.to_string(),
             label: base.to_string(),
             base_id: base.to_string(),
             generic: generic.map(str::to_string),

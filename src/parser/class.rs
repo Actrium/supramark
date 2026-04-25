@@ -878,12 +878,24 @@ fn parse_relation(line: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<(
     };
 
     let (end1, end2, line_type) = parse_rel_spec(&rel_toks);
+    // class_mut is keyed by base id (it strips any `~T~` generic tail).
+    // Use the canonical base ids for the relation endpoints too so dagre
+    // edges match real node ids — `Foo~T~ <|-- Bar` must point at the
+    // `Foo` node, not a phantom `Foo~T~`.
+    let id1_base = id1
+        .split_once('~')
+        .map(|(b, _)| b.to_string())
+        .unwrap_or_else(|| id1.clone());
+    let id2_base = id2
+        .split_once('~')
+        .map(|(b, _)| b.to_string())
+        .unwrap_or_else(|| id2.clone());
     let _ = d.class_mut(&id1);
     let _ = d.class_mut(&id2);
 
     d.relations.push(ClassRelation {
-        id1,
-        id2,
+        id1: id1_base,
+        id2: id2_base,
         end1,
         end2,
         line: line_type,
@@ -1369,7 +1381,9 @@ mod tests {
     fn parse_class_with_generic() {
         let d = parse("classDiagram\nclass Foo~T~\n").unwrap();
         let c = &d.classes[0];
-        assert_eq!(c.id, "Foo~T~");
+        // Mermaid keys class identity by base id; `Foo~T~` and a later
+        // bare `Foo` reference the same record.
+        assert_eq!(c.id, "Foo");
         assert_eq!(c.base_id, "Foo");
         assert_eq!(c.generic.as_deref(), Some("T"));
     }
