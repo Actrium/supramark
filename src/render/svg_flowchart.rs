@@ -133,6 +133,75 @@ fn node_styles_have_bold(styles: &[String]) -> bool {
     false
 }
 
+/// When the resolved node styles include `font-weight:bold`, the upstream
+/// shape renderers (`labelHelper` → jsdom-shimmed `getBoundingClientRect()`)
+/// measure the label text at bold weight — but our `shapes/*` modules use
+/// `HtmlLabelFont::default()` (non-bold). This post-processor patches the
+/// emitted node SVG so the inner `<foreignObject>` width and the enclosing
+/// `<g class="label" transform="translate(-w/2, …)">` x-offset reflect
+/// bold-weight measurement. Other shape geometry (rect outer width/height)
+/// already comes from the layout pass which honours bold via
+/// `measure_vertex_box(v, is_bold=true)`, so we only need to rewrite the
+/// label-level numbers here.
+fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
+    use crate::render::foreign_object::HtmlLabelFont;
+    use crate::render::shapes::types::fmt_num;
+
+    let css = match node.css_styles.as_deref() {
+        Some(s) => s,
+        None => return svg.to_string(),
+    };
+    if !node_styles_have_bold(css) {
+        return svg.to_string();
+    }
+    let label = match node.label.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => return svg.to_string(),
+    };
+    let is_markdown = node.label_type.as_deref() == Some("markdown");
+    // Replicate the shape-side measurement chain so we know which "wrong"
+    // numbers were emitted, then compute the bold equivalents.
+    let escaped = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
+    let (lw_norm, _lh_norm) = crate::render::foreign_object::measure_html_markup_label(
+        &for_measure,
+        &HtmlLabelFont::default(),
+        200.0,
+        true,
+    );
+    let bold_font = HtmlLabelFont {
+        font_family: None,
+        font_size_px: None,
+        bold: Some(true),
+    };
+    let (lw_bold, _lh_bold) =
+        crate::render::foreign_object::measure_html_markup_label(&for_measure, &bold_font, 200.0, true);
+    if (lw_bold - lw_norm).abs() < 1e-9 {
+        // Bold metrics happen to match (e.g. font lacks bold variant).
+        return svg.to_string();
+    }
+    let norm_w_str = fmt_num(lw_norm);
+    let bold_w_str = fmt_num(lw_bold);
+    let norm_half_str = fmt_num(-lw_norm / 2.0);
+    let bold_half_str = fmt_num(-lw_bold / 2.0);
+    // Replace `<foreignObject width="{norm_w}"` and the matching
+    // `transform="translate({-norm_w/2}, …)"` token. Both are emitted by
+    // `render_node_label` and use the same numeric encoding (`fmt_num`),
+    // so a literal substring rewrite is safe — there is no other source of
+    // these exact float strings within a single node block.
+    let needle_fo = format!(r#"<foreignObject width="{norm_w_str}""#);
+    let replace_fo = format!(r#"<foreignObject width="{bold_w_str}""#);
+    let mut out = svg.replace(&needle_fo, &replace_fo);
+    let needle_tx = format!(r#"transform="translate({norm_half_str},"#);
+    let replace_tx = format!(r#"transform="translate({bold_half_str},"#);
+    out = out.replace(&needle_tx, &replace_tx);
+    out
+}
+
 /// the `x` attribute of the `<text class="flowchartTitleText">` element it
 /// appends — the title is then measured by jsdom's getBBox shim and pushes the
 /// outer bbox horizontally.
@@ -581,11 +650,15 @@ pub fn render(
         // Dispatch to the shape registry. Unknown shapes fall back to rect.
         let shape_id = prefixed.shape.clone().unwrap_or_else(|| "rect".to_string());
         match shapes::draw(&shape_id, &prefixed, theme) {
-            Ok(svg) => inner.push_str(&svg),
+            Ok(svg) => {
+                let patched = bold_postprocess_node_svg(&prefixed, &svg);
+                inner.push_str(&patched);
+            }
             Err(_) => {
                 // Fallback: plain rect.
                 if let Ok(svg) = shapes::draw("rect", &prefixed, theme) {
-                    inner.push_str(&svg);
+                    let patched = bold_postprocess_node_svg(&prefixed, &svg);
+                    inner.push_str(&patched);
                 }
             }
         }
