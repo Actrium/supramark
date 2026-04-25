@@ -1338,6 +1338,11 @@ fn parse_one_vertex(
         if c == b'[' || c == b'(' || c == b'{' || c == b'>' {
             break;
         }
+        // `@{...}` is node shape-data syntax (mermaid v11+): end id parsing
+        // here so the post-shape branch can recognise the `@{...}` block.
+        if c == b'@' && bytes.get(i + 1) == Some(&b'{') {
+            break;
+        }
         // End of id if whitespace or `&` or link-start `-`/`=`/`.`/`<`/`x`/`o`/`~` or `:`.
         if c == b' ' || c == b'\t' || c == b'\n' || c == b'&' {
             break;
@@ -1479,15 +1484,26 @@ fn parse_one_vertex(
     };
 
     // Also handle `@{...}` shape-data immediately after id/shape.
+    // Format: `id@{ key: value, key: "value", ... }`. We currently only
+    // extract `label` and `shape` fields; everything else is dropped.
+    // Labels supplied via `@{ label: ... }` are treated as markdown by
+    // upstream — the rendered span gains the `markdown-node-label` class.
+    let mut shape = shape;
+    let mut label = label;
     let remainder = if let Some(after) = remainder.strip_prefix("@{") {
         if let Some(end) = after.find('}') {
-            if let Some(v) = None::<&mut Vertex> {
-                let _ = v;
+            let data = &after[..end];
+            let (lbl, shp) = parse_node_shape_data(data);
+            if let Some(l) = lbl {
+                label = Some(Label::markdown(l));
             }
-            let _data = &after[..end];
-            // Store it on the vertex — caller does it; for now we
-            // attach via class_suffix? We'll ignore here and let the
-            // renderer handle the raw shape data later.
+            if let Some(s_kind) = shp {
+                shape = Some(s_kind);
+            } else if shape.is_none() {
+                // `@{...}` alone (no `[...]` etc.) defaults to a plain rect
+                // with whatever `label:` value we extracted.
+                shape = Some("rect".to_string());
+            }
             &after[end + 1..]
         } else {
             remainder
@@ -1503,6 +1519,59 @@ fn parse_one_vertex(
 fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
     let end = s.find(tok)?;
     Some((&s[..end], &s[end + tok.len()..]))
+}
+
+/// Parse the body of `@{ key: value, ... }` shape-data blocks. Only the
+/// `label` and `shape` keys are honoured; values may be quoted (`"..."`)
+/// or bare. Returns `(label, shape)`.
+fn parse_node_shape_data(body: &str) -> (Option<String>, Option<String>) {
+    let mut label: Option<String> = None;
+    let mut shape: Option<String> = None;
+    let mut rest = body.trim();
+    while !rest.is_empty() {
+        // Read key up to ':'
+        let colon = match rest.find(':') {
+            Some(i) => i,
+            None => break,
+        };
+        let key = rest[..colon].trim().to_string();
+        rest = rest[colon + 1..].trim_start();
+        // Read value: quoted or bare (until ',' or end).
+        let (value, after) = if let Some(stripped) = rest.strip_prefix('"') {
+            // Find matching quote, treating `\"` as escape.
+            let bytes = stripped.as_bytes();
+            let mut j = 0;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' && j + 1 < bytes.len() {
+                    j += 2;
+                    continue;
+                }
+                if bytes[j] == b'"' {
+                    break;
+                }
+                j += 1;
+            }
+            let v = stripped[..j].to_string();
+            let r = if j < bytes.len() {
+                &stripped[j + 1..]
+            } else {
+                ""
+            };
+            (v, r)
+        } else {
+            let end = rest.find(',').unwrap_or(rest.len());
+            (rest[..end].trim().to_string(), &rest[end..])
+        };
+        match key.as_str() {
+            "label" => label = Some(value),
+            "shape" => shape = Some(value),
+            _ => {}
+        }
+        // Skip past optional comma + whitespace.
+        let after = after.trim_start();
+        rest = after.strip_prefix(',').unwrap_or(after).trim_start();
+    }
+    (label, shape)
 }
 
 /// Renumber auto-generated subgraph IDs (matching `subGraph\d+`) to match
