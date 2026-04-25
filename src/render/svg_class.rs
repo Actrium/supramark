@@ -689,17 +689,14 @@ fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> S
 
     let d = build_path(&points, CurveType::Basis);
 
-    // Class diagram edge class format
+    // Class diagram edge class format — upstream emits the same
+    // `edge-pattern-{solid,dashed,dotted}` class names as flowcharts.
+    // The legacy `.dashed-line` / `.dotted-line` CSS rules still ship in
+    // the stylesheet, but the runtime classes on the path element come
+    // from the shared edge stroke logic.
     let pattern_class = match e.pattern.as_deref() {
-        Some("dashed") | Some("dotted") => {
-            // Class diagram uses "dashed-line" or "dotted-line" CSS class
-            // instead of the generic edge-pattern-dashed
-            match e.pattern.as_deref() {
-                Some("dashed") => "dashed-line",
-                Some("dotted") => "dotted-line",
-                _ => "edge-pattern-solid",
-            }
-        }
+        Some("dashed") => "edge-pattern-dashed",
+        Some("dotted") => "edge-pattern-dotted",
         _ => "edge-pattern-solid",
     };
     let thickness_class = match e.thickness.as_deref() {
