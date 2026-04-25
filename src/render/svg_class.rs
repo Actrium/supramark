@@ -903,12 +903,24 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
             let extra_sub = if render_extra_box { padding / 2.0 } else { 0.0 };
             let raw_label_h = label_h;
             let raw_members_h = if has_members { label_h } else { 0.0 };
+            // Annotation row contributes label_h to the divider-y offset
+            // when the class declares any `<<annotation>>`. Mirrors
+            // render_node's `annotation_h_cb` term.
+            let has_annotation = class_node
+                .map_or(false, |c| !c.annotations.is_empty());
+            let raw_annotation_h = if has_annotation { label_h } else { 0.0 };
             let cb = |v: f64| if v == 0.0 { 0.0 } else { v };
+            let annotation_h_cb = cb(raw_annotation_h - extra_sub);
             let label_h_cb = cb(raw_label_h - extra_sub);
             let members_h_cb = cb(raw_members_h - extra_sub);
-            let first_line_y = label_h_cb + y_internal_real + padding;
-            let second_line_y =
-                label_h_cb + members_h_cb + y_internal_real + 2.0 * padding + padding;
+            let first_line_y =
+                annotation_h_cb + label_h_cb + y_internal_real + padding;
+            let second_line_y = annotation_h_cb
+                + label_h_cb
+                + members_h_cb
+                + y_internal_real
+                + 2.0 * padding
+                + padding;
             // The lines stretch from x=-drawn_w/2 to +drawn_w/2 with
             // a 0.001 vertical span, which the path bbox parser sees as
             // a thin (0.001-tall) box.
