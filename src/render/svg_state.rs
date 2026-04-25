@@ -887,6 +887,51 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
     let raw_id = n.id.as_str();
     let label = n.label.as_deref().unwrap_or("");
 
+    // Divider-shape cluster (a `--` partition wrapper): no label, no inner
+    // rect, just a single `<rect class="divider">` wrapped in `<g>`. Mirrors
+    // upstream's `divider` cluster shape (chunk-C7LX3TON.mjs):
+    //   shapeSvg.insert("g").attr("class", cssClasses).attr("id", domId)
+    //     .insert("g", ":first-child")
+    //     .insert("rect", ":first-child")
+    //     .attr("class", "divider").attr(x,y,w,h, data-look)
+    // No `data-id` is emitted (upstream's divider shape skips the id setter).
+    if n.shape.as_deref() == Some("divider") {
+        let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
+        let trimmed = css.trim();
+        let css_attr = if trimmed.contains("statediagram-state") && trimmed.contains("statediagram-cluster") {
+            // Keep the full class string verbatim, prefixed with a leading
+            // space so the resulting attribute reads ` statediagram-state ...`
+            // exactly like upstream's dataFetcher template.
+            let last_is_cluster = trimmed
+                .split_ascii_whitespace()
+                .next_back()
+                .map(|t| t == "statediagram-cluster")
+                .unwrap_or(false);
+            if last_is_cluster {
+                format!(" {} ", trimmed)
+            } else {
+                format!(" {}", trimmed)
+            }
+        } else {
+            // Synthesize a default for safety; layout normally provides the
+            // full string.
+            " statediagram-state statediagram-cluster ".to_string()
+        };
+
+        let rx = cx - w / 2.0;
+        let ry = cy - h / 2.0;
+        return format!(
+            r#"<g class="{css}" id="{svg_id}-{dom_id}" data-look="classic"><g><rect class="divider" x="{x}" y="{y}" width="{w}" height="{h}" data-look="classic"></rect></g></g>"#,
+            css = css_attr,
+            svg_id = svg_id,
+            dom_id = xml_escape(dom_id),
+            x = fmt_num(rx),
+            y = fmt_num(ry),
+            w = fmt_num(w),
+            h = fmt_num(h),
+        );
+    }
+
     // Measure label dimensions (HTML markup path — upstream's createLabel +
     // getBoundingClientRect on the foreignObject's div).
     let escaped = xml_escape(label);

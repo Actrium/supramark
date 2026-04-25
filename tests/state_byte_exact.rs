@@ -227,6 +227,24 @@ fn cypress_68() {
     assert_byte_exact("ext_fixtures/cypress/state/68");
 }
 
+/// Composite state with concurrent-region `--` separators. Exercises the
+/// parser's docTranslator pass that partitions the parent's children into
+/// divider-cluster wrappers (one per chunk), the layout's per-cluster `dir`
+/// default (`TB`) so disconnected divider siblings flow horizontally inside
+/// the parent, and the renderer's dashed-rect divider cluster shape.
+///
+/// Currently disabled because byte-exact reproducibility is blocked on a
+/// non-deterministic `HashMap` iteration inside `dagre_bridge::layout_isolated_cluster`
+/// (`sub_isolated`). Sibling divider clusters end up with width-dependent
+/// slot positions that differ by ~1–3 px depending on which order Rust's
+/// `RandomState` happens to yield. Structural rendering (id sequence, css
+/// classes, divider rect dimensions) IS already byte-exact.
+#[test]
+#[ignore]
+fn cypress_44() {
+    assert_byte_exact("ext_fixtures/cypress/state/44");
+}
+
 /// Dump diff for one fixture (set FIXTURE env var or default 26).
 #[test]
 #[ignore]

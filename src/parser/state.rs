@@ -59,6 +59,10 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
     let mut parent_stack: Vec<String> = Vec::new();
     let mut header_seen = false;
     let mut next_start_end_idx = 0usize;
+    // Upstream `stateDb.getDividerId` increments a per-diagram counter and
+    // returns `divider-id-N`. Track it here so divider lines reproduce the
+    // exact id sequence the upstream parser emits.
+    let mut divider_cnt: usize = 0;
 
     let mut i = 0;
     while i < lines.len() {
@@ -236,10 +240,20 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
             continue;
         }
 
-        // --- Divider `---` / `===` inside composite -----------------------
-        if line.starts_with("---") || line.starts_with("===") {
+        // --- Divider `--` (concurrent-state separator) inside composite ----
+        // Upstream lexer rule: `/^(?:--)/i` produces a CONCURRENT token that
+        // becomes a state stmt with `id = yy.getDividerId()` and `type =
+        // "divider"`. Subsequent `docTranslator` partitions the parent doc
+        // into one cluster wrapper per chunk between dividers (see
+        // `apply_divider_translation` below).
+        //
+        // Accept `--` exactly (with optional leading/trailing whitespace
+        // already trimmed). Avoid colliding with edge syntax `-->` — that
+        // token is matched earlier by parse_transition.
+        if line == "--" || (line.starts_with("--") && line.chars().all(|c| c == '-')) {
             if let Some(parent) = parent_stack.last().cloned() {
-                let id = format!("divider-{}-{}", parent, diagram.states.len());
+                divider_cnt += 1;
+                let id = format!("divider-id-{}", divider_cnt);
                 diagram.states.push(State {
                     id,
                     kind: StateKind::Divider,
@@ -315,7 +329,215 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         }
     }
 
+    // Apply upstream `docTranslator` semantics: every composite parent that
+    // contains divider stmts in its doc gets its children regrouped — each
+    // chunk between dividers becomes its own divider-cluster wrapper. The
+    // first chunks reuse the divider ids (`divider-id-N`); the trailing
+    // chunk gets a generated `id-XXXXXX-K` id derived from the upstream
+    // `Math.random()`-seeded PRNG so byte-exact ids reproduce.
+    apply_divider_translation(&mut diagram);
+
     Ok(diagram)
+}
+
+/// Replicates the divider phase of upstream's `StateDB.docTranslator`.
+///
+/// For every composite parent whose `children` list contains at least one
+/// `Divider` state, partition the children into chunks separated by the
+/// dividers and replace those children with one wrapper Composite per
+/// chunk. The wrapper carries:
+/// * `id` — `divider-id-N` (first wrappers, reusing the divider stmt id)
+///   then a generated `id-{base36}-{cnt}` for the trailing chunk.
+/// * `kind = StateKind::Divider` — picked up by the layout/render path to
+///   produce the dashed-rect cluster shape upstream emits.
+/// * `parent` — the original composite (so cluster nesting is preserved).
+///
+/// Children of each wrapper get their `parent` rewritten to the wrapper id.
+/// The original composite's `children` list is replaced by the wrapper ids
+/// in chunk order.
+fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
+    use crate::model::state::{State, StateKind};
+
+    // Identify composite parents that need translation.
+    let parents_to_translate: Vec<String> = diagram
+        .states
+        .iter()
+        .filter(|s| {
+            // Only consider parents whose direct children include a divider.
+            s.children
+                .iter()
+                .any(|cid| matches!(diagram.states.iter().find(|c| &c.id == cid).map(|c| c.kind), Some(StateKind::Divider)))
+        })
+        .map(|s| s.id.clone())
+        .collect();
+
+    if parents_to_translate.is_empty() {
+        return;
+    }
+
+    // Diagram-scoped PRNG state for `generateId()` calls. Upstream resets
+    // `Math.random()` to mulberry32 seeded at 0x12345678 before each render,
+    // so we mirror that here.
+    let mut rng_state: u32 = 0x12345678;
+    let mut generate_cnt: u32 = 0;
+
+    for parent_id in parents_to_translate {
+        // Snapshot the parent's children list (in declaration order).
+        let children_list: Vec<String> = match diagram.states.iter().find(|s| s.id == parent_id) {
+            Some(p) => p.children.clone(),
+            None => continue,
+        };
+
+        // Partition children into chunks separated by Divider entries.
+        // Each chunk is paired with the id of the divider that ENDED it
+        // (i.e. the divider following the chunk in source order). The
+        // trailing chunk has no divider — the wrapper id for it is
+        // generated below via mulberry32.
+        let mut chunks: Vec<(Option<String>, Vec<String>)> = Vec::new();
+        let mut current: Vec<String> = Vec::new();
+        for cid in &children_list {
+            let kind = diagram
+                .states
+                .iter()
+                .find(|s| &s.id == cid)
+                .map(|s| s.kind);
+            if matches!(kind, Some(StateKind::Divider)) {
+                // Close the current chunk with this divider's id.
+                chunks.push((Some(cid.clone()), std::mem::take(&mut current)));
+            } else {
+                current.push(cid.clone());
+            }
+        }
+        // Trailing chunk after the last divider (if any non-divider items
+        // remain). Upstream only emits the trailing wrapper when there is at
+        // least one divider AND a non-empty trailing chunk.
+        if !current.is_empty() && chunks.iter().any(|(d, _)| d.is_some()) {
+            chunks.push((None, current));
+        } else if !chunks.is_empty() && current.is_empty() {
+            // No trailing chunk — leave as-is.
+        } else if chunks.is_empty() {
+            // No dividers at all — nothing to translate.
+            continue;
+        }
+
+        // Build wrapper states + remap children's parent pointer.
+        let mut wrapper_ids: Vec<String> = Vec::new();
+        for (divider_id_opt, chunk_children) in chunks {
+            let wrapper_id = match divider_id_opt {
+                Some(div_id) => div_id, // reuse the divider stmt id
+                None => {
+                    generate_cnt += 1;
+                    let r = mulberry32_next(&mut rng_state);
+                    format!("id-{}-{}", js_random_to_base36_prefix(r), generate_cnt)
+                }
+            };
+
+            // Rewrite the original divider state (if reused id) into a
+            // composite-like wrapper, OR insert a brand-new wrapper state.
+            let already_present = diagram.states.iter().any(|s| s.id == wrapper_id);
+            if already_present {
+                if let Some(s) = diagram.states.iter_mut().find(|s| s.id == wrapper_id) {
+                    s.kind = StateKind::Divider; // semantically: divider-cluster
+                    s.parent = Some(parent_id.clone());
+                    s.children = chunk_children.clone();
+                    s.implicit = true;
+                }
+            } else {
+                diagram.states.push(State {
+                    id: wrapper_id.clone(),
+                    kind: StateKind::Divider,
+                    parent: Some(parent_id.clone()),
+                    children: chunk_children.clone(),
+                    implicit: true,
+                    ..State::default()
+                });
+            }
+
+            // Re-parent all child states to the wrapper.
+            for cid in &chunk_children {
+                if let Some(c) = diagram.states.iter_mut().find(|s| &s.id == cid) {
+                    c.parent = Some(wrapper_id.clone());
+                }
+            }
+
+            wrapper_ids.push(wrapper_id);
+        }
+
+        // Replace the parent's children list with the wrapper list.
+        if let Some(ps) = diagram.states.iter_mut().find(|s| s.id == parent_id) {
+            ps.children = wrapper_ids;
+        }
+    }
+}
+
+/// mulberry32 PRNG matching upstream `tests/support/generate_ref.mjs`'s
+/// `__mulberry32` seeded at 0x12345678. Returns next value in [0, 1).
+fn mulberry32_next(state: &mut u32) -> f64 {
+    *state = state.wrapping_add(0x6d2b79f5);
+    let mut t: u32 = *state;
+    let a = t ^ (t >> 15);
+    let b = 1u32 | t;
+    t = a.wrapping_mul(b);
+    let a2 = t ^ (t >> 7);
+    let b2 = 61u32 | t;
+    let m = a2.wrapping_mul(b2);
+    t = (t.wrapping_add(m)) ^ t;
+    let v = (t ^ (t >> 14)) as f64;
+    v / 4294967296.0
+}
+
+/// JS `Math.random().toString(36).substr(2, 12)` — exact bignum-style
+/// base-36 conversion used by V8 for non-decimal radices. Mirrors the
+/// implementation in `parser/block.rs::js_random_to_base36_prefix`.
+fn js_random_to_base36_prefix(x: f64) -> String {
+    if x <= 0.0 {
+        return String::new();
+    }
+    let bits = x.to_bits();
+    let raw_exp = ((bits >> 52) & 0x7ff) as i32;
+    let exp = raw_exp - 1023;
+    let mantissa: u64 = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
+    let shift_i: i32 = 52 - exp;
+    if shift_i <= 0 || shift_i >= 63 {
+        return String::new();
+    }
+    let shift = shift_i as u32;
+    let scale2: u128 = 1u128 << (shift + 1);
+    let mut lo: u128 = 2 * (mantissa as u128) - 1;
+    let mut hi: u128 = 2 * (mantissa as u128) + 1;
+    let mut exact: u128 = 2 * (mantissa as u128);
+
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut out = String::with_capacity(12);
+    for _ in 0..12 {
+        lo *= 36;
+        hi *= 36;
+        exact *= 36;
+        let lo_d = lo / scale2;
+        let hi_d = hi / scale2;
+        let ex_d = exact / scale2;
+        lo %= scale2;
+        hi %= scale2;
+        exact %= scale2;
+        let mut digit = ex_d as usize;
+        if lo_d != hi_d {
+            if exact >= scale2 / 2 {
+                digit = digit.saturating_add(1);
+            }
+            if digit >= 36 {
+                out.push('z');
+            } else {
+                out.push(DIGITS[digit] as char);
+            }
+            break;
+        }
+        if digit >= 36 {
+            out.push('z');
+        } else {
+            out.push(DIGITS[digit] as char);
+        }
+    }
+    out
 }
 
 /// Strip `%%`-prefixed comment lines (but leave `%%{...}%%` directives
@@ -882,5 +1104,42 @@ mod tests {
             s.description.is_none(),
             "description should be None when colon-desc became label"
         );
+    }
+}
+
+#[cfg(test)]
+mod test_divider {
+    use super::*;
+
+    /// Parser-only check: cy/44's `--` separators turn into wrapper Divider
+    /// clusters with the expected ids (`divider-id-1/2` and a mulberry32-based
+    /// `id-3tkmm1l27ep-1` for the trailing chunk).
+    #[test]
+    fn divider_translation_cy44_ids_and_parents() {
+        let src = "stateDiagram-v2\n  state s2 {\n      s3\n      --\n      s4\n      --\n      55\n  }\n";
+        let d = parse(src).unwrap();
+        let by_id = |id: &str| d.states.iter().find(|s| s.id == id).cloned();
+        let s2 = by_id("s2").unwrap();
+        assert_eq!(
+            s2.children,
+            vec![
+                "divider-id-1".to_string(),
+                "divider-id-2".to_string(),
+                "id-3tkmm1l27ep-1".to_string(),
+            ],
+            "s2 children should be the 3 divider-cluster wrappers in source order"
+        );
+        for (wrapper, leaf) in [
+            ("divider-id-1", "s3"),
+            ("divider-id-2", "s4"),
+            ("id-3tkmm1l27ep-1", "55"),
+        ] {
+            let w = by_id(wrapper).unwrap();
+            assert_eq!(w.kind, crate::model::state::StateKind::Divider);
+            assert_eq!(w.parent.as_deref(), Some("s2"));
+            assert_eq!(w.children, vec![leaf.to_string()]);
+            let l = by_id(leaf).unwrap();
+            assert_eq!(l.parent.as_deref(), Some(wrapper));
+        }
     }
 }

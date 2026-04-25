@@ -212,11 +212,18 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 // depth-toggled alt suffix).
                 n.css_classes = Some("statediagram-cluster".into());
                 n.padding = Some(8.0);
-                // Per-cluster direction override (`direction RL` etc.). The
-                // dagre bridge reads this to set the inner-pass rankdir so
-                // child nodes flow in the user-requested orientation rather
-                // than the default `opposite_rankdir(outer)`.
-                n.dir = state.direction.clone();
+                // Per-cluster direction. Upstream `dataFetcher` sets
+                // `nodeData.dir = getDir2(parsedItem, "TB")` — the inner
+                // direction of the doc (defaults to TB). The dagre extractor
+                // then USES this `dir` verbatim as the inner clusterGraph's
+                // rankdir (clusterData.dir override on `extractor` line 376).
+                // Result: rankdir is NOT flipped to the opposite of the outer
+                // direction; it always honours the per-cluster dir, defaulting
+                // to TB. We replicate by emitting the explicit direction or
+                // falling back to "TB". This is what makes disconnected
+                // siblings (notably divider chunks) lay out HORIZONTALLY when
+                // inside a TB-rankdir cluster.
+                n.dir = Some(state.direction.clone().unwrap_or_else(|| "TB".into()));
             }
             StateKind::Note => {
                 n.shape = Some("note".into());
@@ -226,11 +233,26 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                 n.height = Some(h);
             }
             StateKind::Divider => {
-                n.shape = Some("basic".into());
-                n.width = Some(0.0);
-                n.height = Some(1.0);
+                // After parser's docTranslator pass, Divider states are
+                // *cluster wrappers* (one per chunk between `--` separators
+                // in a composite). Render as a group with a `divider` shape
+                // so the renderer emits the dashed-rect cluster outline
+                // upstream produces. Children are real states (placed by
+                // dagre's compound layout); width/height are derived from
+                // the inner bbox like any other cluster.
+                n.is_group = true;
+                n.shape = Some("divider".into());
                 n.label = None;
-                n.implicit_skip_render(true);
+                n.padding = Some(8.0);
+                // Default cluster classes; the depth-aware path below
+                // (matching Composite) re-emits the full string with the
+                // statediagram-state prefix and `-alt` suffix.
+                n.css_classes = Some("statediagram-cluster".into());
+                // Inherit the diagram-level direction (or per-state
+                // direction if set) so the dagre extractor uses it directly
+                // as the inner clusterGraph's rankdir. Mirrors upstream
+                // `dataFetcher`'s `dir = getDir2(parsedItem, "TB")`.
+                n.dir = Some(state.direction.clone().unwrap_or_else(|| "TB".into()));
             }
             StateKind::Simple => {
                 let label = state.label.as_deref().unwrap_or(&state.id);
@@ -301,7 +323,7 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             // root level uses `!true = false`, depth 2 uses `true`, etc. So a
             // Composite at depth 2/4/6/... gets the alt class, while
             // Composites at depth 1/3/5/... get only the plain cluster class.
-            if matches!(state.kind, StateKind::Composite) {
+            if matches!(state.kind, StateKind::Composite | StateKind::Divider) {
                 let depth = composite_depth(&state.id, &d.states);
                 let alt = depth >= 2 && depth % 2 == 0;
                 if alt {
@@ -729,6 +751,23 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     // stateEnd.intersect function then uses this updated width.  Replicate
     // by adjusting the last edge endpoint after layout.
     let mut result = result;
+    // Stabilise the post-layout positions of sibling Divider clusters under a
+    // common parent. Upstream's dagre extractor places disconnected sibling
+    // dividers (one per `--` chunk) along the parent's rankdir using stable
+    // insertion order. Our dagre crate preserves insertion order from `Vec`
+    // sources, but the bridge funnels isolated sub-clusters through a
+    // `HashMap` (`sub_isolated`) whose iteration order is non-deterministic.
+    // The result: divider clusters end up at the right *positions* but those
+    // positions are bound to wrappers in random order on every run, breaking
+    // byte-exact reproducibility.
+    //
+    // Fix: for each parent that owns >=2 Divider children, gather the
+    // children's current (x, y), sort the position slots by the inner-pass
+    // axis (x for the typical TB-rankdir layout of dividers), and re-assign
+    // slot[i] to the i-th divider in source-declaration order. The relative
+    // dagre placement (slot positions, slot count, gap) is preserved verbatim
+    // — only the wrapper-to-slot mapping is stabilised.
+    stabilise_divider_positions(&mut result, d);
     fix_state_end_edge_endpoints(&mut result, 7.0088621440762111);
     // The vendored dagre version falls back to intersectRect for every
     // shape, which leaves the first edge point at the rect-clip of a
@@ -747,6 +786,111 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         direction,
         is_v2: d.is_v2,
     })
+}
+
+/// Stabilise the placement of sibling Divider clusters.
+///
+/// See call-site comment for the rationale; this routine simply walks every
+/// composite parent, gathers its divider children in source-declaration order,
+/// sorts the existing dagre-assigned (x, y, outer_tx, outer_ty) slots, and
+/// re-binds them so slot N is owned by the N-th divider in declaration order.
+///
+/// Both `x`/`y` and the `extra["outer_tx"]/extra["outer_ty"]` translate hints
+/// (consumed by the renderer's inner-root translate) need to be remapped — the
+/// renderer reads outer_tx/outer_ty exclusively, but the centre x/y is also
+/// referenced for cluster-bbox derivations elsewhere in the code path.
+fn stabilise_divider_positions(
+    result: &mut crate::layout::unified::types::LayoutResult,
+    d: &StateDiagram,
+) {
+    use crate::model::state::StateKind;
+
+    // Find every parent whose source-declaration order contains >=2 dividers.
+    // The traversal needs the model's `children` ordering (preserved by the
+    // parser's docTranslator pass), not the layout's node order.
+    for parent in &d.states {
+        // Snapshot the divider-child ids in source order.
+        let divider_children: Vec<&str> = parent
+            .children
+            .iter()
+            .filter(|cid| {
+                d.states
+                    .iter()
+                    .find(|s| &s.id == *cid)
+                    .map_or(false, |s| s.kind == StateKind::Divider)
+            })
+            .map(|s| s.as_str())
+            .collect();
+        if divider_children.len() < 2 {
+            continue;
+        }
+
+        // Gather each divider's current (x, y, outer_tx, outer_ty).
+        type Slot = (f64, f64, Option<String>, Option<String>);
+        let mut slots: Vec<Slot> = Vec::with_capacity(divider_children.len());
+        for cid in &divider_children {
+            if let Some(n) = result.nodes.iter().find(|n| &n.id == *cid) {
+                slots.push((
+                    n.x.unwrap_or(0.0),
+                    n.y.unwrap_or(0.0),
+                    n.extra.get("outer_tx").cloned(),
+                    n.extra.get("outer_ty").cloned(),
+                ));
+            }
+        }
+        if slots.len() != divider_children.len() {
+            continue;
+        }
+
+        // Determine sort axis based on slot variance: pick whichever axis has
+        // a non-trivial spread — that is the rankdir flow axis. Falls back to
+        // x-major sort when both are non-trivial (matches LR rankdir, which
+        // is what divider parents use by default per `dataFetcher` dir = TB).
+        let x_spread = slot_spread(&slots, |s| s.0);
+        let y_spread = slot_spread(&slots, |s| s.1);
+        let mut sorted_slots = slots.clone();
+        if x_spread >= y_spread {
+            sorted_slots.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else {
+            sorted_slots.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        }
+
+        // Re-bind: slot[i] (sorted ascending along the rankdir axis) belongs
+        // to divider_children[i] (source-declaration order).
+        for (cid, slot) in divider_children.iter().zip(sorted_slots.iter()) {
+            if let Some(n) = result.nodes.iter_mut().find(|n| &n.id == *cid) {
+                n.x = Some(slot.0);
+                n.y = Some(slot.1);
+                if let Some(v) = &slot.2 {
+                    n.extra.insert("outer_tx".into(), v.clone());
+                }
+                if let Some(v) = &slot.3 {
+                    n.extra.insert("outer_ty".into(), v.clone());
+                }
+            }
+        }
+    }
+}
+
+fn slot_spread<F: Fn(&(f64, f64, Option<String>, Option<String>)) -> f64>(
+    slots: &[(f64, f64, Option<String>, Option<String>)],
+    pick: F,
+) -> f64 {
+    if slots.is_empty() {
+        return 0.0;
+    }
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for s in slots {
+        let v = pick(s);
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
+    }
+    max - min
 }
 
 /// Adjust the last edge point for edges ending at a stateEnd node to use
