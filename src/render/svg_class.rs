@@ -1578,10 +1578,20 @@ fn render_edge_terminal(
     let inner_tx = -fo_w / 2.0;
     let inner_ty = -fo_h / 2.0;
 
+    // Upstream's `setTerminalWidth` (mermaid `edges.js`) does:
+    //   t.style.width = e.length * 9 + "px";
+    //   t.style.height = "12px";
+    // i.e. it overwrites the foreignObject's inline `style.width` with
+    // `label.length * 9` where `length` is JS UTF-16 code units. Replicate
+    // that here so terminal labels with multi-character multiplicities
+    // (e.g. "many", "0..n", "1..n") emit `width: 36px` instead of a
+    // hardcoded `9px`.
+    let style_w_px = text.encode_utf16().count() * 9;
     let fo_block = format!(
-        r#"<foreignObject width="{w}" height="{h}" style="width: 9px; height: 12px;"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="edgeLabel "><p>{txt}</p></span></div></foreignObject>"#,
+        r#"<foreignObject width="{w}" height="{h}" style="width: {sw}px; height: 12px;"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="edgeLabel "><p>{txt}</p></span></div></foreignObject>"#,
         w = fmt_num(fo_w),
         h = fmt_num(fo_h),
+        sw = style_w_px,
         txt = html_escape(text),
     );
 
