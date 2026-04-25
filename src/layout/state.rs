@@ -170,8 +170,10 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             }
             StateKind::Choice => {
                 n.shape = Some("choice".into());
-                n.width = Some(30.0);
-                n.height = Some(30.0);
+                // Upstream `state.ts` renders the choice rhombus at a fixed
+                // 28x28 size (rough-aware code uses half=14).
+                n.width = Some(28.0);
+                n.height = Some(28.0);
                 n.label = None;
             }
             StateKind::History | StateKind::HistoryDeep => {

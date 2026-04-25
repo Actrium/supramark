@@ -194,14 +194,19 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
         }
 
         // --- style — inline node style (`style X fill:...,stroke:...`)
+        // Upstream `style A,B,C fill:red,stroke:blue` syntax: a comma-
+        // separated list of state ids precedes the css declarations.
         if let Some(rest) = strip_kw(line, "style") {
-            // rest may be "X fill:red,stroke:blue" or "X fill:red,..."
-            if let Some((id, css)) = split_once_ws(rest.trim()) {
-                let id = id.trim();
-                if !id.is_empty() {
+            if let Some((ids, css)) = split_once_ws(rest.trim()) {
+                let css_trimmed = css.trim().trim_end_matches(';').to_string();
+                for id in ids.split(',') {
+                    let id = id.trim();
+                    if id.is_empty() {
+                        continue;
+                    }
                     ensure_state(&mut diagram, id, parent_stack.last().cloned());
                     if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
-                        s.style = Some(css.trim().trim_end_matches(';').to_string());
+                        s.style = Some(css_trimmed.clone());
                     }
                 }
             }
@@ -683,6 +688,25 @@ fn ingest_state_decl(diagram: &mut StateDiagram, decl: &str, parent: Option<Stri
     if let Some(open) = decl.find("<<") {
         let id = decl[..open].trim();
         let close = decl[open + 2..].find(">>").map(|i| open + 2 + i);
+        let stereotype = close.map(|c| decl[open + 2..c].trim()).unwrap_or("");
+        ensure_state(diagram, id, parent.clone());
+        if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
+            s.kind = match stereotype {
+                "fork" => StateKind::Fork,
+                "join" => StateKind::Join,
+                "choice" => StateKind::Choice,
+                _ => s.kind,
+            };
+        }
+        return id.to_string();
+    }
+
+    // `state X [[choice]]` / `state X [[fork]]` / `state X [[join]]`
+    // Compatibility form: upstream mermaid.js treats `[[shape]]` as a
+    // synonym for the `<<shape>>` stereotype syntax.
+    if let Some(open) = decl.find("[[") {
+        let id = decl[..open].trim();
+        let close = decl[open + 2..].find("]]").map(|i| open + 2 + i);
         let stereotype = close.map(|c| decl[open + 2..c].trim()).unwrap_or("");
         ensure_state(diagram, id, parent.clone());
         if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {

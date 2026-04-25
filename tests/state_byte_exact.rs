@@ -65,7 +65,12 @@ fn assert_byte_exact(rel: &str) {
 #[test]
 #[ignore]
 fn sweep_all_state_fixtures() {
-    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ext_fixtures/cypress/state");
+    sweep_dir("tests/ext_fixtures/cypress/state", "ext_fixtures/cypress/state");
+    sweep_dir("tests/ext_fixtures/demos/state", "ext_fixtures/demos/state");
+}
+
+fn sweep_dir(dir_rel: &str, ref_prefix: &str) {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(dir_rel);
     let mut pass = 0;
     let mut fail = 0;
     let mut entries: Vec<_> = fs::read_dir(&base)
@@ -80,12 +85,12 @@ fn sweep_all_state_fixtures() {
             continue;
         }
         let stem = name.trim_end_matches(".mmd");
-        let rel = format!("ext_fixtures/cypress/state/{}", stem);
+        let rel = format!("{}/{}", ref_prefix, stem);
         let id = id_for(&rel);
         let source = fs::read_to_string(entry.path()).unwrap();
         let svg_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/reference")
-            .join(format!("ext_fixtures/cypress/state/{}.svg", stem));
+            .join(format!("{}/{}.svg", ref_prefix, stem));
         let expected = match fs::read_to_string(&svg_path) {
             Ok(s) => s,
             Err(_) => {
@@ -124,7 +129,7 @@ fn sweep_all_state_fixtures() {
             }
         }
     }
-    println!("\nResult: {}/{} passed", pass, pass + fail);
+    println!("\nResult [{}]: {}/{} passed", ref_prefix, pass, pass + fail);
 }
 
 #[test]
@@ -188,6 +193,35 @@ fn cypress_14() {
 #[test]
 fn cypress_15() {
     assert_byte_exact("ext_fixtures/cypress/state/15");
+}
+
+/// Dump diff for one fixture (set FIXTURE env var or default 26).
+#[test]
+#[ignore]
+fn debug_one_fixture() {
+    let stem = std::env::var("FIXTURE").unwrap_or_else(|_| "26".to_string());
+    let dir = std::env::var("FIXDIR").unwrap_or_else(|_| "cypress".to_string());
+    let rel = format!("ext_fixtures/{}/state/{}", dir, stem);
+    let mmd = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(format!("{}.mmd", rel));
+    let svg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/reference")
+        .join(format!("{}.svg", rel));
+    let source = fs::read_to_string(&mmd).unwrap();
+    let expected = fs::read_to_string(&svg).unwrap();
+    let id = id_for(&rel);
+    let got = mermaid_little::convert_with_id(&source, &id).unwrap();
+    let outdir = std::path::Path::new("/tmp/state_dump");
+    let _ = std::fs::create_dir_all(outdir);
+    std::fs::write(outdir.join(format!("{}.got.svg", stem)), &got).unwrap();
+    std::fs::write(outdir.join(format!("{}.exp.svg", stem)), &expected).unwrap();
+    println!(
+        "wrote /tmp/state_dump/{}.{{got,exp}}.svg got_len={} exp_len={}",
+        stem,
+        got.len(),
+        expected.len()
+    );
 }
 
 /// Print full SVG output for cy/11 for debugging.
