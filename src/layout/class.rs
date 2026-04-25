@@ -130,8 +130,16 @@ fn build_layout_data(d: &ClassDiagram, _theme: &ThemeVariables) -> LayoutData {
         let line_h = 16.296875_f64;
         let note_padding = 6.0_f64;
         let joined: String = n.text.split('\n').collect();
+        // Upstream's note label goes through DOMPurify into a foreignObject;
+        // the bbox width comes from `el.textContent`. Both the testing
+        // harness shim (`tests/support/generate_ref.mjs`) and a real
+        // browser strip HTML markup before measuring — so an embedded
+        // `<a>` / `<code>` reduces to its visible text content. Without
+        // this strip a note like cypress/class/224 ("<a href=...>note
+        // about mermaid</a>") is measured at ~700 px instead of ~144 px.
+        let measured = strip_html_tags(&joined);
         let family = "trebuchet ms,verdana,arial,sans-serif";
-        let w = font_metrics::text_width(&joined, family, 14.0, false, false);
+        let w = font_metrics::text_width(&measured, family, 14.0, false, false);
         note.width = Some(w + 2.0 * note_padding);
         note.height = Some(line_h + 2.0 * note_padding);
         data.nodes.push(note);
@@ -777,6 +785,30 @@ fn measure_multiline(text: &str, font: f64) -> (f64, f64) {
     }
     let h = lines.len() as f64 * (font * 1.4);
     (w, h)
+}
+
+/// Strip HTML tags (`<...>`) from a string. Upstream measures note
+/// label width via `getBoundingClientRect()` after DOMPurify renders the
+/// markup, so embedded `<a>`/`<code>` reduce to their visible text only.
+/// Mirrors `crate::layout::state::strip_html_tags`.
+fn strip_html_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+            }
+            '>' => {
+                in_tag = false;
+            }
+            _ if !in_tag => {
+                out.push(ch);
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 #[cfg(test)]

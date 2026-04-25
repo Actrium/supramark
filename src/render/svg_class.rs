@@ -623,9 +623,19 @@ fn render_note_node(id: &str, n: &LayoutNode, theme: &ThemeVariables) -> String 
     // Label group: <g class="label noteLabel" ...> with a single
     // foreignObject. The text-align:left style on the wrapper persists
     // through to the inner span; the <p> itself replaces \n with <br/>.
+    //
+    // Upstream pipes the note text through DOMPurify before stamping it
+    // into the foreignObject. Two visible side-effects on inline HTML
+    // labels matter for byte-exact output:
+    //   1. attribute values quoted with `'…'` get re-serialized as `"…"`;
+    //   2. the `target` attribute on `<a>` is stripped from DOMPurify's
+    //      default allow-list, so `<a href=… target="_blank">` becomes
+    //      `<a href=…>`.
+    // (cypress/class/224 exercises both.)
     let label_tx = -bbox_w / 2.0;
     let label_ty = -bbox_h / 2.0;
-    let body = label.replace('\n', "<br/>");
+    let sanitized = sanitize_note_html(label);
+    let body = sanitized.replace('\n', "<br/>");
     let max_w_attr = 200.0_f64; // Upstream `addHtmlSpan` defaults to 200 for notes.
     out.push_str(&format!(
         r#"<g class="label noteLabel" style="text-align:left !important;white-space:nowrap !important" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="text-align: center; white-space: nowrap; display: table-cell; line-height: 1.5; max-width: {mw}px;" xmlns="http://www.w3.org/1999/xhtml"><span style="text-align:left !important;white-space:nowrap !important" class="nodeLabel markdown-node-label"><p>{txt}</p></span></div></foreignObject></g>"#,
@@ -638,6 +648,156 @@ fn render_note_node(id: &str, n: &LayoutNode, theme: &ThemeVariables) -> String 
     ));
 
     out.push_str("</g>");
+    out
+}
+
+/// Apply the visible subset of DOMPurify's HTML cleanup to a note label.
+///
+/// Upstream's `addHtmlSpan` (used by note nodes) calls
+/// `DOMPurify.sanitize(text)` before stuffing the result into the
+/// foreignObject. DOMPurify always re-serialises through the browser's
+/// HTML parser, which produces canonical output:
+///   * single-quoted attribute values become double-quoted;
+///   * disallowed-by-default attributes like `target` are dropped from
+///     the surviving tags.
+///
+/// We don't (yet) need a full HTML parser — only these two
+/// transformations exercised by cypress/class/224. The implementation is
+/// purposely narrow: scan for top-level tag delimiters, normalise
+/// quoting and skip the literal ` target="…"` / ` target='…'` /
+/// ` target=…` attribute forms.
+fn sanitize_note_html(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b != b'<' {
+            out.push(b as char);
+            i += 1;
+            continue;
+        }
+        // Find the closing '>' of this tag.
+        let start = i;
+        let mut j = i + 1;
+        let mut quote: Option<u8> = None;
+        while j < bytes.len() {
+            let c = bytes[j];
+            if let Some(q) = quote {
+                if c == q {
+                    quote = None;
+                }
+            } else if c == b'\'' || c == b'"' {
+                quote = Some(c);
+            } else if c == b'>' {
+                break;
+            }
+            j += 1;
+        }
+        if j >= bytes.len() {
+            // Unterminated tag — emit as-is and stop.
+            out.push_str(&s[start..]);
+            return out;
+        }
+        let tag = &s[start..=j];
+        out.push_str(&clean_tag(tag));
+        i = j + 1;
+    }
+    out
+}
+
+/// Helper for `sanitize_note_html`: rewrite a single tag string in
+/// canonical DOMPurify form.
+fn clean_tag(tag: &str) -> String {
+    let bytes = tag.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'<' || bytes[bytes.len() - 1] != b'>' {
+        return tag.to_string();
+    }
+    let mut out = String::with_capacity(tag.len());
+    out.push('<');
+    let inner = &tag[1..tag.len() - 1];
+    let inner_bytes = inner.as_bytes();
+    let mut k = 0usize;
+    let mut at_attr_boundary = true; // true between attributes (after whitespace)
+    while k < inner_bytes.len() {
+        let c = inner_bytes[k];
+        // Detect attribute names at boundaries; strip `target="..."`.
+        if at_attr_boundary && (c == b't' || c == b'T') {
+            let rest = &inner[k..];
+            let lower: String = rest.chars().take(7).flat_map(char::to_lowercase).collect();
+            if lower.starts_with("target") {
+                let after = &inner[k + 6..];
+                let after_bytes = after.as_bytes();
+                let mut p = 0usize;
+                // Optional whitespace.
+                while p < after_bytes.len() && (after_bytes[p] == b' ' || after_bytes[p] == b'\t')
+                {
+                    p += 1;
+                }
+                if p < after_bytes.len() && after_bytes[p] == b'=' {
+                    p += 1;
+                    while p < after_bytes.len()
+                        && (after_bytes[p] == b' ' || after_bytes[p] == b'\t')
+                    {
+                        p += 1;
+                    }
+                    // Skip the value: quoted or bare token.
+                    if p < after_bytes.len()
+                        && (after_bytes[p] == b'"' || after_bytes[p] == b'\'')
+                    {
+                        let q = after_bytes[p];
+                        p += 1;
+                        while p < after_bytes.len() && after_bytes[p] != q {
+                            p += 1;
+                        }
+                        if p < after_bytes.len() {
+                            p += 1; // consume closing quote
+                        }
+                    } else {
+                        while p < after_bytes.len()
+                            && after_bytes[p] != b' '
+                            && after_bytes[p] != b'\t'
+                        {
+                            p += 1;
+                        }
+                    }
+                    // Drop trailing whitespace we'd otherwise leave behind
+                    // when the attribute we removed had a leading space.
+                    if out.ends_with(' ') {
+                        out.pop();
+                    }
+                    k = k + 6 + p;
+                    continue;
+                }
+            }
+        }
+        // Normalise single-quoted attribute values to double quotes,
+        // matching DOMPurify's canonical serialisation.
+        if c == b'=' && k + 1 < inner_bytes.len() && inner_bytes[k + 1] == b'\'' {
+            // Find the closing single quote.
+            let mut p = k + 2;
+            while p < inner_bytes.len() && inner_bytes[p] != b'\'' {
+                p += 1;
+            }
+            out.push('=');
+            out.push('"');
+            out.push_str(&inner[k + 2..p]);
+            if p < inner_bytes.len() {
+                out.push('"');
+                k = p + 1;
+            } else {
+                k = p;
+            }
+            at_attr_boundary = false;
+            continue;
+        }
+        // Track attribute boundaries: a whitespace char puts us back at
+        // a boundary, a non-whitespace char clears it.
+        at_attr_boundary = c == b' ' || c == b'\t';
+        out.push(c as char);
+        k += 1;
+    }
+    out.push('>');
     out
 }
 
@@ -1221,9 +1381,23 @@ fn compute_svg_bbox_local(l: &ClassLayout, d: &ClassDiagram) -> (f64, f64, f64, 
             visit(-w / 2.0, -h / 2.0, w, h);
         }
         if let Some(label) = n.label.as_deref() {
-            let lw = crate::font_metrics::text_width(label, label_family, label_font, true, false);
-            if lw > 0.0 {
-                visit(0.0, 0.0, lw, label_h);
+            // Notes go through DOMPurify into a foreignObject whose
+            // width is `drawn_w - 2*padding` — the same value the layout
+            // computed from the *stripped* text. Measuring the raw HTML
+            // string here would explode the bbox when the note embeds
+            // tags (cypress/class/224 — `<a><code>…</code></a>`).
+            if n.shape.as_deref() == Some("note") {
+                let pad = 6.0_f64;
+                let lw = (n.width.unwrap_or(0.0) - 2.0 * pad).max(0.0);
+                if lw > 0.0 {
+                    visit(0.0, 0.0, lw, label_h);
+                }
+            } else {
+                let lw =
+                    crate::font_metrics::text_width(label, label_family, label_font, true, false);
+                if lw > 0.0 {
+                    visit(0.0, 0.0, lw, label_h);
+                }
             }
         }
         // Member / method foreignObject contributions: each row sits at
