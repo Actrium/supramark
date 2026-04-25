@@ -67,12 +67,19 @@ pub fn render(
     let vh = bh + pad * 2.0;
 
     // ── 2. <svg ...> opening ────────────────────────────────────────
+    //
+    // Upstream uses two roledescription strings: legacy `classDiagram`
+    // (the `class-v2` parser entry) emits `aria-roledescription="class"`,
+    // while the v3 unified path triggered by `classDiagram-v2` emits
+    // `aria-roledescription="classDiagram"`. The marker IDs follow the
+    // same split — kind prefix is "class" for v1 / "classDiagram" for v2.
+    let kind = if d.v2 { "classDiagram" } else { "class" };
     out.push_str(&unified_shell::open_unified_svg(
         id,
         vw,
         (vx, vy, vw, vh),
         Some("classDiagram"),
-        "class",
+        kind,
     ));
 
     // ── 3. <style> block ───────────────────────────────────────────
@@ -86,7 +93,7 @@ pub fn render(
     // Upstream wraps each marker in its own `<defs>` (a few exceptions
     // emit bare `<marker>` because they are produced by D3's polygon
     // helper). Replicate the wrapping shape to stay byte-exact.
-    out.push_str(&class_markers_defs(id, theme));
+    out.push_str(&class_markers_defs(id, kind, theme));
 
     // ── 5. <g class="root"> ──────────────────────────────────────
     out.push_str(r#"<g class="root">"#);
@@ -105,7 +112,7 @@ pub fn render(
         if e.thickness.as_deref() == Some("invisible") {
             continue;
         }
-        out.push_str(&render_edge_path(id, e));
+        out.push_str(&render_edge_path(id, kind, e));
     }
     out.push_str("</g>");
 
@@ -633,9 +640,8 @@ fn apply_class_marker_offsets(
 // marker (D3's `.append('defs').append('marker')`) — except for
 // `extensionStart-margin` which lands bare. We replicate the exact
 // shape to stay byte-exact.
-fn class_markers_defs(id: &str, _theme: &ThemeVariables) -> String {
+fn class_markers_defs(id: &str, kind: &str, _theme: &ThemeVariables) -> String {
     let mut s = String::with_capacity(4096);
-    let kind = "class";
 
     s.push_str(&format!(r#"<defs><marker id="{id}_{kind}-aggregationStart" class="marker aggregation {kind}" refX="18" refY="7" markerWidth="190" markerHeight="240" orient="auto"><path d="M 18,7 L9,13 L1,7 L9,1 Z"></path></marker></defs>"#));
     s.push_str(&format!(r#"<defs><marker id="{id}_{kind}-aggregationEnd" class="marker aggregation {kind}" refX="1" refY="7" markerWidth="20" markerHeight="28" orient="auto"><path d="M 18,7 L9,13 L1,7 L9,1 Z"></path></marker></defs>"#));
@@ -671,7 +677,7 @@ fn class_markers_defs(id: &str, _theme: &ThemeVariables) -> String {
 //   d → id → class → style → data-edge → data-et → data-id →
 //   data-points (base64) → data-look → [marker-start] → [marker-end]
 // ──────────────────────────────────────────────────────────────────────
-fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> String {
+fn render_edge_path(diag_id: &str, kind: &str, e: &crate::layout::unified::types::Edge) -> String {
     // Raw waypoints — preserved for `data-points` (upstream base64s the
     // pre-offset values).
     let raw: Vec<crate::layout::unified::types::Point> =
@@ -728,8 +734,9 @@ fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> S
         .filter(|s| !s.is_empty())
         .map(|ty| {
             format!(
-                r#" marker-start="url(#{did}_class-{ty}Start)""#,
+                r#" marker-start="url(#{did}_{kind}-{ty}Start)""#,
                 did = diag_id,
+                kind = kind,
                 ty = ty
             )
         })
@@ -741,8 +748,9 @@ fn render_edge_path(diag_id: &str, e: &crate::layout::unified::types::Edge) -> S
         .filter(|s| !s.is_empty())
         .map(|ty| {
             format!(
-                r#" marker-end="url(#{did}_class-{ty}End)""#,
+                r#" marker-end="url(#{did}_{kind}-{ty}End)""#,
                 did = diag_id,
+                kind = kind,
                 ty = ty
             )
         })
