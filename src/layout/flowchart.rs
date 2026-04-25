@@ -804,23 +804,65 @@ fn stroke_descriptor(s: EdgeStroke) -> (&'static str, &'static str) {
 
 /// Compose styles from classDef + inline styles. Returns `Vec<String>`
 /// of `"key:value"` entries.
+///
+/// Mirrors upstream `compileStyles(node)` which builds a `Map<key,value>`
+/// from `[...cssCompiledStyles, ...cssStyles, ...labelStyle]` and then
+/// emits `[...stylesMap]`. The `Map` semantics dedupe by key, with later
+/// entries overriding earlier ones — so e.g. `classDef node color:red`
+/// followed by a vertex's own `classDef myClass1 color:#0000ff` results
+/// in a single `color:#0000ff` entry, not two competing `color:` rules
+/// in the inline `style="…"` attribute.
 fn collect_styles<'a>(v: &'a Vertex, class_map: &BTreeMap<&'a str, &'a ClassDef>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
     // Upstream: getCompiledStyles(["default", "node", ...vertex.classes])
-    // So we look up the "default" and "node" classDefs in addition to the
-    // vertex's own classes.
+    let mut raw: Vec<String> = Vec::new();
     for builtin in &["default", "node"] {
         if let Some(cd) = class_map.get(*builtin) {
-            out.extend(cd.styles.iter().cloned());
+            raw.extend(cd.styles.iter().cloned());
         }
     }
     for cls in &v.classes {
         if let Some(cd) = class_map.get(cls.as_str()) {
-            out.extend(cd.styles.iter().cloned());
+            raw.extend(cd.styles.iter().cloned());
         }
     }
-    out.extend(v.styles.iter().cloned());
-    out
+    raw.extend(v.styles.iter().cloned());
+
+    // Dedupe by CSS property key, preserving insertion order of the
+    // *last* entry per key — mirrors upstream's `styles2Map` which uses
+    // a `Map` keyed by the property name. We retain order based on the
+    // first time the key was seen, then overwrite the value when a
+    // later entry repeats the key (matches JS `Map.set` semantics).
+    let mut order: Vec<String> = Vec::new();
+    let mut by_key: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    for entry in raw {
+        let trimmed = entry.trim().trim_end_matches(';');
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(colon) = trimmed.find(':') else {
+            // No `:` — keep the raw token under itself so it survives
+            // the dedupe pass (rare, but mirrors `styles2Map` which
+            // would also keep it as `key=raw, value=undefined`).
+            let key = trimmed.to_string();
+            if !by_key.contains_key(&key) {
+                order.push(key.clone());
+            }
+            by_key.insert(key, (trimmed.to_string(), String::new()));
+            continue;
+        };
+        let key = trimmed[..colon].trim().to_string();
+        let value = trimmed[colon + 1..].trim().to_string();
+        if !by_key.contains_key(&key) {
+            order.push(key.clone());
+        }
+        by_key.insert(key.clone(), (key, value));
+    }
+    order
+        .into_iter()
+        .filter_map(|k| by_key.remove(&k))
+        .map(|(k, v)| if v.is_empty() { k } else { format!("{}:{}", k, v) })
+        .collect()
 }
 
 /// Compose the DOM id mermaid uses for a flowchart node:
