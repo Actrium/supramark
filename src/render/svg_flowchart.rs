@@ -1790,7 +1790,10 @@ fn render_edge_label(e: &UEdge) -> String {
     // Apply FA icon substitution (fa:fa-car → <i class="fa fa-car"></i>) before
     // measuring, matching upstream's createText path. The <i> element contributes
     // zero width under the jsdom shim.
-    let processed = replace_fa_icons(&label_text);
+    // Also normalise `<br>` / `<br />` to `<br/>` so the rendered HTML matches
+    // upstream's `markdownToHTML` re-serialisation exactly.
+    let processed =
+        crate::render::foreign_object::normalize_br_tags(&replace_fa_icons(&label_text));
     let is_empty = processed.is_empty();
     // Upstream always measures the label height (even when empty),
     // using the font's line-height. For empty labels, width=0 but

@@ -39,6 +39,66 @@
 
 use crate::font_metrics::{line_height, text_width};
 
+/// Normalise every `<br>` / `<br />` / `<br\t/>` (and other whitespace
+/// variants) to upstream's canonical `<br/>` form. Other tags pass through
+/// unchanged, including their original casing.
+///
+/// Used for label inputs that may already contain literal HTML (edge labels,
+/// shape-side labels) where we cannot run them through `string_label_to_html`
+/// because that would also escape `<`/`>` text bodies. Mermaid upstream's
+/// `markdownToHTML` re-serialises every `<br>` form to `<br/>` before
+/// emission, so matching the cypress fixtures requires the same canonical
+/// form regardless of how the source was authored.
+pub fn normalize_br_tags(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 4);
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            // Only treat as a tag when `<` is followed by an ASCII letter
+            // (open tag) or `/letter` (close tag) — matches the recovery
+            // rule in real HTML parsers and avoids rewriting text like
+            // `< br>` that contains a stray `<`.
+            let next = bytes.get(i + 1).copied();
+            let is_tag_start = match next {
+                Some(c) if c.is_ascii_alphabetic() => true,
+                Some(b'/') => bytes
+                    .get(i + 2)
+                    .map(|c| c.is_ascii_alphabetic())
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if is_tag_start {
+                if let Some(rel_end) = src[i..].find('>') {
+                    let tag_full = &src[i..i + rel_end + 1];
+                    let inner = &tag_full[1..tag_full.len() - 1];
+                    // Strip self-closing `/` (either side) plus surrounding
+                    // whitespace and compare case-insensitively to catch
+                    // every `<br>` / `<br/>` / `<br />` / `<BR>` variant.
+                    let core = inner
+                        .trim_end_matches('/')
+                        .trim()
+                        .trim_start_matches('/')
+                        .trim();
+                    if core.eq_ignore_ascii_case("br") {
+                        out.push_str("<br/>");
+                    } else {
+                        out.push_str(tag_full);
+                    }
+                    i += rel_end + 1;
+                    continue;
+                }
+            }
+            out.push('<');
+            i += 1;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Replace FontAwesome icon references (`fa:fa-car`, `fas:fa-spinner`, etc.)
 /// with `<i class="fa fa-car"></i>` etc. — matches upstream's
 /// `createText.ts::replaceIconSubstring` fallback when the icon is not
@@ -603,6 +663,10 @@ fn xml_escape_label(s: &str) -> String {
 /// Rules:
 /// - `\n` → `<br/>` (converted to `<br/>` in rendering, stripped by textContent)
 /// - `<letter` / `</letter` / `<!` — HTML tag start, pass through INCLUDING its closing `>`
+/// - `<br>` / `<br />` / `<br/>` — normalised to upstream's canonical
+///   `<br/>` form regardless of whitespace / case in the source. Upstream
+///   `markdownToHTML` always re-serialises `<br>` variants as `<br/>` so
+///   matching the cypress fixtures requires the same canonicalisation here.
 /// - `<` NOT followed by tag-start char (e.g. `< 4`) → `&lt;` (text content)
 /// - `>` in text content → `&gt;`
 /// - `&` in text content → `&amp;`
@@ -620,17 +684,27 @@ pub fn string_label_to_html(src: &str) -> String {
             let next = bytes.get(i + 1).copied().unwrap_or(0);
             if next.is_ascii_alphabetic() || next == b'/' || next == b'!' {
                 // HTML tag — pass through the entire tag (including its closing `>`).
-                out.push('<');
-                i += 1;
-                // Emit tag content until `>` (or end of string), without escaping.
-                while i < bytes.len() && bytes[i] != b'>' {
-                    out.push(bytes[i] as char);
-                    i += 1;
+                // Capture the entire tag span to detect the `<br>` family and
+                // normalise to upstream's canonical `<br/>` form.
+                let tag_start = i;
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] != b'>' {
+                    j += 1;
                 }
-                if i < bytes.len() {
-                    out.push('>'); // the closing '>' of the tag
-                    i += 1;
+                let tag_end = if j < bytes.len() { j + 1 } else { j };
+                let inner = &src[tag_start + 1..tag_end.saturating_sub(1).max(tag_start + 1)];
+                let inner_trim = inner
+                    .trim_end_matches('/')
+                    .trim()
+                    .trim_start_matches('/')
+                    .trim();
+                if inner_trim.eq_ignore_ascii_case("br") {
+                    out.push_str("<br/>");
+                } else {
+                    // Pass through verbatim.
+                    out.push_str(&src[tag_start..tag_end]);
                 }
+                i = tag_end;
             } else {
                 // Not a valid HTML tag start — treat as literal `<` in text content.
                 out.push_str("&lt;");
@@ -833,5 +907,41 @@ mod tests {
         assert_eq!(fmt_num(5.0), "5");
         assert_eq!(fmt_num(-8.1484375), "-8.1484375");
         assert_eq!(fmt_num(0.0), "0");
+    }
+
+    #[test]
+    fn normalize_br_tag_variants() {
+        // Every `<br>` variant should canonicalise to `<br/>`.
+        assert_eq!(normalize_br_tags("a<br>b"), "a<br/>b");
+        assert_eq!(normalize_br_tags("a<br/>b"), "a<br/>b");
+        assert_eq!(normalize_br_tags("a<br />b"), "a<br/>b");
+        assert_eq!(normalize_br_tags("a<BR>b"), "a<br/>b");
+        assert_eq!(normalize_br_tags("a<br\t/>b"), "a<br/>b");
+        // `< br>` is not a valid tag start, so pass it through verbatim.
+        assert_eq!(normalize_br_tags("a< br>b"), "a< br>b");
+        // Other tags pass through verbatim.
+        assert_eq!(
+            normalize_br_tags("<strong>hi</strong>"),
+            "<strong>hi</strong>"
+        );
+        // Unterminated `<` stays literal.
+        assert_eq!(normalize_br_tags("a<b"), "a<b");
+    }
+
+    #[test]
+    fn string_label_to_html_normalises_br_variants() {
+        // The flowchart fixtures cypress/81/89/90/91/214 author labels
+        // with literal `<br>` and `<br />` — upstream's `markdownToHTML`
+        // re-serialises them all to `<br/>` before emission, which the
+        // jsdom shim then renders inside `<p>…</p>`. Match that exactly.
+        assert_eq!(string_label_to_html("Multi<br>Line"), "Multi<br/>Line");
+        assert_eq!(string_label_to_html("Multi<br />Line"), "Multi<br/>Line");
+        assert_eq!(string_label_to_html("Multi<br/>Line"), "Multi<br/>Line");
+        assert_eq!(string_label_to_html("Multi<BR>Line"), "Multi<br/>Line");
+        // Other tags still pass through unchanged (verbatim).
+        assert_eq!(
+            string_label_to_html("a<strong>b</strong>c"),
+            "a<strong>b</strong>c"
+        );
     }
 }
