@@ -1014,6 +1014,149 @@ fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str
     }
 }
 
+/// Mirror of upstream mermaid's `outsideNode(node, point)`. The
+/// `boundaryNode` is treated as a centred AABB — its origin is the
+/// rectangle centre `(node.x, node.y)` and the half-extents are
+/// `node.width / 2` and `node.height / 2`. Returns `true` when the
+/// point lies strictly outside (or exactly on) the rectangle.
+fn outside_node(b: &crate::layout::unified::Bounds, p: Point) -> bool {
+    // Bounds in our type system stores (x_left, y_top, w, h). Convert to
+    // the centre-anchored form used by upstream `outsideNode`.
+    let cx = b.x + b.width / 2.0;
+    let cy = b.y + b.height / 2.0;
+    let dx = (p.x - cx).abs();
+    let dy = (p.y - cy).abs();
+    let w = b.width / 2.0;
+    let h = b.height / 2.0;
+    dx >= w || dy >= h
+}
+
+/// Mirror of upstream mermaid's `intersection(boundaryNode, outsidePoint, insidePoint)`.
+/// Returns the point on the rectangle's border crossed by the segment
+/// between `outside` (must be outside the AABB) and `inside` (must be
+/// inside the AABB).
+///
+/// The original implementation lives in `dagre-wrapper/edges.js`; the
+/// algorithm is a custom box-line solver, NOT a generic Liang–Barsky
+/// segment-clip. Reproducing it byte-for-byte is required for parity.
+fn intersection_box_line(
+    b: &crate::layout::unified::Bounds,
+    outside: Point,
+    inside: Point,
+) -> Point {
+    let node_x = b.x + b.width / 2.0;
+    let node_y = b.y + b.height / 2.0;
+    let w = b.width / 2.0;
+    let h = b.height / 2.0;
+
+    let dx = (node_x - inside.x).abs();
+    // Pre-compute `r` for the side branch fallback (only used in `else` arm).
+    let _r_side = if inside.x < outside.x { w - dx } else { w + dx };
+    let q_total = (outside.y - inside.y).abs();
+    let r_total = (outside.x - inside.x).abs();
+
+    if (node_y - outside.y).abs() * w > (node_x - outside.x).abs() * h {
+        // Top/bottom branch.
+        let q = if inside.y < outside.y {
+            outside.y - h - node_y
+        } else {
+            node_y - h - outside.y
+        };
+        let r = r_total * q / q_total;
+        let mut res_x = if inside.x < outside.x {
+            inside.x + r
+        } else {
+            inside.x - r_total + r
+        };
+        let mut res_y = if inside.y < outside.y {
+            inside.y + q_total - q
+        } else {
+            inside.y - q_total + q
+        };
+        // Edge-case overrides in upstream.
+        if r == 0.0 {
+            res_x = outside.x;
+            res_y = outside.y;
+        }
+        if r_total == 0.0 {
+            res_x = outside.x;
+        }
+        if q_total == 0.0 {
+            res_y = outside.y;
+        }
+        Point { x: res_x, y: res_y }
+    } else {
+        // Side branch.
+        let r = if inside.x < outside.x {
+            outside.x - w - node_x
+        } else {
+            node_x - w - outside.x
+        };
+        let q = q_total * r / r_total;
+        let mut res_x = if inside.x < outside.x {
+            inside.x + r_total - r
+        } else {
+            inside.x - r_total + r
+        };
+        let mut res_y = if inside.y < outside.y {
+            inside.y + q
+        } else {
+            inside.y - q
+        };
+        if r == 0.0 {
+            res_x = outside.x;
+            res_y = outside.y;
+        }
+        if r_total == 0.0 {
+            res_x = outside.x;
+        }
+        if q_total == 0.0 {
+            res_y = outside.y;
+        }
+        Point { x: res_x, y: res_y }
+    }
+}
+
+/// Mirror of upstream mermaid's `cutPathAtIntersect(_points, boundaryNode)`
+/// from `dagre-wrapper/edges.js`. Walks the polyline from the first
+/// point; when a point transitions from outside the boundary node to
+/// inside, the previous outside point is replaced by the segment-vs-
+/// rectangle intersection as produced by `intersection_box_line`.
+/// Subsequent inside points are dropped.
+fn cut_path_at_intersect(
+    points: &[Point],
+    boundary: &crate::layout::unified::Bounds,
+) -> Vec<Point> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<Point> = Vec::with_capacity(points.len());
+    let mut last_outside = points[0];
+    let mut is_inside = false;
+    for &p in points {
+        let outside = outside_node(boundary, p);
+        if !outside && !is_inside {
+            // Outside → inside transition: append the boundary intersection.
+            let inter = intersection_box_line(boundary, last_outside, p);
+            // Upstream skips duplicates by exact-equality on (x, y).
+            if !out
+                .iter()
+                .any(|q| (q.x - inter.x).abs() == 0.0 && (q.y - inter.y).abs() == 0.0)
+            {
+                out.push(inter);
+            }
+            is_inside = true;
+        } else if outside {
+            last_outside = p;
+            if !is_inside {
+                out.push(p);
+            }
+        }
+        // (`!outside && is_inside`: stay-inside — drop the point entirely.)
+    }
+    out
+}
+
 fn render_edge_path(
     e: &UEdge,
     _index: usize,
@@ -1038,7 +1181,6 @@ fn render_edge_path(
     // and crucially performs the clip BEFORE applying marker visual offsets,
     // so the arrow head sits inside the cluster border by `markerOffset`px.
     let mut pts = pts_raw.clone();
-    use crate::layout::routing::clip_to_cluster_border;
     let orig_dst = e
         .extra
         .get("orig_end")
@@ -1050,11 +1192,11 @@ fn render_edge_path(
         .map(|s| s.as_str())
         .unwrap_or_else(|| e.start.as_deref().unwrap_or(""));
     if let Some(bounds) = cluster_bounds.get(orig_dst) {
-        pts = clip_to_cluster_border(&pts, bounds);
+        pts = cut_path_at_intersect(&pts, bounds);
     }
     if let Some(bounds) = cluster_bounds.get(orig_src) {
         pts.reverse();
-        pts = clip_to_cluster_border(&pts, bounds);
+        pts = cut_path_at_intersect(&pts, bounds);
         pts.reverse();
     }
 

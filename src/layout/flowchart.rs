@@ -369,6 +369,13 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
     //   L_{start}_{end}_1 for the second, etc.
     use std::collections::HashMap;
     let mut pair_count: HashMap<(String, String), usize> = HashMap::new();
+    // Two-pass insertion: edges with leaf endpoints first, then edges that
+    // originally pointed at a cluster (and were retargeted to a leaf). This
+    // matches upstream mermaid's traversal order where cluster-endpoint edges
+    // are processed in a follow-up pass — and crucially it matches how dagre
+    // resolves parallel-edge ordering between the same (src, dst) pair.
+    let mut leaf_edges: Vec<unified::Edge> = Vec::new();
+    let mut cluster_edges: Vec<unified::Edge> = Vec::new();
     for e in &d.edges {
         let start = e.start.clone();
         let end = e.end.clone();
@@ -381,9 +388,17 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         // in dagre_bridge can test against the pre-retarget cluster IDs.
         ue.extra.insert("orig_start".into(), e.start.clone());
         ue.extra.insert("orig_end".into(), e.end.clone());
+        let touched_cluster = d.find_subgraph(&e.start).is_some()
+            || d.find_subgraph(&e.end).is_some();
         retarget_cluster_endpoints(&mut ue, d);
-        data.edges.push(ue);
+        if touched_cluster {
+            cluster_edges.push(ue);
+        } else {
+            leaf_edges.push(ue);
+        }
     }
+    data.edges.extend(leaf_edges);
+    data.edges.extend(cluster_edges);
 
     data
 }
