@@ -100,16 +100,35 @@ pub fn render(
     // ── Root <g> with clusters, edges, labels, nodes ------------
     out.push_str(unified_shell::open_root_group());
 
+    // Isolated clusters (no cross-boundary edges) are rendered as inner
+    // <g class="root" transform="translate(tx, ty)"> wrappers inside the
+    // outer <g class="nodes"> section, mirroring upstream mermaid's
+    // recursiveRender path. They are skipped in the outer cluster/edge/node
+    // sections; their contents go in the inner root.
+    let iso_ids = &l.result.isolated_cluster_ids;
+
     // Clusters (composite states + note groups) ----------------
+    // Skip isolated clusters and clusters that descend from any isolated cluster.
     out.push_str(r#"<g class="clusters">"#);
     for n in l.result.nodes.iter().filter(|n| n.is_group) {
+        if iso_ids.contains(&n.id) {
+            continue;
+        }
+        if has_isolated_ancestor(&n.id, &l.result.nodes, iso_ids) {
+            continue;
+        }
         out.push_str(&emit_cluster(id, n));
     }
     out.push_str("</g>");
 
     // Edge paths ------------------------------------------------
+    // Skip edges whose endpoints are inside an isolated cluster (they
+    // are emitted in the inner root's <g class="edgePaths"> instead).
     out.push_str(r#"<g class="edgePaths">"#);
     for e in &l.result.edges {
+        if edge_endpoint_is_isolated(e, &l.result.nodes, iso_ids) {
+            continue;
+        }
         out.push_str(&emit_edge_path(id, e));
     }
     out.push_str("</g>");
@@ -117,14 +136,38 @@ pub fn render(
     // Edge labels ----------------------------------------------
     out.push_str(r#"<g class="edgeLabels">"#);
     for e in &l.result.edges {
+        if edge_endpoint_is_isolated(e, &l.result.nodes, iso_ids) {
+            continue;
+        }
         out.push_str(&emit_edge_label(e));
     }
     out.push_str("</g>");
 
     // Nodes -----------------------------------------------------
     out.push_str(r#"<g class="nodes">"#);
+
+    // Top-level isolated clusters → inner <g class="root"> wrappers.
+    // "Top-level" = isolated cluster whose parent is NOT itself isolated.
+    for cluster_id in iso_ids {
+        if let Some(cnode) = l.result.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
+            let parent_also_isolated = cnode
+                .parent_id
+                .as_deref()
+                .map(|p| iso_ids.contains(p))
+                .unwrap_or(false);
+            if parent_also_isolated {
+                continue;
+            }
+            out.push_str(&render_isolated_cluster_inner_root(cnode, &l.result, theme, id));
+        }
+    }
+
+    // Regular leaf nodes — skip those inside any isolated cluster.
     for n in l.result.nodes.iter().filter(|n| !n.is_group) {
         if n.extra.get("__skip_render").is_some() {
+            continue;
+        }
+        if has_isolated_ancestor(&n.id, &l.result.nodes, iso_ids) {
             continue;
         }
         if let Some(svg) = emit_node(id, n, theme) {
@@ -344,6 +387,27 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
         }
     }
 
+    // Isolated cluster outer/inner rects. These rects sit inside an inner
+    // <g class="root" transform="translate(tx, ty)">. jsdom getBBox ignores
+    // ALL transforms, so the rect contributes its absolute (cnode-local)
+    // coordinates: outer rect is at (cx - w/2, cy - h/2, w, h).
+    let iso_ids = &l.result.isolated_cluster_ids;
+    for n in l.result.nodes.iter().filter(|n| n.is_group) {
+        if !iso_ids.contains(&n.id) {
+            continue;
+        }
+        if let (Some(cx), Some(cy), Some(w), Some(h)) = (n.x, n.y, n.width, n.height) {
+            let x_left = cx - w / 2.0;
+            let x_right = cx + w / 2.0;
+            let y_top = cy - h / 2.0;
+            let y_bottom = cy + h / 2.0;
+            g_x_min = g_x_min.min(x_left);
+            g_x_max = g_x_max.max(x_right);
+            g_y_min = g_y_min.min(y_top);
+            g_y_max = g_y_max.max(y_bottom);
+        }
+    }
+
     for n in &l.result.nodes {
         if n.is_group || n.extra.get("__skip_render").is_some() {
             continue;
@@ -550,6 +614,350 @@ fn emit_cluster(svg_id: &str, n: &Node) -> String {
         h = fmt_num(h),
         lbl = xml_escape(label),
     )
+}
+
+/// Walk up the parent chain from `node_id`. Return true if any ancestor is in
+/// `iso_ids`. Used to decide whether a node/cluster should be skipped at the
+/// outer render level (because it lives inside an isolated cluster's inner
+/// root group).
+fn has_isolated_ancestor(
+    node_id: &str,
+    nodes: &[Node],
+    iso_ids: &std::collections::HashSet<String>,
+) -> bool {
+    let mut current = node_id;
+    loop {
+        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+            Some(p) => {
+                if iso_ids.contains(p) {
+                    return true;
+                }
+                current = p;
+            }
+            None => return false,
+        }
+    }
+}
+
+/// Return true if either of the edge's endpoints (or any ancestor of either)
+/// is an isolated cluster.
+fn edge_endpoint_is_isolated(
+    e: &Edge,
+    nodes: &[Node],
+    iso_ids: &std::collections::HashSet<String>,
+) -> bool {
+    let in_iso = |id: &str| iso_ids.contains(id) || has_isolated_ancestor(id, nodes, iso_ids);
+    if let Some(s) = e.start.as_deref() {
+        if in_iso(s) {
+            return true;
+        }
+    }
+    if let Some(d) = e.end.as_deref() {
+        if in_iso(d) {
+            return true;
+        }
+    }
+    false
+}
+
+/// True if `node_id` is a transitive descendant of `cluster_id`.
+fn is_descendant_of(node_id: &str, cluster_id: &str, nodes: &[Node]) -> bool {
+    let mut current = node_id;
+    loop {
+        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+            Some(p) => {
+                if p == cluster_id {
+                    return true;
+                }
+                current = p;
+            }
+            None => return false,
+        }
+    }
+}
+
+/// Render an isolated cluster as an inner `<g class="root" transform="...">`
+/// group (mirrors upstream mermaid's `recursiveRender` for clusters with no
+/// cross-boundary edges).
+///
+/// Layout pre-computed `outer_tx`/`outer_ty` in `cnode.extra` from
+/// `dagre_bridge::layout`'s positionNode formula:
+///   tx = outer_x - padding - bbox_w/2
+///   ty = outer_y - bbox_h/2 - padding
+///
+/// The cluster's own `<rect class="outer">`, label, and `<rect class="inner">`
+/// sit inside the inner root group at absolute coordinates derived from the
+/// inner dagre's `cnode.x/y/width/height` and the label bbox.
+///
+/// Recursive: nested isolated clusters get their own inner roots.
+fn render_isolated_cluster_inner_root(
+    cnode: &Node,
+    l: &crate::layout::unified::types::LayoutResult,
+    theme: &ThemeVariables,
+    svg_id: &str,
+) -> String {
+    let iso_ids = &l.isolated_cluster_ids;
+    let cluster_padding = 8.0_f64;
+
+    // Outer translate — pre-computed by the layout engine.
+    let tx = cnode
+        .extra
+        .get("outer_tx")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| {
+            let cx = cnode.x.unwrap_or(0.0);
+            let w = cnode.width.unwrap_or(0.0);
+            cx - cluster_padding - w / 2.0
+        });
+    let ty = cnode
+        .extra
+        .get("outer_ty")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| {
+            let cy = cnode.y.unwrap_or(0.0);
+            let h = cnode.height.unwrap_or(0.0);
+            cy - h / 2.0 - cluster_padding
+        });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="root" transform="translate({tx}, {ty})">"#,
+        tx = fmt_num(tx),
+        ty = fmt_num(ty),
+    ));
+
+    // Inner <g class="clusters"> ─────────────────────────────────────
+    // This cluster's own rect/label/inner-rect, plus any non-isolated
+    // sub-cluster rects (direct children only). Nested isolated sub-clusters
+    // get their own inner root groups inside <g class="nodes">.
+    out.push_str(r#"<g class="clusters">"#);
+    out.push_str(&emit_isolated_cluster_shape(cnode, svg_id));
+    for n in l.nodes.iter() {
+        if !n.is_group {
+            continue;
+        }
+        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if iso_ids.contains(&n.id) {
+            continue;
+        }
+        // Non-isolated sub-cluster: emit using the legacy emit_cluster path.
+        out.push_str(&emit_cluster(svg_id, n));
+    }
+    out.push_str("</g>");
+
+    // Inner <g class="edgePaths"> — edges between descendants of this cluster
+    // that are not inside any isolated sub-cluster.
+    out.push_str(r#"<g class="edgePaths">"#);
+    for e in l.edges.iter() {
+        let src = match e.start.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let dst = match e.end.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        if !is_descendant_of(src, &cnode.id, &l.nodes)
+            || !is_descendant_of(dst, &cnode.id, &l.nodes)
+        {
+            continue;
+        }
+        // Skip if either endpoint is in a sub-isolated cluster.
+        if endpoint_in_sub_isolated(src, cnode.id.as_str(), &l.nodes, iso_ids)
+            || endpoint_in_sub_isolated(dst, cnode.id.as_str(), &l.nodes, iso_ids)
+        {
+            continue;
+        }
+        out.push_str(&emit_edge_path(svg_id, e));
+    }
+    out.push_str("</g>");
+
+    // Inner <g class="edgeLabels">.
+    out.push_str(r#"<g class="edgeLabels">"#);
+    for e in l.edges.iter() {
+        let src = match e.start.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let dst = match e.end.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        if !is_descendant_of(src, &cnode.id, &l.nodes)
+            || !is_descendant_of(dst, &cnode.id, &l.nodes)
+        {
+            continue;
+        }
+        if endpoint_in_sub_isolated(src, cnode.id.as_str(), &l.nodes, iso_ids)
+            || endpoint_in_sub_isolated(dst, cnode.id.as_str(), &l.nodes, iso_ids)
+        {
+            continue;
+        }
+        out.push_str(&emit_edge_label(e));
+    }
+    out.push_str("</g>");
+
+    // Inner <g class="nodes"> — sub-isolated cluster wrappers + leaf nodes.
+    out.push_str(r#"<g class="nodes">"#);
+
+    // Sub-isolated clusters (direct children of cnode that are themselves isolated).
+    for n in l.nodes.iter() {
+        if !n.is_group {
+            continue;
+        }
+        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if !iso_ids.contains(&n.id) {
+            continue;
+        }
+        out.push_str(&render_isolated_cluster_inner_root(n, l, theme, svg_id));
+    }
+
+    // Direct + transitive leaf nodes (those NOT inside a sub-isolated cluster).
+    for n in l.nodes.iter() {
+        if n.is_group {
+            continue;
+        }
+        if n.extra.get("__skip_render").is_some() {
+            continue;
+        }
+        if !is_descendant_of(&n.id, &cnode.id, &l.nodes) {
+            continue;
+        }
+        // Skip leaf nodes whose nearest cluster ancestor (other than cnode itself)
+        // is an isolated sub-cluster.
+        if endpoint_in_sub_isolated(&n.id, cnode.id.as_str(), &l.nodes, iso_ids) {
+            continue;
+        }
+        if let Some(svg) = emit_node(svg_id, n, theme) {
+            out.push_str(&svg);
+        }
+    }
+    out.push_str("</g>");
+
+    let _ = theme; // theme reserved for future per-theme cluster styling.
+
+    out.push_str("</g>"); // close inner root
+    out
+}
+
+/// True when `node_id` belongs to an isolated sub-cluster of `parent_cluster_id`
+/// (i.e. one of its ancestors is an isolated cluster other than `parent_cluster_id`).
+fn endpoint_in_sub_isolated(
+    node_id: &str,
+    parent_cluster_id: &str,
+    nodes: &[Node],
+    iso_ids: &std::collections::HashSet<String>,
+) -> bool {
+    let mut current = node_id;
+    loop {
+        match nodes.iter().find(|n| n.id == current).and_then(|n| n.parent_id.as_deref()) {
+            Some(p) => {
+                if p == parent_cluster_id {
+                    return false;
+                }
+                if iso_ids.contains(p) {
+                    return true;
+                }
+                current = p;
+            }
+            None => return false,
+        }
+    }
+}
+
+/// Emit the cluster's own `<g>` containing the outer rect, label, and inner rect.
+/// Mirrors upstream mermaid's `roundedWithTitle` cluster shape:
+///   outer rect at (cx - w/2, cy - h/2, w, h)
+///   inner rect at (cx - w/2, cy - h/2 + bbox.h + 2, w, h - bbox.h - 6)
+///   label translate (cx - bbox.w/2, cy - h/2 + 1)
+fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
+    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
+
+    let w = n.width.unwrap_or(0.0);
+    let h = n.height.unwrap_or(0.0);
+    let cx = n.x.unwrap_or(0.0);
+    let cy = n.y.unwrap_or(0.0);
+    let dom_id = n.dom_id.as_deref().unwrap_or(&n.id);
+    let raw_id = n.id.as_str();
+    let label = n.label.as_deref().unwrap_or("");
+
+    // Measure label dimensions (HTML markup path — upstream's createLabel +
+    // getBoundingClientRect on the foreignObject's div).
+    let escaped = xml_escape(label);
+    let font = HtmlLabelFont::default();
+    let (lw, lh) = if escaped.is_empty() {
+        (0.0, 0.0)
+    } else {
+        measure_html_markup_label(&escaped, &font, 200.0, true)
+    };
+
+    // Cluster rect coordinates (absolute within the inner root group).
+    // Upstream `roundedWithTitle`: padding=0, x = node.x - width/2, y = node.y - height/2.
+    let rx = cx - w / 2.0;
+    let ry = cy - h / 2.0;
+    // Inner rect: y = node.y - node.height/2 + bbox.height + 2,
+    //             height = node.height - bbox.height - 6.
+    let inner_y = cy - h / 2.0 + lh + 2.0;
+    let inner_h = h - lh - 6.0;
+    // Label translate: (node.x - bbox.width/2, y + 1).
+    let label_tx = cx - lw / 2.0;
+    let label_ty = ry + 1.0;
+
+    // CSS class string. Upstream emits `" statediagram-state statediagram-cluster "`
+    // (leading + trailing space). Our state layout sets `n.css_classes` to
+    // `"statediagram-cluster"` for composite states; reuse it but ensure the
+    // final attribute matches upstream's exact spacing.
+    let css = n.css_classes.as_deref().unwrap_or("statediagram-cluster");
+    // Some passes overwrite css_classes to " statediagram-state". Detect the
+    // composite-state cluster case and emit the canonical class string.
+    let css_attr = if css.trim() == "statediagram-cluster" {
+        " statediagram-state statediagram-cluster ".to_string()
+    } else if css.contains("statediagram-cluster") {
+        format!(" statediagram-state {} ", css.trim())
+    } else {
+        format!(" statediagram-state statediagram-cluster ")
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="{css}" id="{svg_id}-{dom_id}" data-id="{data_id}" data-look="classic">"#,
+        css = css_attr,
+        svg_id = svg_id,
+        dom_id = xml_escape(dom_id),
+        data_id = xml_escape(raw_id),
+    ));
+    out.push_str(&format!(
+        r#"<g><rect class="outer" x="{rx}" y="{ry}" width="{w}" height="{h}" data-look="classic"></rect></g>"#,
+        rx = fmt_num(rx),
+        ry = fmt_num(ry),
+        w = fmt_num(w),
+        h = fmt_num(h),
+    ));
+    if !escaped.is_empty() {
+        out.push_str(&format!(
+            r#"<g class="cluster-label" transform="translate({lx}, {ly})"><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{lbl}</p></span></div></foreignObject></g>"#,
+            lx = fmt_num(label_tx),
+            ly = fmt_num(label_ty),
+            lw = fmt_num(lw),
+            lh = fmt_num(lh),
+            lbl = escaped,
+        ));
+    } else {
+        out.push_str(r#"<g class="cluster-label"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml"></div></foreignObject></g>"#);
+    }
+    out.push_str(&format!(
+        r#"<rect class="inner" x="{rx}" y="{iy}" width="{w}" height="{ih}"></rect>"#,
+        rx = fmt_num(rx),
+        iy = fmt_num(inner_y),
+        w = fmt_num(w),
+        ih = fmt_num(inner_h),
+    ));
+    out.push_str("</g>");
+    out
 }
 
 fn emit_edge_path(id: &str, e: &Edge) -> String {
