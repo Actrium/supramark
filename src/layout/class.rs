@@ -285,12 +285,41 @@ fn build_layout_data(d: &ClassDiagram, _theme: &ThemeVariables) -> LayoutData {
             // Without this, the note→class spline collapses by one
             // line-height (~16 px), shifting downstream y-coordinates.
             e.extra.insert("label_width".into(), "0".into());
-            e.extra
-                .insert("label_height".into(), "16.296875".into());
+            e.extra.insert("label_height".into(), "16.296875".into());
             // Upstream sets arrowTypeStart/End to 'none' (string), which
             // renders as no marker reference. Leave both as None here.
             data.edges.push(e);
         }
+    }
+
+    // Synthetic invisible interface stubs for lollipop relations.
+    // Upstream `classDb.getData` walks `this.interfaces` after notes
+    // and emits one `rect` node per entry with `cssStyles: ['opacity: 0;']`.
+    // The label still measures (so dagre allocates space), but the
+    // outer container has zero opacity. The renderer mirrors this via
+    // the `opacity:0; !important` style on the basic rect container.
+    let iface_family = "trebuchet ms,verdana,arial,sans-serif";
+    let iface_font = 14.0_f64;
+    let iface_line_h = 16.296875_f64;
+    for iface in &d.interfaces {
+        let mut node = Node::default();
+        node.id = iface.id.clone();
+        node.label = Some(iface.label.clone());
+        node.shape = Some("rect".into());
+        // Upstream sets `cssStyles: ['opacity: 0;']`; surface that as a
+        // style entry the rect shape will fold into the container's
+        // `style=` attribute.
+        node.css_styles = Some(vec!["opacity: 0;".into()]);
+        // No explicit cssClasses upstream → renders as `node undefined`.
+        node.css_classes = None;
+        node.look = Some("classic".into());
+        // Upstream's `rect` shape measures the label's foreignObject and
+        // pads with `labelPaddingX/Y`. For lollipop interfaces the text
+        // is plain (no markup) so we use the same trebuchet metrics.
+        let w = font_metrics::text_width(&iface.label, iface_family, iface_font, false, false);
+        node.width = Some(w);
+        node.height = Some(iface_line_h);
+        data.nodes.push(node);
     }
 
     // Relation edges.

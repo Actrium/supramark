@@ -154,8 +154,7 @@ pub fn render(
         let cluster = l.unified.nodes.iter().find(|n| n.is_group).unwrap();
         let cid = cluster.id.as_str();
         // Build set of node ids inside (or equal to) this cluster.
-        let mut inside: std::collections::HashSet<&str> =
-            std::collections::HashSet::new();
+        let mut inside: std::collections::HashSet<&str> = std::collections::HashSet::new();
         inside.insert(cid);
         // Approximate descendants by parent_id chain (single level is
         // enough — class diagrams don't nest namespaces).
@@ -252,11 +251,7 @@ pub fn render(
         .unified
         .nodes
         .iter()
-        .filter_map(|n| {
-            n.parent_id
-                .as_deref()
-                .map(|p| (n.id.as_str(), p))
-        })
+        .filter_map(|n| n.parent_id.as_deref().map(|p| (n.id.as_str(), p)))
         .collect();
     for e in &l.unified.edges {
         if e.thickness.as_deref() == Some("invisible") {
@@ -312,7 +307,7 @@ pub fn render(
 
     if single_cluster {
         out.push_str("</g>"); // </g class="root" inner>
-        // Free nodes (outside the cluster bbox) sit inside the outer nodes group
+                              // Free nodes (outside the cluster bbox) sit inside the outer nodes group
         for n in l.unified.nodes.iter().filter(|n| !n.is_group) {
             if !is_inside_cluster(n) {
                 out.push_str(&render_node(id, n, theme, d));
@@ -752,8 +747,7 @@ fn clean_tag(tag: &str) -> String {
                 let after_bytes = after.as_bytes();
                 let mut p = 0usize;
                 // Optional whitespace.
-                while p < after_bytes.len() && (after_bytes[p] == b' ' || after_bytes[p] == b'\t')
-                {
+                while p < after_bytes.len() && (after_bytes[p] == b' ' || after_bytes[p] == b'\t') {
                     p += 1;
                 }
                 if p < after_bytes.len() && after_bytes[p] == b'=' {
@@ -764,8 +758,7 @@ fn clean_tag(tag: &str) -> String {
                         p += 1;
                     }
                     // Skip the value: quoted or bare token.
-                    if p < after_bytes.len()
-                        && (after_bytes[p] == b'"' || after_bytes[p] == b'\'')
+                    if p < after_bytes.len() && (after_bytes[p] == b'"' || after_bytes[p] == b'\'')
                     {
                         let q = after_bytes[p];
                         p += 1;
@@ -823,11 +816,85 @@ fn clean_tag(tag: &str) -> String {
     out
 }
 
+/// Render the invisible `rect` stub upstream emits for each lollipop
+/// interface. The outer `<g>` carries `class="node undefined "`
+/// (cssClasses unset upstream, mirrored here), and the inner `<rect>` is
+/// a plain SVG element — *not* the rough.js-generated path the regular
+/// classBox uses — with the cssStyles list folded into `style="…"`.
+fn render_interface_stub(id: &str, n: &LayoutNode) -> String {
+    let label = n.label.as_deref().unwrap_or("");
+    let cx = n.x.unwrap_or(0.0);
+    let cy = n.y.unwrap_or(0.0);
+    let w = n.width.unwrap_or(0.0);
+    let h = n.height.unwrap_or(16.296875);
+    let dom_id = n.dom_id.as_deref().unwrap_or(&n.id);
+
+    let x0 = -w / 2.0;
+    let y0 = -h / 2.0;
+
+    // Upstream `styles2String` splits each entry on `:`, trims both
+    // halves, then re-joins with `:` and appends ` !important`. For
+    // `"opacity: 0;"` the trim leaves the value as `0;` (the trailing
+    // `;` stays), so the rendered attribute is `opacity:0; !important`.
+    let style = if let Some(list) = n.css_styles.as_ref() {
+        list.iter()
+            .filter_map(|raw| {
+                let (k, v) = raw.split_once(':')?;
+                Some(format!("{}:{} !important", k.trim(), v.trim()))
+            })
+            .collect::<Vec<_>>()
+            .join(";")
+    } else {
+        String::new()
+    };
+
+    let mut out = String::with_capacity(512);
+    out.push_str(&format!(
+        r#"<g class="node undefined " id="{sid}-{did}" data-look="classic" transform="translate({tx}, {ty})">"#,
+        sid = id,
+        did = dom_id,
+        tx = fmt_num(cx),
+        ty = fmt_num(cy),
+    ));
+    out.push_str(&format!(
+        r#"<rect class="basic label-container" style="{style}" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+        style = style,
+        x = fmt_num(x0),
+        y = fmt_num(y0),
+        w = fmt_num(w),
+        h = fmt_num(h),
+    ));
+    out.push_str(&format!(
+        r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "><p>{lbl}</p></span></div></foreignObject></g>"#,
+        tx = fmt_num(x0),
+        ty = fmt_num(y0),
+        w = fmt_num(w),
+        h = fmt_num(h),
+        lbl = html_escape(label),
+    ));
+    out.push_str("</g>");
+    out
+}
+
 fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagram) -> String {
     // Note nodes follow the upstream `note.ts` shape, not classBox —
     // dispatch before any classBox-specific calculations.
     if n.shape.as_deref() == Some("note") {
         return render_note_node(id, n, theme);
+    }
+    // Lollipop interface stubs: `cssStyles: ['opacity: 0;']` on a plain
+    // rect node. Upstream's `rect` shape renders these via the basic
+    // `<rect class="basic label-container">` element with the opacity
+    // baked into `style=`. The label sits inside a `<g class="label">`
+    // foreignObject without any markdown wrapping (interface labels are
+    // plain identifiers).
+    if n.shape.as_deref() == Some("rect")
+        && n.css_styles
+            .as_ref()
+            .map(|v| v.iter().any(|s| s.contains("opacity: 0")))
+            .unwrap_or(false)
+    {
+        return render_interface_stub(id, n);
     }
     let _ = theme;
     // Pull the matching parsed ClassNode for member/method/annotation
@@ -1045,9 +1112,7 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     // calculateTextWidth: split on \n, round each line, take max.
     let span_max_w = measure_text
         .split('\n')
-        .map(|line| {
-            crate::font_metrics::text_width(line, label_family, 16.0, false, false).round()
-        })
+        .map(|line| crate::font_metrics::text_width(line, label_family, 16.0, false, false).round())
         .fold(0.0_f64, f64::max)
         + 50.0;
     out.push_str(&format!(
@@ -1994,10 +2059,10 @@ fn js_atan2(y: f64, x: f64) -> f64 {
     // y == 0
     if iy == 0 && ly == 0 {
         return match m & 3 {
-            0 => y,         // +x, +0  →  +0
-            1 => -y,        // +x, -0  →  -0
-            2 => pi,        // -x, +0  →  +π
-            _ => -pi,       // -x, -0  →  -π
+            0 => y,   // +x, +0  →  +0
+            1 => -y,  // +x, -0  →  -0
+            2 => pi,  // -x, +0  →  +π
+            _ => -pi, // -x, -0  →  -π
             #[allow(unreachable_patterns)]
             _ => 0.0,
         };

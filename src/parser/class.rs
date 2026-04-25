@@ -34,8 +34,9 @@
 
 use crate::error::{MermaidError, Result};
 use crate::model::class::{
-    ClassDiagram, ClassInteractivity, ClassMember, ClassNode, ClassNote, ClassRelation, Classifier,
-    InteractivityKind, LineType, MemberKind, Namespace, RelationEnd, StyleClass, Visibility,
+    ClassDiagram, ClassInteractivity, ClassInterface, ClassMember, ClassNode, ClassNote,
+    ClassRelation, Classifier, InteractivityKind, LineType, MemberKind, Namespace, RelationEnd,
+    StyleClass, Visibility,
 };
 use crate::preprocess;
 
@@ -428,9 +429,7 @@ fn parse_namespace(
     // resulting cluster dom-id. Strip a single matched pair of leading
     // and trailing backticks if present (anything else is left verbatim,
     // mirroring jison's lenient handling).
-    let name: &str = if name_raw.len() >= 2
-        && name_raw.starts_with('`')
-        && name_raw.ends_with('`')
+    let name: &str = if name_raw.len() >= 2 && name_raw.starts_with('`') && name_raw.ends_with('`')
     {
         &name_raw[1..name_raw.len() - 1]
     } else {
@@ -640,8 +639,7 @@ fn extract_sq_label(head: &str) -> (String, Option<String>) {
             }
             if tail < bytes.len() && bytes[tail] == b']' {
                 let lbl = head[after + 1..close_q].to_string();
-                let remainder =
-                    format!("{}{}", &head[..start], &head[tail + 1..]);
+                let remainder = format!("{}{}", &head[..start], &head[tail + 1..]);
                 return (remainder.trim().to_string(), Some(lbl));
             }
         }
@@ -984,12 +982,50 @@ fn parse_relation(line: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<(
         .split_once('~')
         .map(|(b, _)| b.to_string())
         .unwrap_or_else(|| id2.clone());
-    let _ = d.class_mut(&id1);
-    let _ = d.class_mut(&id2);
+
+    // Lollipop bookkeeping. Upstream `addRelation` treats one-sided
+    // lollipops specially: the `()` side becomes a synthetic
+    // `interface{N}` stub (rendered as an invisible rect) while the
+    // *other* side is registered as a real class. A two-sided lollipop
+    // (or a lollipop paired with another marker) falls through to the
+    // generic addClass-both branch.
+    let is_invalid = |e: RelationEnd| {
+        matches!(
+            e,
+            RelationEnd::Lollipop
+                | RelationEnd::Aggregation
+                | RelationEnd::Composition
+                | RelationEnd::Dependency
+                | RelationEnd::Extension
+        )
+    };
+    let (final_id1, final_id2) = if end1 == RelationEnd::Lollipop && !is_invalid(end2) {
+        let _ = d.class_mut(&id2);
+        let iface_id = format!("interface{}", d.interfaces.len());
+        d.interfaces.push(ClassInterface {
+            id: iface_id.clone(),
+            label: id1_base.clone(),
+            class_id: id2_base.clone(),
+        });
+        (iface_id, id2_base)
+    } else if end2 == RelationEnd::Lollipop && !is_invalid(end1) {
+        let _ = d.class_mut(&id1);
+        let iface_id = format!("interface{}", d.interfaces.len());
+        d.interfaces.push(ClassInterface {
+            id: iface_id.clone(),
+            label: id2_base.clone(),
+            class_id: id1_base.clone(),
+        });
+        (id1_base, iface_id)
+    } else {
+        let _ = d.class_mut(&id1);
+        let _ = d.class_mut(&id2);
+        (id1_base, id2_base)
+    };
 
     d.relations.push(ClassRelation {
-        id1: id1_base,
-        id2: id2_base,
+        id1: final_id1,
+        id2: final_id2,
         end1,
         end2,
         line: line_type,

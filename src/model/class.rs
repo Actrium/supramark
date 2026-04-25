@@ -49,6 +49,12 @@ pub struct ClassDiagram {
     pub style_classes: Vec<StyleClass>,
     /// `click Foo href "..."` interactivity.
     pub interactivity: Vec<ClassInteractivity>,
+    /// Synthetic interface stubs introduced by lollipop relations
+    /// (`A ()-- B`). Upstream's `addRelation` rewrites the lollipop
+    /// side's id to `interface{N}` and stashes the original label here;
+    /// `getData` then emits an invisible `rect` node per entry so the
+    /// edge has something to attach to.
+    pub interfaces: Vec<ClassInterface>,
     /// True if the diagram was introduced with `classDiagram-v2`
     /// rather than `classDiagram`. Rendering is unchanged; kept for
     /// completeness.
@@ -306,7 +312,6 @@ fn split_generic(name: &str) -> (&str, Option<&str>) {
     }
 }
 
-
 /// `namespace Foo { class Bar {} }` — flat list + classes reference via
 /// `ClassNode::parent`.
 #[derive(Debug, Clone)]
@@ -384,6 +389,22 @@ pub struct ClassRelation {
     /// Main edge label (`: Cool` etc.). Empty when no label.
     pub title: String,
     pub style: Vec<String>,
+}
+
+/// Synthetic invisible interface stub created by a lollipop relation.
+///
+/// Mirrors upstream `addInterface`: the original class id (`Animal` in
+/// `Animal ()-- Dog`) becomes the stub's *label* while the relation's
+/// endpoint is rewritten to a fresh `interface{N}` id. The renderer
+/// emits a transparent `rect` node so dagre can route the edge.
+#[derive(Debug, Clone)]
+pub struct ClassInterface {
+    /// Synthetic id (`interface0`, `interface1`, …).
+    pub id: String,
+    /// Display label — the name the user typed.
+    pub label: String,
+    /// The class on the other end of the lollipop, for completeness.
+    pub class_id: String,
 }
 
 /// Note attached via `note "..."` or `note for Foo "..."`.
