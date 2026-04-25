@@ -1347,6 +1347,59 @@ mod tests {
         );
     }
 
+    /// Diagnostic helper: dump a fixture's actual + expected SVG and
+    /// per-byte diff into /tmp for quick inspection. Ignored by default.
+    #[test]
+    #[ignore]
+    fn dump_class_fixture() {
+        let rel = std::env::var("CLASS_DUMP_REL")
+            .unwrap_or_else(|_| "ext_fixtures/cypress/class/01".to_string());
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let id = id_for_rel(&rel);
+        let mmd = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))).unwrap();
+        let exp =
+            std::fs::read_to_string(base.join(format!("tests/reference/{}.svg", rel))).unwrap();
+        let got = render_fixture(&mmd, &id);
+        let stem: String = rel
+            .chars()
+            .map(|c| if c == '/' { '_' } else { c })
+            .collect();
+        std::fs::write(format!("/tmp/class_dump_{}.got.svg", stem), &got).unwrap();
+        std::fs::write(format!("/tmp/class_dump_{}.exp.svg", stem), &exp).unwrap();
+        let prefix = got
+            .bytes()
+            .zip(exp.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        eprintln!(
+            "[class-dump] rel={} got_len={} exp_len={} common_prefix={}",
+            rel,
+            got.len(),
+            exp.len(),
+            prefix
+        );
+    }
+
+    /// Print every layout node's width/height for a fixture.
+    #[test]
+    #[ignore]
+    fn dump_class_node_dims() {
+        let rel = std::env::var("CLASS_DUMP_REL")
+            .unwrap_or_else(|_| "ext_fixtures/cypress/class/01".to_string());
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mmd = std::fs::read_to_string(base.join(format!("tests/{}.mmd", rel))).unwrap();
+        let d = parse(&mmd).expect("parse");
+        let theme = get_theme("default");
+        let l = class_layout(&d, &theme).expect("layout");
+        for n in &l.unified.nodes {
+            eprintln!(
+                "node id={} shape={:?} w={:?} h={:?} x={:?} y={:?}",
+                n.id, n.shape, n.width, n.height, n.x, n.y
+            );
+        }
+        eprintln!("bounds={:?}", l.unified.bounds);
+    }
+
     /// Byte-exact regression: cypress fixtures 88/89/141/178 all share
     /// a single dependency edge between two classes. They cover the
     /// edge-spline contribution to viewBox and the markerOffset trim of

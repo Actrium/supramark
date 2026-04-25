@@ -406,7 +406,12 @@ fn parse_class_decl(
     parent: Option<&str>,
 ) -> Result<()> {
     let src = rest.trim();
-    let (head, body) = if let Some(brace) = src.find('{') {
+    // Find the first `{` that is *not* inside a `["…"]` label block.
+    // Upstream's lexer never enters STRUCT_START while scanning STR
+    // tokens, so labels like `["With {Brackets}"]` must not split the
+    // class body off at the embedded brace.
+    let brace_idx = find_top_level_brace(src);
+    let (head, body) = if let Some(brace) = brace_idx {
         (
             src[..brace].trim().to_string(),
             src[brace + 1..].trim_end_matches('}').trim().to_string(),
@@ -477,20 +482,97 @@ fn extract_bracket(head: &str, open: &str, close: &str) -> (String, Option<Strin
     (head.to_string(), None)
 }
 
-fn extract_sq_label(head: &str) -> (String, Option<String>) {
-    if let Some(start) = head.find('[') {
-        if let Some(end) = head[start..].find(']') {
-            let inner = &head[start + 1..start + end];
-            let t = inner.trim();
-            let lbl = t
-                .strip_prefix('"')
-                .and_then(|s| s.strip_suffix('"'))
-                .or_else(|| t.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                .unwrap_or(t)
-                .to_string();
-            let remainder = format!("{}{}", &head[..start], &head[start + end + 1..]);
-            return (remainder.trim().to_string(), Some(lbl));
+/// Return the byte index of the first `{` in `src` that is not inside
+/// a `["…"]` quoted label block (mirroring upstream's lexer state, which
+/// only switches into STRUCT_START outside the `string` state).
+fn find_top_level_brace(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => {
+                // Skip whitespace inside the brackets.
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let q = bytes.get(j).copied();
+                if q == Some(b'"') || q == Some(b'\'') {
+                    let qc = q.unwrap();
+                    if let Some(close_rel) = src[j + 1..].find(qc as char) {
+                        let close = j + 1 + close_rel;
+                        // Skip to ']' if present.
+                        let mut k = close + 1;
+                        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                            k += 1;
+                        }
+                        if k < bytes.len() && bytes[k] == b']' {
+                            i = k + 1;
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            b'{' => return Some(i),
+            _ => i += 1,
         }
+    }
+    None
+}
+
+fn extract_sq_label(head: &str) -> (String, Option<String>) {
+    // Upstream mermaid's lexer treats the `["…"]` label as
+    //   SQS  =  '['
+    //   STR  =  [^"]*  (only after entering "string" state on the opening '"')
+    //   SQE  =  ']'
+    // which means the *quoted contents* may contain `[` or `]` freely —
+    // only the closing `"` ends the string. Mirror that here: when the
+    // bracketed region opens with a quote we scan for the matching
+    // closing quote first and then expect a `]` to follow. Otherwise
+    // fall back to the simple "first `]` wins" behaviour, which
+    // continues to handle bare-token labels like `[lib]` correctly.
+    let bytes = head.as_bytes();
+    let Some(start) = head.find('[') else {
+        return (head.to_string(), None);
+    };
+    // Skip whitespace inside the brackets.
+    let mut after = start + 1;
+    while after < bytes.len() && bytes[after].is_ascii_whitespace() {
+        after += 1;
+    }
+    let quote = bytes.get(after).copied();
+    if quote == Some(b'"') || quote == Some(b'\'') {
+        let q = quote.unwrap();
+        // Find the closing quote of the string token.
+        if let Some(close_q_rel) = head[after + 1..].find(q as char) {
+            let close_q = after + 1 + close_q_rel;
+            // Optional whitespace, then ']'
+            let mut tail = close_q + 1;
+            while tail < bytes.len() && bytes[tail].is_ascii_whitespace() {
+                tail += 1;
+            }
+            if tail < bytes.len() && bytes[tail] == b']' {
+                let lbl = head[after + 1..close_q].to_string();
+                let remainder =
+                    format!("{}{}", &head[..start], &head[tail + 1..]);
+                return (remainder.trim().to_string(), Some(lbl));
+            }
+        }
+        // Fall through to the legacy path if quote handling fails.
+    }
+    if let Some(end_rel) = head[start..].find(']') {
+        let end = start + end_rel;
+        let inner = &head[start + 1..end];
+        let t = inner.trim();
+        let lbl = t
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .or_else(|| t.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+            .unwrap_or(t)
+            .to_string();
+        let remainder = format!("{}{}", &head[..start], &head[end + 1..]);
+        return (remainder.trim().to_string(), Some(lbl));
     }
     (head.to_string(), None)
 }
