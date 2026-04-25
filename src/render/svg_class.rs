@@ -332,6 +332,11 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     let drawn_h = n.height.unwrap_or(50.0);
 
     let css_classes = n.css_classes.as_deref().unwrap_or("default");
+    // Upstream `nodes.ts insertNode` appends ` clickable` to the existing
+    // class string when `haveCallback` is true. The class string already
+    // contains a trailing space from `getNodeClasses`, so the result has
+    // a double space (e.g. `node default clickable  clickable`).
+    let have_callback = n.have_callback.unwrap_or(false);
     let dom_id = n.dom_id.as_deref().unwrap_or(&n.id);
 
     let x0 = -drawn_w / 2.0;
@@ -344,11 +349,26 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     let style_overrides = resolve_node_style_overrides(n);
 
     let mut out = String::with_capacity(2048);
+    let class_attr = if have_callback {
+        // Upstream `getNodeClasses` returns `node <cssClasses> ` (trailing
+        // space); `insertNode` then concatenates ` clickable`, yielding a
+        // double space before the second `clickable`.
+        format!("node {}  clickable", css_classes)
+    } else {
+        format!("node {} ", css_classes)
+    };
+    // Upstream `nodes.ts insertNode` sets `title` from `node.tooltip` on
+    // the inner shape element; for classBox that's the same outer `<g>`.
+    let title_attr = match n.tooltip.as_deref() {
+        Some(t) if !t.is_empty() => format!(r#" title="{}""#, html_escape(t)),
+        _ => String::new(),
+    };
     out.push_str(&format!(
-        r#"<g class="node {cls} " id="{sid}-{did}" data-look="classic" transform="translate({tx}, {ty})">"#,
-        cls = css_classes,
+        r#"<g class="{cls}" id="{sid}-{did}" data-look="classic"{title} transform="translate({tx}, {ty})">"#,
+        cls = class_attr,
         sid = id,
         did = dom_id,
+        title = title_attr,
         tx = fmt_num(cx),
         ty = fmt_num(cy),
     ));

@@ -730,6 +730,8 @@ fn parse_click(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<()> 
             c.link = Some(url.clone());
             c.link_target = target.clone();
             c.tooltip = tip.clone();
+            // Upstream `setLink` calls `setCssClass(ids, 'clickable')`.
+            c.css_classes.push("clickable".to_string());
         }
         d.interactivity.push(ClassInteractivity {
             class_id: name.to_string(),
@@ -745,6 +747,8 @@ fn parse_click(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<()> 
             let c = d.class_mut(name);
             c.have_callback = true;
             c.tooltip = args_or_tip.clone();
+            // Upstream `setClickEvent` calls `setCssClass(ids, 'clickable')`.
+            c.css_classes.push("clickable".to_string());
         }
         d.interactivity.push(ClassInteractivity {
             class_id: name.to_string(),
@@ -767,6 +771,8 @@ fn parse_link_stmt(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Result<
         c.link = Some(url.clone());
         c.link_target = target.clone();
         c.tooltip = tip.clone();
+        // Upstream `setLink` calls `setCssClass(ids, 'clickable')`.
+        c.css_classes.push("clickable".to_string());
     }
     d.interactivity.push(ClassInteractivity {
         class_id: name.to_string(),
@@ -787,6 +793,8 @@ fn parse_callback_stmt(rest: &str, _line_no: usize, d: &mut ClassDiagram) -> Res
         let c = d.class_mut(name);
         c.have_callback = true;
         c.tooltip = tip.clone();
+        // Upstream `setClickEvent` calls `setCssClass(ids, 'clickable')`.
+        c.css_classes.push("clickable".to_string());
     }
     d.interactivity.push(ClassInteractivity {
         class_id: name.to_string(),

@@ -218,6 +218,18 @@ fn class_to_node(c: &ClassNode, d: &ClassDiagram) -> Node {
     );
     n.parent_id = c.parent.clone();
     n.look = Some("classic".into());
+    if c.have_callback {
+        n.have_callback = Some(true);
+    }
+    if let Some(link) = c.link.as_ref() {
+        n.link = Some(link.clone());
+        n.link_target = c.link_target.clone();
+    }
+    if let Some(t) = c.tooltip.as_ref() {
+        if !t.is_empty() {
+            n.tooltip = Some(t.clone());
+        }
+    }
 
     // Resolve compiled inline styles: classDef styles (in css_classes
     // application order) followed by any direct `style ID …` directive.
