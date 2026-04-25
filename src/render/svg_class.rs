@@ -395,23 +395,54 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     let h_internal = drawn_h - 4.0 * padding;
     let y_internal = -h_internal / 2.0;
 
-    // Annotation group: translate(0, y_internal) for renderExtraBox=true,
-    // empty annotation case.
-    out.push_str(&format!(
-        r#"<g class="annotation-group text" transform="translate(0, {ay})"></g>"#,
-        ay = fmt_num(y_internal),
-    ));
-
-    // Label group: translate(-label_w/2, y_internal). The textHelper sets
-    // labelGroup.attr('transform', 'translate(-w/2, annotationGroupHeight)')
-    // and classBox post-adjusts y to `translateY + y_internal`. With
-    // empty annotation, translateY = 0 → final y = y_internal.
+    // Annotation group: when the class has at least one annotation
+    // (only the first is rendered, mirroring upstream textHelper.ts),
+    // emit a centered foreignObject with `«{annotation}»`. Otherwise
+    // emit an empty group at translate(0, y_internal).
     let label_font = 14.0_f64;
     let label_family = "trebuchet ms,verdana,arial,sans-serif";
-    let label_w = crate::font_metrics::text_width(label, label_family, label_font, true, false);
     let label_h = 16.296875_f64;
+    let annotation_text = class_node
+        .and_then(|c| c.annotations.first())
+        .map(|a| format!("«{}»", a));
+    let (annotation_w, raw_annotation_h, annotation_x) = if let Some(ref txt) = annotation_text {
+        let aw = crate::font_metrics::text_width(txt, label_family, label_font, false, false);
+        (aw, label_h, -aw / 2.0)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+    if let Some(ref txt) = annotation_text {
+        // Inner span max-width follows upstream `addText`:
+        // round(text_width(text, family, 16 px, regular)) + 50.
+        let span_max_w =
+            crate::font_metrics::text_width(txt, label_family, 16.0, false, false).round() + 50.0;
+        out.push_str(&format!(
+            r#"<g class="annotation-group text" transform="translate({ax}, {ay})"><g class="label" style="" transform="translate(0,{ily})"><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: {mw}px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel markdown-node-label" style=""><p>{txt}</p></span></div></foreignObject></g></g>"#,
+            ax = fmt_num(annotation_x),
+            ay = fmt_num(y_internal),
+            ily = fmt_num(-label_h / 2.0),
+            w = fmt_num(annotation_w),
+            h = fmt_num(label_h),
+            mw = fmt_num(span_max_w),
+            txt = txt,
+        ));
+    } else {
+        out.push_str(&format!(
+            r#"<g class="annotation-group text" transform="translate({ax}, {ay})"></g>"#,
+            ax = fmt_num(annotation_x),
+            ay = fmt_num(y_internal),
+        ));
+    }
+
+    // Label group: translate(-label_w/2, y_internal + raw_annotation_h).
+    // The textHelper sets labelGroup transform to
+    // `translate(-w/2, annotationGroupHeight)` and classBox post-adjusts
+    // y to `translateY + y_internal`. When annotations are non-empty,
+    // `annotationGroupHeight = label_h` shifts the whole label-group
+    // (and downstream members/methods) down by one line.
+    let label_w = crate::font_metrics::text_width(label, label_family, label_font, true, false);
     let label_x = -label_w / 2.0;
-    let label_y = y_internal;
+    let label_y = y_internal + raw_annotation_h;
     out.push_str(&format!(
         r#"<g class="label-group text" transform="translate({lx}, {ly})">"#,
         lx = fmt_num(label_x),
@@ -491,6 +522,9 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
             .collect()
     };
     let mut bbox_w = label_w;
+    if annotation_w > bbox_w {
+        bbox_w = annotation_w;
+    }
     let member_widths: Vec<f64> = class_node
         .map(|c| display_widths(&c.members))
         .unwrap_or_default();
@@ -517,7 +551,7 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     // — but importantly the JS `|| 0` fallback is only triggered when
     // the *expression value* is falsy (0, NaN, undefined). A negative
     // number stays as-is, hence `0 - PADDING/2 = -6` survives.
-    let raw_annotation_h = 0.0_f64; // empty annotation
+    // raw_annotation_h is computed earlier alongside annotation_text.
     let raw_label_h = label_h; // single foreignObject
     // members getBBox(): for non-empty groups every row's foreignObject
     // sits at intrinsic (0,0); the union therefore collapses to a single
