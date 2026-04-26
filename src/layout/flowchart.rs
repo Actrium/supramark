@@ -72,11 +72,12 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
     // Dagre's `assign_node_intersects` always uses `intersect_rect`, which
     // produces a point on the node's axis-aligned bounding box. Upstream
     // mermaid instead calls each shape's `intersect()` callback — for the
-    // diamond/question shape this is `intersectPolygon` against the actual
-    // polygon vertices. Recompute the entry/exit point for diamond endpoints
-    // here so the rendered path matches upstream byte-for-byte.
+    // diamond/question shape and trapezoid/lean shapes this is
+    // `intersectPolygon` against the actual polygon vertices. Recompute the
+    // entry/exit point for those endpoints here so the rendered path matches
+    // upstream byte-for-byte.
     let mut edges = edges;
-    fix_diamond_edge_endpoints(&mut edges, &nodes);
+    fix_polygon_edge_endpoints(&mut edges, &nodes);
     // Fallback: when an edge whose both endpoints sit inside the same
     // (isolated) cluster ends up without dagre-computed spline points,
     // synthesize a 3-point straight-line path from src boundary, midpoint,
@@ -103,42 +104,161 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
     })
 }
 
-/// Replace the first/last edge waypoint with the diamond polygon intersection
-/// when the corresponding endpoint node has shape "diamond". Mirrors upstream
-/// `intersectPolygon` for question/diamond shapes; dagre-rs only ever uses
-/// `intersect_rect` and so produces a point on the bounding box, which then
-/// disagrees with mermaid's reference SVG by ~25 px on the lower-left edge.
-fn fix_diamond_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Node]) {
+/// Polygon shape descriptor used to recompute edge endpoints.
+///
+/// `vertices` are the polygon vertices in ABSOLUTE coordinates (already
+/// translated by upstream's `left/top` shift inside `intersectPolygon`).
+/// `adjustment` is subtracted from the resulting intersection point —
+/// only `diamond/question` shapes apply the upstream `-0.5,-0.5` nudge
+/// (see `question.ts::calcIntersect`). Other polygon shapes (trapezoid,
+/// inv_trapezoid, lean_left, lean_right) feed the raw intersection back
+/// to dagre's edge points.
+struct PolygonInfo {
+    vertices: Vec<(f64, f64)>,
+    cx: f64,
+    cy: f64,
+    adjustment: (f64, f64),
+}
+
+/// Replace the first/last edge waypoint with the polygon intersection for
+/// nodes whose render-time `intersect` callback uses `intersect.polygon`
+/// (diamond/question, trapezoid, inverted-trapezoid, lean_left, lean_right).
+///
+/// dagre-rs only ever calls `intersect_rect`, so without this fix the path
+/// endpoint sits on the node's axis-aligned bounding box rather than the
+/// actual polygon boundary — diverging from mermaid.js by up to half the
+/// shape's shear (≈ h/2 px for trapezoid / lean shapes).
+///
+/// Mirrors upstream's `insertEdge()` in
+/// `rendering-util/rendering-elements/edges.js`:
+///   points = points.slice(1, -1);
+///   points.unshift(tail.intersect(points[0]));
+///   points.push(head.intersect(points[points.length - 1]));
+/// where `head/tail.intersect` invokes the per-shape callback set up in
+/// each shape's renderer.
+fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Node]) {
     use crate::layout::unified::types::Point;
-    // Build a quick lookup of node id → (cx, cy, s) for diamond nodes.
-    let mut diamond_info: BTreeMap<&str, (f64, f64, f64)> = BTreeMap::new();
+
+    // Build per-node polygon descriptors keyed by node id.
+    let mut info_map: BTreeMap<&str, PolygonInfo> = BTreeMap::new();
     for n in nodes {
-        if n.shape.as_deref() == Some("diamond") {
-            let cx = n.x.unwrap_or(0.0);
-            let cy = n.y.unwrap_or(0.0);
-            // Layout stores width = height = s (full diagonal length).
-            let s = n.width.unwrap_or(0.0);
-            diamond_info.insert(n.id.as_str(), (cx, cy, s));
-        }
+        let shape = match n.shape.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let cx = n.x.unwrap_or(0.0);
+        let cy = n.y.unwrap_or(0.0);
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        let info = match shape {
+            "diamond" | "question" => {
+                // Layout stores width = height = s (s = w_inner + h_inner).
+                let s = w;
+                let half = s / 2.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (cx, cy + half),
+                        (cx + half, cy),
+                        (cx, cy - half),
+                        (cx - half, cy),
+                    ],
+                    cx,
+                    cy,
+                    // Upstream `question.ts::calcIntersect` subtracts (0.5, 0.5)
+                    // from the raw polygon intersection ("Adjusted result").
+                    adjustment: (-0.5, -0.5),
+                }
+            }
+            // Trapezoid family — upstream stores `node.width = visual width`
+            // (= w_inner + h) after `updateNodeBounds`. Recover w_inner so
+            // we can place the polygon vertices in the same coordinate frame
+            // upstream's `intersectPolygon` uses (`left/top` shift derived
+            // from `node.width/height` and the polygon's minX/minY).
+            "trapezoid" | "trap" => {
+                let h_in = h;
+                let w_in = (w - h_in).max(0.0);
+                // Upstream points (local): [(-h/2, 0), (w+h/2, 0), (w, -h), (0, -h)]
+                // minX = -h/2, minY = -h
+                // left = cx - w_visual/2 - minX = cx - (w_in + h)/2 + h/2 = cx - w_in/2
+                // top  = cy - h/2 - (-h) = cy + h/2
+                let left = cx - w_in / 2.0;
+                let top = cy + h_in / 2.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (left + (-h_in / 2.0), top + 0.0),
+                        (left + (w_in + h_in / 2.0), top + 0.0),
+                        (left + w_in, top + (-h_in)),
+                        (left + 0.0, top + (-h_in)),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
+            "inv_trapezoid" | "invertedTrapezoid" => {
+                let h_in = h;
+                let w_in = (w - h_in).max(0.0);
+                // Upstream points (local): [(0, 0), (w, 0), (w+h/2, -h), (-h/2, -h)]
+                // minX = -h/2, minY = -h
+                // left = cx - w_visual/2 - minX = cx - (w_in+h)/2 + h/2 = cx - w_in/2
+                // top  = cy - h/2 - (-h) = cy + h/2
+                let left = cx - w_in / 2.0;
+                let top = cy + h_in / 2.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (left + 0.0, top + 0.0),
+                        (left + w_in, top + 0.0),
+                        (left + (w_in + h_in / 2.0), top + (-h_in)),
+                        (left + (-h_in / 2.0), top + (-h_in)),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
+            "lean_right" | "lean-right" => {
+                let h_in = h;
+                let w_in = (w - h_in).max(0.0);
+                // Upstream points (local): [(-h/2, 0), (w, 0), (w+h/2, -h), (0, -h)]
+                let left = cx - w_in / 2.0;
+                let top = cy + h_in / 2.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (left + (-h_in / 2.0), top + 0.0),
+                        (left + w_in, top + 0.0),
+                        (left + (w_in + h_in / 2.0), top + (-h_in)),
+                        (left + 0.0, top + (-h_in)),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
+            "lean_left" | "lean-left" => {
+                let h_in = h;
+                let w_in = (w - h_in).max(0.0);
+                // Upstream points (local): [(0, 0), (w+h/2, 0), (w, -h), (-h/2, -h)]
+                let left = cx - w_in / 2.0;
+                let top = cy + h_in / 2.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (left + 0.0, top + 0.0),
+                        (left + (w_in + h_in / 2.0), top + 0.0),
+                        (left + w_in, top + (-h_in)),
+                        (left + (-h_in / 2.0), top + (-h_in)),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
+            _ => continue,
+        };
+        info_map.insert(n.id.as_str(), info);
     }
-    if diamond_info.is_empty() {
+    if info_map.is_empty() {
         return;
     }
-
-    // Diamond polygon vertices in absolute coords. Upstream's
-    // `intersectPolygon` recomputes positions from `node.x/y/width/height`
-    // and the polygon's `minX/minY`, IGNORING the render-time +0.5 px
-    // translation that the SVG `<polygon transform>` carries. Mirror that
-    // here so we land on the same intersection coordinates.
-    let polygon_for = |cx: f64, cy: f64, s: f64| -> [(f64, f64); 4] {
-        let half = s / 2.0;
-        [
-            (cx, cy + half), // bottom
-            (cx + half, cy), // right
-            (cx, cy - half), // top
-            (cx - half, cy), // left
-        ]
-    };
 
     for e in edges.iter_mut() {
         let Some(points) = e.points.as_mut() else {
@@ -150,28 +270,28 @@ fn fix_diamond_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
         // Start endpoint (anchor follows `start` field which may have been
         // retargeted from a cluster — the actual leaf node is what matters).
         if let Some(start_id) = e.start.as_deref() {
-            if let Some(&(cx, cy, s)) = diamond_info.get(start_id) {
-                let poly = polygon_for(cx, cy, s);
+            if let Some(info) = info_map.get(start_id) {
                 let next = points[1];
-                if let Some(p) = polygon_intersection((cx, cy), (next.x, next.y), &poly) {
-                    // Upstream `question.ts::calcIntersect` subtracts (0.5, 0.5)
-                    // from the raw polygon intersection ("Adjusted result").
+                if let Some(p) =
+                    polygon_intersection((info.cx, info.cy), (next.x, next.y), &info.vertices)
+                {
                     points[0] = Point {
-                        x: p.0 - 0.5,
-                        y: p.1 - 0.5,
+                        x: p.0 + info.adjustment.0,
+                        y: p.1 + info.adjustment.1,
                     };
                 }
             }
         }
         if let Some(end_id) = e.end.as_deref() {
-            if let Some(&(cx, cy, s)) = diamond_info.get(end_id) {
-                let poly = polygon_for(cx, cy, s);
+            if let Some(info) = info_map.get(end_id) {
                 let n = points.len();
                 let prev = points[n - 2];
-                if let Some(p) = polygon_intersection((cx, cy), (prev.x, prev.y), &poly) {
+                if let Some(p) =
+                    polygon_intersection((info.cx, info.cy), (prev.x, prev.y), &info.vertices)
+                {
                     points[n - 1] = Point {
-                        x: p.0 - 0.5,
-                        y: p.1 - 0.5,
+                        x: p.0 + info.adjustment.0,
+                        y: p.1 + info.adjustment.1,
                     };
                 }
             }
