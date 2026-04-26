@@ -421,6 +421,23 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
         return render_node_label(&html, w, h, &LabelOpts::default());
     }
+    // Plain string labels with a literal `\n` need the same `<br/>` rewrite
+    // as `<br>`-bearing labels — upstream's `parseGenericTypes` /
+    // `parseEdge` converts every `\n` to `<br/>` before the label reaches
+    // foreignObject. Without this, the rendered `<p>` body would contain a
+    // raw `\n` (mismatching upstream's `<br/>` token) AND the bbox would
+    // be measured as two lines of text instead of one. See cypress
+    // fixture 251 — the diamond label `What is\nyourmermaid version?`
+    // must render as `<p>What is<br/>yourmermaid version?</p>` with a
+    // single-line height.
+    if processed.contains('\n') {
+        let html: String = processed
+            .split('\n')
+            .collect::<Vec<&str>>()
+            .join("<br/>");
+        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
+        return render_node_label(&html, w, h, &LabelOpts::default());
+    }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
     render_node_label(&processed, w, h, &LabelOpts::default())
 }
@@ -592,25 +609,31 @@ pub fn measure_html_label(
     if text.is_empty() {
         return (0.0, line_height(family, size, bold, false));
     }
-    // Upstream's initial getBoundingClientRect measurement happens BEFORE
-    // the wrap fallback: `bbox = div.node().getBoundingClientRect(); if
-    // (bbox.width === width) { div.style.white-space = break-spaces; … }`.
-    // Under the jsdom shim both paths collapse to `measureTextBlock`
-    // which splits on `\n` only. So the effective width is the longest
-    // line's unwrapped width — wrapping does not reduce it unless the
-    // caller explicitly pre-splits the input.
+    // Upstream's parseEdge / parseGenericTypes converts every literal `\n`
+    // in a label string to `<br/>` BEFORE the label reaches the
+    // foreignObject — see
+    // `vendor/mermaid/packages/mermaid/src/diagrams/flowchart/flowDb.ts`
+    // and `parseEdge` in `utils.ts`. The jsdom shim then renders the HTML
+    // and reports the bbox via `getBoundingClientRect()`, which measures
+    // the concatenated `textContent` (tags and `<br/>` strip to zero
+    // width) as a single line.
+    //
+    // Our shape callers (diamond / circle / cylinder / etc.) hand
+    // `xml_escape(label)` to this function with the literal `\n` still
+    // present. To match upstream geometry we therefore concatenate all
+    // `\n`-separated segments into a single text-content run and report
+    // height as ONE line — `\n` becomes a zero-width line break, exactly
+    // as `<br/>` does in `measure_html_markup_label`.
+    //
+    // Cypress fixture 251 (flowchart diamond `What is\nyourmermaid
+    // version?`) regresses without this — measured height becomes
+    // 2 × line-height, inflating the diamond's `s = w + h + 2 * pad`.
     let stripped = strip_paired_markdown_markers(text);
-    let mut max_line_w = 0.0_f64;
-    let lines: Vec<&str> = stripped.split('\n').collect();
-    for line in &lines {
-        let w = text_width(line, family, size, bold, false);
-        if w > max_line_w {
-            max_line_w = w;
-        }
-    }
+    let concatenated: String = stripped.split('\n').collect();
+    let max_line_w = text_width(&concatenated, family, size, bold, false);
     let lh = line_height(family, size, bold, false);
     let _ = (max_width_px, wrap_enabled); // currently unused; reserved.
-    (max_line_w, lh * lines.len() as f64)
+    (max_line_w, lh)
 }
 
 /// Strip paired markdown inline emphasis markers (`**bold**`, `*italic*`,
@@ -1144,12 +1167,19 @@ mod tests {
     }
 
     #[test]
-    fn measure_html_label_multiline() {
-        let (_w, h) = measure_html_label("a\nbb", &HtmlLabelFont::default(), 200.0, true);
-        // Plain-text path splits on '\n' and reports one line-height per line.
-        // Height should be 2× line-height.
+    fn measure_html_label_treats_newline_as_br() {
+        // Upstream `parseGenericTypes` / `parseEdge` converts `\n` to `<br/>`
+        // before the label reaches foreignObject; jsdom then measures the
+        // concatenated textContent as a single line. We mirror that here:
+        // height stays 1× line-height, width sums the concatenated text.
+        let (w, h) = measure_html_label("a\nbb", &HtmlLabelFont::default(), 200.0, true);
         let lh = line_height("sans-serif", 14.0, false, false);
-        assert!((h - 2.0 * lh).abs() < 1e-9);
+        assert!((h - lh).abs() < 1e-9, "h={h} expected single line {lh}");
+        let expected_w = text_width("abb", "sans-serif", 14.0, false, false);
+        assert!(
+            (w - expected_w).abs() < 1e-9,
+            "w={w} expected concat width {expected_w}"
+        );
     }
 
     #[test]
