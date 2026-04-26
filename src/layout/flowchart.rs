@@ -833,13 +833,6 @@ fn strip_markdown_for_measure(label: &str) -> String {
             } else {
                 i += 1; // skip *
             }
-        } else if bytes[i] == b'_' {
-            // Skip `__` or `_` markers
-            if i + 1 < bytes.len() && bytes[i + 1] == b'_' {
-                i += 2;
-            } else {
-                i += 1;
-            }
         } else if bytes[i] == b'`' {
             i += 1; // skip backtick (inline code marker)
         } else if bytes[i] == b'<' {

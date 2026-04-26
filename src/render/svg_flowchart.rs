@@ -2979,14 +2979,22 @@ fn preprocess_markdown(md: &str) -> String {
 }
 
 fn dedent(s: &str) -> String {
+    // Match npm `dedent` semantics: only lines that start with whitespace
+    // *and* contain at least one non-whitespace char contribute to the
+    // common-indent calculation. Lines that begin with a non-whitespace
+    // char (indent = 0) and pure whitespace lines are both excluded —
+    // this matches the upstream regex `^(\s+)\S+`.
     let lines: Vec<&str> = s.split('\n').collect();
-    // Compute minimum leading-whitespace count over non-blank lines.
     let mut min_indent: Option<usize> = None;
     for line in &lines {
-        if line.chars().all(|c| c.is_whitespace()) {
+        let n = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+        if n == 0 {
             continue;
         }
-        let n = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+        // Skip pure-whitespace lines (no non-ws content after the indent).
+        if line.chars().skip(n).next().is_none() {
+            continue;
+        }
         min_indent = Some(min_indent.map(|m| m.min(n)).unwrap_or(n));
     }
     let n = min_indent.unwrap_or(0);
@@ -2999,7 +3007,23 @@ fn dedent(s: &str) -> String {
             if line.chars().all(|c| c.is_whitespace()) {
                 (*line).to_string()
             } else {
-                line.chars().skip(n).collect()
+                // Strip up to n leading whitespace chars; lines with shorter
+                // indent (or none) keep what they have.
+                let mut chars = line.chars();
+                let mut stripped = 0usize;
+                let mut buf = String::new();
+                while stripped < n {
+                    match chars.next() {
+                        Some(c) if c == ' ' || c == '\t' => stripped += 1,
+                        Some(c) => {
+                            buf.push(c);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+                buf.extend(chars);
+                buf
             }
         })
         .collect::<Vec<_>>()

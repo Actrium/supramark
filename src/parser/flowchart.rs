@@ -1042,7 +1042,15 @@ fn parse_label_text(raw: &str) -> Label {
     // Markdown label: starts with "`" inside quotes — check BEFORE plain string.
     if trimmed.starts_with("\"`") && trimmed.ends_with("`\"") {
         let inner = &trimmed[2..trimmed.len() - 2];
-        return Label::markdown(inner);
+        // Marked.js paragraph normalisation: leading whitespace on each
+        // continuation line of a multi-line paragraph is stripped before
+        // the lexer emits text tokens. Mermaid's `markdownToHTML` runs
+        // marked directly on the raw source, so the same stripping applies.
+        // We pre-bake it here so both measurement and rendering observe
+        // the post-marked text (`<br>` lines are unaffected — marked only
+        // touches `\n`-separated lines, not inline HTML breaks).
+        let cleaned = strip_md_continuation_indents(inner);
+        return Label::markdown(cleaned);
     }
     if let Some(inner) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
         // Upstream mermaid trims leading/trailing whitespace (incl. newlines)
@@ -1052,6 +1060,34 @@ fn parse_label_text(raw: &str) -> Label {
         return Label::string(inner.trim());
     }
     Label::text(trimmed)
+}
+
+/// Mirror marked.js paragraph normalisation for backtick-markdown labels:
+/// every line after the first has its leading whitespace removed before the
+/// text reaches `markdownToHTML`. Empty / whitespace-only lines are kept
+/// (subsequent newline collapsing handles those for measurement).
+///
+/// Note: this only operates on `\n`-separated continuation lines. Inline
+/// `<br>` tags are left intact — marked does not touch them, and stripping
+/// the space after `<br>` would clobber labels like `**a**:<br> 5...`.
+fn strip_md_continuation_indents(src: &str) -> String {
+    if !src.contains('\n') {
+        return src.to_string();
+    }
+    let mut out = String::with_capacity(src.len());
+    let mut first = true;
+    for line in src.split('\n') {
+        if first {
+            out.push_str(line);
+            first = false;
+        } else {
+            out.push('\n');
+            // Strip leading ASCII space/tab characters on this line.
+            let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+            out.push_str(trimmed);
+        }
+    }
+    out
 }
 
 fn split_semis(s: &str) -> Vec<String> {
