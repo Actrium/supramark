@@ -941,7 +941,19 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
             let w_inner = tw + 2.0 * m + p;
             return (w_inner, h_inner);
         }
-        "stadium" | "pill" => (th + p * 2.0, p * 2.0),
+        // Upstream stadium.ts (default look, mermaid 11.14.0
+        // mermaid.js:45403-45444):
+        //   labelPaddingX = labelPaddingY = nodePadding (= p)
+        //   h = bbox.height + labelPaddingY                 → th + p
+        //   w = bbox.width  + h/4         + labelPaddingX   → tw + (th+p)/4 + p
+        //   radius = h/2  (used for the rounded end-caps)
+        //   getBBox() of the resulting points spans the full w × h, so
+        //   updateNodeBounds feeds those exact dimensions to dagre.
+        // Note: edge intersection in src/render/edges.rs still works
+        // off the older (th + p*2, p*2) geometry so end-to-end byte
+        // exactness for stadium fixtures (192, 113, 144, ...) waits on
+        // a matching update there.
+        "stadium" | "pill" => ((th + p) / 4.0 + p, p),
         "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
         "subroutine" => (p * 4.0, p * 2.0),
         // Upstream trapezoid.ts / leanLeft.ts / leanRight.ts:
