@@ -366,9 +366,74 @@ impl<'a> LineParser<'a> {
             if piece.is_empty() {
                 continue;
             }
+            // Edge-metadata binding: `<edge-id>@{ key: value, ... }` where
+            // the id matches a previously declared `link_id` (e.g.
+            // `L_A_B_0@{ animation: slow }`). Upstream's `addEdge` consumes
+            // these as edge property bags — they MUST NOT spawn synthetic
+            // nodes. Without this guard the bare-id form falls through to
+            // `parse_vertex_statement` and gets registered as a rectangle
+            // node (cypress fixtures 113, 196, 237).
+            if self.try_consume_edge_meta(piece) {
+                continue;
+            }
             self.parse_vertex_statement(piece)?;
         }
         Ok(())
+    }
+
+    /// Detect `<edge-id>@{ ... }` lines that bind metadata to an existing
+    /// edge and consume them silently. Returns `true` when the line was
+    /// claimed (caller should skip the regular vertex parser).
+    fn try_consume_edge_meta(&mut self, piece: &str) -> bool {
+        // Quick reject: must contain `@{` and no link arrows after the
+        // identifier portion. Anything that also has `-->` / `==>` / `--`
+        // etc. is a real edge declaration and must keep flowing through
+        // `parse_vertex_statement`.
+        let at = match piece.find("@{") {
+            Some(i) => i,
+            None => return false,
+        };
+        let id = piece[..at].trim();
+        if id.is_empty() {
+            return false;
+        }
+        // Bare id only — reject anything with whitespace inside the id
+        // portion (would suggest something like `A B@{...}` which is not
+        // an edge-meta line).
+        if id
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        {
+            return false;
+        }
+        // The remainder after `@{` must close with `}` and have nothing
+        // (other than whitespace) after the closing brace, otherwise this
+        // is a more complex statement (e.g. `id@{...} --> other`).
+        let rest = &piece[at + 2..];
+        let close = match rest.find('}') {
+            Some(i) => i,
+            None => return false,
+        };
+        if !rest[close + 1..].trim().is_empty() {
+            return false;
+        }
+        // Only claim the line if `id` matches a known edge id. Two forms
+        // are recognised:
+        //   1. an explicit `link_id` captured via `<id>@-->` syntax
+        //      (stored on `Edge::id`).
+        //   2. an auto-generated `L_<start>_<end>_<n>` form that the
+        //      layout will assign — recompute it here from the parser's
+        //      per-pair edge ordering so we can spot the binding before
+        //      layout has run.
+        let is_edge_id = self.diag.edges.iter().any(|e| e.id.as_deref() == Some(id))
+            || edge_id_matches_synthetic(id, &self.diag.edges);
+        if !is_edge_id {
+            return false;
+        }
+        // We don't currently model animation/curve/etc. metadata — drop
+        // the line. `parse_node_shape_data` could be re-used here later
+        // when the renderer learns to honour these fields.
+        true
     }
 
     /// Collect a statement that may span multiple physical lines.
@@ -641,10 +706,7 @@ impl<'a> LineParser<'a> {
         // For specific index: pushes `fill:none` when style is non-empty
         // and contains no `fill` property. Mirroring that keeps the
         // rendered `style="..."` attribute byte-exact.
-        if !is_default
-            && !styles.is_empty()
-            && !styles.iter().any(|s| s.starts_with("fill"))
-        {
+        if !is_default && !styles.is_empty() && !styles.iter().any(|s| s.starts_with("fill")) {
             styles.push("fill:none".to_string());
         }
         self.diag.link_styles.push(LinkStyle {
@@ -899,6 +961,27 @@ impl<'a> LineParser<'a> {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+/// Reconstruct the synthetic edge id format the layout will assign
+/// (`L_<start>_<end>_<index>`) and check whether `id` matches one of the
+/// already-recorded edges. The per-pair index follows the order in which
+/// duplicate `(start, end)` edges appear in the source, mirroring
+/// `mermaid-graphlib`'s `getEdgeId` counter.
+fn edge_id_matches_synthetic(id: &str, edges: &[crate::model::flowchart::Edge]) -> bool {
+    use std::collections::HashMap;
+    let mut pair_count: HashMap<(String, String), usize> = HashMap::new();
+    for e in edges {
+        let n = pair_count
+            .entry((e.start.clone(), e.end.clone()))
+            .and_modify(|c| *c += 1)
+            .or_insert(0);
+        let synth = format!("L_{}_{}_{}", e.start, e.end, *n);
+        if synth == id {
+            return true;
+        }
+    }
+    false
+}
 
 fn split_once_ws(s: &str) -> (&str, &str) {
     let s = s.trim_start();
@@ -1195,9 +1278,7 @@ fn scan_arrow(s: &str) -> Option<(&str, &str)> {
         } else {
             i = after_first_body;
         }
-    } else if i < bytes.len()
-        && !matches!(bytes[i], b'>' | b'x' | b'o' | b'|' | b'\n' | b'\r')
-    {
+    } else if i < bytes.len() && !matches!(bytes[i], b'>' | b'x' | b'o' | b'|' | b'\n' | b'\r') {
         // No-space embedded label (`--lb1-->`, `==lb2==>`, `-.lb.->`,
         // `--lb -->` etc.). Mirror upstream mermaid's jison START_LINK
         // rule which accepts a label that may either be flush against
