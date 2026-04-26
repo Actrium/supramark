@@ -372,6 +372,14 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
 /// `escaped_label` must already be HTML-escaped (`&amp;`, `&lt;`, …).
 /// This function does NOT escape — shapes pass through raw markdown
 /// content in some cases.
+///
+/// Markdown shortcut: when `escaped_label` carries paired inline markdown
+/// markers (`**bold**`, `*italic*`, `` `code` ``), upstream funnels the
+/// label through `markdownToHTML` before emission and tags the
+/// surrounding `<span>` with the `markdown-node-label` class. Detect that
+/// here and emit the same HTML so shape paths that don't go through
+/// `svg_flowchart`'s markdown branch (e.g. the diamond polygon) still
+/// produce byte-exact output.
 pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> String {
     if escaped_label.is_empty() {
         return String::new();
@@ -379,8 +387,68 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
     // Replace FontAwesome icon references (fa:fa-car → <i class="fa fa-car"></i>).
     // Applied after xml_escape since the FA pattern uses no XML-special chars.
     let processed = replace_fa_icons(escaped_label);
+    if has_paired_markdown_markers(&processed) {
+        // Build the HTML the same way `markdownToHTML` would, then measure
+        // the marker-free `textContent` width via `measure_html_markup_label`.
+        // The input may already contain XML entities (`&amp;`/`&lt;`/…) from
+        // the caller's `xml_escape`; `markdown_label_to_html` re-escapes
+        // unescaped specials, but it does not double-escape entities that
+        // already begin with `&` because `xml_escape_label` only rewrites
+        // bare `<>"'&` and the entity prefix `&` has nothing left to
+        // escape inside the named-entity body. So the round-trip is safe
+        // for the markdown patterns we handle here.
+        let html = markdown_label_to_html(&processed);
+        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
+        let opts = LabelOpts {
+            extra_span_classes: "markdown-node-label",
+            ..LabelOpts::default()
+        };
+        return render_node_label(&html, w, h, &opts);
+    }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
     render_node_label(&processed, w, h, &LabelOpts::default())
+}
+
+/// True iff the input contains at least one paired markdown inline
+/// emphasis marker (`**bold**`, `*italic*`, or `` `code` ``).
+fn has_paired_markdown_markers(s: &str) -> bool {
+    // `**…**` — two stars then closing two stars on the same line.
+    if let Some(open) = s.find("**") {
+        if let Some(rel) = s[open + 2..].find("**") {
+            // Close marker on same line and non-empty body.
+            let body = &s[open + 2..open + 2 + rel];
+            if !body.is_empty() && !body.contains('\n') {
+                return true;
+            }
+        }
+    }
+    // `` `…` `` — backtick then closing backtick on the same line.
+    if let Some(open) = s.find('`') {
+        if let Some(rel) = s[open + 1..].find('`') {
+            let body = &s[open + 1..open + 1 + rel];
+            if !body.is_empty() && !body.contains('\n') {
+                return true;
+            }
+        }
+    }
+    // Single-star italic — must avoid matching `**bold**` (already covered)
+    // and the lone-star case. Walk left-to-right looking for a `*` whose
+    // immediate predecessor is not also `*` and that has a non-empty
+    // matching close.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'*' && bytes.get(i + 1) != Some(&b'*') && (i == 0 || bytes[i - 1] != b'*') {
+            if let Some(rel) = s[i + 1..].find('*') {
+                let body = &s[i + 1..i + 1 + rel];
+                if !body.is_empty() && !body.contains('\n') {
+                    return true;
+                }
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 // ─── CSS-aware label measurement ───────────────────────────────────────
@@ -427,6 +495,16 @@ impl<'a> HtmlLabelFont<'a> {
 /// false. Text that exceeds the budget is split on whitespace using a
 /// greedy first-fit algorithm (matching CSS's `white-space: break-spaces`
 /// + `word-break: normal` defaults as observed in the jsdom shim).
+///
+/// Markdown convenience: paired `**bold**`, `*italic*`, and `` `code` ``
+/// inline markers are stripped before measurement. Upstream funnels
+/// markdown-source labels through `markdownToHTML` before they reach the
+/// foreignObject `<div>`, so what `textContent` returns is the marker-free
+/// text. Some renderer paths (e.g. the diamond polygon shape) re-measure
+/// node labels at draw time without going through that pipeline; matching
+/// upstream's geometry requires us to strip the markers here too.
+/// Unpaired markers are left in place — labels that *intend* to display
+/// a literal `*` continue to measure correctly.
 pub fn measure_html_label(
     text: &str,
     font: &HtmlLabelFont<'_>,
@@ -445,8 +523,9 @@ pub fn measure_html_label(
     // which splits on `\n` only. So the effective width is the longest
     // line's unwrapped width — wrapping does not reduce it unless the
     // caller explicitly pre-splits the input.
+    let stripped = strip_paired_markdown_markers(text);
     let mut max_line_w = 0.0_f64;
-    let lines: Vec<&str> = text.split('\n').collect();
+    let lines: Vec<&str> = stripped.split('\n').collect();
     for line in &lines {
         let w = text_width(line, family, size, bold, false);
         if w > max_line_w {
@@ -456,6 +535,55 @@ pub fn measure_html_label(
     let lh = line_height(family, size, bold, false);
     let _ = (max_width_px, wrap_enabled); // currently unused; reserved.
     (max_line_w, lh * lines.len() as f64)
+}
+
+/// Strip paired markdown inline emphasis markers (`**bold**`, `*italic*`,
+/// `` `code` ``) from a string while leaving unpaired markers intact.
+///
+/// Used by [`measure_html_label`] so that labels written as markdown source
+/// (e.g. the flowchart diamond's `` `The **cat** in the hat` `` body) are
+/// measured at the width that `textContent` would return after upstream's
+/// `markdownToHTML` step. A label containing a literal `*` such as
+/// `"a*b"` has only one `*` and no closing pair, so it is returned
+/// unchanged.
+fn strip_paired_markdown_markers(text: &str) -> String {
+    // Inline-code spans `` `…` `` are stripped first because they are
+    // delimited by a single character on each side and never nest.
+    let after_code = strip_paired_with(text, "`", "`");
+    // `**…**` must be checked before `*…*` so the longer marker wins.
+    let after_strong = strip_paired_with(&after_code, "**", "**");
+    strip_paired_with(&after_strong, "*", "*")
+}
+
+/// Replace each `<open>X<close>` pair in `s` with `X`, leaving any
+/// unmatched `<open>` token literal. Operates left-to-right and never
+/// crosses newlines so an unterminated marker on one line cannot consume
+/// the next.
+fn strip_paired_with(s: &str, open: &str, close: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if s[i..].starts_with(open) {
+            // Look for the closing marker on the same line.
+            let after = i + open.len();
+            // For the `*` / `**` cases, do not match an empty body —
+            // otherwise `**` (with no inner text) would fold into `""`.
+            let nl = s[after..].find('\n').unwrap_or(s.len() - after);
+            if let Some(rel) = s[after..after + nl].find(close) {
+                if rel > 0 {
+                    out.push_str(&s[after..after + rel]);
+                    i = after + rel + close.len();
+                    continue;
+                }
+            }
+        }
+        // Literal — copy a whole UTF-8 char (1..4 bytes).
+        let ch_len = utf8_char_len(bytes[i]);
+        out.push_str(&s[i..i + ch_len]);
+        i += ch_len;
+    }
+    out
 }
 
 /// Width × height of a label where the input is already HTML markup
