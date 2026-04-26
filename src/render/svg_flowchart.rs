@@ -820,6 +820,7 @@ pub fn render(
 
     // Edge labels (outer level — same selection rule as edge paths).
     inner.push_str(&unified_shell::open_layer("edgeLabels"));
+    let html_labels = d.html_labels.unwrap_or(true);
     for e in l.edges.iter() {
         if edge_is_inside_isolated(e.start.as_deref(), e.end.as_deref(), l) {
             continue;
@@ -830,7 +831,7 @@ pub fn render(
         if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
-        inner.push_str(&render_edge_label(e));
+        inner.push_str(&render_edge_label(e, html_labels));
     }
     inner.push_str(unified_shell::close_layer());
 
@@ -862,7 +863,13 @@ pub fn render(
             if parent_also_isolated {
                 continue;
             }
-            inner.push_str(&render_isolated_cluster_inner_root(cnode, l, theme, id));
+            inner.push_str(&render_isolated_cluster_inner_root(
+                cnode,
+                l,
+                theme,
+                id,
+                html_labels,
+            ));
         }
     }
 
@@ -1591,6 +1598,7 @@ fn render_isolated_cluster_inner_root(
     l: &FlowchartLayout,
     theme: &ThemeVariables,
     svg_id: &str,
+    html_labels: bool,
 ) -> String {
     // Retrieve pre-computed outer translate from the layout engine.
     let tx = cnode
@@ -1743,7 +1751,7 @@ fn render_isolated_cluster_inner_root(
         if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
-        out.push_str(&render_edge_label(e));
+        out.push_str(&render_edge_label(e, html_labels));
     }
     out.push_str(unified_shell::close_layer());
 
@@ -1764,7 +1772,13 @@ fn render_isolated_cluster_inner_root(
         if !l.isolated_cluster_ids.contains(&n.id) {
             continue;
         }
-        out.push_str(&render_isolated_cluster_inner_root(n, l, theme, svg_id));
+        out.push_str(&render_isolated_cluster_inner_root(
+            n,
+            l,
+            theme,
+            svg_id,
+            html_labels,
+        ));
     }
 
     // Render direct leaf nodes.
@@ -2374,7 +2388,7 @@ fn render_edge_path(
     )
 }
 
-fn render_edge_label(e: &UEdge) -> String {
+fn render_edge_label(e: &UEdge, html_labels: bool) -> String {
     use crate::render::foreign_object::{
         measure_html_label, measure_html_markup_label, render_edge_label as fo_edge,
         replace_fa_icons, HtmlLabelFont, LabelOpts,
@@ -2400,6 +2414,16 @@ fn render_edge_label(e: &UEdge) -> String {
     };
     let lx = e.label_x.unwrap_or(0.0);
     let ly = e.label_y.unwrap_or(0.0);
+    // htmlLabels=false path — emit `<text>`/`<tspan>` instead of <foreignObject>.
+    // Mirrors upstream `createText(...)` non-html branch (createText.ts:338+,
+    // createFormattedText) plus `insertEdgeLabel` which moves the
+    // <text>/labelGroup into <g class="label">. When the label is empty,
+    // `addBackground` is forced false so the bare <text> moves but the
+    // <rect class="background"> stays as an orphan <g> SIBLING of the
+    // <g class="edgeLabel">.
+    if !html_labels {
+        return render_edge_label_text(e, &processed, is_empty, lx, ly);
+    }
     // Inline color/font label styles (from `class <edge-id> myClass`,
     // i.e. `edge.label_style`). Upstream applies these as a `style=`
     // prefix on the `<div>` of the edgeLabel via `applyStyle`, which
@@ -2432,6 +2456,155 @@ fn render_edge_label(e: &UEdge) -> String {
         ..LabelOpts::default()
     };
     fo_edge(&processed, lx, ly, w, h, opts)
+}
+
+/// Render an edge label as `<text>`/`<tspan>` (htmlLabels=false branch).
+///
+/// Layout mirrors upstream `createText` + `insertEdgeLabel`:
+///
+/// 1. The `<g class="edgeLabel">` carries an outer `transform="translate(lx, ly)"`
+///    when label_x/label_y are set; for empty labels (lx=ly=0) the attribute
+///    is omitted entirely (upstream's d3 `attr` with computed empty/zero
+///    string still emits, but the layout path passes 0,0 which round-trips
+///    through `text` with no transform — matching the reference fixtures).
+/// 2. Inside, `<g class="label" data-id="..." transform="translate(-w/2, -h/2)">`
+///    centres the visual content. Upstream uses `computeLabelTransform(bbox,
+///    false)` = `translate(-(x + w/2), -(y + h/2))` where `bbox` is the
+///    text element's `getBBox`. Under the jsdom shim that bbox is
+///    `{x:0, y:0, w, h}` for empty/single-line text.
+/// 3. The `<text>` carries `y="-10.1"` and a `text-anchor="middle"`. Inside,
+///    a single `<tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle">`
+///    holds either nothing (empty) or one `<tspan class="text-inner-tspan">`
+///    per markdown segment (font-style/font-weight per em/strong).
+/// 4. When the label is non-empty, `addSvgBackground=isMarkdown` is true,
+///    so `createFormattedText` returns the *labelGroup* (which contains both
+///    `<rect class="background">` and `<text>`) and that group ends up inside
+///    the label's <g>. When empty, `addBackground=false` so it returns the
+///    bare `<text>` and the `labelGroup` (with its rect) stays as an orphan
+///    sibling of the edgeLabel.
+fn render_edge_label_text(e: &UEdge, processed: &str, is_empty: bool, lx: f64, ly: f64) -> String {
+    // Outer edgeLabel transform — upstream `positionEdgeLabel` (edges.js:192)
+    // only sets the `transform` attribute when `edge.label` is truthy.
+    // Empty edge labels therefore receive NO transform at all (regardless of
+    // the dagre-computed label_x/label_y). Non-empty labels (178/179/180)
+    // carry their dagre mid-point as `translate(lx, ly)`.
+    let outer_transform = if is_empty {
+        String::new()
+    } else {
+        format!(
+            r#" transform="translate({lx}, {ly})""#,
+            lx = fmt_num(lx),
+            ly = fmt_num(ly),
+        )
+    };
+    // Compute the inner label transform.
+    // For empty: bbox of the <text> is treated as {x:0, y:0, w:0, h:line_h}
+    // → translate(0, -line_h/2). The reference shim picks line_h=16.296875
+    // (matching measure_html_label's line-height for the default font).
+    // For non-empty: we pad the rect by 2 on each side so the visible bbox
+    // becomes {x:-2, y:-2, w:w+4, h:h+4} → translate(-(w+4)/2 + 2, -(h+4)/2 + 2)
+    //   = translate(-w/2, -h/2). (The same as the html branch.)
+    let (label_tx, label_ty) = if is_empty {
+        // For empty labels, fall back on the html_labels formula since the
+        // visible bbox matches that shape (w=0, h=line_height).
+        use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+        let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
+        (0.0, -lh / 2.0)
+    } else {
+        // Non-empty: text has h=line_height, w=measured text width. The
+        // background rect is inflated by `padding=2` on each side, so the
+        // actual labelGroup bbox is {x:-2, y:-2, w:w+4, h:h+4}. Centring
+        // gives translate(-(w+4)/2 + 2, -(h+4)/2 + 2) = translate(-w/2, -h/2).
+        // The `_w/_h` are the font-measured width/height that match
+        // foreignObject sizing; we don't store them yet — fall back to 0,0
+        // for the non-empty branch which is exercised by 178/179/180 once
+        // we extend this. For now just return zeros so the empty case (177)
+        // still works.
+        (0.0, 0.0)
+    };
+    // Inner label group.
+    let label_attrs = format!(
+        r#" data-id="{did}" transform="translate({tx}, {ty})""#,
+        did = e.id,
+        tx = fmt_num(label_tx),
+        ty = fmt_num(label_ty),
+    );
+    // Build the tspan inner content. Empty → bare `<tspan>...</tspan>`.
+    // Non-empty → one `<tspan class="text-inner-tspan">` per markdown
+    // segment, joined by a leading space from index 1 onwards (mirrors
+    // upstream `updateTextContentAndStyles`).
+    let inner_tspans = if is_empty {
+        String::new()
+    } else {
+        build_inner_tspans(processed)
+    };
+    let outer_tspan = format!(
+        r#"<tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle">{inner}</tspan>"#,
+        inner = inner_tspans,
+    );
+    // For empty labels, only `<text>` is emitted inside the label group;
+    // the orphan rect-only `<g>` follows the closing of `<g class="edgeLabel">`.
+    // For non-empty, the labelGroup wrapping `<g>` (with rect + text) is
+    // emitted *inside* the label — but we don't yet implement non-empty here.
+    if is_empty {
+        format!(
+            r#"<g class="edgeLabel"{outer}><g class="label"{label_attrs}><text y="-10.1" text-anchor="middle">{outer_tspan}</text></g></g><g><rect class="background" style="stroke: none"></rect></g>"#,
+            outer = outer_transform,
+            label_attrs = label_attrs,
+            outer_tspan = outer_tspan,
+        )
+    } else {
+        // TODO: non-empty htmlLabels=false path. For now, fall back to the
+        // foreignObject form so existing fixtures (which already use the
+        // html path) keep working — only the non-html branch with a
+        // non-empty label is unimplemented. Affected fixtures: 178, 179,
+        // 180, 181, etc.
+        use crate::render::foreign_object::{
+            measure_html_markup_label, render_edge_label as fo_edge, HtmlLabelFont, LabelOpts,
+        };
+        use crate::render::shapes::types::{build_div_style_prefix, build_label_style};
+        let (w, h) = measure_html_markup_label(processed, &HtmlLabelFont::default(), 200.0, true);
+        let div_prefix = e
+            .label_style
+            .as_ref()
+            .map(|styles| build_div_style_prefix(styles))
+            .unwrap_or_default();
+        let span_label_style = e
+            .label_style
+            .as_ref()
+            .map(|styles| build_label_style(styles))
+            .unwrap_or_default();
+        let opts = LabelOpts {
+            data_id: Some(&e.id),
+            group_style: None,
+            wrap_in_p: true,
+            div_style_prefix: if div_prefix.is_empty() {
+                None
+            } else {
+                Some(&div_prefix)
+            },
+            label_style: if span_label_style.is_empty() {
+                None
+            } else {
+                Some(&span_label_style)
+            },
+            ..LabelOpts::default()
+        };
+        fo_edge(processed, lx, ly, w, h, opts)
+    }
+}
+
+/// Parse a markdown fragment (e.g. `1o **bold**` or `the *cat*`) into a
+/// sequence of `<tspan class="text-inner-tspan">` elements with
+/// `font-style`/`font-weight` set per em/strong. Mirrors upstream
+/// `markdownToLines` + `updateTextContentAndStyles`.
+///
+/// Currently used only as a stub for the empty-label case; the non-empty
+/// branch in `render_edge_label_text` is still TODO.
+fn build_inner_tspans(_text: &str) -> String {
+    // Placeholder — not exercised yet. The empty-label path in the caller
+    // bypasses this.
+    String::new()
 }
 
 /// Build the flowchart-specific CSS slice — a complete port of upstream's
