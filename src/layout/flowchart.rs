@@ -708,16 +708,6 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
     // resolves parallel-edge ordering between the same (src, dst) pair.
     let mut leaf_edges: Vec<unified::Edge> = Vec::new();
     let mut cluster_edges: Vec<unified::Edge> = Vec::new();
-    // Count how many user edges hit the same (start, end) pair upstream so we
-    // can reproduce upstream's `getEdgeId` index. Upstream's `flowDb.addLink`
-    // invokes both an outer push and an inner `addSingleLink` per user edge,
-    // so the synthetic per-pair counter advances by 2 each iteration.
-    let mut pair_total: HashMap<(String, String), usize> = HashMap::new();
-    for e in &d.edges {
-        *pair_total
-            .entry((e.start.clone(), e.end.clone()))
-            .or_insert(0) += 1;
-    }
     for e in &d.edges {
         let start = e.start.clone();
         let end = e.end.clone();
@@ -725,12 +715,13 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
             .entry((start.clone(), end.clone()))
             .and_modify(|c| *c += 1)
             .or_insert(0);
-        // Only double-step when the same (start, end) pair appears multiple
-        // times in the user input — that is the case where upstream's
-        // `addLink → addSingleLink` double-push is observable in the rendered
-        // edge ids (see cypress/flowchart/159 expecting `_0` / `_2`).
-        let total = *pair_total.get(&(start.clone(), end.clone())).unwrap_or(&1);
-        let counter = if total > 1 { raw * 2 } else { raw };
+        // Reproduce upstream `flowDb.addSingleLink` (mermaid v11 line 306-318):
+        //   if existingLinks.length === 0 → counter = 0
+        //   else                            → counter = existingLinks.length + 1
+        // Concretely: 1st duplicate gets `_0`, 2nd gets `_2`, 3rd `_3`, etc.
+        // Cypress/flowchart/159 (2 edges) → `_0`,`_2`; cypress/flowchart/55
+        // (3 edges, elk-fallback) → `_0`,`_2`,`_3`.
+        let counter = if raw == 0 { 0 } else { raw + 1 };
         let mut ue = build_edge(e, d, counter, &class_map, d.html_labels.unwrap_or(true));
         // Record original endpoints before retargeting so the isolation check
         // in dagre_bridge can test against the pre-retarget cluster IDs.
@@ -1221,10 +1212,7 @@ fn strip_html_for_measurement(s: &str) -> String {
         } else {
             // UTF-8-safe copy of the next char.
             let mut len = 1usize;
-            while len < 4
-                && i + len < bytes.len()
-                && (bytes[i + len] & 0xC0) == 0x80
-            {
+            while len < 4 && i + len < bytes.len() && (bytes[i + len] & 0xC0) == 0x80 {
                 len += 1;
             }
             out.push_str(&s[i..i + len]);

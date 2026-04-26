@@ -721,8 +721,13 @@ impl<'a> LineParser<'a> {
         // `click id callback(args) "tooltip"` OR `click id href "url" "tooltip"`
         // OR `click id "url" "tooltip"`
         // We'll do a simplified parse.
+        // Upstream `flowDb.setLink` / `setClickEvent` only mutate already-known
+        // vertices (`this.vertices.get(id)` early-returns when undefined), so
+        // a `click ID …` line referring to an unknown id is a no-op; do NOT
+        // synthesize a phantom vertex here. Cypress fixture 218 references
+        // `click B testClick` where `B` is never declared — upstream renders
+        // 8 vertices, our previous behaviour rendered 9 (extra orphan `B`).
         let (id, tail) = split_once_ws(rest);
-        self.ensure_vertex(id);
         let tail = tail.trim();
         let v = match self.diag.find_vertex_mut(id) {
             Some(v) => v,
@@ -966,16 +971,17 @@ impl<'a> LineParser<'a> {
 /// (`L_<start>_<end>_<index>`) and check whether `id` matches one of the
 /// already-recorded edges. The per-pair index follows the order in which
 /// duplicate `(start, end)` edges appear in the source, mirroring
-/// `mermaid-graphlib`'s `getEdgeId` counter.
+/// upstream `flowDb.addSingleLink` (existing=0 → 0, otherwise → existing+1).
 fn edge_id_matches_synthetic(id: &str, edges: &[crate::model::flowchart::Edge]) -> bool {
     use std::collections::HashMap;
     let mut pair_count: HashMap<(String, String), usize> = HashMap::new();
     for e in edges {
-        let n = pair_count
+        let n = *pair_count
             .entry((e.start.clone(), e.end.clone()))
             .and_modify(|c| *c += 1)
             .or_insert(0);
-        let synth = format!("L_{}_{}_{}", e.start, e.end, *n);
+        let counter = if n == 0 { 0 } else { n + 1 };
+        let synth = format!("L_{}_{}_{}", e.start, e.end, counter);
         if synth == id {
             return true;
         }
