@@ -452,6 +452,15 @@ fn compute_viewbox(
 
     // Node local bboxes (transform ignored — matching jsdom shim).
     for n in &l.nodes {
+        // Skip cyclic helper labelRects that the renderer also drops —
+        // they are dagre placeholders for self-loop expansion that the
+        // upstream pipeline does NOT render (see
+        // `is_cyclic_helper_from_anchor_rewrite`). Including them here
+        // would inflate the viewBox just like rendering them would.
+        if is_cyclic_helper_from_anchor_rewrite(n, l) {
+            continue;
+        }
+
         let w = n.width.unwrap_or(0.0);
         let h = n.height.unwrap_or(0.0);
 
@@ -581,6 +590,12 @@ fn compute_viewbox(
     // arrow_barb_neo=5.5; arrow_open / arrow_cross / arrow_circle are absent,
     // so they contribute no offset.
     for e in &l.edges {
+        // Skip self-loop edges that the renderer also drops: these would
+        // contribute degenerate path points that have no rendered visual
+        // counterpart but would inflate the viewBox.
+        if is_replaced_self_loop(e) || is_cyclic_segment_from_anchor_rewrite(e) {
+            continue;
+        }
         let Some(points) = &e.points else { continue };
         if points.is_empty() {
             continue;
@@ -615,6 +630,10 @@ fn compute_viewbox(
     // Upstream replaces FA icon tokens with <i> elements (zero width under
     // jsdom shim) before measuring, so we apply the same substitution.
     for e in &l.edges {
+        // Skip self-loop edges that the renderer drops (see edge-paths loop).
+        if is_replaced_self_loop(e) || is_cyclic_segment_from_anchor_rewrite(e) {
+            continue;
+        }
         let label_text = e.label.as_deref().unwrap_or("");
         let is_empty = label_text.is_empty();
         let (lw, lh) = if is_empty {
@@ -871,6 +890,12 @@ pub fn render(
             if l.isolated_cluster_ids.contains(parent) {
                 continue;
             }
+        }
+        // Skip cyclic helper labelRect nodes whose owner has only
+        // anchor-rewrite cyclic_segments — upstream's `expand_self_edge`
+        // is bypassed in that case (see `is_cyclic_segment_from_anchor_rewrite`).
+        if is_cyclic_helper_from_anchor_rewrite(n, l) {
+            continue;
         }
         // Prepend SVG id to dom_id — upstream prefixes the stored
         // domId with the diagram's SVG element id at lookup time
@@ -1327,6 +1352,45 @@ fn is_cyclic_segment_from_anchor_rewrite(e: &UEdge) -> bool {
     let os = e.extra.get("orig_start").map(|s| s.as_str()).unwrap_or("");
     let od = e.extra.get("orig_end").map(|s| s.as_str()).unwrap_or("");
     !os.is_empty() && !od.is_empty() && os != od
+}
+
+/// Cyclic helper labelRect nodes (`In---In---1`, `In---In---2`) are inserted
+/// by dagre's `expand_self_edge` together with three `cyclic_segment` sub-edges.
+/// When ALL of those segments came from cluster-anchor rewriting (a user edge
+/// `Sub --> In` where `In` is `Sub`'s anchor — see `is_cyclic_segment_from_anchor_rewrite`),
+/// upstream mermaid skips the entire expansion: no helper labelRects are
+/// rendered. Mirror that here so the outer-node loop drops these placeholders
+/// rather than emitting the degenerate `<rect width="0.1" height="0.1">`
+/// placeholders that would otherwise widen `cluster Sub` and the diagram bbox.
+fn is_cyclic_helper_from_anchor_rewrite(node: &UNode, l: &FlowchartLayout) -> bool {
+    if node.extra.get("synthetic").map(|s| s.as_str()) != Some("cyclic_helper") {
+        return false;
+    }
+    let owner = match node.extra.get("cyclic_owner").map(|s| s.as_str()) {
+        Some(o) if !o.is_empty() => o,
+        _ => return false,
+    };
+    // Find any cyclic_segment edge sharing this owner. If at least one
+    // segment is a *real* user self-loop (orig_start == orig_end == owner),
+    // keep the helper. Otherwise (every segment came from anchor rewriting,
+    // os != od), drop it.
+    let mut saw_segment = false;
+    for e in &l.edges {
+        if e.extra.get("synthetic").map(|s| s.as_str()) != Some("cyclic_segment") {
+            continue;
+        }
+        if e.extra.get("cyclic_owner").map(|s| s.as_str()) != Some(owner) {
+            continue;
+        }
+        saw_segment = true;
+        if !is_cyclic_segment_from_anchor_rewrite(e) {
+            // A real self-loop segment exists for this owner → keep helper.
+            return false;
+        }
+    }
+    // No real segments — every cyclic_segment edge for this owner is an
+    // anchor-rewrite artefact, so the helper labelRect must be dropped.
+    saw_segment
 }
 
 /// Return true if `node_id` has any ancestor that is an isolated cluster.
