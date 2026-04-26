@@ -252,6 +252,26 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                     adjustment: (0.0, 0.0),
                 }
             }
+            // Upstream hexagon.ts: m = h/f (f=4 for default look), w_total = w + 2m
+            // local points: [(m, 0), (w-m, 0), (w, -h/2), (w-m, -h), (m, -h), (0, -h/2)]
+            // intersectPolygon: minX=0, minY=-h → left = cx - w/2, top = cy + h/2.
+            // Default look only (look=neo uses f=3.5, but neo isn't on the byte-exact path).
+            "hexagon" | "hex" => {
+                let m = h / 4.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (cx - w / 2.0 + m, cy + h / 2.0),
+                        (cx + w / 2.0 - m, cy + h / 2.0),
+                        (cx + w / 2.0, cy),
+                        (cx + w / 2.0 - m, cy - h / 2.0),
+                        (cx - w / 2.0 + m, cy - h / 2.0),
+                        (cx - w / 2.0, cy),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
             _ => continue,
         };
         info_map.insert(n.id.as_str(), info);
@@ -358,7 +378,7 @@ fn intersect_line(
     let r1 = a2 * p1.0 + b2 * p1.1 + c2;
     let r2 = a2 * p2.0 + b2 * p2.1 + c2;
     let epsilon = 1e-6_f64;
-    if r1.abs() < epsilon && r2.abs() < epsilon && r1 * r2 > 0.0 {
+    if r1.abs() > epsilon && r2.abs() > epsilon && r1 * r2 > 0.0 {
         return None;
     }
     let denom = a1 * b2 - a2 * b1;
