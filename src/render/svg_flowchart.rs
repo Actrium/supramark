@@ -405,6 +405,120 @@ fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     out
 }
 
+/// Post-process a rendered node SVG to honour `font-size:Xpx` declared in
+/// the node's resolved styles (typically via `classDef name font-size:30px`).
+///
+/// The shape renderers in `shapes/*` always pass `HtmlLabelFont::default()`
+/// (14 px) to `shape_label_block`, which means the emitted foreignObject
+/// `width`/`height`, the inner `<div>` width, and the surrounding label
+/// `<g>` translate are all measured at the default font. Upstream however
+/// inlines `font-size:30px !important` on the `<div>` (so jsdom shim measures
+/// the bbox at 30 px), inlines `font-size:30px !important` on the label
+/// `<g>`, and adds `font-size:30px !important` to the inner `<span>`.
+///
+/// We mirror that here by:
+/// 1. Re-measuring the label HTML at the requested font-size.
+/// 2. Substituting the literal numbers in the rendered SVG (foreignObject
+///    width/height and the matching label `<g>` translate).
+/// 3. Inserting the inline `font-size:Xpx !important` on the label `<g>`,
+///    on the inner `<div>` (PRE-pending the existing style), and on the
+///    `<span class="nodeLabel ">`.
+///
+/// Cypress fixture 150 (`classDef larger font-size:30px`) relies on this.
+fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
+    use crate::render::foreign_object::HtmlLabelFont;
+    use crate::render::shapes::types::fmt_num;
+
+    let css = match node.css_styles.as_deref() {
+        Some(s) => s,
+        None => return svg.to_string(),
+    };
+    let font_size_px = match crate::layout::flowchart::styles_font_size_px_pub(css) {
+        Some(v) => v,
+        None => return svg.to_string(),
+    };
+    let label = match node.label.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => return svg.to_string(),
+    };
+    let is_markdown = node.label_type.as_deref() == Some("markdown");
+    let escaped = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
+    let bold = node_styles_have_bold(css);
+    let default_font = HtmlLabelFont {
+        font_family: None,
+        font_size_px: None,
+        bold: if bold { Some(true) } else { None },
+    };
+    let (lw_default, lh_default) = crate::render::foreign_object::measure_html_markup_label(
+        &for_measure,
+        &default_font,
+        200.0,
+        true,
+    );
+    let sized_font = HtmlLabelFont {
+        font_family: None,
+        font_size_px: Some(font_size_px),
+        bold: if bold { Some(true) } else { None },
+    };
+    let (lw_sized, lh_sized) = crate::render::foreign_object::measure_html_markup_label(
+        &for_measure,
+        &sized_font,
+        200.0,
+        true,
+    );
+    if (lw_sized - lw_default).abs() < 1e-9 && (lh_sized - lh_default).abs() < 1e-9 {
+        return svg.to_string();
+    }
+
+    // 1. Replace foreignObject width / height numbers.
+    let needle_fo = format!(
+        r#"<foreignObject width="{}" height="{}""#,
+        fmt_num(lw_default),
+        fmt_num(lh_default)
+    );
+    let replace_fo = format!(
+        r#"<foreignObject width="{}" height="{}""#,
+        fmt_num(lw_sized),
+        fmt_num(lh_sized)
+    );
+    let mut out = svg.replace(&needle_fo, &replace_fo);
+
+    // 2. Replace the label `<g>` translate (`-lw/2`, `-lh/2`).
+    let needle_tx = format!(
+        r#"<g class="label" style="" transform="translate({}, {})""#,
+        fmt_num(-lw_default / 2.0),
+        fmt_num(-lh_default / 2.0)
+    );
+    let replace_tx = format!(
+        r#"<g class="label" style="font-size:{fs}px !important" transform="translate({}, {})""#,
+        fmt_num(-lw_sized / 2.0),
+        fmt_num(-lh_sized / 2.0),
+        fs = fmt_num(font_size_px)
+    );
+    out = out.replace(&needle_tx, &replace_tx);
+
+    // 3. Inline font-size on the inner `<div>` and `<span>`.
+    let div_needle = r#"<div style="display: table-cell;"#;
+    let div_replace = format!(
+        r#"<div style="font-size: {fs}px !important; display: table-cell;"#,
+        fs = fmt_num(font_size_px)
+    );
+    out = out.replace(div_needle, &div_replace);
+    let span_needle = r#"<span class="nodeLabel ">"#;
+    let span_replace = format!(
+        r#"<span style="font-size:{fs}px !important" class="nodeLabel ">"#,
+        fs = fmt_num(font_size_px)
+    );
+    out = out.replace(span_needle, &span_replace);
+
+    out
+}
+
 /// the `x` attribute of the `<text class="flowchartTitleText">` element it
 /// appends — the title is then measured by jsdom's getBBox shim and pushes the
 /// outer bbox horizontally.
@@ -930,6 +1044,7 @@ pub fn render(
             Ok(svg) => {
                 let patched = bold_postprocess_node_svg(&prefixed, &svg);
                 let patched = diamond_br_postprocess(&prefixed, &patched);
+                let patched = font_size_postprocess_node_svg(&prefixed, &patched);
                 let patched = link_postprocess_node_svg(&prefixed, &patched);
                 inner.push_str(&patched);
             }

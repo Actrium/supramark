@@ -577,7 +577,8 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         // `getBoundingClientRect()` on the rendered foreignObject div).
         let merged_styles = collect_styles(v, &class_map);
         let is_bold = styles_have_bold(&merged_styles);
-        let (w, h) = measure_vertex_box(v, is_bold);
+        let font_size_px = styles_font_size_px(&merged_styles);
+        let (w, h) = measure_vertex_box(v, is_bold, font_size_px);
         let label_text = display_label(v);
         let mut node = unified::Node::default();
         node.id = v.id.clone();
@@ -863,7 +864,7 @@ fn strip_markdown_for_measure(label: &str) -> String {
 /// `is_bold` is set when the vertex's resolved styles include
 /// `font-weight:bold` — text segments then measure at bold weight to
 /// match upstream's `getBoundingClientRect()` on the foreignObject div.
-fn measure_vertex_box(v: &Vertex, is_bold: bool) -> (f64, f64) {
+fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (f64, f64) {
     let label = display_label(v);
     // For markdown labels, the `**bold**` syntax is rendered as HTML and
     // textContent strips the markers — measure the plain-text equivalent.
@@ -877,7 +878,7 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool) -> (f64, f64) {
     } else {
         label.clone()
     };
-    let (tw, th) = measure_text(&measure_label, is_bold);
+    let (tw, th) = measure_text_with_size(&measure_label, is_bold, font_size_px);
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
     //
@@ -1045,12 +1046,24 @@ fn split_html_into_lines(s: &str) -> Vec<String> {
 /// inline style) include `font-weight:bold` — in which case ALL text
 /// segments measure at bold width regardless of inner `<strong>` tags.
 fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
+    measure_text_with_size(label, force_bold, None)
+}
+
+/// Like [`measure_text`] but lets the caller override the font-size used
+/// for both width and line-height. `font_size_px = None` falls back to
+/// the default `LABEL_FONT_SIZE` (14 px). When the resolved styles
+/// include `font-size: 30px` etc. the rendered foreignObject `<div>`'s
+/// inline `font-size:30px !important;` propagates to its `<span>` /
+/// `<p>` content (cypress fixture 150's `classDef larger font-size:30px`),
+/// so the jsdom shim measures the bbox at the larger font.
+fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f64>) -> (f64, f64) {
+    let font_size = font_size_px.unwrap_or(LABEL_FONT_SIZE);
     if label.is_empty() {
-        return (0.0, LABEL_FONT_SIZE);
+        return (0.0, font_size);
     }
     // Strip FA icon tokens first — they render as <i> elements with no width.
     let stripped = strip_fa_icons(label);
-    let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
+    let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, font_size, false, false);
 
     // Upstream measures the rendered foreignObject `<div>` via
     // `el.textContent`, which strips ALL HTML tags (including `<br/>`) and
@@ -1066,7 +1079,7 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
     let width = font_metrics::text_width(
         &concat,
         DEFAULT_FONT_FAMILY,
-        LABEL_FONT_SIZE,
+        font_size,
         force_bold,
         false,
     );
@@ -1344,6 +1357,58 @@ fn stroke_descriptor(s: EdgeStroke) -> (&'static str, &'static str) {
 /// measurement when a vertex's classDef / inline style applies bold —
 /// matching upstream's `getBoundingClientRect()` on the bold-styled
 /// foreignObject div.
+/// Public re-export for the renderer's `font_size_postprocess_node_svg`.
+/// Keeping the helper inside this module so the layout-side measurement
+/// and the render-side post-processor share a single parser, avoiding
+/// drift between resolved widths and emitted SVG numbers.
+pub fn styles_font_size_px_pub(styles: &[String]) -> Option<f64> {
+    styles_font_size_px(styles)
+}
+
+/// Extract a `font-size` value (in px) from a list of CSS declarations.
+///
+/// Recognises the common forms emitted by `classDef`/`style` directives:
+///   - `font-size:30px`
+///   - `font-size: 30px !important`
+///   - `font-size: 1.25em` (treated as multiplier × `LABEL_FONT_SIZE`).
+///
+/// Returns `None` when no `font-size` is set; the caller falls back to the
+/// default 14 px label font. Used to correct width / height measurement of
+/// nodes whose `classDef` upgrades the rendered foreignObject font (e.g.
+/// cypress fixture 150's `classDef larger font-size:30px`).
+fn styles_font_size_px(styles: &[String]) -> Option<f64> {
+    for s in styles {
+        let trimmed = s.trim().trim_end_matches(';');
+        let Some(colon) = trimmed.find(':') else {
+            continue;
+        };
+        let key = trimmed[..colon].trim();
+        if !key.eq_ignore_ascii_case("font-size") {
+            continue;
+        }
+        let value = trimmed[colon + 1..].trim();
+        let val_no_important = value
+            .trim_end_matches("!important")
+            .trim()
+            .trim_end_matches('!')
+            .trim();
+        if let Some(stripped) = val_no_important.strip_suffix("px") {
+            if let Ok(n) = stripped.trim().parse::<f64>() {
+                return Some(n);
+            }
+        } else if let Some(stripped) = val_no_important.strip_suffix("em") {
+            if let Ok(n) = stripped.trim().parse::<f64>() {
+                return Some(n * LABEL_FONT_SIZE);
+            }
+        } else if let Some(stripped) = val_no_important.strip_suffix("rem") {
+            if let Ok(n) = stripped.trim().parse::<f64>() {
+                return Some(n * LABEL_FONT_SIZE);
+            }
+        }
+    }
+    None
+}
+
 fn styles_have_bold(styles: &[String]) -> bool {
     for s in styles {
         let trimmed = s.trim().trim_end_matches(';');
