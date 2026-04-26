@@ -1810,15 +1810,26 @@ fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) 
         .unwrap_or(false)
 }
 
-/// Apply the upstream `markerOffsets` visual offset to path endpoints.
+/// Apply the upstream `markerOffsets` visual offset to path points.
 ///
-/// Upstream's `getLineFunctionsWithOffset` adjusts the first/last path
-/// point by `markerOffset * sin(angle)` so the arrowhead doesn't overlap
-/// the node boundary. Only `arrow_point` (and the barb variants) carry an
-/// offset in the active `markerOffsets` table — `arrow_cross` and
-/// `arrow_circle` are intentionally absent (`markerOffsets2` defines them
-/// but is unused), so circle/cross arrowheads sit flush against the node
-/// boundary with no path retraction.
+/// Mirror of upstream's `getLineFunctionsWithOffset` from
+/// `src/utils/lineWithOffset.ts`. Each point gets two contributions:
+///
+/// 1. *Endpoint base offset* (only at `i == 0` for `arrowTypeStart` and at
+///    `i == last` for `arrowTypeEnd`) shifts the arrowhead so it does not
+///    overlap the node boundary.
+/// 2. *Extra-room adjustment* applied per-point: when a point lies within
+///    `markerHeight` of either endpoint along BOTH axes, the offset is
+///    extended by `markerHeight + 1 - difference` in the direction away
+///    from that endpoint. This is what produces the cluster-source `-4`
+///    shift on the START side even when `arrowTypeStart == "none"` —
+///    short cluster→cluster edges where every point is within the end
+///    marker's reach get pulled back together with the last point.
+///
+/// Only `arrow_point` (and the barb variants) carry an offset in the
+/// active `markerOffsets` table — `arrow_cross` and `arrow_circle` are
+/// intentionally absent (`markerOffsets2` defines them but is unused),
+/// so circle/cross arrowheads sit flush against the node boundary.
 fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str) {
     fn marker_offset_for(arrow: &str) -> Option<f64> {
         match arrow {
@@ -1834,37 +1845,103 @@ fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str
         return;
     }
 
-    // End offset: applied to last point.
-    // Upstream calculateDeltaAndAngle(last, prev): deltaX = prev.x - last.x.
-    // x_offset = mo * cos(atan(dy/dx)) * sign(deltaX) = mo * deltaX/len
-    // y_offset = mo * |sin(atan(dy/dx))| * sign(deltaY) = mo * |deltaY|/len * sign(deltaY)
-    if let Some(mo) = marker_offset_for(arrow_end) {
-        let last = pts[n - 1];
-        let prev = pts[n - 2];
-        let dx = prev.x - last.x;
-        let dy = prev.y - last.y;
-        let blen = (dx * dx + dy * dy).sqrt();
-        if blen > 0.0 {
-            // x: mo * cos(atan(dy/dx)) * sign(dx) = mo * |dx|/len * sign(dx) = mo * dx/len
-            pts[n - 1].x += mo * dx / blen;
-            // y: mo * |sin| * sign(dy) = mo * |dy|/len * sign(dy) = mo * |dy|/len * (dy/|dy|)
-            pts[n - 1].y += mo * dy.abs() / blen * if dy >= 0.0 { 1.0 } else { -1.0 };
-        }
+    let start_mo = marker_offset_for(arrow_start);
+    let end_mo = marker_offset_for(arrow_end);
+    if start_mo.is_none() && end_mo.is_none() {
+        return;
     }
 
-    // Start offset: applied to first point.
-    // calculateDeltaAndAngle(first, second): deltaX = second.x - first.x.
-    if let Some(mo) = marker_offset_for(arrow_start) {
-        let first = pts[0];
-        let next = pts[1];
-        let dx = next.x - first.x;
-        let dy = next.y - first.y;
-        let flen = (dx * dx + dy * dy).sqrt();
-        if flen > 0.0 {
-            pts[0].x += mo * dx / flen;
-            pts[0].y += mo * dy.abs() / flen * if dy >= 0.0 { 1.0 } else { -1.0 };
-        }
-    }
+    // Snapshot first/last in their pre-adjustment form. Upstream's d3
+    // line generator passes the un-adjusted point array as `data5` to
+    // each accessor — `data5[0]` and `data5[last]` reflect input
+    // coordinates, NOT cumulative offsets.
+    let first = pts[0];
+    let last = pts[n - 1];
+
+    // DIRECTION used by the extra-room sign flip. Upstream:
+    //   x: data5[0].x < data5[last].x ? "left" : "right"
+    //   y: data5[0].y < data5[last].y ? "down" : "up"
+    let dir_x_right = first.x >= last.x;
+    let dir_y_up = first.y >= last.y;
+
+    let adjusted: Vec<Point> = pts
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            let mut off_x = 0.0_f64;
+            let mut off_y = 0.0_f64;
+
+            // Endpoint base offsets.
+            if i == 0 {
+                if let Some(mo) = start_mo {
+                    let next = pts[1];
+                    let dx = next.x - first.x;
+                    let dy = next.y - first.y;
+                    let blen = (dx * dx + dy * dy).sqrt();
+                    if blen > 0.0 {
+                        // mo * cos(atan(dy/dx)) * sign(dx)  ==  mo * dx / blen
+                        off_x += mo * dx / blen;
+                        // mo * |sin(atan(dy/dx))| * sign(dy)  ==  mo * dy / blen
+                        off_y += mo * dy / blen;
+                    }
+                }
+            } else if i == n - 1 {
+                if let Some(mo) = end_mo {
+                    let prev = pts[n - 2];
+                    let dx = prev.x - last.x;
+                    let dy = prev.y - last.y;
+                    let blen = (dx * dx + dy * dy).sqrt();
+                    if blen > 0.0 {
+                        off_x += mo * dx / blen;
+                        off_y += mo * dy / blen;
+                    }
+                }
+            }
+
+            // Extra-room adjustment toward the END.
+            if let Some(end_h) = end_mo {
+                let diff_to_end_x = (p.x - last.x).abs();
+                let diff_y_end = (p.y - last.y).abs();
+                if diff_to_end_x < end_h && diff_to_end_x > 0.0 && diff_y_end < end_h {
+                    let adj = end_h + 1.0 - diff_to_end_x;
+                    let signed = if dir_x_right { -adj } else { adj };
+                    off_x -= signed;
+                }
+                let diff_to_end_y = (p.y - last.y).abs();
+                let diff_x_end = (p.x - last.x).abs();
+                if diff_to_end_y < end_h && diff_to_end_y > 0.0 && diff_x_end < end_h {
+                    let adj = end_h + 1.0 - diff_to_end_y;
+                    let signed = if dir_y_up { -adj } else { adj };
+                    off_y -= signed;
+                }
+            }
+
+            // Extra-room adjustment toward the START.
+            if let Some(start_h) = start_mo {
+                let diff_to_start_x = (p.x - first.x).abs();
+                let diff_y_start = (p.y - first.y).abs();
+                if diff_to_start_x < start_h && diff_to_start_x > 0.0 && diff_y_start < start_h {
+                    let adj = start_h + 1.0 - diff_to_start_x;
+                    let signed = if dir_x_right { -adj } else { adj };
+                    off_x += signed;
+                }
+                let diff_to_start_y = (p.y - first.y).abs();
+                let diff_x_start = (p.x - first.x).abs();
+                if diff_to_start_y < start_h && diff_to_start_y > 0.0 && diff_x_start < start_h {
+                    let adj = start_h + 1.0 - diff_to_start_y;
+                    let signed = if dir_y_up { -adj } else { adj };
+                    off_y += signed;
+                }
+            }
+
+            Point {
+                x: p.x + off_x,
+                y: p.y + off_y,
+            }
+        })
+        .collect();
+
+    *pts = adjusted;
 }
 
 /// Mirror of upstream mermaid's `outsideNode(node, point)`. The
