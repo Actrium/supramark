@@ -827,9 +827,14 @@ fn canon_shape(s: &str) -> &'static str {
 }
 
 fn display_label(v: &Vertex) -> String {
+    // Fall back to the id only when the source has no label record at all
+    // (e.g. plain `A`). When the source explicitly supplied an empty / blank
+    // label such as `A(( ))`, upstream `vertex.text` is the empty string and
+    // the rendered foreignObject contains no visible text — falling back to
+    // the id here inflates the node bbox and leaks the id into the SVG.
     match v.label.as_ref() {
-        Some(l) if !l.text.is_empty() => l.text.clone(),
-        _ => v.id.clone(),
+        Some(l) => l.text.clone(),
+        None => v.id.clone(),
     }
 }
 

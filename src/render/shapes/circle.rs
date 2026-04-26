@@ -44,6 +44,23 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
             &xml_escape(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
+    } else {
+        // Upstream's `labelHelper` always emits the `<g class="label">` block
+        // (with `<rect>` marker, empty `<foreignObject width="0">`, and an
+        // empty `<span class="nodeLabel ">`), even when the source supplies
+        // an empty label like `A(( ))`. The label block contributes zero to
+        // the visual result but is required for byte-exact parity. See
+        // cypress/flowchart/88 + demos/flowchart/30, /31, /61.
+        let font = crate::render::foreign_object::HtmlLabelFont::default();
+        let (w, h) =
+            crate::render::foreign_object::measure_html_label("", &font, 200.0, true);
+        let opts = crate::render::foreign_object::LabelOpts {
+            wrap_in_p: false,
+            ..crate::render::foreign_object::LabelOpts::default()
+        };
+        out.push_str(&crate::render::foreign_object::render_node_label(
+            "", w, h, &opts,
+        ));
     }
     out.push_str("</g>");
     Ok(out)
