@@ -500,6 +500,25 @@ fn compute_viewbox(
                     2.0 * r,
                 );
             }
+            "trapezoid" | "trap" | "inv_trapezoid" | "invertedTrapezoid"
+            | "lean_left" | "lean-left" | "lean_right" | "lean-right" => {
+                // `node.width` already carries the visual width
+                // (= base_w + 2*shear). polygon raw points span
+                //   x ∈ [-shear, base_w + shear] = [-shear, w - shear]
+                //   y ∈ [-h, 0]
+                // and the polygon's own transform is ignored by the jsdom shim.
+                let shear = h / 2.0;
+                expand(
+                    &mut min_x,
+                    &mut min_y,
+                    &mut max_x,
+                    &mut max_y,
+                    -shear,
+                    -h,
+                    w,
+                    h,
+                );
+            }
             _ => {
                 // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
                 expand(

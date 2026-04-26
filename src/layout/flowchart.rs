@@ -814,8 +814,26 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool) -> (f64, f64) {
         "stadium" | "pill" => (th + p * 2.0, p * 2.0),
         "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
         "subroutine" => (p * 4.0, p * 2.0),
-        "trapezoid" | "trap" | "inv_trapezoid" | "invertedTrapezoid" | "lean_left"
-        | "lean-left" | "lean_right" | "lean-right" => (p * 4.0, p * 2.0),
+        // Upstream trapezoid.ts / leanLeft.ts / leanRight.ts:
+        //   labelPaddingX = labelPaddingY = nodePadding (look=neo doubles X)
+        //   w = bbox.width + nodePadding,  h = bbox.height + nodePadding
+        //   updateNodeBounds → node.width = polygon.getBBox().width
+        //   = w + 2*shear = w + h (visual width fed to dagre).
+        // We bake that here so dagre sees the correct horizontal extent;
+        // shapes recover the base w as `node.width - node.height`.
+        "trapezoid" | "trap" | "lean_left" | "lean-left" | "lean_right" | "lean-right" => {
+            let h_inner = th + p;
+            let w_inner = tw + p;
+            return (w_inner + h_inner, h_inner);
+        }
+        // Upstream invertedTrapezoid.ts:
+        //   w = bbox.width + p*2,  h = bbox.height + p*2 (non-neo)
+        //   visual width = w + 2*shear = w + h.
+        "inv_trapezoid" | "invertedTrapezoid" => {
+            let h_inner = th + p * 2.0;
+            let w_inner = tw + p * 2.0;
+            return (w_inner + h_inner, h_inner);
+        }
         "round" | "rounded" => (p * 2.0, p * 2.0),
         _ => (p * 4.0, p * 2.0), // rect / squareRect: labelPaddingX = p*2, ×2 sides = p*4
     };

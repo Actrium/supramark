@@ -300,6 +300,62 @@ pub fn emit_polygon_node(node: &crate::layout::unified::types::Node, pts: &[(f64
     out
 }
 
+/// Emit a polygon-shaped node block where the inner `<polygon>` carries
+/// its own `transform="translate(ptx, pty)"` (no space after comma —
+/// upstream `insertPolygonShape.ts` builds the string by direct
+/// concatenation: `'translate(' + -w/2 + ',' + h/2 + ')'`).
+///
+/// Attribute order matches upstream: `points → class → transform`.
+/// `pts` are kept in pre-translate (raw upstream) coordinates.
+///
+/// Used by trapezoid / inv_trapezoid / lean_left / lean_right.
+pub fn emit_polygon_node_with_transform(
+    node: &crate::layout::unified::types::Node,
+    pts: &[(f64, f64)],
+    ptx: f64,
+    pty: f64,
+) -> String {
+    let classes = get_node_classes(node.look.as_deref(), node.css_classes.as_deref(), None);
+    let id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
+    let tx = node.x.unwrap_or(0.0);
+    let ty = node.y.unwrap_or(0.0);
+    let label = node.label.clone().unwrap_or_default();
+    let pts_attr: Vec<String> = pts
+        .iter()
+        .map(|(x, y)| format!("{},{}", fmt_num(*x), fmt_num(*y)))
+        .collect();
+    let data_look = match node.look.as_deref() {
+        Some(look) if !look.is_empty() => format!(r#" data-look="{}""#, look),
+        _ => String::new(),
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="{classes}" id="{id}"{data_look} transform="translate({tx}, {ty})">"#,
+        classes = classes,
+        id = xml_escape(&id),
+        data_look = data_look,
+        tx = fmt_num(tx),
+        ty = fmt_num(ty),
+    ));
+    // Note: inner translate emitted without a space after the comma to
+    // match d3's string-concat behaviour in upstream `insertPolygonShape`.
+    out.push_str(&format!(
+        r#"<polygon points="{p}" class="label-container" transform="translate({ptx},{pty})"></polygon>"#,
+        p = pts_attr.join(" "),
+        ptx = fmt_num(ptx),
+        pty = fmt_num(pty),
+    ));
+    if !label.is_empty() {
+        out.push_str(&crate::render::foreign_object::shape_label_block(
+            &xml_escape(&label),
+            &crate::render::foreign_object::HtmlLabelFont::default(),
+        ));
+    }
+    out.push_str("</g>");
+    out
+}
+
 /// Convert a CSS hex colour value (e.g. `#fff`, `#f9a0c2`) to the
 /// `rgb(r, g, b)` notation that upstream mermaid emits when applying
 /// inline label styles via `applyStyle(div, labelStyle)`.
