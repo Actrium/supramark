@@ -731,7 +731,7 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         // edge ids (see cypress/flowchart/159 expecting `_0` / `_2`).
         let total = *pair_total.get(&(start.clone(), end.clone())).unwrap_or(&1);
         let counter = if total > 1 { raw * 2 } else { raw };
-        let mut ue = build_edge(e, d, counter, &class_map);
+        let mut ue = build_edge(e, d, counter, &class_map, d.html_labels.unwrap_or(true));
         // Record original endpoints before retargeting so the isolation check
         // in dagre_bridge can test against the pre-retarget cluster IDs.
         ue.extra.insert("orig_start".into(), e.start.clone());
@@ -1118,20 +1118,48 @@ fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
 /// concatenated plain text as a single line. Sources with `<br>` line breaks
 /// therefore measure to the same width as the joined text would, NOT to the
 /// raw markup width that would include the literal `<br>` characters.
-fn measure_edge_label(text: &str) -> (f64, f64) {
+///
+/// `html_labels` toggles the htmlLabels=true (default, foreignObject) vs
+/// htmlLabels=false (text/tspan with `<rect>` background) measurement. In
+/// the htmlLabels=false branch upstream's `bbox = labelGroup.getBBox()`
+/// inflates the text bbox by the rect's 2-px padding on every side
+/// (createText.ts:178-183), so the dimensions dagre sees gain `+4` on
+/// each axis.
+///
+/// `is_markdown` controls whether we strip paired markdown emphasis
+/// markers before measuring — under htmlLabels=false the rendered text
+/// content drops the `**`/`*`/`__`/`_` markers, so the bbox width
+/// follows the post-strip text.
+fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64, f64) {
     const EDGE_LABEL_FONT: &str = "sans-serif";
     const EDGE_LABEL_SIZE: f64 = 14.0;
     let h = font_metrics::line_height(EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
     if text.is_empty() {
         return (0.0, h);
     }
+    let measure_text = if !html_labels && is_markdown {
+        // Under htmlLabels=false the SVG <text> textContent comes from
+        // `markdownToLines` → `updateTextContentAndStyles`, which only
+        // emits the marker-free text. Reuse the foreign_object helper
+        // that mirrors `markdownToHTML`'s strip behaviour so the
+        // measured width matches what jsdom's getBBox() would see.
+        crate::render::foreign_object::markdown_label_to_html(text)
+    } else {
+        text.to_string()
+    };
     // Mirror `parse_html_text_segments`/textContent semantics: strip HTML
     // tags (`<br>`, `<strong>`, …) and decode entities, then measure the
     // result as ONE line — `<br>` does not split because `textContent`
     // collapses break tags. `\n` characters survive as whitespace and are
     // dropped here to match upstream's `measureTextBlock` shim.
-    let plain = strip_html_for_measurement(text);
+    let plain = strip_html_for_measurement(&measure_text);
     let w = font_metrics::text_width(&plain, EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
+    if !html_labels {
+        // `bbox` of labelGroup = unionOf(rect{-2,-2,w+4,h+4}, text{0,0,w,h})
+        //                     = {x:-2, y:-2, w:w+4, h:h+4}
+        // → dagre sees the inflated dimensions.
+        return (w + 4.0, h + 4.0);
+    }
     (w, h)
 }
 
@@ -1211,6 +1239,7 @@ fn build_edge<'a>(
     d: &FlowchartDiagram,
     pair_counter: usize,
     class_map: &BTreeMap<&'a str, &'a ClassDef>,
+    html_labels: bool,
 ) -> unified::Edge {
     let mut ue = unified::Edge::default();
     // Custom-id syntax `A name@-->B` lets the source set an explicit edge id
@@ -1237,7 +1266,12 @@ fn build_edge<'a>(
     // labelpos="c" centres the label on the spline (upstream flowchart default).
     ue.labelpos = Some("c".into());
     let label_text = e.label.as_ref().map(|l| l.text.as_str()).unwrap_or("");
-    let (lw, lh) = measure_edge_label(label_text);
+    let is_markdown_label = e
+        .label
+        .as_ref()
+        .map(|l| matches!(l.kind, crate::model::flowchart::LabelKind::Markdown))
+        .unwrap_or(false);
+    let (lw, lh) = measure_edge_label(label_text, html_labels, is_markdown_label);
     ue.extra.insert("label_width".into(), lw.to_string());
     ue.extra.insert("label_height".into(), lh.to_string());
 

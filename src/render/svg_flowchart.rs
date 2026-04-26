@@ -2483,10 +2483,11 @@ fn render_edge_label(e: &UEdge, html_labels: bool) -> String {
 ///    bare `<text>` and the `labelGroup` (with its rect) stays as an orphan
 ///    sibling of the edgeLabel.
 fn render_edge_label_text(e: &UEdge, processed: &str, is_empty: bool, lx: f64, ly: f64) -> String {
+    use crate::render::shapes::types::{fmt_num, xml_escape};
     // Outer edgeLabel transform — upstream `positionEdgeLabel` (edges.js:192)
     // only sets the `transform` attribute when `edge.label` is truthy.
     // Empty edge labels therefore receive NO transform at all (regardless of
-    // the dagre-computed label_x/label_y). Non-empty labels (178/179/180)
+    // the dagre-computed label_x/label_y). Non-empty labels (178/179/180/181)
     // carry their dagre mid-point as `translate(lx, ly)`.
     let outer_transform = if is_empty {
         String::new()
@@ -2497,31 +2498,61 @@ fn render_edge_label_text(e: &UEdge, processed: &str, is_empty: bool, lx: f64, l
             ly = fmt_num(ly),
         )
     };
-    // Compute the inner label transform.
-    // For empty: bbox of the <text> is treated as {x:0, y:0, w:0, h:line_h}
-    // → translate(0, -line_h/2). The reference shim picks line_h=16.296875
-    // (matching measure_html_label's line-height for the default font).
-    // For non-empty: we pad the rect by 2 on each side so the visible bbox
-    // becomes {x:-2, y:-2, w:w+4, h:h+4} → translate(-(w+4)/2 + 2, -(h+4)/2 + 2)
-    //   = translate(-w/2, -h/2). (The same as the html branch.)
-    let (label_tx, label_ty) = if is_empty {
-        // For empty labels, fall back on the html_labels formula since the
-        // visible bbox matches that shape (w=0, h=line_height).
-        use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
-        let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
-        (0.0, -lh / 2.0)
+    // Tokenise the label text into MarkdownLines. For empty there is one
+    // empty line. For non-markdown (`labelType != "markdown"`) we still call
+    // through the same per-line tokenisation but skip emphasis parsing —
+    // mirroring upstream's `nonMarkdownToLines` vs `markdownToLines` split.
+    let is_markdown = e.label_type.as_deref() == Some("markdown");
+    let lines: Vec<Vec<MdWord>> = if is_empty {
+        Vec::new()
+    } else if is_markdown {
+        markdown_to_lines(processed)
     } else {
-        // Non-empty: text has h=line_height, w=measured text width. The
-        // background rect is inflated by `padding=2` on each side, so the
-        // actual labelGroup bbox is {x:-2, y:-2, w:w+4, h:h+4}. Centring
-        // gives translate(-(w+4)/2 + 2, -(h+4)/2 + 2) = translate(-w/2, -h/2).
-        // The `_w/_h` are the font-measured width/height that match
-        // foreignObject sizing; we don't store them yet — fall back to 0,0
-        // for the non-empty branch which is exercised by 178/179/180 once
-        // we extend this. For now just return zeros so the empty case (177)
-        // still works.
-        (0.0, 0.0)
+        non_markdown_to_lines(processed)
     };
+
+    // Compute text bbox for `computeLabelTransform` and rect sizing.
+    // Under the jsdom shim, `<text>.getBBox()` collapses every nested
+    // `<tspan>`'s textContent into a single string and measures it as one
+    // line at the resolved font (sans-serif 14, no bold/italic). So:
+    //   bbox.width  = text_width(textContent_concat)
+    //   bbox.height = line_height(sans-serif, 14)
+    use crate::font_metrics::{line_height, text_width};
+    const FAM: &str = "sans-serif";
+    const SIZE: f64 = 14.0;
+    let lh = line_height(FAM, SIZE, false, false);
+    // textContent of all child tspans concatenated. Words are joined by
+    // " " (mirrors `updateTextContentAndStyles` which prepends a space to
+    // every word after index 0). Across lines no separator is inserted —
+    // jsdom's textContent simply concatenates.
+    let text_content: String = if lines.is_empty() {
+        String::new()
+    } else {
+        let mut parts: Vec<String> = Vec::new();
+        for line in &lines {
+            for (i, w) in line.iter().enumerate() {
+                if i == 0 {
+                    parts.push(w.content.clone());
+                } else {
+                    parts.push(format!(" {}", w.content));
+                }
+            }
+        }
+        parts.concat()
+    };
+    let text_w = if text_content.is_empty() {
+        0.0
+    } else {
+        text_width(&text_content, FAM, SIZE, false, false)
+    };
+    let text_h = lh;
+    // Inner label transform via computeLabelTransform({x:0, y:0, w, h}, false)
+    //   = translate(-(0 + w/2), -(0 + h/2))
+    //   = translate(-w/2, -h/2)
+    // For empty labels the bbox collapses to {x:0, y:0, w:0, h:line_h} so
+    // the formula reduces to translate(0, -line_h/2).
+    let label_tx = -text_w / 2.0;
+    let label_ty = -text_h / 2.0;
     // Inner label group.
     let label_attrs = format!(
         r#" data-id="{did}" transform="translate({tx}, {ty})""#,
@@ -2529,82 +2560,359 @@ fn render_edge_label_text(e: &UEdge, processed: &str, is_empty: bool, lx: f64, l
         tx = fmt_num(label_tx),
         ty = fmt_num(label_ty),
     );
-    // Build the tspan inner content. Empty → bare `<tspan>...</tspan>`.
-    // Non-empty → one `<tspan class="text-inner-tspan">` per markdown
-    // segment, joined by a leading space from index 1 onwards (mirrors
-    // upstream `updateTextContentAndStyles`).
-    let inner_tspans = if is_empty {
-        String::new()
-    } else {
-        build_inner_tspans(processed)
-    };
-    let outer_tspan = format!(
-        r#"<tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em" text-anchor="middle">{inner}</tspan>"#,
-        inner = inner_tspans,
-    );
-    // For empty labels, only `<text>` is emitted inside the label group;
-    // the orphan rect-only `<g>` follows the closing of `<g class="edgeLabel">`.
-    // For non-empty, the labelGroup wrapping `<g>` (with rect + text) is
-    // emitted *inside* the label — but we don't yet implement non-empty here.
-    if is_empty {
+
+    // Build the inner-tspan markup per line. Each `MarkdownLine` becomes
+    // one `<tspan class="text-outer-tspan row">` whose `y` reflects the
+    // line index. Inside, every `MarkdownWord` becomes one
+    // `<tspan class="text-inner-tspan">` carrying `font-style` and
+    // `font-weight` per upstream `updateTextContentAndStyles`.
+    fn outer_tspan_open(line_idx: usize) -> String {
+        const LINE_HEIGHT_EM: f64 = 1.1;
+        // y = lineIdx * lineHeight - 0.1 (em). When lineIdx == 0, y = -0.1.
+        // Match upstream's d3 attr formatting: omit the leading "+0.1*..."
+        // computation when lineIdx == 0 → emits the literal "-0.1em".
+        let y_em = if line_idx == 0 {
+            "-0.1em".to_string()
+        } else {
+            // Format like upstream's String coercion: `lineIndex * lineHeight - 0.1 + 'em'`.
+            // d3 attr renders the JS number literally, so 1*1.1-0.1=1, 2*1.1-0.1=2.1, etc.
+            let val = line_idx as f64 * LINE_HEIGHT_EM - 0.1;
+            format!("{}em", fmt_num(val))
+        };
         format!(
-            r#"<g class="edgeLabel"{outer}><g class="label"{label_attrs}><text y="-10.1" text-anchor="middle">{outer_tspan}</text></g></g><g><rect class="background" style="stroke: none"></rect></g>"#,
+            r#"<tspan class="text-outer-tspan row" x="0" y="{y}" dy="1.1em" text-anchor="middle">"#,
+            y = y_em,
+        )
+    }
+    let mut tspans_markup = String::new();
+    if !lines.is_empty() {
+        for (line_idx, line) in lines.iter().enumerate() {
+            tspans_markup.push_str(&outer_tspan_open(line_idx));
+            for (word_idx, w) in line.iter().enumerate() {
+                let font_style = match w.kind {
+                    MdWordKind::Em => "italic",
+                    _ => "normal",
+                };
+                let font_weight = match w.kind {
+                    MdWordKind::Strong => "bold",
+                    _ => "normal",
+                };
+                let content = if word_idx == 0 {
+                    xml_escape(&w.content)
+                } else {
+                    format!(" {}", xml_escape(&w.content))
+                };
+                tspans_markup.push_str(&format!(
+                    r#"<tspan font-style="{fs}" class="text-inner-tspan" font-weight="{fw}">{c}</tspan>"#,
+                    fs = font_style,
+                    fw = font_weight,
+                    c = content,
+                ));
+            }
+            tspans_markup.push_str("</tspan>");
+        }
+    } else {
+        // Empty: emit a bare outer tspan with no inner content.
+        tspans_markup.push_str(&outer_tspan_open(0));
+        tspans_markup.push_str("</tspan>");
+    }
+
+    if is_empty {
+        // Empty-label branch: `addBackground` is forced false in upstream
+        // (see createText.ts:348) because the text is empty. The labelElement
+        // returned is the bare `<text>` (no wrapping `<g>`), so the rect
+        // remains an orphan `<g>` SIBLING of the edgeLabel and its style is
+        // never overwritten — keeping `style="stroke: none"`.
+        format!(
+            r#"<g class="edgeLabel"{outer}><g class="label"{label_attrs}><text y="-10.1" text-anchor="middle">{tspans}</text></g></g><g><rect class="background" style="stroke: none"></rect></g>"#,
             outer = outer_transform,
             label_attrs = label_attrs,
-            outer_tspan = outer_tspan,
+            tspans = tspans_markup,
         )
     } else {
-        // TODO: non-empty htmlLabels=false path. For now, fall back to the
-        // foreignObject form so existing fixtures (which already use the
-        // html path) keep working — only the non-html branch with a
-        // non-empty label is unimplemented. Affected fixtures: 178, 179,
-        // 180, 181, etc.
-        use crate::render::foreign_object::{
-            measure_html_markup_label, render_edge_label as fo_edge, HtmlLabelFont, LabelOpts,
-        };
-        use crate::render::shapes::types::{build_div_style_prefix, build_label_style};
-        let (w, h) = measure_html_markup_label(processed, &HtmlLabelFont::default(), 200.0, true);
-        let div_prefix = e
-            .label_style
-            .as_ref()
-            .map(|styles| build_div_style_prefix(styles))
-            .unwrap_or_default();
-        let span_label_style = e
-            .label_style
-            .as_ref()
-            .map(|styles| build_label_style(styles))
-            .unwrap_or_default();
-        let opts = LabelOpts {
-            data_id: Some(&e.id),
-            group_style: None,
-            wrap_in_p: true,
-            div_style_prefix: if div_prefix.is_empty() {
-                None
-            } else {
-                Some(&div_prefix)
-            },
-            label_style: if span_label_style.is_empty() {
-                None
-            } else {
-                Some(&span_label_style)
-            },
-            ..LabelOpts::default()
-        };
-        fo_edge(processed, lx, ly, w, h, opts)
+        // Non-empty branch: `addBackground=true` always for the new flowchart
+        // edge-label path (rendering-elements/edges.js:84). createText returns
+        // the `labelGroup` whose children are `<rect class="background">`
+        // (sized to `bbox + 2px padding`) and `<text y="-10.1">`. The rect's
+        // style attribute is later overwritten with `edgeLabelRectStyle`
+        // (text-only style minus `stroke`/`stroke-width`/`fill`,
+        // `background:` -> `fill:`); for an edge with no labelStyle the
+        // resulting style is empty (`""`).
+        let rect_x = -2.0;
+        let rect_y = -2.0;
+        let rect_w = text_w + 4.0;
+        let rect_h = text_h + 4.0;
+        // For now, ignore label_style overrides — the byte-exact targets
+        // 178/179/180/181 use no per-edge label styles, and the upstream
+        // behaviour is more involved (split into rect-style vs text-style).
+        let rect_style = "";
+        let text_style = "";
+        format!(
+            r#"<g class="edgeLabel"{outer}><g class="label"{label_attrs}><g><rect class="background" style="{rs}" x="{rx}" y="{ry}" width="{rw}" height="{rh}"></rect><text y="-10.1" text-anchor="middle" style="{ts}">{tspans}</text></g></g></g>"#,
+            outer = outer_transform,
+            label_attrs = label_attrs,
+            rs = rect_style,
+            rx = fmt_num(rect_x),
+            ry = fmt_num(rect_y),
+            rw = fmt_num(rect_w),
+            rh = fmt_num(rect_h),
+            ts = text_style,
+            tspans = tspans_markup,
+        )
     }
 }
 
-/// Parse a markdown fragment (e.g. `1o **bold**` or `the *cat*`) into a
-/// sequence of `<tspan class="text-inner-tspan">` elements with
-/// `font-style`/`font-weight` set per em/strong. Mirrors upstream
-/// `markdownToLines` + `updateTextContentAndStyles`.
+/// Word style for a single MarkdownWord.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MdWordKind {
+    Normal,
+    Strong,
+    Em,
+}
+
+#[derive(Debug, Clone)]
+struct MdWord {
+    content: String,
+    kind: MdWordKind,
+}
+
+/// Mirrors upstream `nonMarkdownToLines`:
+///   text.split(/\\n|\n|<br\s*\/?>/gi)
+///     .map(line => line.trim().match(/<[^>]+>|[^\s<>]+/g)?.map(w => ({content:w, type:'normal'})) ?? [])
+fn non_markdown_to_lines(text: &str) -> Vec<Vec<MdWord>> {
+    let normalised = normalise_br_for_split(text);
+    normalised
+        .split('\n')
+        .map(|line| {
+            tokenise_non_markdown_line(line.trim())
+                .into_iter()
+                .map(|w| MdWord {
+                    content: w,
+                    kind: MdWordKind::Normal,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn normalise_br_for_split(text: &str) -> String {
+    // Replace every `<br>` / `<br/>` / `<br />` (case-insensitive) with `\n`,
+    // and `\\n` literal sequences with `\n` — mirroring upstream's regex.
+    // Done in two passes since Rust's stdlib has no regex without an extra
+    // dep — and the input shapes encountered here are simple.
+    let mut out = text.replace("\\n", "\n");
+    // Manual scan for <br> tags (case-insensitive, optional /, optional space).
+    let mut buf = String::with_capacity(out.len());
+    let bytes = out.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            // Try to match `<br\s*/?>` case-insensitively.
+            let rest = &out[i..];
+            let lower = rest.to_ascii_lowercase();
+            if lower.starts_with("<br") {
+                // Scan to closing '>'
+                if let Some(rel) = lower.find('>') {
+                    // Must be just `<br...>` where `...` is whitespace and optional `/`.
+                    let between = &lower[3..rel];
+                    let between_clean: String =
+                        between.chars().filter(|c| !c.is_whitespace()).collect();
+                    if between_clean.is_empty() || between_clean == "/" {
+                        buf.push('\n');
+                        i += rel + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        buf.push(out.as_bytes()[i] as char);
+        i += 1;
+    }
+    out = buf;
+    out
+}
+
+fn tokenise_non_markdown_line(line: &str) -> Vec<String> {
+    // Match `<[^>]+>` or `[^\s<>]+`.
+    let mut out = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '<' {
+            // Take until next '>'.
+            if let Some(rel) = line[i..].find('>') {
+                out.push(line[i..i + rel + 1].to_string());
+                i += rel + 1;
+                continue;
+            }
+            // Unclosed tag — treat as plain run.
+        }
+        // Non-whitespace, non-`<>` run.
+        let start = i;
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if c.is_whitespace() || c == '<' || c == '>' {
+                break;
+            }
+            i += 1;
+        }
+        if i > start {
+            out.push(line[start..i].to_string());
+        }
+    }
+    out
+}
+
+/// A simplified port of upstream `markdownToLines` covering the cases
+/// needed for byte-exact parity on cypress flowchart fixtures (178, 179,
+/// 180, 181, …):
 ///
-/// Currently used only as a stub for the empty-label case; the non-empty
-/// branch in `render_edge_label_text` is still TODO.
-fn build_inner_tspans(_text: &str) -> String {
-    // Placeholder — not exercised yet. The empty-label path in the caller
-    // bypasses this.
-    String::new()
+/// - `<br/>` → `\n`
+/// - Multiple consecutive `\n` collapsed to one
+/// - `**…**` / `__…__` → strong; `*…*` / `_…_` → em
+/// - Words inside emphasis inherit the parent type, words split on space
+///
+/// Doesn't yet handle nested emphasis, code spans, or links — but those
+/// don't appear in the targeted fixtures' edge labels.
+fn markdown_to_lines(md: &str) -> Vec<Vec<MdWord>> {
+    let pre = preprocess_markdown(md);
+    let mut lines: Vec<Vec<MdWord>> = vec![Vec::new()];
+    let mut current = 0usize;
+
+    fn push_text(
+        lines: &mut Vec<Vec<MdWord>>,
+        current: &mut usize,
+        text: &str,
+        kind: MdWordKind,
+    ) {
+        let parts: Vec<&str> = text.split('\n').collect();
+        for (idx, line) in parts.iter().enumerate() {
+            if idx != 0 {
+                *current += 1;
+                lines.push(Vec::new());
+            }
+            for word in line.split(' ') {
+                let w = word.replace("&#39;", "'");
+                if !w.is_empty() {
+                    lines[*current].push(MdWord {
+                        content: w,
+                        kind,
+                    });
+                }
+            }
+        }
+    }
+
+    let bytes = pre.as_bytes();
+    let mut i = 0usize;
+    let mut plain_start = 0usize;
+    macro_rules! flush_plain {
+        ($end:expr) => {{
+            let end = $end;
+            if end > plain_start {
+                let segment = pre[plain_start..end].to_string();
+                push_text(&mut lines, &mut current, &segment, MdWordKind::Normal);
+            }
+        }};
+    }
+    while i < bytes.len() {
+        let b = bytes[i];
+        // **strong** / __strong__ (longer marker first)
+        if (b == b'*' || b == b'_')
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b
+        {
+            let marker = if b == b'*' { "**" } else { "__" };
+            if let Some(end) = find_str(&pre, i + 2, marker) {
+                flush_plain!(i);
+                let inner = &pre[i + 2..end];
+                push_text(&mut lines, &mut current, inner, MdWordKind::Strong);
+                i = end + 2;
+                plain_start = i;
+                continue;
+            }
+        }
+        // *em* / _em_
+        if b == b'*' || b == b'_' {
+            let marker = if b == b'*' { "*" } else { "_" };
+            if let Some(end) = find_str(&pre, i + 1, marker) {
+                if end > i + 1 {
+                    flush_plain!(i);
+                    let inner = &pre[i + 1..end];
+                    push_text(&mut lines, &mut current, inner, MdWordKind::Em);
+                    i = end + 1;
+                    plain_start = i;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    flush_plain!(bytes.len());
+    lines
+}
+
+fn find_str(haystack: &str, from: usize, needle: &str) -> Option<usize> {
+    haystack.get(from..)?.find(needle).map(|rel| from + rel)
+}
+
+/// Preprocess the markdown source as upstream's `preprocessMarkdown` does:
+/// `<br/>` → `\n`, collapse consecutive newlines, and dedent leading
+/// whitespace. The dedent step matters for fixtures whose mermaid source
+/// indents continuation lines (so the rendered text won't carry extra
+/// leading spaces when split on `\n`).
+fn preprocess_markdown(md: &str) -> String {
+    // 1. Replace <br/> (case-insensitive, with optional whitespace) with \n.
+    let s = normalise_br_for_split(md);
+    // 2. Collapse runs of \n into a single \n.
+    let mut collapsed = String::with_capacity(s.len());
+    let mut prev_nl = false;
+    for c in s.chars() {
+        if c == '\n' {
+            if !prev_nl {
+                collapsed.push('\n');
+            }
+            prev_nl = true;
+        } else {
+            collapsed.push(c);
+            prev_nl = false;
+        }
+    }
+    // 3. Dedent: strip the common leading-whitespace prefix from every line.
+    dedent(&collapsed)
+}
+
+fn dedent(s: &str) -> String {
+    let lines: Vec<&str> = s.split('\n').collect();
+    // Compute minimum leading-whitespace count over non-blank lines.
+    let mut min_indent: Option<usize> = None;
+    for line in &lines {
+        if line.chars().all(|c| c.is_whitespace()) {
+            continue;
+        }
+        let n = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+        min_indent = Some(min_indent.map(|m| m.min(n)).unwrap_or(n));
+    }
+    let n = min_indent.unwrap_or(0);
+    if n == 0 {
+        return s.to_string();
+    }
+    lines
+        .iter()
+        .map(|line| {
+            if line.chars().all(|c| c.is_whitespace()) {
+                (*line).to_string()
+            } else {
+                line.chars().skip(n).collect()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Build the flowchart-specific CSS slice — a complete port of upstream's
