@@ -328,9 +328,26 @@ impl<'a> LineParser<'a> {
             return Ok(());
         }
 
-        // click
+        // click — may span multiple lines when a tooltip/link string
+        // contains a literal newline. Upstream's jison grammar treats
+        // unclosed `"…` strings as errors, but in practice users embed
+        // multi-line tooltips (e.g. demos/flowchart/18). To match the
+        // forgiving behavior, fold subsequent raw lines into the click
+        // statement until the quote count is balanced.
         if let Some(rest) = line.strip_prefix("click ") {
-            self.parse_click(rest.trim());
+            let mut combined = rest.to_string();
+            let mut q = combined.chars().filter(|&c| c == '"').count();
+            while q % 2 == 1 {
+                self.advance();
+                if self.i >= self.lines.len() {
+                    break;
+                }
+                let nxt = self.current_line().to_string();
+                combined.push('\n');
+                combined.push_str(&nxt);
+                q += nxt.chars().filter(|&c| c == '"').count();
+            }
+            self.parse_click(combined.trim());
             self.advance();
             return Ok(());
         }
