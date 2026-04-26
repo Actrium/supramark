@@ -265,7 +265,17 @@ impl<'a> LineParser<'a> {
             }
         }
 
-        // `direction X` (inside a subgraph)
+        // `direction X` line.
+        //
+        // Inside a subgraph this overrides that subgraph's `dir`. At the
+        // top level upstream's flowDb treats it as a no-op: the parser
+        // emits a `{stmt:'dir', value:X}` AST node that only `addSubGraph`
+        // consumes (via the `uniq` reducer in flowDb.ts). Since the root
+        // document is never wrapped in a subgraph, top-level direction
+        // tokens are silently dropped — the root `rankdir` stays whatever
+        // the `flowchart <DIR>` header declared. Mirror that here so we
+        // don't accidentally swap the outer dagre direction (cypress
+        // fixture 248).
         if let Some(rest) = line.strip_prefix("direction") {
             let rest = rest.trim();
             if let Some(d) = Direction::parse(rest) {
@@ -273,8 +283,6 @@ impl<'a> LineParser<'a> {
                     if let Some(sg) = self.diag.subgraphs.iter_mut().find(|s| s.id == sid) {
                         sg.dir = Some(d);
                     }
-                } else {
-                    self.diag.direction = d;
                 }
                 self.advance();
                 return Ok(());
