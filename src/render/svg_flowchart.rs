@@ -143,6 +143,89 @@ fn node_styles_have_bold(styles: &[String]) -> bool {
 /// already comes from the layout pass which honours bold via
 /// `measure_vertex_box(v, is_bold=true)`, so we only need to rewrite the
 /// label-level numbers here.
+fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
+    use crate::render::foreign_object::HtmlLabelFont;
+    use crate::render::shapes::types::{fmt_num, xml_escape};
+
+    let shape = node.shape.as_deref().unwrap_or("rect");
+    if shape != "diamond" && shape != "question" {
+        return svg.to_string();
+    }
+    let label = match node.label.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => return svg.to_string(),
+    };
+    // Cheap check: only rewrite if the label contains a `<br>` variant —
+    // otherwise the upstream diamond measurement already matches the
+    // jsdom textContent geometry.
+    let has_br = {
+        let lower = label.to_ascii_lowercase();
+        lower.contains("<br>")
+            || lower.contains("<br/>")
+            || lower.contains("<br />")
+            || lower.contains("<br/ >")
+    };
+    if !has_br {
+        return svg.to_string();
+    }
+    // Mirror the (wrong) measurement diamond.rs uses today:
+    //   bbox = measure_html_label(xml_escape(label), default_font)
+    // `measure_html_label` splits on `\n` only, so embedded `&lt;br/&gt;`
+    // entities remain as plain text and inflate the width. We need to
+    // recompute (s_wrong) so we can find-and-replace the literal numbers.
+    let escaped = xml_escape(label);
+    let (wrong_w, wrong_h) = crate::render::foreign_object::measure_html_label(
+        &escaped,
+        &HtmlLabelFont::default(),
+        200.0,
+        true,
+    );
+    let p = node.padding.unwrap_or(15.0);
+    let s_wrong = (wrong_w + p) + (wrong_h + p);
+    let half_wrong = s_wrong / 2.0;
+    // Compute the right `s` from node.width/height (the layout already
+    // measured correctly via the post-`<br/>` concatenated text).
+    let s_right = node.width.unwrap_or(s_wrong);
+    let half_right = s_right / 2.0;
+    if (s_right - s_wrong).abs() < 1e-9 {
+        return svg.to_string();
+    }
+    // Build the literal substrings the diamond shape emits and substitute
+    // them with their right-sized counterparts. Use unique substrings
+    // (the polygon points + transform) so we don't accidentally rewrite
+    // unrelated numbers in the same node block.
+    let pts_wrong = format!(
+        "points=\"{},0 {},{} {},{} 0,{}\"",
+        fmt_num(half_wrong),
+        fmt_num(s_wrong),
+        fmt_num(-half_wrong),
+        fmt_num(half_wrong),
+        fmt_num(-s_wrong),
+        fmt_num(-half_wrong),
+    );
+    let pts_right = format!(
+        "points=\"{},0 {},{} {},{} 0,{}\"",
+        fmt_num(half_right),
+        fmt_num(s_right),
+        fmt_num(-half_right),
+        fmt_num(half_right),
+        fmt_num(-s_right),
+        fmt_num(-half_right),
+    );
+    let tx_wrong = format!(
+        "transform=\"translate({}, {})\"",
+        fmt_num(-half_wrong + 0.5),
+        fmt_num(half_wrong),
+    );
+    let tx_right = format!(
+        "transform=\"translate({}, {})\"",
+        fmt_num(-half_right + 0.5),
+        fmt_num(half_right),
+    );
+    svg.replace(&pts_wrong, &pts_right)
+        .replace(&tx_wrong, &tx_right)
+}
+
 fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     use crate::render::foreign_object::HtmlLabelFont;
     use crate::render::shapes::types::fmt_num;
@@ -710,12 +793,14 @@ pub fn render(
         match shapes::draw(&shape_id, &prefixed, theme) {
             Ok(svg) => {
                 let patched = bold_postprocess_node_svg(&prefixed, &svg);
+                let patched = diamond_br_postprocess(&prefixed, &patched);
                 inner.push_str(&patched);
             }
             Err(_) => {
                 // Fallback: plain rect.
                 if let Ok(svg) = shapes::draw("rect", &prefixed, theme) {
                     let patched = bold_postprocess_node_svg(&prefixed, &svg);
+                    let patched = diamond_br_postprocess(&prefixed, &patched);
                     inner.push_str(&patched);
                 }
             }
@@ -1554,10 +1639,14 @@ fn render_isolated_cluster_inner_root(
         }
         let shape_id = prefixed.shape.clone().unwrap_or_else(|| "rect".to_string());
         match crate::render::shapes::draw(&shape_id, &prefixed, theme) {
-            Ok(svg) => out.push_str(&svg),
+            Ok(svg) => {
+                let patched = diamond_br_postprocess(&prefixed, &svg);
+                out.push_str(&patched);
+            }
             Err(_) => {
                 if let Ok(svg) = crate::render::shapes::draw("rect", &prefixed, theme) {
-                    out.push_str(&svg);
+                    let patched = diamond_br_postprocess(&prefixed, &svg);
+                    out.push_str(&patched);
                 }
             }
         }

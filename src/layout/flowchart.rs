@@ -927,29 +927,25 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
     let stripped = strip_fa_icons(label);
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, LABEL_FONT_SIZE, false, false);
 
-    // Upstream's `getBoundingClientRect()` on the foreignObject `<div>` reports
-    // the widest line — `<br>` and `\n` introduce hard line breaks that the
-    // `display: table-cell; white-space: nowrap` div renders on separate
-    // lines. We mirror that here so node sizing tracks the rendered geometry
-    // for multi-line labels (e.g. cypress/200 diamond, 211 hexagon).
+    // Upstream measures the rendered foreignObject `<div>` via
+    // `el.textContent`, which strips ALL HTML tags (including `<br/>`) and
+    // returns the concatenated plain text as a SINGLE line. The block height
+    // is therefore exactly one `line_height`, regardless of how many `<br/>`
+    // or `\n` appear in the source label. Cypress fixtures 67 / 200 / 214 and
+    // demos 06 / 07 all encode multi-line diamond / hexagon labels via
+    // `<br/>` and expect the foreignObject geometry of the concatenated text.
     //
-    // Single-line labels fall through to the same branch (one segment, sum
-    // == max), so behaviour is unchanged for the common case.
+    // Width is the width of the concatenated lines, measured as one segment.
     let lines = split_html_into_lines(&stripped);
-    let max_w = lines
-        .iter()
-        .map(|line| {
-            font_metrics::text_width(
-                line,
-                DEFAULT_FONT_FAMILY,
-                LABEL_FONT_SIZE,
-                force_bold,
-                false,
-            )
-        })
-        .fold(0.0_f64, f64::max);
-    let height = lh * lines.len().max(1) as f64;
-    (max_w, height)
+    let concat: String = lines.concat();
+    let width = font_metrics::text_width(
+        &concat,
+        DEFAULT_FONT_FAMILY,
+        LABEL_FONT_SIZE,
+        force_bold,
+        false,
+    );
+    (width, lh)
 }
 
 fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
