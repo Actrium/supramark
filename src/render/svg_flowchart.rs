@@ -263,15 +263,12 @@ fn link_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     let id_val = extract_attr(opening, "id").unwrap_or_default();
     let data_look_val = extract_attr(opening, "data-look");
     let transform_val = extract_attr(opening, "transform");
-    // Append `clickable` to the class string. The shape emits the
-    // non-link class as `"node {css_classes} "` (often with a trailing
-    // double space when `extra` is empty — the format produces
-    // `"node default  "`). Upstream's link branch instead supplies
-    // `"clickable"` as `extra`, yielding `"node default clickable "`
-    // (single space). Strip any trailing whitespace before appending
-    // so we don't introduce an extra space.
-    let trimmed = class_val.trim_end();
-    let new_class_val = format!("{} clickable ", trimmed);
+    // Upstream `flowDb.setLink` calls `setClass(ids, 'clickable')`,
+    // which pushes `'clickable'` into `vertex.classes` *before* any
+    // subsequent `class <id> <className>` directive. The parser
+    // already mirrors that, so the class string has `clickable` in
+    // the upstream-correct slot. Preserve it as-is here.
+    let new_class_val = class_val.clone();
     // Build the anchor opening. Order: href, target?, data-look?, transform?.
     let mut anchor = String::with_capacity(link.len() + 96);
     anchor.push_str("<a href=\"");
@@ -340,6 +337,54 @@ fn extract_attr(opening: &str, attr: &str) -> Option<String> {
     let start = i + needle.len();
     let end = opening[start..].find('"')?;
     Some(opening[start..start + end].to_string())
+}
+
+/// Inject `title="..."` into the outer `<g class="node …">` opening
+/// tag for nodes that have a tooltip but no link. Upstream
+/// (`nodes.ts`) calls `el.attr('title', node.tooltip)` on every
+/// node with a tooltip — for link nodes the link-postprocess
+/// already handles this. This covers callback-only nodes (e.g.
+/// `click B testClick "click test"`).
+///
+/// Placement mirrors upstream's d3 attribute order: `class id
+/// data-look title transform`. We insert the `title` attribute
+/// immediately before ` transform="…"`.
+fn tooltip_postprocess_node_svg(node: &UNode, svg: &str) -> String {
+    use crate::render::shapes::types::xml_escape;
+    if node.link.is_some() {
+        // link_postprocess already handles tooltip injection.
+        return svg.to_string();
+    }
+    let tooltip = match node.tooltip.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => return svg.to_string(),
+    };
+    let g_start = match svg.find("<g class=\"node ") {
+        Some(i) => i,
+        None => return svg.to_string(),
+    };
+    let head_open_end = match svg[g_start..].find('>') {
+        Some(off) => g_start + off + 1,
+        None => return svg.to_string(),
+    };
+    let opening = &svg[g_start..head_open_end];
+    // If a `title=` is already present on the outer <g>, leave it alone.
+    if opening.contains(" title=\"") {
+        return svg.to_string();
+    }
+    // Splice ` title="..."` immediately before ` transform="`.
+    let transform_marker = " transform=\"";
+    let transform_off = match opening.find(transform_marker) {
+        Some(off) => off,
+        None => return svg.to_string(),
+    };
+    let abs_transform = g_start + transform_off;
+    let title_attr = format!(r#" title="{}""#, xml_escape(tooltip));
+    let mut out = String::with_capacity(svg.len() + title_attr.len());
+    out.push_str(&svg[..abs_transform]);
+    out.push_str(&title_attr);
+    out.push_str(&svg[abs_transform..]);
+    out
 }
 
 fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
@@ -1054,6 +1099,7 @@ pub fn render(
                 let patched = bold_postprocess_node_svg(&prefixed, &svg);
                 let patched = diamond_br_postprocess(&prefixed, &patched);
                 let patched = font_size_postprocess_node_svg(&prefixed, &patched);
+                let patched = tooltip_postprocess_node_svg(&prefixed, &patched);
                 let patched = link_postprocess_node_svg(&prefixed, &patched);
                 inner.push_str(&patched);
             }
@@ -1062,6 +1108,7 @@ pub fn render(
                 if let Ok(svg) = shapes::draw("rect", &prefixed, theme) {
                     let patched = bold_postprocess_node_svg(&prefixed, &svg);
                     let patched = diamond_br_postprocess(&prefixed, &patched);
+                    let patched = tooltip_postprocess_node_svg(&prefixed, &patched);
                     let patched = link_postprocess_node_svg(&prefixed, &patched);
                     inner.push_str(&patched);
                 }
@@ -1949,12 +1996,14 @@ fn render_isolated_cluster_inner_root(
         match crate::render::shapes::draw(&shape_id, &prefixed, theme) {
             Ok(svg) => {
                 let patched = diamond_br_postprocess(&prefixed, &svg);
+                let patched = tooltip_postprocess_node_svg(&prefixed, &patched);
                 let patched = link_postprocess_node_svg(&prefixed, &patched);
                 out.push_str(&patched);
             }
             Err(_) => {
                 if let Ok(svg) = crate::render::shapes::draw("rect", &prefixed, theme) {
                     let patched = diamond_br_postprocess(&prefixed, &svg);
+                    let patched = tooltip_postprocess_node_svg(&prefixed, &patched);
                     let patched = link_postprocess_node_svg(&prefixed, &patched);
                     out.push_str(&patched);
                 }

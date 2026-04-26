@@ -807,6 +807,13 @@ impl<'a> LineParser<'a> {
                 v.tooltip = Some(tooltip);
             }
         }
+        // Upstream `setLink` / `setClickEvent` both call
+        // `this.setClass(ids, 'clickable')` after recording the URL or
+        // callback, which pushes `'clickable'` into `vertex.classes`.
+        // Mirror that here so the class string is built in the order
+        // upstream expects (e.g. `default clickable someclass` when a
+        // later `class A someclass` directive appends `someclass`).
+        v.classes.push("clickable".to_string());
     }
 
     fn ensure_vertex(&mut self, id: &str) {

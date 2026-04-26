@@ -22,15 +22,41 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     // Re-measure the label to get the bbox dimensions, matching upstream's
     // `bbox = labelHelper(...)`. The layout stores `s` as both width and
     // height for dagre, so we can't use node.width/height directly.
+    //
+    // Upstream's `labelHelper` runs `createText` on the label which
+    // expands FontAwesome icon references (`fa:fa-car`) into
+    // `<i class="fa fa-car"></i>` markup BEFORE the bbox is measured.
+    // Mirror that so a label like `fa:fa-code Text` is measured as
+    // " Text" (the rendered textContent), not as the literal 15-char
+    // source string. Cypress fixture 57 / 117 / 118 hits this on a
+    // diamond node `I{"fa:fa-code Text"}`.
     let (bbox_w, bbox_h) = if label.is_empty() {
         (0.0, 0.0)
     } else {
-        crate::render::foreign_object::measure_html_label(
-            &super::types::xml_escape(&label),
-            &crate::render::foreign_object::HtmlLabelFont::default(),
-            200.0,
-            true,
-        )
+        let escaped = super::types::xml_escape(&label);
+        let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
+        // `measure_html_label` does not strip HTML tags — it would
+        // measure the literal `<i class="fa fa-code"></i>` characters.
+        // When the FA-icon expansion produced a non-trivial change
+        // (`<i …>` markup), fall through to `measure_html_markup_label`
+        // which strips tags via the textContent rule. For plain labels
+        // (no `<i>` injected) keep `measure_html_label` for the
+        // existing markdown-marker / `\n` semantics.
+        if for_measure.contains("<i ") {
+            crate::render::foreign_object::measure_html_markup_label(
+                &for_measure,
+                &crate::render::foreign_object::HtmlLabelFont::default(),
+                200.0,
+                true,
+            )
+        } else {
+            crate::render::foreign_object::measure_html_label(
+                &for_measure,
+                &crate::render::foreign_object::HtmlLabelFont::default(),
+                200.0,
+                true,
+            )
+        }
     };
     let p = node.padding.unwrap_or(15.0);
     let w = bbox_w + p;

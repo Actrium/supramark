@@ -438,6 +438,16 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
         return render_node_label(&html, w, h, &LabelOpts::default());
     }
+    // After `replace_fa_icons`, FA references like `fa:fa-code` become
+    // `<i class="fa fa-code"></i>` markup. `measure_html_label` does
+    // not strip HTML tags — it would measure the raw `<i …>` chars
+    // as text. Detect any leftover `<i` (the only tag injection done
+    // here) and route to `measure_html_markup_label` which strips
+    // tags via the textContent rule.
+    if processed.contains("<i ") {
+        let (w, h) = measure_html_markup_label(&processed, font, 200.0, true);
+        return render_node_label(&processed, w, h, &LabelOpts::default());
+    }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
     render_node_label(&processed, w, h, &LabelOpts::default())
 }
