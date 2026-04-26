@@ -955,7 +955,13 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
         // a matching update there.
         "stadium" | "pill" => ((th + p) / 4.0 + p, p),
         "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
-        "subroutine" => (p * 4.0, p * 2.0),
+        // Upstream subroutine.ts (chunk-C7LX3TON.mjs:3464-3477):
+        //   FRAME_WIDTH = 8, labelPaddingX = labelPaddingY = nodePadding (= p)
+        //   totalWidth  = bbox.width  + 2*FRAME_WIDTH + labelPaddingX  → tw + 16 + p
+        //   totalHeight = bbox.height + labelPaddingY                  → th + p
+        // updateNodeBounds feeds (totalWidth, totalHeight) to dagre, so
+        // pad_x must be 16 + p (not 4*p), pad_y must be p (not 2*p).
+        "subroutine" => (p + 16.0, p),
         // Upstream trapezoid.ts / leanLeft.ts / leanRight.ts:
         //   labelPaddingX = labelPaddingY = nodePadding (look=neo doubles X)
         //   w = bbox.width + nodePadding,  h = bbox.height + nodePadding
