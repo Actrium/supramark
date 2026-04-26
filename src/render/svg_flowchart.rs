@@ -831,7 +831,7 @@ pub fn render(
         if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
-        inner.push_str(&render_edge_label(e, html_labels));
+        inner.push_str(&render_edge_label(e, html_labels, l));
     }
     inner.push_str(unified_shell::close_layer());
 
@@ -1751,7 +1751,7 @@ fn render_isolated_cluster_inner_root(
         if is_cyclic_segment_from_anchor_rewrite(e) {
             continue;
         }
-        out.push_str(&render_edge_label(e, html_labels));
+        out.push_str(&render_edge_label(e, html_labels, l));
     }
     out.push_str(unified_shell::close_layer());
 
@@ -2388,7 +2388,7 @@ fn render_edge_path(
     )
 }
 
-fn render_edge_label(e: &UEdge, html_labels: bool) -> String {
+fn render_edge_label(e: &UEdge, html_labels: bool, l: &FlowchartLayout) -> String {
     use crate::render::foreign_object::{
         markdown_label_to_html, measure_html_label, measure_html_markup_label,
         render_edge_label as fo_edge, replace_fa_icons, HtmlLabelFont, LabelOpts,
@@ -2422,8 +2422,18 @@ fn render_edge_label(e: &UEdge, html_labels: bool) -> String {
     } else {
         measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true)
     };
-    let lx = e.label_x.unwrap_or(0.0);
-    let ly = e.label_y.unwrap_or(0.0);
+    let dagre_lx = e.label_x.unwrap_or(0.0);
+    let dagre_ly = e.label_y.unwrap_or(0.0);
+    // Mirror upstream `positionEdgeLabel` (edges.js:253). When `paths.updatedPath`
+    // is set (i.e. the rendered SVG path differs from the dagre point sequence,
+    // typically because the edge crosses a cluster boundary via
+    // `cutPathAtIntersect`), the label is re-anchored to the half-distance
+    // midpoint of the *clipped* path, with x/y rounded to 5 decimals via
+    // `roundNumber(_, 5)`. We approximate this by detecting cluster-bound
+    // edges (via `orig_start` / `orig_end` referencing an `is_group` node)
+    // and recomputing the label position with `cutPathAtIntersect` +
+    // `traverseEdge` ported from upstream `edges.js`.
+    let (lx, ly) = recompute_edge_label_position(e, l).unwrap_or((dagre_lx, dagre_ly));
     // htmlLabels=false path — emit `<text>`/`<tspan>` instead of <foreignObject>.
     // Mirrors upstream `createText(...)` non-html branch (createText.ts:338+,
     // createFormattedText) plus `insertEdgeLabel` which moves the
@@ -3215,6 +3225,235 @@ fn flowchart_specific_css(id: &str, theme: &ThemeVariables) -> String {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+/// Half-precision rounding helper mirroring upstream `roundNumber(num, 5)`
+/// (utils.ts:329). Used by `recompute_edge_label_position` so the label
+/// transform we emit matches upstream byte-for-byte: e.g.
+/// `221.18530273…` → `221.1853`, `221.2421875` → `221.24219`.
+fn round_to_5(v: f64) -> f64 {
+    (v * 100000.0).round() / 100000.0
+}
+
+/// `outsideNode(node, point)` from upstream edges.js:333 — returns true
+/// when `point` lies strictly outside the cluster's bounding box (treating
+/// the rectangle border as INSIDE, which matters for paths whose terminal
+/// point sits exactly on the cluster boundary).
+fn point_outside_node(nx: f64, ny: f64, nw: f64, nh: f64, px: f64, py: f64) -> bool {
+    let dx = (px - nx).abs();
+    let dy = (py - ny).abs();
+    dx >= nw / 2.0 || dy >= nh / 2.0
+}
+
+/// Port of upstream `intersection(node, outsidePoint, insidePoint)`
+/// (edges.js:343). Computes where the segment from `outside` to `inside`
+/// crosses the rectangular boundary of the cluster `node`.
+#[allow(clippy::too_many_arguments)]
+fn rect_intersection(
+    nx: f64,
+    ny: f64,
+    nw: f64,
+    nh: f64,
+    ox: f64,
+    oy: f64,
+    ix: f64,
+    iy: f64,
+) -> (f64, f64) {
+    let w = nw / 2.0;
+    let h = nh / 2.0;
+    let q_total = (oy - iy).abs();
+    let r_total = (ox - ix).abs();
+
+    // Branch on which side the outside point projects to.
+    if (ny - oy).abs() * w > (nx - ox).abs() * h {
+        // Top/bottom branch.
+        let q = if iy < oy { oy - h - ny } else { ny - h - oy };
+        let r = if q_total == 0.0 {
+            0.0
+        } else {
+            r_total * q / q_total
+        };
+        let mut res_x = if ix < ox { ix + r } else { ix - r_total + r };
+        let mut res_y = if iy < oy {
+            iy + q_total - q
+        } else {
+            iy - q_total + q
+        };
+        // Edge cases mirror upstream's r === 0 / R === 0 / Q === 0 patches.
+        if r == 0.0 {
+            res_x = ox;
+            res_y = oy;
+        }
+        if r_total == 0.0 {
+            res_x = ox;
+        }
+        if q_total == 0.0 {
+            res_y = oy;
+        }
+        (res_x, res_y)
+    } else {
+        // Left/right branch.
+        let r = if ix < ox {
+            ox - w - nx
+        } else {
+            nx - w - ox
+        };
+        let q = if r_total == 0.0 {
+            0.0
+        } else {
+            q_total * r / r_total
+        };
+        let mut res_x = if ix < ox {
+            ix + r_total - r
+        } else {
+            ix - r_total + r
+        };
+        let mut res_y = if iy < oy { iy + q } else { iy - q };
+        if r == 0.0 {
+            res_x = ox;
+            res_y = oy;
+        }
+        if r_total == 0.0 {
+            res_x = ox;
+        }
+        if q_total == 0.0 {
+            res_y = oy;
+        }
+        (res_x, res_y)
+    }
+}
+
+/// Port of upstream `cutPathAtIntersect(_points, boundaryNode)` (edges.js:408).
+/// Tuple-of-(f64,f64) variant used by `recompute_edge_label_position`; the
+/// existing `Bounds`-based implementation upstream operates on the SVG
+/// renderer's `Point` type and a top-left-anchored AABB, while the label-
+/// position recompute needs centre-anchored cluster geometry.
+fn cut_path_at_intersect_xywh(
+    pts: &[(f64, f64)],
+    nx: f64,
+    ny: f64,
+    nw: f64,
+    nh: f64,
+) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if pts.is_empty() {
+        return out;
+    }
+    let mut last_outside = pts[0];
+    let mut is_inside = false;
+    for &(px, py) in pts {
+        let outside = point_outside_node(nx, ny, nw, nh, px, py);
+        if !outside && !is_inside {
+            let (ix, iy) = rect_intersection(nx, ny, nw, nh, last_outside.0, last_outside.1, px, py);
+            if !out.iter().any(|p| p.0 == ix && p.1 == iy) {
+                out.push((ix, iy));
+            }
+            is_inside = true;
+        } else {
+            last_outside = (px, py);
+            if !is_inside {
+                out.push((px, py));
+            }
+        }
+    }
+    out
+}
+
+/// Port of upstream `traverseEdge` + `calculatePoint` (utils.ts:305).
+/// Returns the half-total-distance midpoint of the polyline, with x/y
+/// rounded to 5 decimals via `roundNumber(_, 5)`. Returns `None` when the
+/// path collapses to a single point or degenerate length.
+fn traverse_edge_midpoint(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
+    if pts.len() < 2 {
+        return None;
+    }
+    // Total length.
+    let mut total = 0.0_f64;
+    for w in pts.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dy = w[1].1 - w[0].1;
+        total += (dx * dx + dy * dy).sqrt();
+    }
+    let mut remaining = total / 2.0;
+    let mut prev: Option<(f64, f64)> = None;
+    for &(px, py) in pts {
+        if let Some((ppx, ppy)) = prev {
+            let dx = px - ppx;
+            let dy = py - ppy;
+            let seg = (dx * dx + dy * dy).sqrt();
+            if seg == 0.0 {
+                return Some((round_to_5(ppx), round_to_5(ppy)));
+            }
+            if seg < remaining {
+                remaining -= seg;
+            } else {
+                let ratio = remaining / seg;
+                if ratio <= 0.0 {
+                    return Some((round_to_5(ppx), round_to_5(ppy)));
+                }
+                if ratio >= 1.0 {
+                    return Some((round_to_5(px), round_to_5(py)));
+                }
+                let x = (1.0 - ratio) * ppx + ratio * px;
+                let y = (1.0 - ratio) * ppy + ratio * py;
+                return Some((round_to_5(x), round_to_5(y)));
+            }
+        }
+        prev = Some((px, py));
+    }
+    None
+}
+
+/// When an edge enters or exits a cluster, upstream `insertEdge` re-clips
+/// the polyline at the cluster boundary (via `cutPathAtIntersect`) and the
+/// resulting `paths.updatedPath` triggers `positionEdgeLabel` to recompute
+/// the label translate via `calcLabelPosition` with 5-decimal rounding.
+///
+/// We approximate this by checking whether the edge's `orig_start` /
+/// `orig_end` reference a cluster (`is_group=true` node) and applying the
+/// same clip + traverse on the dagre points. Returns `None` when the edge
+/// is not cluster-bound or the path has no points to traverse, in which
+/// case the renderer falls back to dagre's `label_x`/`label_y`.
+fn recompute_edge_label_position(e: &UEdge, l: &FlowchartLayout) -> Option<(f64, f64)> {
+    let pts_ref = e.points.as_ref()?;
+    if pts_ref.len() < 2 {
+        return None;
+    }
+    let mut pts: Vec<(f64, f64)> = pts_ref.iter().map(|p| (p.x, p.y)).collect();
+    let orig_start = e.extra.get("orig_start").map(|s| s.as_str());
+    let orig_end = e.extra.get("orig_end").map(|s| s.as_str());
+    let cluster_bbox = |id: &str| -> Option<(f64, f64, f64, f64)> {
+        let n = l.nodes.iter().find(|n| n.id == id && n.is_group)?;
+        let x = n.x?;
+        let y = n.y?;
+        let w = n.width?;
+        let h = n.height?;
+        Some((x, y, w, h))
+    };
+    let mut changed = false;
+    if let Some(end_id) = orig_end {
+        if let Some((nx, ny, nw, nh)) = cluster_bbox(end_id) {
+            // toCluster: cut from start side until we enter the cluster.
+            pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
+            changed = true;
+        }
+    }
+    if let Some(start_id) = orig_start {
+        if let Some((nx, ny, nw, nh)) = cluster_bbox(start_id) {
+            // fromCluster: reverse, cut, reverse again — mirrors upstream.
+            pts.reverse();
+            pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
+            pts.reverse();
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    if pts.len() < 2 {
+        return None;
+    }
+    traverse_edge_midpoint(&pts)
+}
 
 fn fmt_num(v: f64) -> String {
     if v.is_nan() {
