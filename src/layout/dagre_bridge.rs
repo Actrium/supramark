@@ -1603,7 +1603,19 @@ fn layout_isolated_cluster(
         .all(|c| c.padding.unwrap_or(0.0) == 0.0);
     // Treat sub_isolated children as leaves for the purpose of this fix.
     let leaf_like_count = leaf_children.len() + sub_isolated.len();
-    let leaf_only_lr = matches!(inner_rankdir, RankDir::LR)
+    // Diagram-type guard: empirically the 5×5 swap divergence has only been
+    // observed for state diagrams. Class diagrams (namespace clusters) use
+    // the same layout pipeline shape (LR inner, leaf-only, zero padding) but
+    // dagre-d3-es and dagre-rs agree on the cluster rect for class —
+    // applying the swap there *introduces* a 5×5 regression in cypress
+    // class/38, /94, /222 and demos class/09, /11. Limit to stateDiagram.
+    let is_state_diagram = data
+        .diagram_type
+        .as_deref()
+        .map(|s| s.eq_ignore_ascii_case("stateDiagram"))
+        .unwrap_or(false);
+    let leaf_only_lr = is_state_diagram
+        && matches!(inner_rankdir, RankDir::LR)
         && non_isolated_cluster_children.is_empty()
         && leaf_like_count > 0
         && all_leaves_unpadded;
