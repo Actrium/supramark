@@ -405,8 +405,84 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
         };
         return render_node_label(&html, w, h, &opts);
     }
+    // Plain string labels with embedded `<br>` family tags must be re-emitted
+    // as real `<br/>` tags inside the foreignObject — upstream's
+    // `markdownToHTML` step preserves `<br>` while collapsing every variant
+    // (`<br>` / `<br/>` / `<br />`) to the canonical `<br/>` form. Without
+    // this, callers that pre-`xml_escape` their label (every shape under
+    // `src/render/shapes/*`) would emit a literal `&lt;br/&gt;` and measure
+    // `<br/>` as 6 chars of text — see e.g. cypress fixtures 67 / 200 and
+    // demos 06 / 07 where a diamond label spans three `<br/>`-separated
+    // segments and the `<foreignObject>` width must equal the concatenated
+    // segment widths (because `display: table-cell; white-space: nowrap`
+    // disables soft-wrap on `<br/>`).
+    if has_escaped_br(&processed) {
+        let html = restore_escaped_br(&processed);
+        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
+        return render_node_label(&html, w, h, &LabelOpts::default());
+    }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
     render_node_label(&processed, w, h, &LabelOpts::default())
+}
+
+/// Cheap pre-check: is there at least one `&lt;…&gt;` fragment whose body is
+/// some `<br>` variant? Avoids the regex / case-fold cost on the common path.
+fn has_escaped_br(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 4 <= bytes.len() {
+        if &bytes[i..i + 4] == b"&lt;" {
+            // Find the matching `&gt;` on the same line.
+            let after = i + 4;
+            let line_end = s[after..].find('\n').map(|n| after + n).unwrap_or(s.len());
+            if let Some(rel) = s[after..line_end].find("&gt;") {
+                let inner = s[after..after + rel]
+                    .trim_end_matches('/')
+                    .trim()
+                    .trim_start_matches('/')
+                    .trim();
+                if inner.eq_ignore_ascii_case("br") {
+                    return true;
+                }
+                i = after + rel + 4;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Replace every `&lt;br&gt;` / `&lt;br/&gt;` / `&lt;br /&gt;` (and their
+/// case variants) with the canonical `<br/>` tag, leaving every other
+/// `&lt;…&gt;` fragment untouched. Callers should run this only after
+/// [`has_escaped_br`] returns true.
+fn restore_escaped_br(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 4 <= bytes.len() && &bytes[i..i + 4] == b"&lt;" {
+            let after = i + 4;
+            let line_end = s[after..].find('\n').map(|n| after + n).unwrap_or(s.len());
+            if let Some(rel) = s[after..line_end].find("&gt;") {
+                let inner = s[after..after + rel]
+                    .trim_end_matches('/')
+                    .trim()
+                    .trim_start_matches('/')
+                    .trim();
+                if inner.eq_ignore_ascii_case("br") {
+                    out.push_str("<br/>");
+                    i = after + rel + 4;
+                    continue;
+                }
+            }
+        }
+        let ch_len = utf8_char_len(bytes[i]);
+        out.push_str(&s[i..i + ch_len]);
+        i += ch_len;
+    }
+    out
 }
 
 /// True iff the input contains at least one paired markdown inline
@@ -1117,6 +1193,43 @@ mod tests {
         );
         // Unterminated `<` stays literal.
         assert_eq!(normalize_br_tags("a<b"), "a<b");
+    }
+
+    #[test]
+    fn shape_label_block_restores_xml_escaped_br() {
+        // Diamond / circle / cylinder / etc. shapes pre-escape the label via
+        // `xml_escape` before calling `shape_label_block`, which turns
+        // literal `<br/>` source into `&lt;br/&gt;`. The block must restore
+        // the canonical `<br/>` tag so the rendered foreignObject contains
+        // a real line break and the width sums all segments as a single
+        // text-content line (cypress/67, cypress/200, demos/06, demos/07).
+        let got = shape_label_block(
+            "Multi&lt;br/&gt;Line",
+            &HtmlLabelFont::default(),
+        );
+        // Final `<p>` body must carry the live `<br/>` tag, not the entity.
+        assert!(
+            got.contains("<p>Multi<br/>Line</p>"),
+            "expected `<p>Multi<br/>Line</p>` body, got {got}"
+        );
+        // `<br>` and `<br />` variants normalise the same way.
+        let got2 = shape_label_block(
+            "A&lt;br&gt;B&lt;br /&gt;C",
+            &HtmlLabelFont::default(),
+        );
+        assert!(
+            got2.contains("<p>A<br/>B<br/>C</p>"),
+            "expected canonical <br/> form, got {got2}"
+        );
+        // Non-br escaped tags must NOT be restored — only `<br>` family.
+        let got3 = shape_label_block(
+            "a&lt;span&gt;b&lt;/span&gt;c",
+            &HtmlLabelFont::default(),
+        );
+        assert!(
+            got3.contains("&lt;span&gt;"),
+            "non-br escaped tags must remain escaped, got {got3}"
+        );
     }
 
     #[test]
