@@ -918,7 +918,23 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
             let s = w + h;
             return (s, s);
         }
-        "hexagon" | "hex" => (p * 4.0, p * 2.0),
+        // Upstream hexagon.ts:
+        //   labelPaddingX = labelPaddingY = nodePadding (default look)
+        //   h3 = bbox.height + labelPaddingX
+        //   m  = h3 / 4
+        //   w4 = bbox.width + 2*m + labelPaddingY
+        //   updateNodeBounds → node.width = w4, node.height = h3 (polygon
+        //   spans 0..w4 horizontally, -h3..0 vertically; its own transform
+        //   `translate(-w4/2, h3/2)` centres it but jsdom getBBox reads
+        //   the raw bbox without applying that transform).
+        // Feed (w4, h3) directly to dagre — no `+ 2*shear` baking like
+        // trapezoid, since the polygon already lives inside [0..w4].
+        "hexagon" | "hex" => {
+            let h_inner = th + p;
+            let m = h_inner / 4.0;
+            let w_inner = tw + 2.0 * m + p;
+            return (w_inner, h_inner);
+        }
         "stadium" | "pill" => (th + p * 2.0, p * 2.0),
         "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
         "subroutine" => (p * 4.0, p * 2.0),

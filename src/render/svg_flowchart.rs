@@ -651,6 +651,15 @@ fn compute_viewbox(
                         &mut min_x, &mut min_y, &mut max_x, &mut max_y, -shear, -h, w, h,
                     );
                 }
+                "hexagon" | "hex" => {
+                    // polygon raw points span x ∈ [0, w], y ∈ [-h, 0]
+                    // (the polygon's own `translate(-w/2, h/2)` transform
+                    // is ignored by the jsdom getBBox shim, so the bbox
+                    // reflects the raw point list).
+                    expand(
+                        &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, -h, w, h,
+                    );
+                }
                 _ => {
                     // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
                     expand(
