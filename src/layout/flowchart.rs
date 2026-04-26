@@ -1292,6 +1292,17 @@ fn build_edge<'a>(
         if apply_link_style(ls, e.index) {
             for s in &ls.styles {
                 applied_styles.push(s.clone());
+                // Mirror upstream `flowDb.updateLink`: when a linkStyle entry
+                // contains a `color`-related property (e.g. `color:Sienna`),
+                // upstream pushes it onto `defaultStyle.labelStyle` so the
+                // label's <div>/<span> render with the matching color.
+                let trimmed = s.trim().trim_end_matches(';');
+                if let Some(colon) = trimmed.find(':') {
+                    let key = trimmed[..colon].trim();
+                    if key.contains("color") {
+                        applied_text_styles.push(s.clone());
+                    }
+                }
             }
             if let Some(i) = &ls.interpolate {
                 interpolate = Some(i.clone());

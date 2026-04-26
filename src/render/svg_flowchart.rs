@@ -2185,9 +2185,28 @@ fn emit_colored_marker_defs(edges: &[UEdge], aria_kind: &str, svg_id: &str) -> S
 /// `${edgeStyles}${labelStyles};;` instead of doubling the full style
 /// array. Falls back to `";"` when the edge has no inline style at all.
 fn compute_edge_path_style(e: &UEdge) -> String {
+    // When `label_style` exactly mirrors `style` (i.e. the colour came from
+    // `linkStyle …` which copies the same string into both
+    // `defaultStyle.style` and `defaultStyle.labelStyle`), upstream emits
+    // the doubled-style template — `${style};;${style}` — rather than the
+    // class-derived `${style}${labelStyle};;` template. We detect this by
+    // checking whether the two arrays have identical non-empty entries.
+    // Class-derived label styles are a strict colour-only subset, so this
+    // check leaves the class path-style branch intact.
+    let style_subsumes_label = match (e.style.as_ref(), e.label_style.as_ref()) {
+        (Some(v), Some(ls)) => {
+            let v_filtered: Vec<&String> = v.iter().filter(|s| !s.is_empty()).collect();
+            let ls_filtered: Vec<&String> = ls.iter().filter(|s| !s.is_empty()).collect();
+            !ls_filtered.is_empty() && v_filtered == ls_filtered
+        }
+        _ => false,
+    };
     match (e.style.as_ref(), e.label_style.as_ref()) {
         (Some(v), Some(ls))
-            if !v.is_empty() && v.iter().any(|s| !s.is_empty()) && !ls.is_empty() =>
+            if !v.is_empty()
+                && v.iter().any(|s| !s.is_empty())
+                && !ls.is_empty()
+                && !style_subsumes_label =>
         {
             let first: String = v
                 .iter()
@@ -2216,6 +2235,50 @@ fn compute_edge_path_style(e: &UEdge) -> String {
         }
         _ => ";".to_string(),
     }
+}
+
+/// Lowercase a named CSS colour value (e.g. `color:Sienna` → `color:sienna`).
+/// Browsers lowercase named colours when serialising via the DOM `style` IDL
+/// attribute; the reference SVGs were captured after that pass, so we mirror
+/// it here. Hex (`#abc`/`#aabbcc`), `rgb(…)`, `rgba(…)`, `hsl(…)` and `var(…)`
+/// values are left untouched — only bare-word values that aren't a hex/rgb
+/// expression are lowercased.
+fn lowercase_named_color(decl: &str) -> String {
+    let trimmed = decl.trim();
+    let trailing_semi = trimmed.ends_with(';');
+    let body = trimmed.trim_end_matches(';');
+    let Some(colon) = body.find(':') else {
+        return decl.to_string();
+    };
+    let key = body[..colon].trim();
+    if !key.contains("color") {
+        return decl.to_string();
+    }
+    let raw_value = &body[colon + 1..];
+    let value = raw_value.trim();
+    let lowered = value.to_lowercase();
+    if value == lowered {
+        return decl.to_string();
+    }
+    // Skip values that already encode their own casing (hex, function calls).
+    if value.starts_with('#')
+        || value.contains('(')
+        || value.starts_with("var ")
+        || value.starts_with("url")
+    {
+        return decl.to_string();
+    }
+    let mut out = String::with_capacity(decl.len());
+    out.push_str(&body[..colon]);
+    out.push(':');
+    // Preserve any leading whitespace between `:` and the value.
+    let lead_ws_len = raw_value.len() - raw_value.trim_start().len();
+    out.push_str(&raw_value[..lead_ws_len]);
+    out.push_str(&lowered);
+    if trailing_semi {
+        out.push(';');
+    }
+    out
 }
 
 /// Map `arrow_type_*` value to the `markers.rs` family + position pair
@@ -2449,10 +2512,18 @@ fn render_edge_label(e: &UEdge, html_labels: bool, l: &FlowchartLayout) -> Strin
     // prefix on the `<div>` of the edgeLabel via `applyStyle`, which
     // emits text-only properties before the default `display: table-cell;
     // …` block. `build_div_style_prefix` mirrors that filter exactly.
+    //
+    // Browsers lowercase named CSS colours when serialising `element.style`
+    // (e.g. `Sienna` → `sienna`). The reference SVGs were captured from a
+    // real DOM so they carry the lowercased form; we mirror the behaviour
+    // here without touching the (blacklisted) shape-style helpers.
     let div_prefix = e
         .label_style
         .as_ref()
-        .map(|styles| build_div_style_prefix(styles))
+        .map(|styles| {
+            let lowered: Vec<String> = styles.iter().map(|s| lowercase_named_color(s)).collect();
+            build_div_style_prefix(&lowered)
+        })
         .unwrap_or_default();
     let span_label_style = e
         .label_style
