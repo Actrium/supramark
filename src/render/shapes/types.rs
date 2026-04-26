@@ -277,6 +277,14 @@ pub fn emit_polygon_node(node: &crate::layout::unified::types::Node, pts: &[(f64
         .iter()
         .map(|(x, y)| format!("{},{}", fmt_num(*x), fmt_num(*y)))
         .collect();
+    // Upstream `polygon.attr('style', nodeStyles)` only sets the attr
+    // when `nodeStyles` is non-empty; omit it otherwise.
+    let node_style = build_inline_style(node.css_styles.as_deref().unwrap_or(&[]));
+    let style_attr = if node_style.is_empty() {
+        String::new()
+    } else {
+        format!(r#" style="{}""#, node_style)
+    };
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -287,8 +295,9 @@ pub fn emit_polygon_node(node: &crate::layout::unified::types::Node, pts: &[(f64
         ty = fmt_num(ty),
     ));
     out.push_str(&format!(
-        r#"<polygon class="label-container" points="{p}"></polygon>"#,
+        r#"<polygon class="label-container" points="{p}"{style_attr}></polygon>"#,
         p = pts_attr.join(" "),
+        style_attr = style_attr,
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
@@ -328,6 +337,15 @@ pub fn emit_polygon_node_with_transform(
         Some(look) if !look.is_empty() => format!(r#" data-look="{}""#, look),
         _ => String::new(),
     };
+    // Upstream `polygon.attr('style', nodeStyles)` is only called when
+    // `nodeStyles` is truthy. We mirror that: when no css_styles are
+    // present, the `style="…"` attribute is omitted entirely.
+    let node_style = build_inline_style(node.css_styles.as_deref().unwrap_or(&[]));
+    let style_attr = if node_style.is_empty() {
+        String::new()
+    } else {
+        format!(r#" style="{}""#, node_style)
+    };
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -341,10 +359,11 @@ pub fn emit_polygon_node_with_transform(
     // Note: inner translate emitted without a space after the comma to
     // match d3's string-concat behaviour in upstream `insertPolygonShape`.
     out.push_str(&format!(
-        r#"<polygon points="{p}" class="label-container" transform="translate({ptx},{pty})"></polygon>"#,
+        r#"<polygon points="{p}" class="label-container" transform="translate({ptx},{pty})"{style_attr}></polygon>"#,
         p = pts_attr.join(" "),
         ptx = fmt_num(ptx),
         pty = fmt_num(pty),
+        style_attr = style_attr,
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
