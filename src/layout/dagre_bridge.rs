@@ -72,6 +72,34 @@ fn is_compound(data: &LayoutData) -> bool {
     data.nodes.iter().any(|n| n.parent_id.is_some())
 }
 
+/// Whether a leaf node's polygon vertices live in `[0, w]` instead of
+/// `[-w/2, w/2]` once the node's centring `transform="translate(-w/2, h/2)"`
+/// is ignored by the jsdom `getBBox` shim.
+///
+/// Affects isolated-cluster `bbox_width` calculation: an asymmetric leaf
+/// contributes `0` (not `-w/2`) as its leftmost local x, so the cluster's
+/// left bbox bound is determined ONLY by symmetric siblings (rect / round
+/// / circle / etc.). When an asymmetric polygon is the widest leaf but a
+/// symmetric leaf has the largest half-width, upstream's bbox is narrower
+/// than `8 + cluster_width + max_half_node_w` — cypress/flowchart/176 +
+/// /181 hit this case (One subgraph: round `a` paired with hexagon `b`).
+fn shape_is_asymmetric_x(shape: Option<&str>) -> bool {
+    matches!(
+        shape,
+        Some(
+            "hexagon"
+                | "subroutine"
+                | "lean_left"
+                | "lean_right"
+                | "trapezoid"
+                | "inv_trapezoid"
+                | "diamond"
+                | "rect_left_inv_arrow"
+                | "question"
+        )
+    )
+}
+
 /// Build the layout options from `LayoutData` + defaults. Mirrors
 /// upstream `index.ts` lines 272-291's `.setGraph({...})` call.
 fn build_layout_options(data: &LayoutData) -> LayoutOptions {
@@ -1482,53 +1510,59 @@ fn layout_isolated_cluster(
     //
     // The label foreignObjects typically have small widths (single char labels) that
     // do not exceed the cluster rect's right edge. Edge paths fall within the rect.
-    // So the binding constraints are the cluster rect right and the node rects left:
-    //   bbox_width  = (8 + cluster_width)  - min(0, -max_half_node_w)
-    //              = (8 + cluster_width)  + max_half_node_w
-    //   bbox_height = (8 + cluster_height) + max_half_node_h
+    //
+    // Symmetric shapes (rect / round / circle / stadium / ellipse / cylinder) emit
+    // a `<rect x="-w/2" ...>` (or equivalent `<circle cx="0">`) so their local
+    // bbox spans `[-w/2, w/2]`. Asymmetric polygon shapes (hexagon / subroutine /
+    // lean_left / lean_right / trapezoid / inv_trapezoid / diamond / rect_left_inv_arrow)
+    // emit a `<polygon points="...">` whose vertices live in `[0, w] × [-h, 0]` —
+    // the centring `transform="translate(-w/2, h/2)"` is IGNORED by the jsdom
+    // shim. So an asymmetric leaf contributes `0` (not `-w/2`) to `min_left` and
+    // `w` (not `w/2`) to `max_right_node`.
+    //
+    //   bbox_width  = max(8 + cluster_width, max_right_node) - min(0, -max_half_sym_w)
+    //   bbox_height = (8 + cluster_height) + max_half_sym_h     (no asymmetric vertical
+    //                                                            divergence — polygon
+    //                                                            shapes' local y range
+    //                                                            is `[-h, 0]` which lies
+    //                                                            ENTIRELY above the
+    //                                                            cluster rect's local y
+    //                                                            range `[8, 8+ch]`, so
+    //                                                            their `-h` extent matches
+    //                                                            the symmetric `-h/2` case
+    //                                                            in pulling `min_y` down)
     let inner_margin = 8.0; // inner dagre marginx/marginy
-    let max_half_node_w = {
-        let mut v: f64 = 0.0;
-        for child in &leaf_children {
-            if let Some(lbl) = g.node(&child.id) {
-                v = v.max(lbl.width / 2.0);
+    let mut max_half_sym_w: f64 = 0.0;
+    let mut max_full_asym_w: f64 = 0.0;
+    let mut max_half_node_h: f64 = 0.0;
+    for child in &leaf_children {
+        if let Some(lbl) = g.node(&child.id) {
+            if shape_is_asymmetric_x(child.shape.as_deref()) {
+                max_full_asym_w = max_full_asym_w.max(lbl.width);
+            } else {
+                max_half_sym_w = max_half_sym_w.max(lbl.width / 2.0);
             }
+            max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
         }
-        // Sub-isolated clusters appear as leaf nodes with preset dims.
-        // Iterate by sorted id for deterministic float-summation order.
-        for cid in &sub_isolated_sorted_ids {
-            if let Some(lbl) = g.node(cid) {
-                v = v.max(lbl.width / 2.0);
-            }
+    }
+    // Sub-isolated clusters appear as leaf nodes with preset dims (rect-shaped).
+    for cid in &sub_isolated_sorted_ids {
+        if let Some(lbl) = g.node(cid) {
+            max_half_sym_w = max_half_sym_w.max(lbl.width / 2.0);
+            max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
         }
-        // Non-isolated cluster children — use the compound bbox from dagre.
-        for cc in &non_isolated_cluster_children {
-            if let Some(lbl) = g.node(&cc.id) {
-                v = v.max(lbl.width / 2.0);
-            }
+    }
+    // Non-isolated cluster children — also rect-shaped compound nodes.
+    for cc in &non_isolated_cluster_children {
+        if let Some(lbl) = g.node(&cc.id) {
+            max_half_sym_w = max_half_sym_w.max(lbl.width / 2.0);
+            max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
         }
-        v
-    };
-    let max_half_node_h = {
-        let mut v: f64 = 0.0;
-        for child in &leaf_children {
-            if let Some(lbl) = g.node(&child.id) {
-                v = v.max(lbl.height / 2.0);
-            }
-        }
-        for cid in &sub_isolated_sorted_ids {
-            if let Some(lbl) = g.node(cid) {
-                v = v.max(lbl.height / 2.0);
-            }
-        }
-        for cc in &non_isolated_cluster_children {
-            if let Some(lbl) = g.node(&cc.id) {
-                v = v.max(lbl.height / 2.0);
-            }
-        }
-        v
-    };
-    let mut bbox_width = inner_margin + cluster_width + max_half_node_w;
+    }
+    let max_right_node = max_half_sym_w.max(max_full_asym_w);
+    let max_right = (inner_margin + cluster_width).max(max_right_node);
+    let min_left = (0.0_f64).min(-max_half_sym_w);
+    let mut bbox_width = max_right - min_left;
     let mut bbox_height = inner_margin + cluster_height + max_half_node_h;
 
     // Read back inner-pass edge routing.  Every edge whose endpoints are both
