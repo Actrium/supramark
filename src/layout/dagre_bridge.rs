@@ -1552,18 +1552,39 @@ fn layout_isolated_cluster(
             max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
         }
     }
-    // Non-isolated cluster children — also rect-shaped compound nodes.
+    // Non-isolated cluster children are rendered as <g class="cluster">
+    // elements inside the inner SVG with absolute-positioned rects
+    // (cx - w/2, cy - h/2, w, h).  Under the jsdom getBBox shim (which
+    // ignores transforms), these rects contribute their absolute coords
+    // to the bbox — NOT (-w/2, -h/2, w, h) like leaf nodes.  Track
+    // their absolute extents so we can union them into the overall bbox.
+    let mut cluster_child_min_x: f64 = f64::INFINITY;
+    let mut cluster_child_max_x: f64 = f64::NEG_INFINITY;
+    let mut cluster_child_min_y: f64 = f64::INFINITY;
+    let mut cluster_child_max_y: f64 = f64::NEG_INFINITY;
     for cc in &non_isolated_cluster_children {
         if let Some(lbl) = g.node(&cc.id) {
-            max_half_sym_w = max_half_sym_w.max(lbl.width / 2.0);
-            max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
+            let cx = lbl.x.unwrap_or(0.0);
+            let cy = lbl.y.unwrap_or(0.0);
+            let hw = lbl.width / 2.0;
+            let hh = lbl.height / 2.0;
+            cluster_child_min_x = cluster_child_min_x.min(cx - hw);
+            cluster_child_max_x = cluster_child_max_x.max(cx + hw);
+            cluster_child_min_y = cluster_child_min_y.min(cy - hh);
+            cluster_child_max_y = cluster_child_max_y.max(cy + hh);
         }
     }
     let max_right_node = max_half_sym_w.max(max_full_asym_w);
-    let max_right = (inner_margin + cluster_width).max(max_right_node);
-    let min_left = (0.0_f64).min(-max_half_sym_w);
+    let max_right = (inner_margin + cluster_width)
+        .max(max_right_node)
+        .max(cluster_child_max_x);
+    let min_left = (0.0_f64)
+        .min(-max_half_sym_w)
+        .min(cluster_child_min_x);
+    let max_bottom = (inner_margin + cluster_height).max(cluster_child_max_y);
+    let min_top = (0.0_f64).min(-max_half_node_h).min(cluster_child_min_y);
     let mut bbox_width = max_right - min_left;
-    let mut bbox_height = inner_margin + cluster_height + max_half_node_h;
+    let mut bbox_height = max_bottom - min_top;
 
     // Read back inner-pass edge routing.  Every edge whose endpoints are both
     // inside this cluster (excluding self-edges, which are expanded into
