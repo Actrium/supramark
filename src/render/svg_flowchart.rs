@@ -705,6 +705,17 @@ fn compute_viewbox(
                         &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, -h, w, h,
                     );
                 }
+                "subroutine" => {
+                    // `node.width` carries the visual width
+                    // (= base_w + 2*FRAME_WIDTH). The raw polygon spans
+                    //   x ∈ [-8, base_w + 8] = [-8, w - 8],  width = w
+                    //   y ∈ [-h, 0]
+                    // and the polygon's own `translate(-base_w/2, h/2)`
+                    // is ignored by the jsdom getBBox shim.
+                    expand(
+                        &mut min_x, &mut min_y, &mut max_x, &mut max_y, -8.0, -h, w, h,
+                    );
+                }
                 "cylinder" | "cyl" => {
                     // Cylinder path d="M0,ry a... w,0 a... -w,0 l0,h a... w,0 l0,-h"
                     // jsdom's pathBBox shim only registers each command's

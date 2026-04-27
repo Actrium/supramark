@@ -455,9 +455,7 @@ fn build_graph_filtered_ex<'a>(
             // id as `owner_override` (for helper naming + parent lookup) and
             // keeping `dagre_src` (the anchor leaf) as the actual dagre
             // edge endpoint.
-            let owner_override = if effective_src == effective_dst
-                && effective_src != dagre_src
-            {
+            let owner_override = if effective_src == effective_dst && effective_src != dagre_src {
                 log::debug!(
                     "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
                     effective_src,
@@ -660,10 +658,7 @@ fn collect_self_loop_helpers(g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Node> {
 /// `{owner}-cyclic-special-2` respectively (note: the dagre name suffix
 /// numbers are off-by-one from the DOM id labels — that mirrors mermaid's
 /// own `index.js:343-361` naming).
-fn collect_self_loop_segments(
-    data: &LayoutData,
-    g: &Graph<NodeLabel, EdgeLabel>,
-) -> Vec<Edge> {
+fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Edge> {
     use std::collections::HashMap;
     // Build a quick lookup: owner node id → original Edge (so the synthetic
     // segments can inherit pattern/style/label/look from the user-provided
@@ -686,15 +681,16 @@ fn collect_self_loop_segments(
         };
         // Recognised suffixes: `-cyclic-special-0`, `-cyclic-special-1`,
         // `-cyclic-special-2`. Anything else is a regular edge.
-        let (owner, seg_idx, dom_suffix) = if let Some(rest) = name.strip_suffix("-cyclic-special-0") {
-            (rest, 0u8, "1")
-        } else if let Some(rest) = name.strip_suffix("-cyclic-special-1") {
-            (rest, 1u8, "mid")
-        } else if let Some(rest) = name.strip_suffix("-cyclic-special-2") {
-            (rest, 2u8, "2")
-        } else {
-            continue;
-        };
+        let (owner, seg_idx, dom_suffix) =
+            if let Some(rest) = name.strip_suffix("-cyclic-special-0") {
+                (rest, 0u8, "1")
+            } else if let Some(rest) = name.strip_suffix("-cyclic-special-1") {
+                (rest, 1u8, "mid")
+            } else if let Some(rest) = name.strip_suffix("-cyclic-special-2") {
+                (rest, 2u8, "2")
+            } else {
+                continue;
+            };
         let lbl = match g.edge(&ed.v, &ed.w, ed.name.as_deref()) {
             Some(l) => l,
             None => continue,
@@ -748,8 +744,16 @@ fn collect_self_loop_segments(
     }
     // Stable sort: group by owner, then segment index ascending.
     out.sort_by(|a, b| {
-        let ao = a.extra.get("cyclic_owner").map(|s| s.as_str()).unwrap_or("");
-        let bo = b.extra.get("cyclic_owner").map(|s| s.as_str()).unwrap_or("");
+        let ao = a
+            .extra
+            .get("cyclic_owner")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let bo = b
+            .extra
+            .get("cyclic_owner")
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let ai = a
             .extra
             .get("cyclic_index")
@@ -1393,13 +1397,9 @@ fn layout_isolated_cluster(
     // The post-process `widen_cluster_with_fork_children` in
     // `layout/state.rs` handles edge spline + descendant centring; here we
     // only need to make sure the bbox the outer dagre sees is widened too.
-    let has_forkjoin_child = data
-        .nodes
-        .iter()
-        .any(|n| {
-            n.parent_id.as_deref() == Some(cluster_id)
-                && n.shape.as_deref() == Some("forkJoin")
-        });
+    let has_forkjoin_child = data.nodes.iter().any(|n| {
+        n.parent_id.as_deref() == Some(cluster_id) && n.shape.as_deref() == Some("forkJoin")
+    });
     if has_forkjoin_child {
         cluster_width += 2.0;
         inner_x += 1.0;
@@ -1968,9 +1968,7 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
                             );
                         }
                     }
-                } else if let Some(&(parent_cx, parent_cy, _, _)) =
-                    inner_positions.get(&orig.id)
-                {
+                } else if let Some(&(parent_cx, parent_cy, _, _)) = inner_positions.get(&orig.id) {
                     if let Some(il) = find_inner_layout(&orig.id, &isolated_layouts) {
                         // Leaf width inside the parent isolated pass is the
                         // nested cluster's own `bbox_width × bbox_height`
@@ -2125,6 +2123,17 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
             all_edges.extend(refined);
         }
     }
+    // Re-clip edge endpoints for shapes whose upstream `node.intersect`
+    // overrides dagre's default `intersect.rect`. dagre's
+    // `assign_node_intersects` only knows about rect / diamond /
+    // ellipse-family shapes; for `subroutine` upstream installs
+    // `intersect.polygon`, whose integer-rounded line-intersect produces
+    // a sub-pixel offset on the boundary point. Without this pass our
+    // edges land on the rect boundary (e.g. `M192.146,104.945`) instead
+    // of upstream's polygon-rounded `M192.646,105.445`, breaking
+    // byte-exact parity for every fixture that connects a subroutine.
+    reclip_polygon_intersect_endpoints(&all_nodes, &mut all_edges);
+
     let bounds = compute_bounds(&all_nodes, &all_edges);
 
     Ok(LayoutResult {
@@ -2134,6 +2143,178 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         bounds,
         isolated_cluster_ids: all_isolated_ids,
     })
+}
+
+/// Re-run the upstream-faithful `intersect.polygon` (with its
+/// half-denominator rounding) on edge endpoints whose source/target
+/// node uses a polygon-based `node.intersect`. Currently this covers
+/// subroutine; other shapes can be added as their byte-exact diffs
+/// surface.
+///
+/// The caller has already received dagre's clipped first/last points
+/// (computed via `intersect.rect`). We use the *second* and
+/// *second-to-last* dagre points as the probe — these match the
+/// `point` argument upstream's `node.intersect` receives during
+/// `assign_node_intersects`.
+fn reclip_polygon_intersect_endpoints(nodes: &[Node], edges: &mut [Edge]) {
+    use std::collections::HashMap;
+    let by_id: HashMap<&str, &Node> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    for e in edges.iter_mut() {
+        let Some(pts) = e.points.as_mut() else {
+            continue;
+        };
+        if pts.len() < 3 {
+            continue;
+        }
+        let len = pts.len();
+        // Source endpoint: `points[0]` was clipped by dagre with
+        // `intersect.rect(src, points[1])`. Re-do with polygon.
+        if let Some(src_id) = e.start.as_deref().or(e.source.as_deref()) {
+            if let Some(src) = by_id.get(src_id) {
+                if shape_uses_polygon_intersect(src.shape.as_deref()) {
+                    let probe = pts[1];
+                    if let Some(p) = polygon_intersect_for_node(src, probe) {
+                        pts[0] = p;
+                    }
+                }
+            }
+        }
+        // Target endpoint: `points[last]` was clipped with
+        // `intersect.rect(dst, points[last - 1])`.
+        if let Some(dst_id) = e.end.as_deref().or(e.target.as_deref()) {
+            if let Some(dst) = by_id.get(dst_id) {
+                if shape_uses_polygon_intersect(dst.shape.as_deref()) {
+                    let probe = pts[len - 2];
+                    if let Some(p) = polygon_intersect_for_node(dst, probe) {
+                        pts[len - 1] = p;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn shape_uses_polygon_intersect(shape: Option<&str>) -> bool {
+    matches!(shape, Some("subroutine"))
+}
+
+/// Compute the upstream `intersect.polygon` hit for a node + probe
+/// point. Returns `None` if the node's shape is not a polygon-intersect
+/// shape or if the math degenerates.
+fn polygon_intersect_for_node(
+    node: &Node,
+    probe: crate::layout::unified::Point,
+) -> Option<crate::layout::unified::Point> {
+    let cx = node.x?;
+    let cy = node.y?;
+    let w = node.width?;
+    let h = node.height?;
+    let raw_pts: Vec<(f64, f64)> = match node.shape.as_deref()? {
+        "subroutine" => {
+            // 10-vertex polygon = inner rect (top-left at origin) +
+            // outer rewind extending ±FRAME_WIDTH on each side.
+            // FRAME_WIDTH = 8 — see `src/render/shapes/subroutine.rs`.
+            let base_w = (w - 16.0).max(0.0);
+            vec![
+                (0.0, 0.0),
+                (base_w, 0.0),
+                (base_w, -h),
+                (0.0, -h),
+                (0.0, 0.0),
+                (-8.0, 0.0),
+                (base_w + 8.0, 0.0),
+                (base_w + 8.0, -h),
+                (-8.0, -h),
+                (-8.0, 0.0),
+            ]
+        }
+        _ => return None,
+    };
+    upstream_polygon_intersect(cx, cy, w, h, &raw_pts, probe)
+}
+
+/// Upstream-faithful port of dagre `intersect.polygon` + `intersect.line`,
+/// reproducing the half-denominator rounding (offset = |denom|/2) that
+/// shifts polygon boundary points by a fraction of a pixel.
+fn upstream_polygon_intersect(
+    cx: f64,
+    cy: f64,
+    width: f64,
+    height: f64,
+    raw_pts: &[(f64, f64)],
+    probe: crate::layout::unified::Point,
+) -> Option<crate::layout::unified::Point> {
+    if raw_pts.len() < 2 {
+        return None;
+    }
+    let (min_x, min_y) = raw_pts
+        .iter()
+        .fold((f64::INFINITY, f64::INFINITY), |(mx, my), &(x, y)| {
+            (mx.min(x), my.min(y))
+        });
+    let left = cx - width / 2.0 - min_x;
+    let top = cy - height / 2.0 - min_y;
+    let p1 = (cx, cy);
+    let p2 = (probe.x, probe.y);
+    let mut hits: Vec<crate::layout::unified::Point> = Vec::with_capacity(2);
+    let n = raw_pts.len();
+    for i in 0..n {
+        let (rax, ray) = raw_pts[i];
+        let (rbx, rby) = raw_pts[(i + 1) % n];
+        let q1 = (left + rax, top + ray);
+        let q2 = (left + rbx, top + rby);
+        if let Some(hit) = upstream_intersect_line(p1, p2, q1, q2) {
+            hits.push(hit);
+        }
+    }
+    hits.into_iter().min_by(|a, b| {
+        let da = (a.x - probe.x).powi(2) + (a.y - probe.y).powi(2);
+        let db = (b.x - probe.x).powi(2) + (b.y - probe.y).powi(2);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn upstream_intersect_line(
+    p1: (f64, f64),
+    p2: (f64, f64),
+    q1: (f64, f64),
+    q2: (f64, f64),
+) -> Option<crate::layout::unified::Point> {
+    let a1 = p2.1 - p1.1;
+    let b1 = p1.0 - p2.0;
+    let c1 = p2.0 * p1.1 - p1.0 * p2.1;
+    let r3 = a1 * q1.0 + b1 * q1.1 + c1;
+    let r4 = a1 * q2.0 + b1 * q2.1 + c1;
+    if r3 != 0.0 && r4 != 0.0 && (r3 * r4) > 0.0 {
+        return None;
+    }
+    let a2 = q2.1 - q1.1;
+    let b2 = q1.0 - q2.0;
+    let c2 = q2.0 * q1.1 - q1.0 * q2.1;
+    let r1 = a2 * p1.0 + b2 * p1.1 + c2;
+    let r2 = a2 * p2.0 + b2 * p2.1 + c2;
+    let epsilon = 1e-6;
+    if r1.abs() < epsilon && r2.abs() < epsilon && (r1 * r2) > 0.0 {
+        return None;
+    }
+    let denom = a1 * b2 - a2 * b1;
+    if denom == 0.0 {
+        return None;
+    }
+    let offset = (denom / 2.0).abs();
+    let num_x = b1 * c2 - b2 * c1;
+    let x = if num_x < 0.0 {
+        (num_x - offset) / denom
+    } else {
+        (num_x + offset) / denom
+    };
+    let num_y = a2 * c1 - a1 * c2;
+    let y = if num_y < 0.0 {
+        (num_y - offset) / denom
+    } else {
+        (num_y + offset) / denom
+    };
+    Some(crate::layout::unified::Point { x, y })
 }
 
 #[cfg(test)]
@@ -2284,8 +2465,7 @@ mod tests {
             .filter(|n| n.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_helper"))
             .collect();
         assert_eq!(helpers.len(), 2, "two `---1` / `---2` helpers");
-        let ids: std::collections::HashSet<&str> =
-            helpers.iter().map(|n| n.id.as_str()).collect();
+        let ids: std::collections::HashSet<&str> = helpers.iter().map(|n| n.id.as_str()).collect();
         assert!(ids.contains("A---A---1"));
         assert!(ids.contains("A---A---2"));
         for h in &helpers {
@@ -2301,13 +2481,15 @@ mod tests {
             .collect();
         assert_eq!(segs.len(), 3, "three cyclic-special sub-edges");
         // Segment ids match upstream's DOM naming: -1, -mid, -2.
-        let seg_ids: std::collections::HashSet<&str> =
-            segs.iter().map(|e| e.id.as_str()).collect();
+        let seg_ids: std::collections::HashSet<&str> = segs.iter().map(|e| e.id.as_str()).collect();
         assert!(seg_ids.contains("A-cyclic-special-1"));
         assert!(seg_ids.contains("A-cyclic-special-mid"));
         assert!(seg_ids.contains("A-cyclic-special-2"));
         // Mid segment carries the original label.
-        let mid = segs.iter().find(|e| e.id == "A-cyclic-special-mid").unwrap();
+        let mid = segs
+            .iter()
+            .find(|e| e.id == "A-cyclic-special-mid")
+            .unwrap();
         assert_eq!(mid.label.as_deref(), Some("again"));
         for s in &segs {
             assert!(
