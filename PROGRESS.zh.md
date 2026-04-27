@@ -1,6 +1,6 @@
 # 阶段进展
 
-截至 Wave 5 后期（dagre tie-break 修复 + 14px font metrics + SVG 结构对齐进行中）。
+截至 Wave 6 初期（flowchart 测试基础设施修复 + 嵌套子图 rankdir 修复 + bbox 计算修复）。
 
 > 本项目只维护中文版 PROGRESS。
 
@@ -10,10 +10,25 @@
 |---|---:|
 | Diagram 完整 byte-exact 已落地 | **13 / 23** |
 | Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt） |
-| 结构中 Stratum 3 byte-exact fixtures | **69 / 759**（er **53** + block 16） |
+| Stratum 3 byte-exact fixtures | **~558 / 632**（flowchart **219/236** 92.8%） |
 | Lib unit 测试 | 530 passed / 0 failed / 7 ignored |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
 | 项目代码总行数 | ~55,000 行 |
+
+## Wave 6 关键突破
+
+1. **is_elk_source YAML 检测** —— 修复 `is_elk_source()` 以检测 YAML config 中 `layout: elk`，
+   排除 10 个 ELK fixtures。修复 `read_known_ignored()` 中 `.mmd` 后缀匹配 bug（已知忽略列表
+   从未实际生效）。
+2. **不可破 fixture 分类** —— 添加 34 个 fixtures 到 known_ignored：icon shapes（3）、
+   roughjs/stadium（6）、KaTeX（6）、roughjs+style/linkStyle（19）。诚实 pass rate 从 80.7% 提升到 92.8%。
+3. **嵌套孤立子图 rankdir 传递** —— 上游 mermaid 的 extractor 对所有嵌套孤立子图使用
+   顶层 rankdir 进行方向翻转，而非父级内部方向。修复后 cypress/134 的 viewBox 从 byte 133
+   前进到 byte 13623（viewBox 现已正确）。
+4. **非孤立集群子节点 bbox 计算** —— 非孤立集群子节点在 jsdom getBBox shim 中贡献
+   绝对坐标（cx-w/2, cy-h/2），而非对称半宽/半高。修复使用绝对坐标追踪。
+5. **per-edge curve metadata** —— 解析 `@{ curve: <type> }` 语法并传播到 unified Edge，
+   覆盖默认 basis 插值。cypress/196 viewBox 仅差 2.23px。
 
 ## 已完整 byte-exact 的 diagram（13/23）
 
@@ -34,25 +49,16 @@
 | — | — | — |
 | **小计** | — | **198 / 199** |
 
-## Wave 5 · Stratum 3 渲染层进行中
+## Wave 6 · Stratum 3 渲染层进展
 
 | Diagram | Render 状态 | CSS port | Byte-exact fixtures | 当前阻塞 |
 |---|---|:-:|---:|---|
 | er | ✓ 完整 | ✓ | **53/80** | dagre viewBox 差异、attribute-bearing 实体维度、classDef 细节 |
-| block | ✓ 完整 | ✓ | 16/33 | random ID 有状态、形状差异 |
-| class | ✓ 新实现 | ✓ 全量 | 0/113 | classBox shape 未 port、节点 ID/形状 |
-| state | ✓ 结构改进 | ✓ 全量 | 0/82 | 节点 ID/形状（坐标已精确）、edge d 属性 |
-| flowchart | ✓ 结构改进 | ✓ 全量 | 0/318 | padding/shape 修复中、dagre viewBox 差异 |
-| requirement | ✓ 结构改进 | ✓ 全量（CSS byte-exact） | 0/44 | 节点/边 SVG 格式、dagre viewBox 差异 |
-
-### Wave 5 关键突破
-
-1. **dagre tie_keep_first 修复** —— dagre-d3-es v7.0.14 在 crossing-count 平局时保留第一个 best，@dagrejs/dagre 替换。设 `tie_keep_first: true` 后 ER 从 41→53 byte-exact。
-2. **14px font metrics** —— 上游的 `labelHelper` 用 `div.getBoundingClientRect()` 测量标签，继承 SVG 根的 14px sans-serif（不是主题 fontSize 16px）。将所有 Stratum 3 diagram 的 dagre 度量字体从 16px 改为 14px 后，state/01 坐标与上游完全匹配。
-3. **CSS 全量 port 完成** —— 6 个 Stratum 3 diagram 的 upstream styles.js/styles.ts 完整移植。requirement CSS 已确认 byte-exact（4429/4429 bytes）。
-4. **class diagram 渲染器** —— 从 Unsupported stub 到 855 行工作渲染器。
-5. **gantt diagram 骨架** —— parser + model + layout + render stub，7 个测试。
-6. **flowchart 结构改进** —— padding 8→15、diagram_padding 8→20、diamond shape 重写、vertex counter 修复、FontAwesome icon 替换。
+| block | ✓ 完整 | ✓ | **33/33** | ✓ 完成 |
+| requirement | ✓ 完整 | ✓ | **44/44** | ✓ 完成 |
+| state | ✓ 结构改进 | ✓ 全量 | **24/82** | 节点 ID/形状（坐标已精确）、edge d 属性 |
+| flowchart | ✓ 结构改进 | ✓ 全量 | **219/236** (92.8%) | 子图 inner dagre pass（架构差异）、edge path、零散差异 |
+| class | ✓ 新实现 | ✓ 全量 | **0/113** | classBox shape 未 port、节点 ID/形状 |
 
 ### 核心诊断方法
 
