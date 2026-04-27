@@ -247,7 +247,7 @@ fn flowchart_byte_exact_sweep() {
         }
     }
     eprintln!("[flowchart] byte-exact={}/{}", pass, total);
-    for (r, d) in diffs.iter() {
+    for (r, d) in diffs.iter().take(30) {
         eprintln!("[flowchart] diff {r}: {d}");
     }
     // This test is aspirational for the MVP: it exists so the CI / harness
