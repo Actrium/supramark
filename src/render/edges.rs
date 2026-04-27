@@ -152,6 +152,146 @@ pub fn build_path(points: &[Point], curve: CurveType) -> String {
     }
 }
 
+/// Return the absolute coordinates that upstream's `pathBBox` parser would
+/// visit when computing the SVG bbox of the rendered `d=` string for the
+/// given curve. This is what `getBBox()` uses for edge paths in the
+/// jsdom shim (parsed coords from each `M`/`L`/`C` command's endpoint and
+/// control points), and differs from the raw layout `points` for cubic
+/// curves: the basis spline smooths the input polyline and the actual
+/// visited bbox is tighter than `min/max` of the raw points.
+///
+/// Used by viewBox computation in `svg_flowchart.rs` so we mirror upstream
+/// pixel-for-pixel for edges whose dagre middle points poke out beyond
+/// the rendered curve.
+pub fn pathbbox_points(points: &[Point], curve: CurveType) -> Vec<(f64, f64)> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    match curve {
+        CurveType::Basis
+        | CurveType::Cardinal
+        | CurveType::CatmullRom
+        | CurveType::BumpX
+        | CurveType::BumpY
+        | CurveType::MonotoneX
+        | CurveType::MonotoneY
+        | CurveType::Natural => basis_visited_points(points),
+        CurveType::Linear => points.iter().map(|p| (p.x, p.y)).collect(),
+        CurveType::Step => step_visited_points(points, 0.5),
+        CurveType::StepBefore => step_visited_points(points, 0.0),
+        CurveType::StepAfter => step_visited_points(points, 1.0),
+        CurveType::Rounded => points.iter().map(|p| (p.x, p.y)).collect(),
+    }
+}
+
+/// Mirror of `path_basis` — returns the coords visited by an SVG
+/// `pathBBox` parser. For the basis curve this corresponds to: the
+/// initial M, the implicit L to the first interior anchor, every C
+/// command's two control points and end coordinate, and the closing L
+/// to the last point. We deliberately do NOT round to 3 decimals here
+/// because the bbox is consumed by the byte-exact viewBox formatter,
+/// which reads the unrounded float directly (matching upstream's
+/// `parseFloat` of the d-string after appendRound — round-trip stable).
+fn basis_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    if points.len() == 1 {
+        out.push((points[0].x, points[0].y));
+        return out;
+    }
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut state: u8 = 0;
+    for p in points {
+        let (x, y) = (p.x, p.y);
+        match state {
+            0 => {
+                out.push((x, y)); // M
+                state = 1;
+            }
+            1 => {
+                state = 2;
+            }
+            2 => {
+                // L to the (5*p0+p1)/6 anchor
+                out.push(((5.0 * x0 + x1) / 6.0, (5.0 * y0 + y1) / 6.0));
+                push_basis_cubic_visited(&mut out, x0, y0, x1, y1, x, y);
+                state = 3;
+            }
+            _ => {
+                push_basis_cubic_visited(&mut out, x0, y0, x1, y1, x, y);
+            }
+        }
+        x0 = x1;
+        x1 = x;
+        y0 = y1;
+        y1 = y;
+    }
+    match state {
+        3 => {
+            // lineEnd cubic uses (x1, y1) as the next "x".
+            push_basis_cubic_visited(&mut out, x0, y0, x1, y1, x1, y1);
+            out.push((x1, y1)); // closing L
+        }
+        2 => {
+            out.push((x1, y1));
+        }
+        _ => {}
+    }
+    out
+}
+
+fn push_basis_cubic_visited(
+    out: &mut Vec<(f64, f64)>,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    x: f64,
+    y: f64,
+) {
+    let c1x = (2.0 * x0 + x1) / 3.0;
+    let c1y = (2.0 * y0 + y1) / 3.0;
+    let c2x = (x0 + 2.0 * x1) / 3.0;
+    let c2y = (y0 + 2.0 * y1) / 3.0;
+    let ex = (x0 + 4.0 * x1 + x) / 6.0;
+    let ey = (y0 + 4.0 * y1 + y) / 6.0;
+    out.push((c1x, c1y));
+    out.push((c2x, c2y));
+    out.push((ex, ey));
+}
+
+/// Mirror of `path_step` — returns the coords visited.
+fn step_visited_points(points: &[Point], t: f64) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    let mut x_prev = 0.0;
+    let mut y_prev = 0.0;
+    for (i, p) in points.iter().enumerate() {
+        if i == 0 {
+            out.push((p.x, p.y));
+        } else {
+            let x_bend = x_prev + (p.x - x_prev) * t;
+            if x_bend != x_prev {
+                out.push((x_bend, y_prev));
+            }
+            if x_bend != p.x {
+                out.push((x_bend, p.y));
+            }
+            out.push((p.x, p.y));
+        }
+        x_prev = p.x;
+        y_prev = p.y;
+    }
+    out
+}
+
 /// d3 curveBasis path emission. Cubic B-spline through the points.
 ///
 /// Adapted from mmdflux (`render/graph/svg/edges/path_emit.rs`) —

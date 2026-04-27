@@ -813,21 +813,27 @@ fn compute_viewbox(
         let mut adjusted: Vec<Point> = points.clone();
         apply_marker_offsets(&mut adjusted, arrow_end, arrow_start);
 
-        // Mirror upstream's `pathBBox` → `unionBox` flow: compute the path's
-        // own (minX, minY, maxX, maxY), then convert to {x, y, width, height}
-        // and union via `b.x + b.width`. This reproduces the f64-rounding
-        // path that `parseFloat(maxX) - parseFloat(minX)` introduces; using
-        // each point's raw x/y for max/min directly rounds to 3 decimals
-        // and SKIPS the `(width = max - min)` precision loss, which makes
-        // our viewBox come out with one ULP fewer than upstream when an
-        // edge endpoint terminates near the +x boundary.
+        // Mirror upstream's `pathBBox` → `unionBox` flow. The bbox is
+        // computed from the rendered `d=` string commands (M/L/C/etc.),
+        // not the raw layout points. For cubic curves the basis spline
+        // smooths the polyline so the visited control-point bbox is
+        // tighter than `min/max` of the raw input. We round each visited
+        // coord to 3 decimals to match `appendRound(3)` in the rendered
+        // string, then union as `(min, max-min)` to reproduce upstream's
+        // `parseFloat(maxX) - parseFloat(minX)` precision behaviour.
+        let curve_name = e.curve.as_deref().unwrap_or("basis");
+        let ctype = edges::CurveType::parse(curve_name).unwrap_or(edges::CurveType::Basis);
+        let visited = edges::pathbbox_points(&adjusted, ctype);
+        if visited.is_empty() {
+            continue;
+        }
         let mut path_min_x = f64::INFINITY;
         let mut path_min_y = f64::INFINITY;
         let mut path_max_x = f64::NEG_INFINITY;
         let mut path_max_y = f64::NEG_INFINITY;
-        for p in adjusted.iter() {
-            let rx = (p.x * 1000.0).round() / 1000.0;
-            let ry = (p.y * 1000.0).round() / 1000.0;
+        for (px, py) in visited.iter() {
+            let rx = (px * 1000.0).round() / 1000.0;
+            let ry = (py * 1000.0).round() / 1000.0;
             if rx < path_min_x {
                 path_min_x = rx;
             }
