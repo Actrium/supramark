@@ -1014,7 +1014,50 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 /// Markdown `*italic*` → `<em>italic</em>` → textContent `italic`.
 /// HTML tags like `<br>` embedded in markdown are stripped by textContent.
 /// The `\n` → `<br/>` → stripped. Result: plain text, single line.
+///
+/// Mirrors marked.lexer's paragraph tokenisation: blank-line-separated
+/// runs become separate `<p>` elements, and each paragraph drops its
+/// trailing whitespace. The textContent of `<p>p1</p><p>p2</p>` is
+/// `p1` concatenated with `p2` (no separator, since paragraph tags
+/// themselves contribute nothing to textContent), which is what we
+/// reproduce here.
 fn strip_markdown_for_measure(label: &str) -> String {
+    let paragraphs = split_paragraphs_for_measure(label);
+    let mut out = String::with_capacity(label.len());
+    for para in &paragraphs {
+        out.push_str(&strip_markdown_paragraph_for_measure(para));
+    }
+    out
+}
+
+/// Split a markdown source into paragraph chunks at runs of blank lines
+/// (lines containing only whitespace), trimming trailing whitespace from
+/// each chunk. Mirrors marked.lexer paragraph tokenisation.
+fn split_paragraphs_for_measure(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for line in src.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        let is_blank = body.chars().all(|c| c.is_whitespace());
+        if is_blank {
+            if !current.is_empty() {
+                out.push(current.trim_end().to_string());
+                current = String::new();
+            }
+        } else {
+            current.push_str(line);
+        }
+    }
+    if !current.is_empty() {
+        out.push(current.trim_end().to_string());
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+fn strip_markdown_paragraph_for_measure(label: &str) -> String {
     let mut out = String::with_capacity(label.len());
     let bytes = label.as_bytes();
     let mut i = 0;

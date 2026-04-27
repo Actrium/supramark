@@ -853,6 +853,68 @@ fn parse_html_text_segments(html: &str, base_bold: bool) -> Vec<(String, bool)> 
 /// This matches what upstream's `markdownToLines` + `dedupPostProcessor`
 /// produce for the inline markdown labels used in flowchart nodes.
 pub fn markdown_label_to_html(src: &str) -> String {
+    // Mirror marked.lexer's paragraph splitting: blank-line-separated runs
+    // become separate paragraph tokens. Each paragraph drops its trailing
+    // whitespace during tokenisation. Within a paragraph, single newlines
+    // remain (and become `<br/>` here, matching GFM `breaks: true`).
+    //
+    // The caller (foreign_object_body with wrap_in_p=true) wraps the result
+    // in a single `<p>…</p>`, so we emit `</p><p>` between paragraphs to
+    // get the upstream `<p>p1</p><p>p2</p>` shape.
+    let paragraphs = split_markdown_paragraphs(src);
+    if paragraphs.len() <= 1 {
+        return markdown_paragraph_to_html(paragraphs.first().map(|s| s.as_str()).unwrap_or(src));
+    }
+    let mut out = String::with_capacity(src.len() * 2);
+    for (i, para) in paragraphs.iter().enumerate() {
+        if i > 0 {
+            out.push_str("</p><p>");
+        }
+        out.push_str(&markdown_paragraph_to_html(para));
+    }
+    out
+}
+
+/// Split a markdown source into paragraph chunks at runs of blank lines
+/// (lines containing only whitespace), and trim trailing whitespace
+/// from each chunk. Mirrors marked.lexer's paragraph tokenisation.
+///
+/// Returns a single-element vec containing the whole input (with trailing
+/// whitespace trimmed) when there are no blank-line separators.
+fn split_markdown_paragraphs(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut blank_run = 0usize;
+    for line in src.split_inclusive('\n') {
+        // Strip the trailing '\n' (if any) to test for blank-ness.
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        let is_blank = body.chars().all(|c| c.is_whitespace());
+        if is_blank {
+            if !current.is_empty() {
+                // End the current paragraph; trailing whitespace dropped.
+                out.push(current.trim_end().to_string());
+                current = String::new();
+            }
+            blank_run += 1;
+        } else {
+            blank_run = 0;
+            current.push_str(line);
+        }
+    }
+    if !current.is_empty() {
+        out.push(current.trim_end().to_string());
+    }
+    if out.is_empty() {
+        // Source was empty or all-whitespace — preserve original behaviour
+        // (the caller's wrap_in_p will emit no `<p>` for an empty body).
+        out.push(String::new());
+    }
+    let _ = blank_run;
+    out
+}
+
+/// Convert a single markdown paragraph (no blank-line splits) to HTML.
+fn markdown_paragraph_to_html(src: &str) -> String {
     let mut out = String::with_capacity(src.len() * 2);
     let bytes = src.as_bytes();
     let mut i = 0;
