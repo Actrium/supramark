@@ -430,9 +430,25 @@ impl<'a> LineParser<'a> {
         if !is_edge_id {
             return false;
         }
-        // We don't currently model animation/curve/etc. metadata — drop
-        // the line. `parse_node_shape_data` could be re-used here later
-        // when the renderer learns to honour these fields.
+        // Parse metadata body and extract `curve:` if present.
+        let body = &rest[..close];
+        let curve = parse_edge_meta_curve(body);
+        if let Some(curve_type) = curve {
+            let curve_type = curve_type.to_string();
+            for e in &mut self.diag.edges {
+                if e.id.as_deref() == Some(id) {
+                    e.curve = Some(curve_type.clone());
+                    break;
+                }
+            }
+            if self.diag.edges.iter().all(|e| e.id.as_deref() != Some(id)) {
+                let curve_type_clone = curve_type.clone();
+                let idx = edge_id_matches_synthetic_index(id, &self.diag.edges);
+                if let Some(i) = idx {
+                    self.diag.edges[i].curve = Some(curve_type_clone);
+                }
+            }
+        }
         true
     }
 
@@ -907,6 +923,7 @@ impl<'a> LineParser<'a> {
                                 label: link.label.clone(),
                                 index: idx,
                                 classes: Vec::new(),
+                                curve: None,
                             };
                             self.diag.edges.push(edge);
                         }
@@ -1018,9 +1035,16 @@ impl<'a> LineParser<'a> {
 /// duplicate `(start, end)` edges appear in the source, mirroring
 /// upstream `flowDb.addSingleLink` (existing=0 → 0, otherwise → existing+1).
 fn edge_id_matches_synthetic(id: &str, edges: &[crate::model::flowchart::Edge]) -> bool {
+    edge_id_matches_synthetic_index(id, edges).is_some()
+}
+
+fn edge_id_matches_synthetic_index(
+    id: &str,
+    edges: &[crate::model::flowchart::Edge],
+) -> Option<usize> {
     use std::collections::HashMap;
     let mut pair_count: HashMap<(String, String), usize> = HashMap::new();
-    for e in edges {
+    for (i, e) in edges.iter().enumerate() {
         let n = *pair_count
             .entry((e.start.clone(), e.end.clone()))
             .and_modify(|c| *c += 1)
@@ -1028,10 +1052,23 @@ fn edge_id_matches_synthetic(id: &str, edges: &[crate::model::flowchart::Edge]) 
         let counter = if n == 0 { 0 } else { n + 1 };
         let synth = format!("L_{}_{}_{}", e.start, e.end, counter);
         if synth == id {
-            return true;
+            return Some(i);
         }
     }
-    false
+    None
+}
+
+fn parse_edge_meta_curve(body: &str) -> Option<&str> {
+    for part in body.split(',') {
+        let part = part.trim();
+        if let Some(val) = part.strip_prefix("curve:") {
+            let val = val.trim().trim_matches('"').trim_matches('\'');
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
 }
 
 fn split_once_ws(s: &str) -> (&str, &str) {

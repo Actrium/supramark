@@ -1539,6 +1539,10 @@ fn build_edge<'a>(
     ue.stroke = Some(thickness.into());
     ue.interpolate = Some("basis".into());
     ue.curve = Some("basis".into());
+    if let Some(curve_override) = &e.curve {
+        ue.interpolate = Some(curve_override.clone());
+        ue.curve = Some(curve_override.clone());
+    }
     // dagre needs edge label dimensions to reserve space between ranks;
     // labelpos="c" centres the label on the spline (upstream flowchart default).
     ue.labelpos = Some("c".into());

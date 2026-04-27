@@ -154,6 +154,8 @@ pub struct Edge {
     /// — mirrors how upstream's `applyClassesToEdge` walks each edge's
     /// `cssClasses` array.
     pub classes: Vec<String>,
+    /// Per-edge curve type from `@{ curve: <type> }` metadata.
+    pub curve: Option<String>,
 }
 
 /// A subgraph (cluster) declaration.
