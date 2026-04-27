@@ -971,6 +971,12 @@ pub fn render(
     // We need the rendered content to compute the viewBox accurately,
     // matching upstream's `getBBox()` approach.
 
+    // `flowchart.htmlLabels` controls whether labels render via foreignObject
+    // (HTML/CSS) or `<text>`/`<tspan>` (SVG). Defaults to true, but
+    // `%%{init: {flowchart: {htmlLabels: false}}}%%` flips it for an entire
+    // diagram. Cluster, node and edge labels all consult this flag.
+    let html_labels = d.html_labels.unwrap_or(true);
+
     let mut inner = String::new();
 
     // Seed <g> wrapping markers + root — matches upstream's
@@ -1009,7 +1015,7 @@ pub fn render(
             continue;
         };
         if let Some(cnode) = l.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
-            inner.push_str(&render_cluster(cnode, cluster, theme, id));
+            inner.push_str(&render_cluster(cnode, cluster, theme, id, html_labels));
         }
     }
     inner.push_str(unified_shell::close_layer());
@@ -1045,7 +1051,6 @@ pub fn render(
 
     // Edge labels (outer level — same selection rule as edge paths).
     inner.push_str(&unified_shell::open_layer("edgeLabels"));
-    let html_labels = d.html_labels.unwrap_or(true);
     for e in l.edges.iter() {
         if edge_is_inside_isolated(e.start.as_deref(), e.end.as_deref(), l) {
             continue;
@@ -1442,6 +1447,7 @@ fn render_cluster(
     _cluster: &Cluster,
     _theme: &ThemeVariables,
     svg_id: &str,
+    html_labels: bool,
 ) -> String {
     use crate::render::foreign_object::{
         measure_html_label, measure_html_markup_label, HtmlLabelFont,
@@ -1527,18 +1533,79 @@ fn render_cluster(
         } else {
             "display: table-cell; white-space: nowrap; line-height: 1.5;".to_string()
         };
-        out.push_str(&format!(
-            r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="{div_style}" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "{span_style_attr}><p>{escaped}</p></span></div></foreignObject></g>"#,
-            label_tx = fmt_num(label_tx),
-            label_ty = fmt_num(label_ty),
-            lw = fmt_num(lw),
-            lh = fmt_num(lh),
-            div_style = div_style,
-            span_style_attr = span_style_attr,
-            escaped = escaped,
-        ));
+        if html_labels {
+            out.push_str(&format!(
+                r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="{div_style}" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel "{span_style_attr}><p>{escaped}</p></span></div></foreignObject></g>"#,
+                label_tx = fmt_num(label_tx),
+                label_ty = fmt_num(label_ty),
+                lw = fmt_num(lw),
+                lh = fmt_num(lh),
+                div_style = div_style,
+                span_style_attr = span_style_attr,
+                escaped = escaped,
+            ));
+        } else {
+            // htmlLabels=false: emit `<text>`/`<tspan>` (SVG) instead of
+            // foreignObject. Mirrors upstream `createText` non-html branch.
+            // For cluster labels, `addBackground=true` always (createText
+            // calls createFormattedText with the labelGroup wrapping a
+            // `<rect class="background">` and `<text>`).  The rect carries
+            // `style="stroke: none"` and no x/y/width/height — upstream
+            // never sizes the rect for cluster labels (unlike edges, which
+            // pass through `insertEdgeLabel`).
+            let inner_tspans = build_cluster_text_inner_tspans(&label, is_markdown);
+            out.push_str(&format!(
+                r#"<g class="cluster-label " transform="translate({label_tx}, {label_ty})"><g><rect class="background" style="stroke: none"></rect><text y="-10.1" style=""><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em">{inner_tspans}</tspan></text></g></g>"#,
+                label_tx = fmt_num(label_tx),
+                label_ty = fmt_num(label_ty),
+                inner_tspans = inner_tspans,
+            ));
+        }
     }
     out.push_str("</g>");
+    out
+}
+
+/// Build the inner `<tspan class="text-inner-tspan">` markup for a cluster
+/// label rendered in htmlLabels=false mode.  Mirrors upstream
+/// `updateTextContentAndStyles` (createText.ts:308) which iterates the
+/// markdown words on the line and emits one `<tspan>` per word with
+/// `font-style` and `font-weight` reflecting the segment kind.
+///
+/// Cluster labels are single-line (no `<br>` splits supported here), so the
+/// outer `<tspan class="text-outer-tspan row">` wraps just one line.
+fn build_cluster_text_inner_tspans(label: &str, is_markdown: bool) -> String {
+    use crate::render::shapes::types::xml_escape;
+    let lines: Vec<Vec<MdWord>> = if is_markdown {
+        markdown_to_lines(label)
+    } else {
+        non_markdown_to_lines(label)
+    };
+    // Cluster labels never wrap onto multiple lines in upstream's flow
+    // (the call site passes `useMaxWidth=false`); take the first line only.
+    let first_line: &[MdWord] = lines.first().map(|v| v.as_slice()).unwrap_or(&[]);
+    let mut out = String::new();
+    for (word_idx, w) in first_line.iter().enumerate() {
+        let font_style = match w.kind {
+            MdWordKind::Em => "italic",
+            _ => "normal",
+        };
+        let font_weight = match w.kind {
+            MdWordKind::Strong => "bold",
+            _ => "normal",
+        };
+        let content = if word_idx == 0 {
+            xml_escape(&w.content)
+        } else {
+            format!(" {}", xml_escape(&w.content))
+        };
+        out.push_str(&format!(
+            r#"<tspan font-style="{fs}" class="text-inner-tspan" font-weight="{fw}">{c}</tspan>"#,
+            fs = font_style,
+            fw = font_weight,
+            c = content,
+        ));
+    }
     out
 }
 
@@ -1867,7 +1934,13 @@ fn render_isolated_cluster_inner_root(
         representative: None,
         bounds: None,
     };
-    out.push_str(&render_cluster(cnode, &dummy_cluster, theme, svg_id));
+    out.push_str(&render_cluster(
+        cnode,
+        &dummy_cluster,
+        theme,
+        svg_id,
+        html_labels,
+    ));
     // Non-isolated child cluster rects (direct children only).
     for n in &l.nodes {
         if !n.is_group {
@@ -1884,7 +1957,7 @@ fn render_isolated_cluster_inner_root(
             representative: None,
             bounds: None,
         };
-        out.push_str(&render_cluster(n, &dummy, theme, svg_id));
+        out.push_str(&render_cluster(n, &dummy, theme, svg_id, html_labels));
     }
     out.push_str(unified_shell::close_layer());
 
