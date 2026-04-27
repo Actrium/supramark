@@ -705,6 +705,20 @@ fn compute_viewbox(
                         &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, -h, w, h,
                     );
                 }
+                "cylinder" | "cyl" => {
+                    // Cylinder path d="M0,ry a... w,0 a... -w,0 l0,h a... w,0 l0,-h"
+                    // jsdom's pathBBox shim only registers each command's
+                    // endpoint (arcs ignore the bulge), so the visited points
+                    // are: (0,ry), (w,ry), (0,ry), (0,ry+h), (w,ry+h), (w,ry).
+                    // Bbox = x ∈ [0, w], y ∈ [ry, ry+h]. The path's own
+                    // translate(-w/2, -(h/2+ry)) transform is ignored by the
+                    // shim, so the contribution lives in path-local coords.
+                    let rx = w / 2.0;
+                    let ry = rx / (2.5 + w / 50.0);
+                    expand(
+                        &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, ry, w, h,
+                    );
+                }
                 _ => {
                     // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
                     expand(
@@ -820,14 +834,7 @@ fn compute_viewbox(
             let bw = path_max_x - path_min_x;
             let bh = path_max_y - path_min_y;
             expand(
-                &mut min_x,
-                &mut min_y,
-                &mut max_x,
-                &mut max_y,
-                path_min_x,
-                path_min_y,
-                bw,
-                bh,
+                &mut min_x, &mut min_y, &mut max_x, &mut max_y, path_min_x, path_min_y, bw, bh,
             );
         }
     }
@@ -2421,17 +2428,20 @@ fn compute_edge_path_style(e: &UEdge) -> String {
                 true
             } else {
                 // Each label entry must appear in style.
-                let label_in_style =
-                    ls_filtered.iter().all(|l| v_filtered.iter().any(|v| v == l));
+                let label_in_style = ls_filtered
+                    .iter()
+                    .all(|l| v_filtered.iter().any(|v| v == l));
                 // Detect linkStyle's auto-pushed `fill:none` (key starts with
                 // `fill` and value is `none`, with optional whitespace).
                 let has_auto_fill_none = v_filtered.iter().any(|s| {
                     let t = s.trim();
-                    t == "fill:none" || t.starts_with("fill:") && t["fill:".len()..].trim() == "none"
+                    t == "fill:none"
+                        || t.starts_with("fill:") && t["fill:".len()..].trim() == "none"
                 });
                 let label_has_fill_none = ls_filtered.iter().any(|s| {
                     let t = s.trim();
-                    t == "fill:none" || t.starts_with("fill:") && t["fill:".len()..].trim() == "none"
+                    t == "fill:none"
+                        || t.starts_with("fill:") && t["fill:".len()..].trim() == "none"
                 });
                 label_in_style && has_auto_fill_none && !label_has_fill_none
             }
@@ -3119,12 +3129,7 @@ fn markdown_to_lines(md: &str) -> Vec<Vec<MdWord>> {
     let mut lines: Vec<Vec<MdWord>> = vec![Vec::new()];
     let mut current = 0usize;
 
-    fn push_text(
-        lines: &mut Vec<Vec<MdWord>>,
-        current: &mut usize,
-        text: &str,
-        kind: MdWordKind,
-    ) {
+    fn push_text(lines: &mut Vec<Vec<MdWord>>, current: &mut usize, text: &str, kind: MdWordKind) {
         let parts: Vec<&str> = text.split('\n').collect();
         for (idx, line) in parts.iter().enumerate() {
             if idx != 0 {
@@ -3134,10 +3139,7 @@ fn markdown_to_lines(md: &str) -> Vec<Vec<MdWord>> {
             for word in line.split(' ') {
                 let w = word.replace("&#39;", "'");
                 if !w.is_empty() {
-                    lines[*current].push(MdWord {
-                        content: w,
-                        kind,
-                    });
+                    lines[*current].push(MdWord { content: w, kind });
                 }
             }
         }
@@ -3158,10 +3160,7 @@ fn markdown_to_lines(md: &str) -> Vec<Vec<MdWord>> {
     while i < bytes.len() {
         let b = bytes[i];
         // **strong** / __strong__ (longer marker first)
-        if (b == b'*' || b == b'_')
-            && i + 1 < bytes.len()
-            && bytes[i + 1] == b
-        {
+        if (b == b'*' || b == b'_') && i + 1 < bytes.len() && bytes[i + 1] == b {
             let marker = if b == b'*' { "**" } else { "__" };
             if let Some(end) = find_str(&pre, i + 2, marker) {
                 flush_plain!(i);
@@ -3631,11 +3630,7 @@ fn rect_intersection(
         (res_x, res_y)
     } else {
         // Left/right branch.
-        let r = if ix < ox {
-            ox - w - nx
-        } else {
-            nx - w - ox
-        };
+        let r = if ix < ox { ox - w - nx } else { nx - w - ox };
         let q = if r_total == 0.0 {
             0.0
         } else {
@@ -3682,7 +3677,8 @@ fn cut_path_at_intersect_xywh(
     for &(px, py) in pts {
         let outside = point_outside_node(nx, ny, nw, nh, px, py);
         if !outside && !is_inside {
-            let (ix, iy) = rect_intersection(nx, ny, nw, nh, last_outside.0, last_outside.1, px, py);
+            let (ix, iy) =
+                rect_intersection(nx, ny, nw, nh, last_outside.0, last_outside.1, px, py);
             if !out.iter().any(|p| p.0 == ix && p.1 == iy) {
                 out.push((ix, iy));
             }

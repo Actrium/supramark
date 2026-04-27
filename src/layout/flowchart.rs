@@ -345,14 +345,12 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
 fn fix_ellipse_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Node]) {
     use crate::layout::unified::types::Point;
 
-    struct EllipseInfo {
-        cx: f64,
-        cy: f64,
-        rx: f64,
-        ry: f64,
+    enum ShapeInfo {
+        Ellipse { cx: f64, cy: f64, rx: f64, ry: f64 },
+        Cylinder { cx: f64, cy: f64, w: f64, h: f64 },
     }
 
-    let mut info_map: BTreeMap<&str, EllipseInfo> = BTreeMap::new();
+    let mut info_map: BTreeMap<&str, ShapeInfo> = BTreeMap::new();
     for n in nodes {
         let shape = match n.shape.as_deref() {
             Some(s) => s,
@@ -368,13 +366,16 @@ fn fix_ellipse_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
             "circle" | "circ" | "doublecircle" | "ellipse" => {
                 info_map.insert(
                     n.id.as_str(),
-                    EllipseInfo {
+                    ShapeInfo::Ellipse {
                         cx,
                         cy,
                         rx: w / 2.0,
                         ry: h / 2.0,
                     },
                 );
+            }
+            "cylinder" | "cyl" => {
+                info_map.insert(n.id.as_str(), ShapeInfo::Cylinder { cx, cy, w, h });
             }
             _ => {}
         }
@@ -383,27 +384,76 @@ fn fix_ellipse_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
         return;
     }
 
-    let intersect_ellipse = |info: &EllipseInfo, target: Point| -> Point {
-        let px = info.cx - target.x;
-        let py = info.cy - target.y;
-        let det = (info.rx * info.rx * py * py + info.ry * info.ry * px * px).sqrt();
+    let intersect_ellipse = |cx: f64, cy: f64, rx: f64, ry: f64, target: Point| -> Point {
+        let px = cx - target.x;
+        let py = cy - target.y;
+        let det = (rx * rx * py * py + ry * ry * px * px).sqrt();
         if det == 0.0 {
-            return Point {
-                x: info.cx,
-                y: info.cy,
-            };
+            return Point { x: cx, y: cy };
         }
-        let mut dx = (info.rx * info.ry * px / det).abs();
-        if target.x < info.cx {
+        let mut dx = (rx * ry * px / det).abs();
+        if target.x < cx {
             dx = -dx;
         }
-        let mut dy = (info.rx * info.ry * py / det).abs();
-        if target.y < info.cy {
+        let mut dy = (rx * ry * py / det).abs();
+        if target.y < cy {
             dy = -dy;
         }
         Point {
-            x: info.cx + dx,
-            y: info.cy + dy,
+            x: cx + dx,
+            y: cy + dy,
+        }
+    };
+
+    // Upstream cylinder.ts intersect: rect AABB → adjust y by elliptical cap.
+    let intersect_cylinder = |cx: f64, cy: f64, w: f64, h: f64, target: Point| -> Point {
+        let dx = target.x - cx;
+        let dy = target.y - cy;
+        if dx == 0.0 && dy == 0.0 {
+            return Point { x: cx, y: cy };
+        }
+        let half_w = w / 2.0;
+        let half_h = h / 2.0;
+        let tx = if dx != 0.0 {
+            half_w / dx.abs()
+        } else {
+            f64::INFINITY
+        };
+        let ty = if dy != 0.0 {
+            half_h / dy.abs()
+        } else {
+            f64::INFINITY
+        };
+        let t = tx.min(ty);
+        let mut pos = Point {
+            x: cx + dx * t,
+            y: cy + dy * t,
+        };
+        let rx = w / 2.0;
+        if rx != 0.0 {
+            let ry_arc = rx / (2.5 + w / 50.0);
+            let local_x = pos.x - cx;
+            let on_cap = local_x.abs() < half_w
+                || (local_x.abs() == half_w && (pos.y - cy).abs() > half_h - ry_arc);
+            if on_cap {
+                let mut y = ry_arc * ry_arc * (1.0 - local_x * local_x / (rx * rx));
+                if y > 0.0 {
+                    y = y.sqrt();
+                }
+                let mut delta = ry_arc - y;
+                if target.y - cy > 0.0 {
+                    delta = -delta;
+                }
+                pos.y += delta;
+            }
+        }
+        pos
+    };
+
+    let intersect_for = |info: &ShapeInfo, target: Point| -> Point {
+        match info {
+            ShapeInfo::Ellipse { cx, cy, rx, ry } => intersect_ellipse(*cx, *cy, *rx, *ry, target),
+            ShapeInfo::Cylinder { cx, cy, w, h } => intersect_cylinder(*cx, *cy, *w, *h, target),
         }
     };
 
@@ -417,14 +467,14 @@ fn fix_ellipse_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
         if let Some(start_id) = e.start.as_deref() {
             if let Some(info) = info_map.get(start_id) {
                 let next = points[1];
-                points[0] = intersect_ellipse(info, next);
+                points[0] = intersect_for(info, next);
             }
         }
         if let Some(end_id) = e.end.as_deref() {
             if let Some(info) = info_map.get(end_id) {
                 let n = points.len();
                 let prev = points[n - 2];
-                points[n - 1] = intersect_ellipse(info, prev);
+                points[n - 1] = intersect_for(info, prev);
             }
         }
     }
@@ -1090,7 +1140,23 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
         // exactness for stadium fixtures (192, 113, 144, ...) waits on
         // a matching update there.
         "stadium" | "pill" => ((th + p) / 4.0 + p, p),
-        "cylinder" | "cyl" => (p * 2.0, p * 2.0 + 24.0),
+        // Upstream cylinder.ts (mermaid 11.14.0 mermaid.js:43045-43113):
+        //   labelPaddingX = labelPaddingY = nodePadding (= p) for non-neo look
+        //   w4 = bbox.width  + labelPaddingY  → tw + p
+        //   rx = w4 / 2;  ry = rx / (2.5 + w4 / 50)
+        //   h3 = bbox.height + labelPaddingX + ry  → th + p + ry
+        // The path is M0,ry then arc->end + lineto + arc->end + lineto. Under
+        // jsdom's pathBBox shim arc commands only register their endpoint
+        // (not the arc bulge), so the measured bbox spans (w4, h3) — NOT
+        // (w4, h3 + 2*ry). updateNodeBounds therefore feeds dagre:
+        //   node.width  = w4 = tw + p
+        //   node.height = h3 = th + p + ry  (ry depends on w4)
+        "cylinder" | "cyl" => {
+            let w4 = tw + p;
+            let rx = w4 / 2.0;
+            let ry = rx / (2.5 + w4 / 50.0);
+            return (w4, th + p + ry);
+        }
         // Upstream subroutine.ts (chunk-C7LX3TON.mjs:3464-3477):
         //   FRAME_WIDTH = 8, labelPaddingX = labelPaddingY = nodePadding (= p)
         //   totalWidth  = bbox.width  + 2*FRAME_WIDTH + labelPaddingX  → tw + 16 + p
@@ -1252,13 +1318,8 @@ fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f6
     // Width is the width of the concatenated lines, measured as one segment.
     let lines = split_html_into_lines(&stripped);
     let concat: String = lines.concat();
-    let width = font_metrics::text_width(
-        &concat,
-        DEFAULT_FONT_FAMILY,
-        font_size,
-        force_bold,
-        false,
-    );
+    let width =
+        font_metrics::text_width(&concat, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
     (width, lh)
 }
 

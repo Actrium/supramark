@@ -381,12 +381,41 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
 /// `svg_flowchart`'s markdown branch (e.g. the diamond polygon) still
 /// produce byte-exact output.
 pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> String {
+    shape_label_block_inner(escaped_label, font, 0.0)
+}
+
+/// Variant of [`shape_label_block`] that adds a vertical offset to the outer
+/// `<g class="label">` transform. Used by shapes whose upstream rendering
+/// translates the label by `node.padding / k` along the Y axis (cylinder.ts
+/// uses `node.padding / 1.5`, ~10 for the default 15-unit padding).
+pub fn shape_label_block_with_y_offset(
+    escaped_label: &str,
+    font: &HtmlLabelFont<'_>,
+    y_offset: f64,
+) -> String {
+    shape_label_block_inner(escaped_label, font, y_offset)
+}
+
+fn shape_label_block_inner(escaped_label: &str, font: &HtmlLabelFont<'_>, y_offset: f64) -> String {
     if escaped_label.is_empty() {
         return String::new();
     }
     // Replace FontAwesome icon references (fa:fa-car → <i class="fa fa-car"></i>).
     // Applied after xml_escape since the FA pattern uses no XML-special chars.
     let processed = replace_fa_icons(escaped_label);
+    let make_opts = |w: f64, h: f64, base: LabelOpts<'static>| -> LabelOpts<'static> {
+        if y_offset == 0.0 {
+            return base;
+        }
+        LabelOpts {
+            group_transform: Some(format!(
+                "translate({}, {})",
+                fmt_num(-w / 2.0),
+                fmt_num(-h / 2.0 + y_offset)
+            )),
+            ..base
+        }
+    };
     if has_paired_markdown_markers(&processed) {
         // Build the HTML the same way `markdownToHTML` would, then measure
         // the marker-free `textContent` width via `measure_html_markup_label`.
@@ -399,10 +428,11 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
         // for the markdown patterns we handle here.
         let html = markdown_label_to_html(&processed);
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        let opts = LabelOpts {
+        let base = LabelOpts {
             extra_span_classes: "markdown-node-label",
             ..LabelOpts::default()
         };
+        let opts = make_opts(w, h, base);
         return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with embedded `<br>` family tags must be re-emitted
@@ -419,7 +449,8 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
     if has_escaped_br(&processed) {
         let html = restore_escaped_br(&processed);
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        return render_node_label(&html, w, h, &LabelOpts::default());
+        let opts = make_opts(w, h, LabelOpts::default());
+        return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with a literal `\n` need the same `<br/>` rewrite
     // as `<br>`-bearing labels — upstream's `parseGenericTypes` /
@@ -431,12 +462,10 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
     // must render as `<p>What is<br/>yourmermaid version?</p>` with a
     // single-line height.
     if processed.contains('\n') {
-        let html: String = processed
-            .split('\n')
-            .collect::<Vec<&str>>()
-            .join("<br/>");
+        let html: String = processed.split('\n').collect::<Vec<&str>>().join("<br/>");
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        return render_node_label(&html, w, h, &LabelOpts::default());
+        let opts = make_opts(w, h, LabelOpts::default());
+        return render_node_label(&html, w, h, &opts);
     }
     // After `replace_fa_icons`, FA references like `fa:fa-code` become
     // `<i class="fa fa-code"></i>` markup. `measure_html_label` does
@@ -446,10 +475,12 @@ pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> Strin
     // tags via the textContent rule.
     if processed.contains("<i ") {
         let (w, h) = measure_html_markup_label(&processed, font, 200.0, true);
-        return render_node_label(&processed, w, h, &LabelOpts::default());
+        let opts = make_opts(w, h, LabelOpts::default());
+        return render_node_label(&processed, w, h, &opts);
     }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
-    render_node_label(&processed, w, h, &LabelOpts::default())
+    let opts = make_opts(w, h, LabelOpts::default());
+    render_node_label(&processed, w, h, &opts)
 }
 
 /// Cheap pre-check: is there at least one `&lt;…&gt;` fragment whose body is
@@ -1243,29 +1274,20 @@ mod tests {
         // the canonical `<br/>` tag so the rendered foreignObject contains
         // a real line break and the width sums all segments as a single
         // text-content line (cypress/67, cypress/200, demos/06, demos/07).
-        let got = shape_label_block(
-            "Multi&lt;br/&gt;Line",
-            &HtmlLabelFont::default(),
-        );
+        let got = shape_label_block("Multi&lt;br/&gt;Line", &HtmlLabelFont::default());
         // Final `<p>` body must carry the live `<br/>` tag, not the entity.
         assert!(
             got.contains("<p>Multi<br/>Line</p>"),
             "expected `<p>Multi<br/>Line</p>` body, got {got}"
         );
         // `<br>` and `<br />` variants normalise the same way.
-        let got2 = shape_label_block(
-            "A&lt;br&gt;B&lt;br /&gt;C",
-            &HtmlLabelFont::default(),
-        );
+        let got2 = shape_label_block("A&lt;br&gt;B&lt;br /&gt;C", &HtmlLabelFont::default());
         assert!(
             got2.contains("<p>A<br/>B<br/>C</p>"),
             "expected canonical <br/> form, got {got2}"
         );
         // Non-br escaped tags must NOT be restored — only `<br>` family.
-        let got3 = shape_label_block(
-            "a&lt;span&gt;b&lt;/span&gt;c",
-            &HtmlLabelFont::default(),
-        );
+        let got3 = shape_label_block("a&lt;span&gt;b&lt;/span&gt;c", &HtmlLabelFont::default());
         assert!(
             got3.contains("&lt;span&gt;"),
             "non-br escaped tags must remain escaped, got {got3}"

@@ -429,6 +429,36 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
                 };
             }
         }
+        "cylinder" | "cyl" => {
+            // Upstream cylinder.ts intersect: start with rect intersection
+            // then adjust y by the elliptical end-cap when the hit point is
+            // on the top/bottom face (or precisely on the side at the cap).
+            //   rx = w / 2
+            //   ry = rx / (2.5 + w / 50)
+            //   y = ry² * (1 − x² / rx²)  → sqrt → ry − y; sign by probe side
+            let mut pos = intersection_rect_aabb(cx, cy, w, h, probe);
+            let rx = w / 2.0;
+            if rx != 0.0 {
+                let ry_arc = rx / (2.5 + w / 50.0);
+                let local_x = pos.x - cx;
+                let half_w = w / 2.0;
+                let half_h = h / 2.0;
+                let on_cap = local_x.abs() < half_w
+                    || (local_x.abs() == half_w && (pos.y - cy).abs() > half_h - ry_arc);
+                if on_cap {
+                    let mut y = ry_arc * ry_arc * (1.0 - local_x * local_x / (rx * rx));
+                    if y > 0.0 {
+                        y = y.sqrt();
+                    }
+                    let mut delta = ry_arc - y;
+                    if probe.y - cy > 0.0 {
+                        delta = -delta;
+                    }
+                    pos.y += delta;
+                }
+            }
+            return pos;
+        }
         _ => {
             // Rectangular / rounded / default path — matches upstream
             // `intersectRect` for rectangles, which we implement via
