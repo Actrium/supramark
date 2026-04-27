@@ -2,6 +2,7 @@
 
 use super::types::{
     build_inline_style, create_cylinder_path_d, fmt_num, get_node_classes, xml_escape,
+    xml_escape_label,
 };
 use crate::error::Result;
 use crate::layout::unified::types::Node;
@@ -61,7 +62,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         let y_offset = padding / 1.5;
         out.push_str(
             &crate::render::foreign_object::shape_label_block_with_y_offset(
-                &xml_escape(&label),
+                &xml_escape_label(&label),
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 y_offset,
             ),

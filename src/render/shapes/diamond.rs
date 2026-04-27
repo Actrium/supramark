@@ -12,7 +12,7 @@
 //!   label-container`) and a `transform="translate(-s/2+0.5, s/2)"`.
 //! - The closing tag is `></polygon>`.
 
-use super::types::{fmt_num, get_node_classes, xml_escape};
+use super::types::{fmt_num, get_node_classes, xml_escape, xml_escape_label};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::theme::ThemeVariables;
@@ -33,7 +33,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     let (bbox_w, bbox_h) = if label.is_empty() {
         (0.0, 0.0)
     } else {
-        let escaped = super::types::xml_escape(&label);
+        let escaped = super::types::xml_escape_label(&label);
         let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
         // `measure_html_label` does not strip HTML tags — it would
         // measure the literal `<i class="fa fa-code"></i>` characters.
@@ -103,7 +103,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
-            &xml_escape(&label),
+            &xml_escape_label(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }

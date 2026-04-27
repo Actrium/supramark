@@ -301,7 +301,7 @@ pub fn emit_polygon_node(node: &crate::layout::unified::types::Node, pts: &[(f64
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
-            &xml_escape(&label),
+            &xml_escape_label(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }
@@ -367,7 +367,7 @@ pub fn emit_polygon_node_with_transform(
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
-            &xml_escape(&label),
+            &xml_escape_label(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }
@@ -516,6 +516,27 @@ pub fn xml_escape(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// HTML text-content escape for label bodies — escapes `&`, `<`, `>` only.
+///
+/// Unlike [`xml_escape`], double-quotes are preserved verbatim because the
+/// label is rendered into HTML text content (e.g. `<p>…</p>` inside a
+/// `<foreignObject>`), where `"` does not require escaping. Upstream
+/// mermaid's reference SVGs (cypress fixture 160) carry literal `"` in
+/// label text — using `xml_escape` here would emit `&quot;` and break
+/// byte-exact parity.
+pub fn xml_escape_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
             _ => out.push(c),
         }
     }

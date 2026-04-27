@@ -5,7 +5,7 @@
 //! Our dagre node width = bbox.width + node.padding = label_width + padding,
 //! so r = (width - padding)/2 + padding/2 = width/2.
 
-use super::types::{fmt_num, get_node_classes, xml_escape};
+use super::types::{fmt_num, get_node_classes, xml_escape, xml_escape_label};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::theme::ThemeVariables;
@@ -41,7 +41,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     ));
     if !label.is_empty() {
         out.push_str(&crate::render::foreign_object::shape_label_block(
-            &xml_escape(&label),
+            &xml_escape_label(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     } else {

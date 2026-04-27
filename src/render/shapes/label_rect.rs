@@ -32,7 +32,7 @@
 //!   `labelHelper` does not short-circuit on empty text; the inner
 //!   `<span class="nodeLabel "></span>` is what consumers measure.
 
-use super::types::{fmt_num, xml_escape};
+use super::types::{fmt_num, xml_escape, xml_escape_label};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::render::foreign_object::{render_node_label, LabelOpts};
@@ -84,7 +84,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         out.push_str(&inner);
     } else {
         out.push_str(&crate::render::foreign_object::shape_label_block(
-            &xml_escape(&label),
+            &xml_escape_label(&label),
             &crate::render::foreign_object::HtmlLabelFont::default(),
         ));
     }

@@ -490,6 +490,30 @@ impl<'a> LineParser<'a> {
             }
             self.advance();
             if depth_paren <= 0 && depth_sq <= 0 && depth_cu <= 0 && !in_str && !in_md {
+                // Continuation: when the next non-empty physical line begins
+                // with an arrow operator (e.g. `--> b`), treat it as a
+                // continuation of the current statement. Mirrors upstream's
+                // jison grammar which accepts whitespace (incl. \n) between
+                // `vertex` and the following `LINK vertex` segment, so:
+                //   a{{...}}
+                //   --> b{{...}}
+                // parses as a single edge `a --> b` rather than a stray
+                // edge with no source. Cypress fixture 160 relies on this.
+                let mut peek_i = self.i;
+                while peek_i < self.lines.len() && self.lines[peek_i].trim().is_empty() {
+                    peek_i += 1;
+                }
+                if peek_i < self.lines.len()
+                    && line_starts_with_arrow(self.lines[peek_i].trim_start())
+                {
+                    out.push('\n');
+                    // Absorb any blank lines between us and the arrow line.
+                    while self.i < peek_i {
+                        out.push('\n');
+                        self.i += 1;
+                    }
+                    continue;
+                }
                 break;
             }
             out.push('\n');
@@ -1078,9 +1102,74 @@ fn parse_label_text(raw: &str) -> Label {
         // from the quoted string body before HTML-conversion. Otherwise a
         // node like ["\n\nfoo\nbar\n"] would emit `<br/><br/>foo<br/>bar<br/>`
         // instead of `foo<br/>bar`. See ext_fixtures/demos/flowchart/48.
-        return Label::string(inner.trim());
+        return Label::string(decode_pseudo_entities(inner.trim()));
     }
-    Label::text(trimmed)
+    Label::text(decode_pseudo_entities(trimmed))
+}
+
+/// Decode upstream's `#NAME;` pseudo-entities into the equivalent character.
+///
+/// Mermaid's parser emits `#NAME;` (with a literal `#` instead of `&`) as a
+/// safe pre-DOM-purify marker for HTML named entities embedded in user
+/// strings — e.g. `Lorem #quot;ipsum#quot;` becomes `Lorem "ipsum"` once the
+/// label is rendered. We emit the SVG without going through a real HTML
+/// parser, so we have to perform the decode here to match the reference
+/// output byte-for-byte (cypress fixture 160 relies on it).
+///
+/// The named-entity table is intentionally narrow — only the entities that
+/// appear in the upstream fixtures are decoded. Unknown names are passed
+/// through verbatim so mermaid features that intentionally use `#NAME;` as
+/// literal text remain untouched.
+fn decode_pseudo_entities(s: &str) -> String {
+    if !s.contains('#') {
+        return s.to_owned();
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'#' {
+            // Look for `#<name>;` where <name> is alphanumeric.
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_alphanumeric() {
+                j += 1;
+            }
+            if j > i + 1 && j < bytes.len() && bytes[j] == b';' {
+                let name = &s[i + 1..j];
+                if let Some(replacement) = named_entity_to_str(name) {
+                    out.push_str(replacement);
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+        // Copy a UTF-8 char.
+        let b = bytes[i];
+        let ch_len = if b < 0x80 {
+            1
+        } else if b & 0xE0 == 0xC0 {
+            2
+        } else if b & 0xF0 == 0xE0 {
+            3
+        } else {
+            4
+        };
+        out.push_str(&s[i..i + ch_len]);
+        i += ch_len;
+    }
+    out
+}
+
+fn named_entity_to_str(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "quot" => "\"",
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "apos" => "'",
+        "nbsp" => "\u{00A0}",
+        _ => return None,
+    })
 }
 
 /// Mirror marked.js paragraph normalisation for backtick-markdown labels:
@@ -1433,6 +1522,43 @@ fn find_next_arrow_segment(s: &str, body_ch: u8) -> Option<usize> {
 
 fn is_arrow_boundary_byte(b: u8) -> bool {
     matches!(b, b'-' | b'=' | b'.' | b'<' | b'x' | b'o' | b'~')
+}
+
+/// True when `line` (already left-trimmed) begins with what could be the
+/// LINK token of a flowchart edge (e.g. `--`, `==`, `-.`, `<--`, `~~~`).
+/// Used by `collect_statement` to detect statement continuations like
+///   ```text
+///   a{{...}}
+///   --> b{{...}}
+///   ```
+/// where the arrow is the first non-whitespace token on a fresh line.
+///
+/// Excludes lines that begin with `x`/`o` (those have to be followed by a
+/// `-`/`=`/`.` arrow body but `x` and `o` are also valid identifiers, so
+/// admitting them at column 0 of a line would mis-classify nodes named
+/// `x` / `o`).
+fn line_starts_with_arrow(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    match bytes[0] {
+        b'-' | b'=' | b'~' => {
+            // Need at least two body chars (or `~~~`) to be a real arrow.
+            // Single `-` could be from a list item etc., so require the
+            // second char also be arrow-body.
+            bytes.len() >= 2 && matches!(bytes[1], b'-' | b'=' | b'.' | b'>' | b'~')
+        }
+        b'<' => {
+            // `<-->`, `<==>`, `<-.->` — second char must be `-`, `=`, or `.`.
+            bytes.len() >= 2 && matches!(bytes[1], b'-' | b'=' | b'.')
+        }
+        b'.' => {
+            // `.- ` would not be a valid arrow start; only `-.` is.
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Classify an arrow span: returns (stroke, length, arrow_end, arrow_start, embedded_label).
