@@ -78,6 +78,11 @@ pub fn layout(d: &FlowchartDiagram, theme: &ThemeVariables) -> Result<FlowchartL
     // upstream byte-for-byte.
     let mut edges = edges;
     fix_polygon_edge_endpoints(&mut edges, &nodes);
+    // Circle / ellipse / doublecircle nodes: dagre's `intersect_rect` clips
+    // to the AABB; upstream calls `intersect.circle` / `intersect.ellipse`
+    // which clip to the actual circular/elliptical boundary. Recompute
+    // those endpoints here.
+    fix_ellipse_edge_endpoints(&mut edges, &nodes);
     // Fallback: when an edge whose both endpoints sit inside the same
     // (isolated) cluster ends up without dagre-computed spline points,
     // synthesize a 3-point straight-line path from src boundary, midpoint,
@@ -314,6 +319,112 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                         y: p.1 + info.adjustment.1,
                     };
                 }
+            }
+        }
+    }
+}
+
+/// Replace the first/last edge waypoint with the ellipse intersection for
+/// circular / elliptical nodes (circle, ellipse, doublecircle).
+///
+/// Upstream mermaid calls `intersect.circle(node, r, point)` /
+/// `intersect.ellipse(node, rx, ry, point)` which clip the ray from the
+/// node centre to the ellipse boundary. dagre-rs only ever clips to the
+/// AABB, which on a circle of radius `r` produces a point at distance
+/// `r·max(|dx|,|dy|)/min(|dx|,|dy|)` from the centre instead of `r` — a
+/// noticeable divergence whenever an edge lands at a non-axis-aligned
+/// angle.
+///
+/// Mirrors upstream `intersect-ellipse.js` exactly:
+///     px = cx - point.x
+///     py = cy - point.y
+///     det = sqrt(rx² · py² + ry² · px²)
+///     dx  = |rx · ry · px / det|, sign = sign(point.x - cx)
+///     dy  = |rx · ry · py / det|, sign = sign(point.y - cy)
+///     return (cx + dx, cy + dy)
+fn fix_ellipse_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Node]) {
+    use crate::layout::unified::types::Point;
+
+    struct EllipseInfo {
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+    }
+
+    let mut info_map: BTreeMap<&str, EllipseInfo> = BTreeMap::new();
+    for n in nodes {
+        let shape = match n.shape.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let (cx, cy, w, h) = (
+            n.x.unwrap_or(0.0),
+            n.y.unwrap_or(0.0),
+            n.width.unwrap_or(0.0),
+            n.height.unwrap_or(0.0),
+        );
+        match shape {
+            "circle" | "circ" | "doublecircle" | "ellipse" => {
+                info_map.insert(
+                    n.id.as_str(),
+                    EllipseInfo {
+                        cx,
+                        cy,
+                        rx: w / 2.0,
+                        ry: h / 2.0,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    if info_map.is_empty() {
+        return;
+    }
+
+    let intersect_ellipse = |info: &EllipseInfo, target: Point| -> Point {
+        let px = info.cx - target.x;
+        let py = info.cy - target.y;
+        let det = (info.rx * info.rx * py * py + info.ry * info.ry * px * px).sqrt();
+        if det == 0.0 {
+            return Point {
+                x: info.cx,
+                y: info.cy,
+            };
+        }
+        let mut dx = (info.rx * info.ry * px / det).abs();
+        if target.x < info.cx {
+            dx = -dx;
+        }
+        let mut dy = (info.rx * info.ry * py / det).abs();
+        if target.y < info.cy {
+            dy = -dy;
+        }
+        Point {
+            x: info.cx + dx,
+            y: info.cy + dy,
+        }
+    };
+
+    for e in edges.iter_mut() {
+        let Some(points) = e.points.as_mut() else {
+            continue;
+        };
+        if points.len() < 2 {
+            continue;
+        }
+        if let Some(start_id) = e.start.as_deref() {
+            if let Some(info) = info_map.get(start_id) {
+                let next = points[1];
+                points[0] = intersect_ellipse(info, next);
+            }
+        }
+        if let Some(end_id) = e.end.as_deref() {
+            if let Some(info) = info_map.get(end_id) {
+                let n = points.len();
+                let prev = points[n - 2];
+                points[n - 1] = intersect_ellipse(info, prev);
             }
         }
     }

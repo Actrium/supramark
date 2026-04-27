@@ -788,21 +788,47 @@ fn compute_viewbox(
         let mut adjusted: Vec<Point> = points.clone();
         apply_marker_offsets(&mut adjusted, arrow_end, arrow_start);
 
+        // Mirror upstream's `pathBBox` → `unionBox` flow: compute the path's
+        // own (minX, minY, maxX, maxY), then convert to {x, y, width, height}
+        // and union via `b.x + b.width`. This reproduces the f64-rounding
+        // path that `parseFloat(maxX) - parseFloat(minX)` introduces; using
+        // each point's raw x/y for max/min directly rounds to 3 decimals
+        // and SKIPS the `(width = max - min)` precision loss, which makes
+        // our viewBox come out with one ULP fewer than upstream when an
+        // edge endpoint terminates near the +x boundary.
+        let mut path_min_x = f64::INFINITY;
+        let mut path_min_y = f64::INFINITY;
+        let mut path_max_x = f64::NEG_INFINITY;
+        let mut path_max_y = f64::NEG_INFINITY;
         for p in adjusted.iter() {
             let rx = (p.x * 1000.0).round() / 1000.0;
             let ry = (p.y * 1000.0).round() / 1000.0;
-            if rx < min_x {
-                min_x = rx;
+            if rx < path_min_x {
+                path_min_x = rx;
             }
-            if ry < min_y {
-                min_y = ry;
+            if ry < path_min_y {
+                path_min_y = ry;
             }
-            if rx > max_x {
-                max_x = rx;
+            if rx > path_max_x {
+                path_max_x = rx;
             }
-            if ry > max_y {
-                max_y = ry;
+            if ry > path_max_y {
+                path_max_y = ry;
             }
+        }
+        if path_min_x.is_finite() {
+            let bw = path_max_x - path_min_x;
+            let bh = path_max_y - path_min_y;
+            expand(
+                &mut min_x,
+                &mut min_y,
+                &mut max_x,
+                &mut max_y,
+                path_min_x,
+                path_min_y,
+                bw,
+                bh,
+            );
         }
     }
 
