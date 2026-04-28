@@ -41,9 +41,7 @@ pub enum CurveType {
     /// smoothing. Not a d3 curve; implemented in upstream's
     /// `generateRoundedPath`.
     Rounded,
-    /// Stubbed — upstream supports curveCardinal / catmullRom / bumpX/Y
-    /// / monotoneX/Y / natural. Fall back to curveBasis for those until
-    /// the math is ported.
+    /// d3 curveCardinal — cardinal spline with tension parameter.
     Cardinal,
     CatmullRom,
     BumpX,
@@ -128,27 +126,25 @@ pub fn fmt_coord(v: f64) -> String {
 /// using the requested curve.
 ///
 /// Matches upstream's `lineFunction = d3.line().x(x).y(y).curve(curve)`
-/// output byte-for-byte for the supported curves. Cardinal /
-/// catmullRom / bump* / monotone* / natural currently fall back to
-/// curveBasis (see module-level TODO).
+/// output byte-for-byte for the supported curves.
 pub fn build_path(points: &[Point], curve: CurveType) -> String {
     if points.is_empty() {
         return String::new();
     }
     match curve {
-        CurveType::Basis
-        | CurveType::Cardinal
-        | CurveType::CatmullRom
-        | CurveType::BumpX
-        | CurveType::BumpY
-        | CurveType::MonotoneX
-        | CurveType::MonotoneY
-        | CurveType::Natural => path_basis(points),
+        CurveType::Basis => path_basis(points),
         CurveType::Linear => path_linear(points),
         CurveType::Step => path_step(points, 0.5),
         CurveType::StepBefore => path_step(points, 0.0),
         CurveType::StepAfter => path_step(points, 1.0),
         CurveType::Rounded => path_rounded(points, 5.0),
+        CurveType::Natural => path_natural(points),
+        CurveType::MonotoneX => path_monotone_x(points),
+        CurveType::MonotoneY => path_monotone_y(points),
+        CurveType::BumpX => path_bump_x(points),
+        CurveType::BumpY => path_bump_y(points),
+        CurveType::CatmullRom => path_catmull_rom(points, 0.5),
+        CurveType::Cardinal => path_cardinal(points, 0.0),
     }
 }
 
@@ -168,19 +164,19 @@ pub fn pathbbox_points(points: &[Point], curve: CurveType) -> Vec<(f64, f64)> {
         return Vec::new();
     }
     match curve {
-        CurveType::Basis
-        | CurveType::Cardinal
-        | CurveType::CatmullRom
-        | CurveType::BumpX
-        | CurveType::BumpY
-        | CurveType::MonotoneX
-        | CurveType::MonotoneY
-        | CurveType::Natural => basis_visited_points(points),
+        CurveType::Basis => basis_visited_points(points),
         CurveType::Linear => points.iter().map(|p| (p.x, p.y)).collect(),
         CurveType::Step => step_visited_points(points, 0.5),
         CurveType::StepBefore => step_visited_points(points, 0.0),
         CurveType::StepAfter => step_visited_points(points, 1.0),
         CurveType::Rounded => points.iter().map(|p| (p.x, p.y)).collect(),
+        CurveType::Natural => natural_visited_points(points),
+        CurveType::MonotoneX => monotone_x_visited_points(points),
+        CurveType::MonotoneY => monotone_y_visited_points(points),
+        CurveType::BumpX => bump_x_visited_points(points),
+        CurveType::BumpY => bump_y_visited_points(points),
+        CurveType::CatmullRom => catmull_rom_visited_points(points, 0.5),
+        CurveType::Cardinal => cardinal_visited_points(points, 0.0),
     }
 }
 
@@ -477,6 +473,826 @@ fn path_rounded(points: &[Point], radius: f64) -> String {
         }
     }
     d
+}
+
+// ── d3 curveNatural ──────────────────────────────────────────────────
+
+fn natural_control_points(x: &[f64]) -> (Vec<f64>, Vec<f64>) {
+    let n = x.len() - 1;
+    if n == 0 {
+        return (vec![], vec![]);
+    }
+    let mut a = vec![0.0; n];
+    let mut b = vec![0.0; n];
+    let mut r = vec![0.0; n];
+    a[0] = 0.0;
+    b[0] = 2.0;
+    r[0] = x[0] + 2.0 * x[1];
+    for i in 1..n - 1 {
+        a[i] = 1.0;
+        b[i] = 4.0;
+        r[i] = 4.0 * x[i] + 2.0 * x[i + 1];
+    }
+    a[n - 1] = 2.0;
+    b[n - 1] = 7.0;
+    r[n - 1] = 8.0 * x[n - 1] + x[n];
+    for i in 1..n {
+        let m = a[i] / b[i - 1];
+        b[i] -= m;
+        r[i] -= m * r[i - 1];
+    }
+    a[n - 1] = r[n - 1] / b[n - 1];
+    for i in (0..n - 1).rev() {
+        a[i] = (r[i] - a[i + 1]) / b[i];
+    }
+    let mut bp = vec![0.0; n];
+    bp[n - 1] = (x[n] + a[n - 1]) / 2.0;
+    for i in 0..n - 1 {
+        bp[i] = 2.0 * x[i + 1] - a[i + 1];
+    }
+    (a, bp)
+}
+
+fn path_natural(points: &[Point]) -> String {
+    use std::fmt::Write;
+    if points.is_empty() {
+        return String::new();
+    }
+    let n = points.len();
+    if n == 1 {
+        return format!("M{},{}Z", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    }
+    let mut d = String::new();
+    let _ = write!(d, "M{},{}", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    if n == 2 {
+        let _ = write!(d, "L{},{}", fmt_coord(points[1].x), fmt_coord(points[1].y));
+        return d;
+    }
+    let xs: Vec<f64> = points.iter().map(|p| p.x).collect();
+    let ys: Vec<f64> = points.iter().map(|p| p.y).collect();
+    let (px_a, px_b) = natural_control_points(&xs);
+    let (py_a, py_b) = natural_control_points(&ys);
+    for i0 in 0..n - 1 {
+        let i1 = i0 + 1;
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            fmt_coord(px_a[i0]),
+            fmt_coord(py_a[i0]),
+            fmt_coord(px_b[i0]),
+            fmt_coord(py_b[i0]),
+            fmt_coord(xs[i1]),
+            fmt_coord(ys[i1])
+        );
+    }
+    d
+}
+
+fn natural_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    let n = points.len();
+    if n == 1 {
+        out.push((points[0].x, points[0].y));
+        return out;
+    }
+    out.push((points[0].x, points[0].y));
+    if n == 2 {
+        out.push((points[1].x, points[1].y));
+        return out;
+    }
+    let xs: Vec<f64> = points.iter().map(|p| p.x).collect();
+    let ys: Vec<f64> = points.iter().map(|p| p.y).collect();
+    let (px_a, px_b) = natural_control_points(&xs);
+    let (py_a, py_b) = natural_control_points(&ys);
+    for i0 in 0..n - 1 {
+        let i1 = i0 + 1;
+        out.push((px_a[i0], py_a[i0]));
+        out.push((px_b[i0], py_b[i0]));
+        out.push((xs[i1], ys[i1]));
+    }
+    out
+}
+
+// ── d3 curveMonotoneX / curveMonotoneY ────────────────────────────────
+
+fn monotone_sign(x: f64) -> f64 {
+    if x < 0.0 { -1.0 } else { 1.0 }
+}
+
+fn monotone_slope3(
+    x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64,
+) -> f64 {
+    let h0 = x1 - x0;
+    let h1 = x2 - x1;
+    let d0 = if h0 != 0.0 {
+        h0
+    } else if h1 < 0.0 {
+        -0.0
+    } else {
+        0.0
+    };
+    let d1 = if h1 != 0.0 {
+        h1
+    } else if h0 < 0.0 {
+        -0.0
+    } else {
+        0.0
+    };
+    let s0 = (y1 - y0) / d0;
+    let s1 = (y2 - y1) / d1;
+    let p = if h0 + h1 != 0.0 {
+        (s0 * h1 + s1 * h0) / (h0 + h1)
+    } else {
+        0.0
+    };
+    let min_val = s0.abs().min(s1.abs()).min(0.5 * p.abs());
+    let result = (monotone_sign(s0) + monotone_sign(s1)) * min_val;
+    if result == 0.0 || !result.is_finite() { 0.0 } else { result }
+}
+
+fn monotone_slope2(x0: f64, y0: f64, x1: f64, y1: f64, t: f64) -> f64 {
+    let h = x1 - x0;
+    if h != 0.0 { (3.0 * (y1 - y0) / h - t) / 2.0 } else { t }
+}
+
+fn path_monotone_impl(points: &[Point], swap: bool) -> String {
+    use std::fmt::Write;
+    if points.is_empty() {
+        return String::new();
+    }
+    if points.len() == 1 {
+        let (x, y) = if swap { (points[0].y, points[0].x) } else { (points[0].x, points[0].y) };
+        return format!("M{},{}Z", fmt_coord(x), fmt_coord(y));
+    }
+    let coords: Vec<(f64, f64)> = points
+        .iter()
+        .map(|p| if swap { (p.y, p.x) } else { (p.x, p.y) })
+        .collect();
+    let mut d = String::new();
+    if swap {
+        let _ = write!(d, "M{},{}", fmt_coord(coords[0].1), fmt_coord(coords[0].0));
+    } else {
+        let _ = write!(d, "M{},{}", fmt_coord(coords[0].0), fmt_coord(coords[0].1));
+    }
+
+    if coords.len() == 2 {
+        if swap {
+            let _ = write!(d, "L{},{}", fmt_coord(coords[1].1), fmt_coord(coords[1].0));
+        } else {
+            let _ = write!(d, "L{},{}", fmt_coord(coords[1].0), fmt_coord(coords[1].1));
+        }
+        return d;
+    }
+
+    let mut x0 = coords[0].0;
+    let mut y0 = coords[0].1;
+    let mut x1 = coords[1].0;
+    let mut y1 = coords[1].1;
+    let mut t0: f64 = f64::NAN;
+
+    for idx in 2..coords.len() {
+        let (x2, y2) = coords[idx];
+        let t1 = monotone_slope3(x0, y0, x1, y1, x2, y2);
+        if idx == 2 {
+            let t_start = monotone_slope2(x0, y0, x1, y1, t1);
+            emit_monotone_cubic(&mut d, x0, y0, x1, y1, t_start, t1, swap);
+        } else {
+            emit_monotone_cubic(&mut d, x0, y0, x1, y1, t0, t1, swap);
+        }
+        t0 = t1;
+        x0 = x1;
+        y0 = y1;
+        x1 = x2;
+        y1 = y2;
+    }
+
+    let t_end = monotone_slope2(x0, y0, x1, y1, t0);
+    emit_monotone_cubic(&mut d, x0, y0, x1, y1, t0, t_end, swap);
+
+    d
+}
+
+fn emit_monotone_cubic(
+    d: &mut String, x0: f64, y0: f64, x1: f64, y1: f64, t0: f64, t1: f64, swap: bool,
+) {
+    use std::fmt::Write;
+    let dx = (x1 - x0) / 3.0;
+    let cx1 = x0 + dx;
+    let cy1 = y0 + dx * t0;
+    let cx2 = x1 - dx;
+    let cy2 = y1 - dx * t1;
+    if swap {
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            fmt_coord(cy1),
+            fmt_coord(cx1),
+            fmt_coord(cy2),
+            fmt_coord(cx2),
+            fmt_coord(y1),
+            fmt_coord(x1)
+        );
+    } else {
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            fmt_coord(cx1),
+            fmt_coord(cy1),
+            fmt_coord(cx2),
+            fmt_coord(cy2),
+            fmt_coord(x1),
+            fmt_coord(y1)
+        );
+    }
+}
+
+fn path_monotone_x(points: &[Point]) -> String {
+    path_monotone_impl(points, false)
+}
+
+fn path_monotone_y(points: &[Point]) -> String {
+    path_monotone_impl(points, true)
+}
+
+fn monotone_visited_points_impl(points: &[Point], swap: bool) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    let coords: Vec<(f64, f64)> = points
+        .iter()
+        .map(|p| if swap { (p.y, p.x) } else { (p.x, p.y) })
+        .collect();
+    if coords.len() == 1 {
+        let (x, y) = coords[0];
+        if swap { out.push((y, x)); } else { out.push((x, y)); }
+        return out;
+    }
+    if swap { out.push((coords[0].1, coords[0].0)); } else { out.push((coords[0].0, coords[0].1)); }
+    if coords.len() == 2 {
+        if swap { out.push((coords[1].1, coords[1].0)); } else { out.push((coords[1].0, coords[1].1)); }
+        return out;
+    }
+    let mut x0 = coords[0].0;
+    let mut y0 = coords[0].1;
+    let mut x1 = coords[1].0;
+    let mut y1 = coords[1].1;
+    let mut t0: f64 = f64::NAN;
+
+    for idx in 2..coords.len() {
+        let (x2, y2) = coords[idx];
+        let t1 = monotone_slope3(x0, y0, x1, y1, x2, y2);
+        if idx == 2 {
+            let t_start = monotone_slope2(x0, y0, x1, y1, t1);
+            push_monotone_cubic_visited(&mut out, x0, y0, x1, y1, t_start, t1, swap);
+        } else {
+            push_monotone_cubic_visited(&mut out, x0, y0, x1, y1, t0, t1, swap);
+        }
+        t0 = t1;
+        x0 = x1;
+        y0 = y1;
+        x1 = x2;
+        y1 = y2;
+    }
+
+    let t_end = monotone_slope2(x0, y0, x1, y1, t0);
+    push_monotone_cubic_visited(&mut out, x0, y0, x1, y1, t0, t_end, swap);
+
+    out
+}
+
+fn push_monotone_cubic_visited(
+    out: &mut Vec<(f64, f64)>, x0: f64, y0: f64, x1: f64, y1: f64, t0: f64, t1: f64, swap: bool,
+) {
+    let dx = (x1 - x0) / 3.0;
+    let cx1 = x0 + dx;
+    let cy1 = y0 + dx * t0;
+    let cx2 = x1 - dx;
+    let cy2 = y1 - dx * t1;
+    if swap {
+        out.push((cy1, cx1));
+        out.push((cy2, cx2));
+        out.push((y1, x1));
+    } else {
+        out.push((cx1, cy1));
+        out.push((cx2, cy2));
+        out.push((x1, y1));
+    }
+}
+
+fn monotone_x_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    monotone_visited_points_impl(points, false)
+}
+
+fn monotone_y_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    monotone_visited_points_impl(points, true)
+}
+
+// ── d3 curveBumpX / curveBumpY ────────────────────────────────────────
+
+fn path_bump_impl(points: &[Point], bump_x: bool) -> String {
+    use std::fmt::Write;
+    if points.is_empty() {
+        return String::new();
+    }
+    let mut d = String::new();
+    let _ = write!(d, "M{},{}", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    for i in 1..points.len() {
+        let x0 = points[i - 1].x;
+        let y0 = points[i - 1].y;
+        let x = points[i].x;
+        let y = points[i].y;
+        if bump_x {
+            let mx = (x0 + x) / 2.0;
+            let _ = write!(
+                d,
+                "C{},{},{},{},{},{}",
+                fmt_coord(mx),
+                fmt_coord(y0),
+                fmt_coord(mx),
+                fmt_coord(y),
+                fmt_coord(x),
+                fmt_coord(y)
+            );
+        } else {
+            let my = (y0 + y) / 2.0;
+            let _ = write!(
+                d,
+                "C{},{},{},{},{},{}",
+                fmt_coord(x0),
+                fmt_coord(my),
+                fmt_coord(x),
+                fmt_coord(my),
+                fmt_coord(x),
+                fmt_coord(y)
+            );
+        }
+    }
+    d
+}
+
+fn path_bump_x(points: &[Point]) -> String {
+    path_bump_impl(points, true)
+}
+
+fn path_bump_y(points: &[Point]) -> String {
+    path_bump_impl(points, false)
+}
+
+fn bump_visited_points_impl(points: &[Point], bump_x: bool) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    out.push((points[0].x, points[0].y));
+    for i in 1..points.len() {
+        let x0 = points[i - 1].x;
+        let y0 = points[i - 1].y;
+        let x = points[i].x;
+        let y = points[i].y;
+        if bump_x {
+            let mx = (x0 + x) / 2.0;
+            out.push((mx, y0));
+            out.push((mx, y));
+            out.push((x, y));
+        } else {
+            let my = (y0 + y) / 2.0;
+            out.push((x0, my));
+            out.push((x, my));
+            out.push((x, y));
+        }
+    }
+    out
+}
+
+fn bump_x_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    bump_visited_points_impl(points, true)
+}
+
+fn bump_y_visited_points(points: &[Point]) -> Vec<(f64, f64)> {
+    bump_visited_points_impl(points, false)
+}
+
+// ── d3 curveCatmullRom (alpha = 0.5, centripetal) ────────────────────
+
+const D3_EPSILON: f64 = 1e-12;
+
+fn catmull_rom_point(
+    x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64,
+    l01_a: f64, l12_a: f64, l23_a: f64,
+    l01_2a: f64, l12_2a: f64, l23_2a: f64,
+    nx: f64, ny: f64,
+) -> (f64, f64, f64, f64) {
+    let mut cx1 = x1;
+    let mut cy1 = y1;
+    let mut cx2 = x2;
+    let mut cy2 = y2;
+
+    if l01_a > D3_EPSILON {
+        let a = 2.0 * l01_2a + 3.0 * l01_a * l12_a + l12_2a;
+        let n = 3.0 * l01_a * (l01_a + l12_a);
+        cx1 = (x1 * a - x0 * l12_2a + x2 * l01_2a) / n;
+        cy1 = (y1 * a - y0 * l12_2a + y2 * l01_2a) / n;
+    }
+
+    if l23_a > D3_EPSILON {
+        let b = 2.0 * l23_2a + 3.0 * l23_a * l12_a + l12_2a;
+        let m = 3.0 * l23_a * (l23_a + l12_a);
+        cx2 = (x2 * b + x1 * l23_2a - nx * l12_2a) / m;
+        cy2 = (y2 * b + y1 * l23_2a - ny * l12_2a) / m;
+    }
+
+    (cx1, cy1, cx2, cy2)
+}
+
+fn path_catmull_rom(points: &[Point], alpha: f64) -> String {
+    use std::fmt::Write;
+    if points.is_empty() {
+        return String::new();
+    }
+    if points.len() == 1 {
+        return format!("M{},{}Z", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    }
+    let mut d = String::new();
+    let _ = write!(d, "M{},{}", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    if points.len() == 2 {
+        let _ = write!(d, "L{},{}", fmt_coord(points[1].x), fmt_coord(points[1].y));
+        return d;
+    }
+
+    if alpha == 0.0 {
+        return path_cardinal(points, 0.0);
+    }
+
+    let n = points.len();
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut x2 = points[0].x;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut y2 = points[0].y;
+    let mut l01_a = 0.0;
+    let mut l12_a = 0.0;
+    let mut l23_a = 0.0;
+    let mut l01_2a = 0.0;
+    let mut l12_2a = 0.0;
+    let mut l23_2a = 0.0;
+    let mut pt = 0u8;
+
+    for i in 0..n {
+        let x = points[i].x;
+        let y = points[i].y;
+
+        if pt > 0 {
+            let x23 = x2 - x;
+            let y23 = y2 - y;
+            l23_2a = (x23 * x23 + y23 * y23).powf(alpha);
+            l23_a = l23_2a.sqrt();
+        }
+
+        match pt {
+            0 => {
+                pt = 1;
+            }
+            1 => {
+                pt = 2;
+                x1 = x;
+                y1 = y;
+            }
+            2 => {
+                pt = 3;
+                let (cx1, cy1, cx2, cy2) = catmull_rom_point(
+                    x0, y0, x1, y1, x2, y2,
+                    l01_a, l12_a, l23_a,
+                    l01_2a, l12_2a, l23_2a,
+                    x, y,
+                );
+                let _ = write!(
+                    d,
+                    "C{},{},{},{},{},{}",
+                    fmt_coord(cx1),
+                    fmt_coord(cy1),
+                    fmt_coord(cx2),
+                    fmt_coord(cy2),
+                    fmt_coord(x2),
+                    fmt_coord(y2)
+                );
+            }
+            _ => {
+                let (cx1, cy1, cx2, cy2) = catmull_rom_point(
+                    x0, y0, x1, y1, x2, y2,
+                    l01_a, l12_a, l23_a,
+                    l01_2a, l12_2a, l23_2a,
+                    x, y,
+                );
+                let _ = write!(
+                    d,
+                    "C{},{},{},{},{},{}",
+                    fmt_coord(cx1),
+                    fmt_coord(cy1),
+                    fmt_coord(cx2),
+                    fmt_coord(cy2),
+                    fmt_coord(x2),
+                    fmt_coord(y2)
+                );
+            }
+        }
+
+        l01_a = l12_a;
+        l12_a = l23_a;
+        l01_2a = l12_2a;
+        l12_2a = l23_2a;
+        x0 = x1;
+        x1 = x2;
+        x2 = x;
+        y0 = y1;
+        y1 = y2;
+        y2 = y;
+    }
+
+    if pt == 3 {
+        let (cx1, cy1, cx2, cy2) = catmull_rom_point(
+            x0, y0, x1, y1, x2, y2,
+            l01_a, l12_a, 0.0,
+            l01_2a, l12_2a, 0.0,
+            x2, y2,
+        );
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            fmt_coord(cx1),
+            fmt_coord(cy1),
+            fmt_coord(cx2),
+            fmt_coord(cy2),
+            fmt_coord(x2),
+            fmt_coord(y2)
+        );
+    } else if pt == 2 {
+        let _ = write!(d, "L{},{}", fmt_coord(x2), fmt_coord(y2));
+    }
+
+    d
+}
+
+fn catmull_rom_visited_points(points: &[Point], alpha: f64) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    if points.len() == 1 {
+        out.push((points[0].x, points[0].y));
+        return out;
+    }
+    out.push((points[0].x, points[0].y));
+    if points.len() == 2 {
+        out.push((points[1].x, points[1].y));
+        return out;
+    }
+    if alpha == 0.0 {
+        return cardinal_visited_points(points, 0.0);
+    }
+
+    let n = points.len();
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut x2 = points[0].x;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut y2 = points[0].y;
+    let mut l01_a = 0.0;
+    let mut l12_a = 0.0;
+    let mut l23_a = 0.0;
+    let mut l01_2a = 0.0;
+    let mut l12_2a = 0.0;
+    let mut l23_2a = 0.0;
+    let mut pt = 0u8;
+
+    for i in 0..n {
+        let x = points[i].x;
+        let y = points[i].y;
+
+        if pt > 0 {
+            let x23 = x2 - x;
+            let y23 = y2 - y;
+            l23_2a = (x23 * x23 + y23 * y23).powf(alpha);
+            l23_a = l23_2a.sqrt();
+        }
+
+        match pt {
+            0 => {
+                pt = 1;
+            }
+            1 => {
+                pt = 2;
+                x1 = x;
+                y1 = y;
+            }
+            2 | _ => {
+                pt = 3;
+                let (cx1, cy1, cx2, cy2) = catmull_rom_point(
+                    x0, y0, x1, y1, x2, y2,
+                    l01_a, l12_a, l23_a,
+                    l01_2a, l12_2a, l23_2a,
+                    x, y,
+                );
+                out.push((cx1, cy1));
+                out.push((cx2, cy2));
+                out.push((x2, y2));
+            }
+        }
+
+        l01_a = l12_a;
+        l12_a = l23_a;
+        l01_2a = l12_2a;
+        l12_2a = l23_2a;
+        x0 = x1;
+        x1 = x2;
+        x2 = x;
+        y0 = y1;
+        y1 = y2;
+        y2 = y;
+    }
+
+    if pt == 3 {
+        let (cx1, cy1, cx2, cy2) = catmull_rom_point(
+            x0, y0, x1, y1, x2, y2,
+            l01_a, l12_a, 0.0,
+            l01_2a, l12_2a, 0.0,
+            x2, y2,
+        );
+        out.push((cx1, cy1));
+        out.push((cx2, cy2));
+        out.push((x2, y2));
+    } else if pt == 2 {
+        out.push((x2, y2));
+    }
+
+    out
+}
+
+// ── d3 curveCardinal (tension = 0, k = 1/6) ──────────────────────────
+
+fn path_cardinal(points: &[Point], tension: f64) -> String {
+    use std::fmt::Write;
+    let k = (1.0 - tension) / 6.0;
+    if points.is_empty() {
+        return String::new();
+    }
+    if points.len() == 1 {
+        return format!("M{},{}Z", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    }
+    let mut d = String::new();
+    let _ = write!(d, "M{},{}", fmt_coord(points[0].x), fmt_coord(points[0].y));
+    if points.len() == 2 {
+        let _ = write!(d, "L{},{}", fmt_coord(points[1].x), fmt_coord(points[1].y));
+        return d;
+    }
+
+    let n = points.len();
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut x2 = points[0].x;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut y2 = points[0].y;
+    let mut pt = 0u8;
+
+    for i in 0..n {
+        let x = points[i].x;
+        let y = points[i].y;
+        match pt {
+            0 => {
+                pt = 1;
+            }
+            1 => {
+                pt = 2;
+                x1 = x;
+                y1 = y;
+            }
+            _ => {
+                pt = 3;
+                let cx1 = x1 + k * (x2 - x0);
+                let cy1 = y1 + k * (y2 - y0);
+                let cx2 = x2 + k * (x1 - x);
+                let cy2 = y2 + k * (y1 - y);
+                let _ = write!(
+                    d,
+                    "C{},{},{},{},{},{}",
+                    fmt_coord(cx1),
+                    fmt_coord(cy1),
+                    fmt_coord(cx2),
+                    fmt_coord(cy2),
+                    fmt_coord(x2),
+                    fmt_coord(y2)
+                );
+            }
+        }
+        x0 = x1;
+        x1 = x2;
+        x2 = x;
+        y0 = y1;
+        y1 = y2;
+        y2 = y;
+    }
+
+    if pt == 3 {
+        let nx = x1;
+        let ny = y1;
+        let cx1 = x1 + k * (x2 - x0);
+        let cy1 = y1 + k * (y2 - y0);
+        let cx2 = x2 + k * (x1 - nx);
+        let cy2 = y2 + k * (y1 - ny);
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            fmt_coord(cx1),
+            fmt_coord(cy1),
+            fmt_coord(cx2),
+            fmt_coord(cy2),
+            fmt_coord(x2),
+            fmt_coord(y2)
+        );
+    } else if pt == 2 {
+        let _ = write!(d, "L{},{}", fmt_coord(x2), fmt_coord(y2));
+    }
+
+    d
+}
+
+fn cardinal_visited_points(points: &[Point], tension: f64) -> Vec<(f64, f64)> {
+    let k = (1.0 - tension) / 6.0;
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    if points.is_empty() {
+        return out;
+    }
+    if points.len() == 1 {
+        out.push((points[0].x, points[0].y));
+        return out;
+    }
+    out.push((points[0].x, points[0].y));
+    if points.len() == 2 {
+        out.push((points[1].x, points[1].y));
+        return out;
+    }
+
+    let n = points.len();
+    let mut x0 = f64::NAN;
+    let mut x1 = f64::NAN;
+    let mut x2 = points[0].x;
+    let mut y0 = f64::NAN;
+    let mut y1 = f64::NAN;
+    let mut y2 = points[0].y;
+    let mut pt = 0u8;
+
+    for i in 0..n {
+        let x = points[i].x;
+        let y = points[i].y;
+        match pt {
+            0 => {
+                pt = 1;
+            }
+            1 => {
+                pt = 2;
+                x1 = x;
+                y1 = y;
+            }
+            _ => {
+                pt = 3;
+                let cx1 = x1 + k * (x2 - x0);
+                let cy1 = y1 + k * (y2 - y0);
+                let cx2 = x2 + k * (x1 - x);
+                let cy2 = y2 + k * (y1 - y);
+                out.push((cx1, cy1));
+                out.push((cx2, cy2));
+                out.push((x2, y2));
+            }
+        }
+        x0 = x1;
+        x1 = x2;
+        x2 = x;
+        y0 = y1;
+        y1 = y2;
+        y2 = y;
+    }
+
+    if pt == 3 {
+        let nx = x1;
+        let ny = y1;
+        let cx1 = x1 + k * (x2 - x0);
+        let cy1 = y1 + k * (y2 - y0);
+        let cx2 = x2 + k * (x1 - nx);
+        let cy2 = y2 + k * (y1 - ny);
+        out.push((cx1, cy1));
+        out.push((cx2, cy2));
+        out.push((x2, y2));
+    } else if pt == 2 {
+        out.push((x2, y2));
+    }
+
+    out
 }
 
 // ── endpoint clipping ───────────────────────────────────────────────
@@ -938,5 +1754,218 @@ mod tests {
             Some("url(#flow-1-pointEnd)")
         );
         assert_eq!(marker_start_url(&edge, "flow-1"), None);
+    }
+
+    #[test]
+    fn natural_curve_matches_d3() {
+        let pts4 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 10.0, y: 0.0 },
+            Point { x: 10.0, y: 10.0 },
+            Point { x: 20.0, y: 10.0 },
+        ];
+        assert_eq!(
+            build_path(&pts4, CurveType::Natural),
+            "M0,0C4.444,-1.111,8.889,-2.222,10,0C11.111,2.222,8.889,7.778,10,10C11.111,12.222,15.556,11.111,20,10"
+        );
+
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::Natural),
+            "M0,0C16.667,-4.167,33.333,-8.333,50,0C66.667,8.333,83.333,29.167,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(build_path(&pts2, CurveType::Natural), "M0,0L100,0");
+
+        let pts1 = vec![Point { x: 0.0, y: 0.0 }];
+        assert_eq!(build_path(&pts1, CurveType::Natural), "M0,0Z");
+    }
+
+    #[test]
+    fn monotone_x_curve_matches_d3() {
+        let pts4 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 10.0, y: 0.0 },
+            Point { x: 10.0, y: 10.0 },
+            Point { x: 20.0, y: 10.0 },
+        ];
+        assert_eq!(
+            build_path(&pts4, CurveType::MonotoneX),
+            "M0,0C3.333,0,6.667,0,10,0C10,0,10,10,10,10C13.333,10,16.667,10,20,10"
+        );
+
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::MonotoneX),
+            "M0,0C16.667,0,33.333,0,50,0C66.667,0,83.333,25,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(build_path(&pts2, CurveType::MonotoneX), "M0,0L100,0");
+
+        let pts1 = vec![Point { x: 0.0, y: 0.0 }];
+        assert_eq!(build_path(&pts1, CurveType::MonotoneX), "M0,0Z");
+    }
+
+    #[test]
+    fn monotone_y_curve_matches_d3() {
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::MonotoneY),
+            "M0,0C0,0,50,0,50,0C83.333,16.667,91.667,33.333,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(build_path(&pts2, CurveType::MonotoneY), "M0,0L100,0");
+    }
+
+    #[test]
+    fn bump_x_curve_matches_d3() {
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::BumpX),
+            "M0,0C25,0,25,0,50,0C75,0,75,50,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(
+            build_path(&pts2, CurveType::BumpX),
+            "M0,0C50,0,50,0,100,0"
+        );
+    }
+
+    #[test]
+    fn bump_y_curve_matches_d3() {
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::BumpY),
+            "M0,0C0,0,50,0,50,0C50,25,100,25,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(
+            build_path(&pts2, CurveType::BumpY),
+            "M0,0C0,0,100,0,100,0"
+        );
+    }
+
+    #[test]
+    fn catmull_rom_curve_matches_d3() {
+        let pts4 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 10.0, y: 0.0 },
+            Point { x: 10.0, y: 10.0 },
+            Point { x: 20.0, y: 10.0 },
+        ];
+        assert_eq!(
+            build_path(&pts4, CurveType::CatmullRom),
+            "M0,0C0,0,8.333,-1.667,10,0C11.667,1.667,8.333,8.333,10,10C11.667,11.667,20,10,20,10"
+        );
+
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::CatmullRom),
+            "M0,0C0,0,34.545,-6.402,50,0C68.38,7.613,100,50,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(build_path(&pts2, CurveType::CatmullRom), "M0,0L100,0");
+
+        let pts1 = vec![Point { x: 0.0, y: 0.0 }];
+        assert_eq!(build_path(&pts1, CurveType::CatmullRom), "M0,0Z");
+    }
+
+    #[test]
+    fn cardinal_curve_matches_d3() {
+        let pts4 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 10.0, y: 0.0 },
+            Point { x: 10.0, y: 10.0 },
+            Point { x: 20.0, y: 10.0 },
+        ];
+        assert_eq!(
+            build_path(&pts4, CurveType::Cardinal),
+            "M0,0C0,0,8.333,-1.667,10,0C11.667,1.667,8.333,8.333,10,10C11.667,11.667,20,10,20,10"
+        );
+
+        let pts3 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 50.0, y: 0.0 },
+            Point { x: 100.0, y: 50.0 },
+        ];
+        assert_eq!(
+            build_path(&pts3, CurveType::Cardinal),
+            "M0,0C0,0,33.333,-8.333,50,0C66.667,8.333,100,50,100,50"
+        );
+
+        let pts2 = vec![Point { x: 0.0, y: 0.0 }, Point { x: 100.0, y: 0.0 }];
+        assert_eq!(build_path(&pts2, CurveType::Cardinal), "M0,0L100,0");
+
+        let pts1 = vec![Point { x: 0.0, y: 0.0 }];
+        assert_eq!(build_path(&pts1, CurveType::Cardinal), "M0,0Z");
+    }
+
+    #[test]
+    fn five_point_curves_match_d3() {
+        let pts5 = vec![
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 30.0, y: 50.0 },
+            Point { x: 60.0, y: 20.0 },
+            Point { x: 90.0, y: 80.0 },
+            Point { x: 120.0, y: 40.0 },
+        ];
+        assert_eq!(
+            build_path(&pts5, CurveType::Natural),
+            "M0,0C10,26.548,20,53.095,30,50C40,46.905,50,14.167,60,20C70,25.833,80,70.238,90,80C100,89.762,110,64.881,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::MonotoneX),
+            "M0,0C10,25,20,50,30,50C40,50,50,20,60,20C70,20,80,80,90,80C100,80,110,60,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::MonotoneY),
+            "M0,0C15,16.667,30,33.333,30,50C30,40,60,30,60,20C60,40,90,60,90,80C90,66.667,105,53.333,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::BumpX),
+            "M0,0C15,0,15,50,30,50C45,50,45,20,60,20C75,20,75,80,90,80C105,80,105,40,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::BumpY),
+            "M0,0C0,25,30,25,30,50C30,35,60,35,60,20C60,50,90,50,90,80C90,60,120,60,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::CatmullRom),
+            "M0,0C0,0,19.07,48.654,30,50C39.323,51.148,50.907,18.524,60,20C71.434,21.855,79.15,79.022,90,80C99.367,80.845,120,40,120,40"
+        );
+        assert_eq!(
+            build_path(&pts5, CurveType::Cardinal),
+            "M0,0C0,0,20,46.667,30,50C40,53.333,50,15,60,20C70,25,80,76.667,90,80C100,83.333,120,40,120,40"
+        );
     }
 }

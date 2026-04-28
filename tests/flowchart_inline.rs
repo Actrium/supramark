@@ -75,8 +75,7 @@ fn read_known_ignored() -> std::collections::HashSet<String> {
 }
 
 fn is_elk_source(src: &str) -> bool {
-    let trimmed = src.trim_start();
-    trimmed.starts_with("flowchart-elk") || src.contains("layout: elk")
+    src.contains("flowchart-elk") || src.contains("layout: elk")
 }
 
 fn run_one(rel: &str) -> Result<(bool, String), String> {
@@ -256,7 +255,7 @@ fn flowchart_byte_exact_sweep() {
 
 #[test]
 fn flowchart_single_diff_report() {
-    let rel = "ext_fixtures/cypress/flowchart/134";
+        let rel = "ext_fixtures/cypress/flowchart/137";
     let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mmd = base.join("tests").join(format!("{}.mmd", rel));
     let svg_path = base.join("tests/reference").join(format!("{}.svg", rel));
