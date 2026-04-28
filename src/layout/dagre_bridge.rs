@@ -1833,14 +1833,14 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         std::collections::HashMap::new();
     for cid in &root_clusters {
         if is_isolated_cluster(cid, data) {
-            // Skip empty clusters — those with no leaf children get demoted
-            // to regular nodes in the outer dagre, matching upstream's
-            // behavior where `graph.children(v).length === 0` triggers
-            // `insertNode` instead of `insertCluster`.
-            let has_leaf_children = data.nodes.iter().any(|n| {
-                n.parent_id.as_deref() == Some(cid) && !n.is_group
+            // Skip truly empty clusters (no direct children at all) —
+            // upstream demotes these to regular nodes. Giving them an
+            // inner dagre pass produces degenerate results; they should
+            // participate in the outer dagre as regular nodes.
+            let has_any_children = data.nodes.iter().any(|n| {
+                n.parent_id.as_deref() == Some(cid.as_str())
             });
-            if !has_leaf_children {
+            if !has_any_children {
                 continue;
             }
             let inner = layout_isolated_cluster(cid, data, outer_rankdir, outer_ranksep);
@@ -1914,9 +1914,26 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
             let mut leaf = n.clone();
             leaf.width = Some(il.bbox_width);
             leaf.height = Some(il.bbox_height);
-            leaf.parent_id = None; // no longer a compound parent in outer
+            leaf.parent_id = None;
             leaf.is_group = false;
             outer_nodes.push(leaf);
+        } else if n.is_group {
+            // Non-isolated cluster — check if it has no children (empty).
+            // Upstream demotes such clusters to regular nodes. In the
+            // outer dagre they must NOT be compound parents (dagre-rs
+            // panics on compound nodes with zero children).
+            let has_children = data.nodes.iter().any(|child| {
+                child.parent_id.as_deref() == Some(&n.id)
+                    && !excluded_node_ids.contains(&child.id)
+            });
+            if !has_children {
+                let mut leaf = n.clone();
+                leaf.is_group = false;
+                leaf.parent_id = None;
+                outer_nodes.push(leaf);
+            } else {
+                outer_nodes.push(n.clone());
+            }
         } else {
             outer_nodes.push(n.clone());
         }
