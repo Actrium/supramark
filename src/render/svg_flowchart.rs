@@ -1021,7 +1021,19 @@ pub fn render(
             continue;
         };
         if let Some(cnode) = l.nodes.iter().find(|n| &n.id == cluster_id && n.is_group) {
-            inner.push_str(&render_cluster(cnode, cluster, theme, id, html_labels));
+            // Upstream demotes empty subgraphs (no children after
+            // adjustClustersAndEdges) to regular nodes. Match that by
+            // checking if the cluster has any leaf children.
+            let has_children = l.nodes.iter().any(|n| {
+                n.parent_id.as_deref() == Some(cluster_id) && !n.is_group
+            }) || l.nodes.iter().any(|n| {
+                n.parent_id.as_deref() == Some(cluster_id) && n.is_group
+            });
+            if !has_children {
+                inner.push_str(&render_empty_cluster_as_node(cnode, cluster, theme, id, html_labels));
+            } else {
+                inner.push_str(&render_cluster(cnode, cluster, theme, id, html_labels));
+            }
         }
     }
     inner.push_str(unified_shell::close_layer());
@@ -1099,13 +1111,23 @@ pub fn render(
             if parent_also_isolated {
                 continue;
             }
-            inner.push_str(&render_isolated_cluster_inner_root(
-                cnode,
-                l,
-                theme,
-                id,
-                html_labels,
-            ));
+            let has_children = l.nodes.iter().any(|n| {
+                n.parent_id.as_deref() == Some(cluster_id)
+            });
+            if !has_children {
+                let cluster = l.clusters.iter().find(|c| &c.id == cluster_id);
+                if let Some(cluster) = cluster {
+                    inner.push_str(&render_empty_cluster_as_node(cnode, cluster, theme, id, html_labels));
+                }
+            } else {
+                inner.push_str(&render_isolated_cluster_inner_root(
+                    cnode,
+                    l,
+                    theme,
+                    id,
+                    html_labels,
+                ));
+            }
         }
     }
 
@@ -1443,9 +1465,83 @@ fn normalize_attr_quotes(tag_inner: &str) -> String {
 fn attr_present(tag_inner: &str, name: &str) -> bool {
     let lower = tag_inner.to_ascii_lowercase();
     let needle = format!("{}=", name.to_ascii_lowercase());
-    // We scan outside quotes — but for our limited inputs (`<img>` from labels)
-    // a plain substring containment check is sufficient.
     lower.contains(&needle)
+}
+
+fn render_empty_cluster_as_node(
+    node: &UNode,
+    _cluster: &Cluster,
+    _theme: &ThemeVariables,
+    svg_id: &str,
+    html_labels: bool,
+) -> String {
+    use crate::render::foreign_object::{measure_html_label, HtmlLabelFont};
+    let label = node.label.clone().unwrap_or_default();
+    let base_id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
+    let dom_id = format!("{svg_id}-{base_id}");
+    let data_look = match node.look.as_deref() {
+        Some(look) if !look.is_empty() => format!(r#" data-look="{}""#, look),
+        _ => String::new(),
+    };
+    let font = HtmlLabelFont::default();
+    let is_markdown = node.label_type.as_deref() == Some("markdown");
+    let (lw, lh) = if html_labels && !label.is_empty() {
+        let text = if is_markdown {
+            crate::render::foreign_object::markdown_label_to_html(&label)
+        } else {
+            xml_escape(&label)
+        };
+        measure_html_label(&text, &font, f64::MAX, false)
+    } else if !label.is_empty() {
+        (crate::font_metrics::text_width(&label, "sans-serif", 16.0, false, false) as f64, 22.0)
+    } else {
+        (0.0, 0.0)
+    };
+    let nw = lw + 30.0;
+    let nh = lh + 22.0;
+    let cx = node.x.unwrap_or(0.0);
+    let cy = node.y.unwrap_or(0.0);
+    let css_styles = node.css_styles.as_deref().unwrap_or(&[]);
+    let rect_style = crate::render::shapes::types::build_inline_style(css_styles);
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<g class="node  " id="{id}"{data_look} transform="translate({cx}, {cy})">"#,
+        id = xml_escape(&dom_id),
+        data_look = data_look,
+        cx = fmt_num(cx),
+        cy = fmt_num(cy),
+    ));
+    out.push_str(&format!(
+        r#"<rect class="basic label-container" style="{rect_style}" x="{rx}" y="{ry}" width="{nw}" height="{nh}"></rect>"#,
+        rect_style = rect_style,
+        rx = fmt_num(-nw / 2.0),
+        ry = fmt_num(-nh / 2.0),
+        nw = fmt_num(nw),
+        nh = fmt_num(nh),
+    ));
+    if !label.is_empty() {
+        let label_tx = -lw / 2.0;
+        let label_ty = -lh / 2.0;
+        let escaped = if is_markdown {
+            crate::render::foreign_object::markdown_label_to_html(&label)
+        } else {
+            xml_escape(&label)
+        };
+        let div_style = "display: inline-block; white-space: nowrap;";
+        let span_style_attr = if is_markdown { "" } else { r#" style=""# };
+        out.push_str(&format!(
+            r#"<g class="label " transform="translate({label_tx}, {label_ty})"><foreignObject width="{lw}" height="{lh}"><div style="{div_style}" xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"{span_style_attr}>{escaped}</span></div></foreignObject></g>"#,
+            label_tx = fmt_num(label_tx),
+            label_ty = fmt_num(label_ty),
+            lw = fmt_num(lw),
+            lh = fmt_num(lh),
+            div_style = div_style,
+            span_style_attr = span_style_attr,
+            escaped = escaped,
+        ));
+    }
+    out.push_str("</g>");
+    out
 }
 
 fn render_cluster(

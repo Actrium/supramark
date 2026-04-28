@@ -1833,6 +1833,16 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         std::collections::HashMap::new();
     for cid in &root_clusters {
         if is_isolated_cluster(cid, data) {
+            // Skip empty clusters — those with no leaf children get demoted
+            // to regular nodes in the outer dagre, matching upstream's
+            // behavior where `graph.children(v).length === 0` triggers
+            // `insertNode` instead of `insertCluster`.
+            let has_leaf_children = data.nodes.iter().any(|n| {
+                n.parent_id.as_deref() == Some(cid) && !n.is_group
+            });
+            if !has_leaf_children {
+                continue;
+            }
             let inner = layout_isolated_cluster(cid, data, outer_rankdir, outer_ranksep);
             isolated_layouts.insert(cid.clone(), inner);
         }
