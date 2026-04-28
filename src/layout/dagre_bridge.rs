@@ -464,36 +464,47 @@ fn build_graph_filtered_ex<'a>(
         }
 
         if dagre_src == dagre_dst {
-            // Self-edge expansion — see upstream index.ts:308-364.
+            // Self-edge expansion — mirrors upstream's pre-layout expansion.
             //
-            // When the user-level endpoint is a cluster (effective_src ==
-            // effective_dst is a cluster id), upstream:
-            //   1. expands the self-edge BEFORE adjustClustersAndEdges, using
-            //      the cluster id as the dagre endpoint and the cluster's
-            //      PARENT as the helper-parent (so helpers are siblings of
-            //      the cluster, not children); and
-            //   2. only AFTER expansion does adjustClustersAndEdges rewrite
-            //      cluster endpoints in remaining (non-self) edges to anchor
-            //      leaves.
+            // Upstream expands self-edges in Phase 2 (before
+            // adjustClustersAndEdges) where `edge.start === edge.end` in
+            // the ORIGINAL parsed data. Self-loops created BY anchor
+            // rewriting (e.g. Sub→In becomes In→In) are NOT expanded;
+            // they're passed to dagre as raw v===w edges.
             //
-            // The net effect: helpers/cyclic edges are NAMED after the
-            // cluster (`Active---Active---1`, `Active-cyclic-special-1`),
-            // helpers live at root, and the dagre chain hops through the
-            // cluster's anchor leaf. Match that here by passing the cluster
-            // id as `owner_override` (for helper naming + parent lookup) and
-            // keeping `dagre_src` (the anchor leaf) as the actual dagre
-            // edge endpoint.
-            let owner_override = if effective_src == effective_dst && effective_src != dagre_src {
+            // Detect anchor-rewritten self-loops by checking whether the
+            // original (pre-retarget) endpoints differ from the current
+            // dagre endpoints. If orig_src != dagre_src or orig_dst !=
+            // dagre_dst, this self-loop was created by rewriting, not by
+            // the user — skip expansion and pass as a raw self-loop edge.
+            let orig_src_str = orig_src.unwrap_or(effective_src);
+            let orig_dst_str = orig_dst.unwrap_or(effective_dst);
+            let is_rewrite_self_loop = orig_src_str != dagre_src || orig_dst_str != dagre_dst;
+            if is_rewrite_self_loop {
                 log::debug!(
-                    "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
-                    effective_src,
-                    dagre_src
+                    "dagre_bridge: rewrite self-loop on '{}' (from original {}→{}); not expanding",
+                    dagre_src, orig_src_str, orig_dst_str
                 );
-                Some(effective_src)
+                let name = if edge.id.is_empty() { None } else { Some(edge.id.as_str()) };
+                g.set_edge(
+                    dagre_src, dagre_src,
+                    Some(make_edge_label(edge)),
+                    name,
+                );
             } else {
-                None
-            };
-            expand_self_edge_owned(&mut g, edge, dagre_src, owner_override);
+                // Original self-loop: expand with helpers.
+                let owner_override = if effective_src == effective_dst && effective_src != dagre_src {
+                    log::debug!(
+                        "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
+                        effective_src,
+                        dagre_src
+                    );
+                    Some(effective_src)
+                } else {
+                    None
+                };
+                expand_self_edge_owned(&mut g, edge, dagre_src, owner_override);
+            }
         } else {
             let name = if edge.id.is_empty() {
                 None
