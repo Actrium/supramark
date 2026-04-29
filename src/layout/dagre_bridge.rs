@@ -226,25 +226,45 @@ fn build_cluster_anchors(
     // For each cluster, determine if it has external connections.
     // A cluster has external connections if any edge has exactly one endpoint
     // that is a descendant of (or is) the cluster.
+    //
+    // IMPORTANT: use orig_start/orig_end (pre-retargeting) when available so
+    // that cluster-to-cluster edges do not falsely appear to cross the
+    // boundary.  An edge whose BOTH original endpoints are cluster ids
+    // represents a super-node connection that does not penetrate either
+    // cluster's interior, so it must not create an anchor for either cluster.
+    //
+    // Additionally: an edge whose endpoint IS the cluster's own id (e.g.
+    // "Main→Out1" where Main is the cluster) does NOT penetrate the cluster's
+    // interior — the cluster acts as a super-node connecting to the outside.
+    // Such edges should be recognized as external connections.
     let desc_of: HashMap<&str, HashSet<String>> = cluster_ids
         .iter()
-        .map(|&cid| (cid, all_descendants(cid, data)))
+        .map(|&cid| (cid, all_descendants_excluding(cid, data, excluded)))
         .collect();
 
     let mut has_external: HashSet<&str> = HashSet::new();
     for edge in &data.edges {
-        let src = match edge_source(edge) {
-            Some(s) => s,
-            None => continue,
-        };
-        let dst = match edge_target(edge) {
-            Some(s) => s,
-            None => continue,
-        };
+        let orig_src = edge.extra.get("orig_start").map(|s| s.as_str());
+        let orig_dst = edge.extra.get("orig_end").map(|s| s.as_str());
+        // If the original endpoints are available AND both are cluster ids,
+        // this is a cluster-to-cluster edge — skip the boundary check.
+        if let (Some(os), Some(od)) = (orig_src, orig_dst) {
+            if cluster_ids.contains(os) && cluster_ids.contains(od) {
+                continue;
+            }
+        }
+        // Use original endpoints for the boundary check when available;
+        // fall back to post-retarget endpoints.
+        let src = orig_src.or_else(|| edge_source(edge));
+        let dst = orig_dst.or_else(|| edge_target(edge));
         for &cid in &cluster_ids {
             let members = desc_of.get(cid).unwrap();
-            let src_in = members.contains(src) || src == cid;
-            let dst_in = members.contains(dst) || dst == cid;
+            // Endpoint == cluster's own id: the cluster acts as a super-node
+            // connecting to the outside. This should be counted as external,
+            // so treat it as "inside" the cluster (same as is_isolated_cluster
+            // skip logic, but here we WANT the boundary cross to be detected).
+            let src_in = src.map(|s| members.contains(s) || s == cid).unwrap_or(false);
+            let dst_in = dst.map(|s| members.contains(s) || s == cid).unwrap_or(false);
             if src_in != dst_in {
                 has_external.insert(cid);
             }
@@ -257,12 +277,16 @@ fn build_cluster_anchors(
         cluster_id: &str,
         data: &'a LayoutData,
         cluster_ids: &HashSet<&str>,
+        excluded: &HashSet<&str>,
     ) -> Option<&'a str> {
-        // Find direct children of this cluster.
+        // Find direct children of this cluster, skipping excluded nodes.
         let children: Vec<&Node> = data
             .nodes
             .iter()
-            .filter(|n| n.parent_id.as_deref() == Some(cluster_id))
+            .filter(|n| {
+                n.parent_id.as_deref() == Some(cluster_id)
+                    && !excluded.contains(n.id.as_str())
+            })
             .collect();
         for child in &children {
             if !cluster_ids.contains(child.id.as_str()) {
@@ -272,7 +296,7 @@ fn build_cluster_anchors(
         }
         // All children are clusters — recurse into the first one.
         for child in &children {
-            if let Some(anchor) = find_anchor(&child.id, data, cluster_ids) {
+            if let Some(anchor) = find_anchor(&child.id, data, cluster_ids, excluded) {
                 return Some(anchor);
             }
         }
@@ -281,7 +305,7 @@ fn build_cluster_anchors(
 
     let mut anchors: HashMap<String, String> = HashMap::new();
     for &cid in &has_external {
-        if let Some(anchor) = find_anchor(cid, data, &cluster_ids) {
+        if let Some(anchor) = find_anchor(cid, data, &cluster_ids, excluded) {
             anchors.insert(cid.to_string(), anchor.to_string());
             log::debug!(
                 "dagre_bridge: cluster '{}' has external connections, anchor='{}'",
@@ -1203,6 +1227,30 @@ fn all_descendants(cluster_id: &str, data: &LayoutData) -> std::collections::Has
     members
 }
 
+/// Like `all_descendants` but excludes nodes whose ids are in `excluded`.
+/// Used by `build_cluster_anchors` when nested isolated clusters have been
+/// removed from the outer dagre graph.
+fn all_descendants_excluding(
+    cluster_id: &str,
+    data: &LayoutData,
+    excluded: &std::collections::HashSet<&str>,
+) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let mut members: HashSet<String> = HashSet::new();
+    let mut queue: Vec<&str> = vec![cluster_id];
+    while let Some(cid) = queue.pop() {
+        for n in &data.nodes {
+            if n.parent_id.as_deref() == Some(cid) && !excluded.contains(n.id.as_str()) {
+                members.insert(n.id.clone());
+                if n.is_group {
+                    queue.push(n.id.as_str());
+                }
+            }
+        }
+    }
+    members
+}
+
 /// Check whether a sub-cluster is isolated *within the context of its parent
 /// cluster* — i.e. no edge crosses the sub-cluster boundary when only looking
 /// at edges that are entirely contained within `parent_members`.
@@ -1913,6 +1961,76 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         }
     }
 
+    // --- Nested isolated sub-cluster discovery ---------------------------------
+    // Non-isolated root-level clusters may have direct cluster-children that
+    // are isolated within the parent's context.  Upstream's extractor +
+    // recursiveRender handles this by running the extractor again on every
+    // cluster's inner content; our code previously only checked root-level
+    // clusters for isolation, missing this nesting entirely.
+    //
+    // For each such discovered sub-cluster we run layout_isolated_cluster
+    // with the PARENT's inner direction (opposite of outer rankdir) and
+    // inner ranksep (outer + 25) as the "outer" parameters, so that the
+    // sub-cluster's own inner direction flips back to match the diagram's
+    // outer direction — matching upstream's two-level extractor chain.
+    let mut nested_isolated_layouts: std::collections::HashMap<String, InnerLayout> =
+        std::collections::HashMap::new();
+
+    for cid in &root_clusters {
+        if isolated_layouts.contains_key(cid) {
+            continue;
+        }
+        let has_any_children = data.nodes.iter().any(|n| {
+            n.parent_id.as_deref() == Some(cid.as_str())
+        });
+        if !has_any_children {
+            continue;
+        }
+        let parent_descendants = all_descendants(cid, data);
+        let mut parent_members = parent_descendants.clone();
+        parent_members.insert(cid.clone());
+
+        let cluster_children: Vec<String> = data
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(cid.as_str()) && n.is_group)
+            .map(|n| n.id.clone())
+            .collect();
+
+        for cc_id in &cluster_children {
+            if isolated_layouts.contains_key(cc_id) {
+                continue;
+            }
+            // The sub-cluster must ALSO be globally isolated (no edges crossing
+            // its boundary at the diagram level) to qualify for a nested inner
+            // pass.  Upstream's extractor checks ALL edges for externalConnections,
+            // not just edges within the parent context.  A cluster that has global
+            // external connections is NOT isolated even if it appears isolated
+            // within its parent (because edges crossing the parent boundary are
+            // invisible to is_isolated_within).
+            if !is_isolated_cluster(cc_id, data) {
+                continue;
+            }
+            if is_isolated_within(cc_id, &parent_members, data) {
+                let has_cc_children = data.nodes.iter().any(|n| {
+                    n.parent_id.as_deref() == Some(cc_id.as_str())
+                });
+                if !has_cc_children {
+                    continue;
+                }
+                let parent_inner_rankdir = opposite_rankdir(outer_rankdir);
+                let parent_inner_ranksep = outer_ranksep + 25.0;
+                let inner = layout_isolated_cluster(
+                    cc_id,
+                    data,
+                    parent_inner_rankdir,
+                    parent_inner_ranksep,
+                );
+                nested_isolated_layouts.insert(cc_id.clone(), inner);
+            }
+        }
+    }
+
     // Collect ALL isolated cluster ids (top-level and nested) and their
     // positions from the recursive inner layouts.
     // Also build a flat map: node_id → (x, y) for all nodes inside any
@@ -1945,6 +2063,9 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     for (cid, inner) in &isolated_layouts {
         collect_inner(inner, cid, &mut all_isolated_ids, &mut inner_positions);
     }
+    for (cid, inner) in &nested_isolated_layouts {
+        collect_inner(inner, cid, &mut all_isolated_ids, &mut inner_positions);
+    }
 
     // --- Outer dagre (simple leaf mode) --------------------------------------
     // Isolated clusters are excluded from the outer graph as compound parents;
@@ -1960,6 +2081,11 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     // since they are already placed by the inner dagre pass.
     let mut excluded_node_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     for cid in isolated_layouts.keys() {
+        for desc_id in all_descendants(cid, data) {
+            excluded_node_ids.insert(desc_id);
+        }
+    }
+    for cid in nested_isolated_layouts.keys() {
         for desc_id in all_descendants(cid, data) {
             excluded_node_ids.insert(desc_id);
         }
@@ -1980,6 +2106,15 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
             leaf.width = Some(il.bbox_width);
             leaf.height = Some(il.bbox_height);
             leaf.parent_id = None;
+            leaf.is_group = false;
+            outer_nodes.push(leaf);
+        } else if let Some(il) = nested_isolated_layouts.get(&n.id) {
+            // Nested isolated sub-cluster within a non-isolated parent:
+            // replace with a bbox-sized leaf node, KEEP parent_id so the
+            // leaf sits inside the parent compound node in the outer dagre.
+            let mut leaf = n.clone();
+            leaf.width = Some(il.bbox_width);
+            leaf.height = Some(il.bbox_height);
             leaf.is_group = false;
             outer_nodes.push(leaf);
         } else if n.is_group {
@@ -2010,12 +2145,18 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
 
     let excluded_refs: std::collections::HashSet<&str> =
         excluded_node_ids.iter().map(|s| s.as_str()).collect();
-    // Build cluster anchor map for non-isolated clusters with external connections.
-    // Must be computed from outer_data (with isolated clusters replaced as leaf nodes).
     let outer_cluster_anchors = build_cluster_anchors(&outer_data, &excluded_refs);
     let mut g = build_graph_filtered(&outer_data, &excluded_refs);
     let opts = build_layout_options(&outer_data);
     dagre::layout(&mut g, Some(opts));
+
+    // Merge nested isolated layouts into the main map so find_inner_layout
+    // and the edge-routing merge can discover them.  This must happen AFTER
+    // outer_data construction (which treats top-level and nested isolated
+    // clusters differently) but BEFORE position reading.
+    for (cid, inner) in nested_isolated_layouts {
+        isolated_layouts.insert(cid, inner);
+    }
 
     // Helper: find InnerLayout for any cluster id (at any nesting level).
     fn find_inner_layout<'a>(

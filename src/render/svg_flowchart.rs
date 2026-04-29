@@ -2045,6 +2045,27 @@ fn render_isolated_cluster_inner_root(
     }
     out.push_str(unified_shell::close_layer());
 
+    // Build cluster_bounds for edge clipping: non-isolated sub-clusters
+    // that are descendants of cnode.id. Their bounds (from l.clusters)
+    // are already in the inner dagre coordinate frame.
+    let inner_cluster_bounds: std::collections::HashMap<String, crate::layout::unified::Bounds> =
+        l.clusters
+            .iter()
+            .filter_map(|c| {
+                let b = c.bounds.as_ref()?;
+                if c.id == cnode.id {
+                    return None;
+                }
+                if !is_descendant_of(&c.id, &cnode.id, l) {
+                    return None;
+                }
+                if l.isolated_cluster_ids.contains(&c.id) {
+                    return None;
+                }
+                Some((c.id.clone(), b.clone()))
+            })
+            .collect();
+
     // Inner <g class="edgePaths"> — edges between descendants of this
     // cluster, excluding edges between descendants of isolated sub-clusters.
     out.push_str(&unified_shell::open_layer("edgePaths"));
@@ -2094,7 +2115,7 @@ fn render_isolated_cluster_inner_root(
             i,
             svg_id,
             &l.aria_kind,
-            &std::collections::HashMap::new(),
+            &inner_cluster_bounds,
         ));
     }
     out.push_str(unified_shell::close_layer());
