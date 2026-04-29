@@ -2187,8 +2187,10 @@ fn render_isolated_cluster_inner_root(
         ));
     }
 
-    // Render direct leaf nodes.
-    for n in &l.nodes {
+    // Render direct leaf nodes (JS object key order, like outer level).
+    let inner_node_indices: Vec<usize> = js_object_key_order(l.nodes.iter().map(|n| n.id.as_str()));
+    for &idx in &inner_node_indices {
+        let n = &l.nodes[idx];
         if n.is_group {
             continue;
         }
@@ -2202,11 +2204,7 @@ fn render_isolated_cluster_inner_root(
         // (those are handled recursively in sub-cluster's inner root).
         // Note: cnode.id itself is in isolated_cluster_ids, so we must
         // exclude it from the "sub-isolated" check.
-        let in_sub_isolated = n
-            .parent_id
-            .as_deref()
-            .map(|p| p != cnode.id.as_str() && l.isolated_cluster_ids.contains(p))
-            .unwrap_or(false);
+        let in_sub_isolated = is_in_isolated_sub_cluster_of(&n.id, &cnode.id, l);
         if in_sub_isolated {
             continue;
         }
@@ -2250,6 +2248,19 @@ fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) 
         .and_then(|n| n.parent_id.as_deref())
         .map(|p| p == cluster_id)
         .unwrap_or(false)
+}
+
+fn is_in_isolated_sub_cluster_of(node_id: &str, cnode_id: &str, l: &FlowchartLayout) -> bool {
+    let mut current = node_id;
+    while let Some(n) = l.nodes.iter().find(|n| n.id == current) {
+        match n.parent_id.as_deref() {
+            Some(p) if p == cnode_id => return false,
+            Some(p) if l.isolated_cluster_ids.contains(p) => return true,
+            Some(p) => current = p,
+            None => return false,
+        }
+    }
+    false
 }
 
 /// Apply the upstream `markerOffsets` visual offset to path points.
@@ -4015,14 +4026,12 @@ fn recompute_edge_label_position(e: &UEdge, l: &FlowchartLayout) -> Option<(f64,
     let mut changed = false;
     if let Some(end_id) = orig_end {
         if let Some((nx, ny, nw, nh)) = cluster_bbox(end_id) {
-            // toCluster: cut from start side until we enter the cluster.
             pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
             changed = true;
         }
     }
     if let Some(start_id) = orig_start {
         if let Some((nx, ny, nw, nh)) = cluster_bbox(start_id) {
-            // fromCluster: reverse, cut, reverse again — mirrors upstream.
             pts.reverse();
             pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
             pts.reverse();

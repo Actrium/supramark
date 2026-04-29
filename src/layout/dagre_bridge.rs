@@ -1397,11 +1397,23 @@ fn layout_isolated_cluster(
     let mut g: Graph<NodeLabel, EdgeLabel> = Graph::with_options(opts);
 
     // Add the cluster node itself as compound root.
+    // Upstream's `extractor` carries `clusterData.padding` (8 for flowchart
+    // and state subgraphs) onto the inner compound node. Our code was
+    // defaulting to 0, which produces different compound dimensions from
+    // upstream dagre.js. Use the cluster node's padding from LayoutData
+    // (matching upstream's `node.padding`).
+    let cluster_padding = data
+        .nodes
+        .iter()
+        .find(|n| n.id == cluster_id)
+        .and_then(|n| n.padding)
+        .unwrap_or(8.0);
     g.set_node(
         cluster_id.to_string(),
         Some(NodeLabel {
             width: 0.0,
             height: 0.0,
+            padding: cluster_padding,
             ..NodeLabel::default()
         }),
     );
@@ -1626,36 +1638,53 @@ fn layout_isolated_cluster(
     // rendered SVG via `el.getBBox()`. The jsdom shim returns the union of all
     // child elements' local bounding boxes WITHOUT applying any transforms.
     //
-    // Union bbox components (in the inner dagre coordinate space):
-    //   - Cluster rect: [8, 8+cluster_width] × [8, 8+cluster_height]  (absolute)
-    //   - Each leaf node's local rect: [-w/2, w/2] × [-h/2, h/2]  (transforms ignored)
-    //   - Label foreignObjects: [0, lw] × [0, lh]  (transforms ignored; lw small for short labels)
-    //   - Edge paths: absolute inner dagre coords (within the cluster rect range)
+    // Under the jsdom getBBox shim (ignoring all `<g>` transforms), the inner
+    // root `<g>`'s getBBox is the union of these intrinsic boxes at their LOCAL
+    // coordinates:
     //
-    // The label foreignObjects typically have small widths (single char labels) that
-    // do not exceed the cluster rect's right edge. Edge paths fall within the rect.
+    //   - Cluster rect intrinsic: {x=8, y=8, w=rect_w, h=rect_h}
+    //       where rect_w = max(cluster_w, label_w + cluster_padding)  (insertCluster)
+    //       and   rect_h = cluster_h                                  (insertCluster)
+    //       Position (8, 8) because after translate_graph the compound
+    //       center is at (rect_w/2 + marginx, rect_h/2 + marginy) so
+    //       rx = cx - rect_w/2 = marginx = 8, similarly ry = 8.
     //
-    // Symmetric shapes (rect / round / circle / stadium / ellipse / cylinder) emit
-    // a `<rect x="-w/2" ...>` (or equivalent `<circle cx="0">`) so their local
-    // bbox spans `[-w/2, w/2]`. Asymmetric polygon shapes (hexagon / subroutine /
-    // lean_left / lean_right / trapezoid / inv_trapezoid / diamond / rect_left_inv_arrow)
-    // emit a `<polygon points="...">` whose vertices live in `[0, w] × [-h, 0]` —
-    // the centring `transform="translate(-w/2, h/2)"` is IGNORED by the jsdom
-    // shim. So an asymmetric leaf contributes `0` (not `-w/2`) to `min_left` and
-    // `w` (not `w/2`) to `max_right_node`.
+    //   - Cluster label foreignObject: {x=0, y=0, w=label_w, h=label_h}
+    //       The cluster-label `<g>` has translate → ignored by jsdom.
     //
-    //   bbox_width  = max(8 + cluster_width, max_right_node) - min(0, -max_half_sym_w)
-    //   bbox_height = (8 + cluster_height) + max_half_sym_h     (no asymmetric vertical
-    //                                                            divergence — polygon
-    //                                                            shapes' local y range
-    //                                                            is `[-h, 0]` which lies
-    //                                                            ENTIRELY above the
-    //                                                            cluster rect's local y
-    //                                                            range `[8, 8+ch]`, so
-    //                                                            their `-h` extent matches
-    //                                                            the symmetric `-h/2` case
-    //                                                            in pulling `min_y` down)
+    //   - Each leaf node rect intrinsic: {x=-nw/2, y=-nh/2, w=nw, h=nh}
+    //       The node `<g>` has translate(node_x, node_y) → ignored.
+    //       Symmetric shapes: [-nw/2, nw/2]. Asymmetric polygon shapes:
+    //       vertices in [0, nw] × [-nh, 0] → the centring translate is
+    //       ignored, contributing 0 to min_left and nw to max_right_node.
+    //
+    //   - Sub-isolated cluster inner root: its `<g class="root">` has
+    //     translate → ignored. All its descendant intrinsic boxes appear
+    //     at the same LOCAL coordinates as they did in the sub-isolated
+    //     inner root's own getBBox. This means the sub-isolated cluster
+    //     rect at (8, 8) and label at (0, 0) overlap with the parent
+    //     cluster's own rect/label. Only the sub-isolated cluster's
+    //     child node extents can extend the parent's bbox further.
+    //
+    //   - Non-isolated cluster rect intrinsic: {x=cx-hw, y=cy-hh, w, h}
+    //       Absolute inner dagre coords (the cluster `<g>`'s translate
+    //       is ignored; the rect uses its own x/y attributes).
     let inner_margin = 8.0; // inner dagre marginx/marginy
+    let cluster_padding_for_rect = cluster_padding; // from inner dagre cluster node
+
+    // Cluster rect dimensions matching upstream's insertCluster:
+    //   rect_w = max(node.width, labelBBox.width + node.padding)
+    //   rect_h = node.height
+    //
+    // We approximate label_w by measuring the cluster's label text.
+    // When the label width isn't available (no label or measurement
+    // fails), label_w = 0 which makes rect_w = max(cluster_w, 8)
+    // which is just cluster_w (since cluster_w > 8 for any non-empty
+    // compound).
+    let label_w = measure_cluster_label_width(cluster_id, data);
+    let rect_w = cluster_width.max(label_w + cluster_padding_for_rect);
+    let rect_h = cluster_height;
+
     let mut max_half_sym_w: f64 = 0.0;
     let mut max_full_asym_w: f64 = 0.0;
     let mut max_half_node_h: f64 = 0.0;
@@ -1669,11 +1698,21 @@ fn layout_isolated_cluster(
             max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
         }
     }
-    // Sub-isolated clusters appear as leaf nodes with preset dims (rect-shaped).
+    // Sub-isolated clusters: under jsdom their inner root `<g>`'s
+    // translate is ignored, so all descendant intrinsic boxes appear
+    // at their LOCAL coordinates. The sub-isolated cluster rect at
+    // (8, 8) overlaps with the parent rect at (8, 8) so it doesn't
+    // extend max_right/max_bottom beyond the parent rect. Only the
+    // sub-isolated cluster's child node half-extents matter: they
+    // contribute (-nw/2, -nh/2) to min_left/min_top and (nw/2, nh/2)
+    // to max_right_node / max_bottom.  Previously we used
+    // bbox_w/2 and bbox_h/2 which overestimated because bbox includes
+    // the (8,8)-offset rect that overlaps with the parent.
     for cid in &sub_isolated_sorted_ids {
-        if let Some(lbl) = g.node(cid) {
-            max_half_sym_w = max_half_sym_w.max(lbl.width / 2.0);
-            max_half_node_h = max_half_node_h.max(lbl.height / 2.0);
+        let sub_inner = &sub_isolated[*cid];
+        for (_child_id, &(_cx, _cy, cw, ch)) in &sub_inner.child_positions {
+            max_half_sym_w = max_half_sym_w.max(cw / 2.0);
+            max_half_node_h = max_half_node_h.max(ch / 2.0);
         }
     }
     // Non-isolated cluster children are rendered as <g class="cluster">
@@ -1699,13 +1738,18 @@ fn layout_isolated_cluster(
         }
     }
     let max_right_node = max_half_sym_w.max(max_full_asym_w);
-    let max_right = (inner_margin + cluster_width)
+    // Union of cluster rect {8, 8, rect_w, rect_h}, label {0, 0, lw, lh},
+    // leaf node rects {-hw, hw}, and non-isolated cluster rects (absolute).
+    let max_right = (inner_margin + rect_w)
         .max(max_right_node)
+        .max(label_w)
         .max(cluster_child_max_x);
     let min_left = (0.0_f64)
         .min(-max_half_sym_w)
         .min(cluster_child_min_x);
-    let max_bottom = (inner_margin + cluster_height).max(cluster_child_max_y);
+    let max_bottom = (inner_margin + rect_h)
+        .max(max_half_node_h)
+        .max(cluster_child_max_y);
     let min_top = (0.0_f64).min(-max_half_node_h).min(cluster_child_min_y);
     let mut bbox_width = max_right - min_left;
     let mut bbox_height = max_bottom - min_top;
@@ -2615,6 +2659,44 @@ fn upstream_intersect_line(
         (num_y + offset) / denom
     };
     Some(crate::layout::unified::Point { x, y })
+}
+
+/// Approximate the rendered width of a cluster's label text, matching
+/// upstream's `createText` → `foreignObject` measurement pipeline.
+/// Returns 0.0 when the cluster has no label.
+fn measure_cluster_label_width(cluster_id: &str, data: &LayoutData) -> f64 {
+    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
+
+    let label = match data
+        .nodes
+        .iter()
+        .find(|n| n.id == cluster_id)
+        .and_then(|n| n.label.as_deref())
+    {
+        Some(l) if !l.is_empty() => l,
+        _ => return 0.0,
+    };
+    let font = HtmlLabelFont::default();
+    let escaped = xml_escape_minimal(label);
+    let (lw, _lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
+    lw
+}
+
+/// Minimal XML escape for label measurement. Mirrors
+/// `state.rs::xml_escape_minimal` and `shapes/types.rs::xml_escape`.
+fn xml_escape_minimal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
