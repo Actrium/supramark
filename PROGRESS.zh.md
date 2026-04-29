@@ -10,7 +10,7 @@
 |---|---:|
 | Diagram 完整 byte-exact 已落地 | **13 / 23** |
 | Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt） |
-| Stratum 3 byte-exact fixtures | **~550 / 632**（flowchart **210/224** 93.8%） |
+| Stratum 3 byte-exact fixtures | **~552 / 632**（flowchart **212/224** 95.0%） |
 | Lib unit 测试 | 530 passed / 0 failed / 7 ignored |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
 | 项目代码总行数 | ~55,000 行 |
@@ -67,7 +67,7 @@
 | block | ✓ 完整 | ✓ | **33/33** | ✓ 完成 |
 | requirement | ✓ 完整 | ✓ | **44/44** | ✓ 完成 |
 | state | ✓ 结构改进 | ✓ 全量 | **24/82** | 节点 ID/形状（坐标已精确）、edge d 属性 |
-| flowchart | ✓ 结构改进 | ✓ 全量 | **210/224** (93.8%) | 子图 dagre 布局差异（10 个 viewBox）、edge path（2 个）、self-loop（1 个） |
+| flowchart | ✓ 结构改进 | ✓ 全量 | **212/224** (95.0%) | 子图 dagre 布局差异（8 个 viewBox）、edge path（2 个）、self-loop（1 个） |
 | class | ✓ 新实现 | ✓ 全量 | **0/113** | classBox shape 未 port、节点 ID/形状 |
 
 ### 核心诊断方法
