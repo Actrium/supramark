@@ -7,26 +7,53 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image, ImageSourcePropType } from 'react-native';
 import type { ContainerRNRenderArgs } from '@supramark/core';
+
+import noteIcon from './icons/note.png';
+import warningIcon from './icons/warning.png';
 
 type AdmonitionKind = 'note' | 'tip' | 'info' | 'warning' | 'danger';
 
 const kindTheme: Record<
   AdmonitionKind,
-  { border: string; bg: string; color: string; icon: string; fallbackTitle: string }
+  { border: string; bg: string; color: string; icon: ImageSourcePropType; fallbackTitle: string }
 > = {
-  note: { border: '#448aff', bg: '#e3f2fd', color: '#1565c0', icon: 'ℹ️', fallbackTitle: '提示' },
-  tip: { border: '#00c853', bg: '#e8f5e9', color: '#2e7d32', icon: '💡', fallbackTitle: '建议' },
-  info: { border: '#448aff', bg: '#e3f2fd', color: '#1565c0', icon: 'ℹ️', fallbackTitle: '信息' },
+  note: {
+    border: '#448aff',
+    bg: '#E9F0FC',
+    color: '#597EF7',
+    icon: noteIcon,
+    fallbackTitle: '提示',
+  },
+  tip: {
+    border: '#00c853',
+    bg: '#e8f5e9',
+    color: '#2e7d32',
+    icon: warningIcon,
+    fallbackTitle: '建议',
+  },
+  info: {
+    border: '#448aff',
+    bg: '#e3f2fd',
+    color: '#1565c0',
+    icon: noteIcon,
+    fallbackTitle: '信息',
+  },
   warning: {
     border: '#ff9100',
-    bg: '#fff3e0',
-    color: '#e65100',
-    icon: '⚠️',
+    bg: '#F2BF4433',
+    color: '#F2BF44',
+    icon: warningIcon,
     fallbackTitle: '警告',
   },
-  danger: { border: '#ff1744', bg: '#fce4ec', color: '#b71c1c', icon: '🚨', fallbackTitle: '危险' },
+  danger: {
+    border: '#ff1744',
+    bg: '#fce4ec',
+    color: '#b71c1c',
+    icon: warningIcon,
+    fallbackTitle: '危险',
+  },
 };
 
 function resolveKind(node: any): AdmonitionKind {
@@ -96,13 +123,12 @@ export function renderAdmonitionContainerRN({
       style={[
         localStyles.card,
         {
-          borderLeftColor: theme.border,
           backgroundColor: theme.bg,
         },
       ]}
     >
       <View style={localStyles.header}>
-        <Text style={localStyles.icon}>{theme.icon}</Text>
+        <Image source={theme.icon} style={localStyles.icon} resizeMode="contain" />
         <Text style={[localStyles.title, { color: theme.color }]}>{title}</Text>
       </View>
       <View style={localStyles.content}>{renderedChildren}</View>
@@ -113,27 +139,28 @@ export function renderAdmonitionContainerRN({
 const localStyles = StyleSheet.create({
   card: {
     width: '100%',
-    borderLeftWidth: 4,
-    borderRadius: 8,
+    borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: 12,
+    minWidth: 288,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 8,
   },
-  icon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   content: {
     width: '100%',
+  },
+  icon: {
+    width: 18,
+    height: 18,
+    marginRight: 4,
   },
   fallbackBlock: {
     width: '100%',
