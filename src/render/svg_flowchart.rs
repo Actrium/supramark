@@ -2251,6 +2251,18 @@ fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) 
 /// active `markerOffsets` table — `arrow_cross` and `arrow_circle` are
 /// intentionally absent (`markerOffsets2` defines them but is unused),
 /// so circle/cross arrowheads sit flush against the node boundary.
+/// For a single-point path after cluster clipping, compute the outward
+/// marker offset direction. Upstream applies the end marker offset as a
+/// pure outward shift perpendicular to the nearest boundary edge.
+/// `end_mo` / `start_mo` are the marker offset values (4.0 for arrow_point).
+fn marker_offset_value(arrow: &str) -> f64 {
+    match arrow {
+        "arrow_point" => 4.0,
+        "arrow_barb_neo" => 5.5,
+        _ => 0.0,
+    }
+}
+
 fn apply_marker_offsets(pts: &mut Vec<Point>, arrow_end: &str, arrow_start: &str) {
     fn marker_offset_for(arrow: &str) -> Option<f64> {
         match arrow {
@@ -2758,10 +2770,57 @@ fn render_edge_path(
         pts.reverse();
     }
 
-    // Apply marker visual offsets to get the rendered path points.
+// Apply marker visual offsets to get the rendered path points.
     let arrow_end = e.arrow_type_end.as_deref().unwrap_or("none");
     let arrow_start = e.arrow_type_start.as_deref().unwrap_or("none");
     apply_marker_offsets(&mut pts, arrow_end, arrow_start);
+
+    // When cluster clipping reduces the path to a single point, upstream
+    // still applies the end marker offset. For rewrite self-loops (anchor-
+    // rewritten edges where orig_start != orig_end), the self-loop sits on
+    // the node's right boundary in TB layout. After fromCluster clipping,
+    // the single remaining point is at the node boundary, and the marker
+    // offset shifts it outward perpendicular to that boundary edge.
+    // Compute the outward direction from the self-loop geometry: the
+    // boundary points (first and last of pts_raw) share the same x
+    // coordinate, and that x is the node's right boundary. The outward
+    // direction is +x for right boundary (TB), -x for left (RL),
+    // +y for bottom (LR), -y for top (BT).
+    if pts.len() == 1 && pts_raw.len() >= 7 {
+        let mo = marker_offset_value(arrow_end);
+        if mo > 0.0 {
+            // Self-loop points[0] and points[last] share the same x
+            // (or y) — that shared coordinate is the boundary. Detect
+            // which axis is shared and which side.
+            let first_x = pts_raw[0].x;
+            let last_x = pts_raw[pts_raw.len() - 1].x;
+            let first_y = pts_raw[0].y;
+            let last_y = pts_raw[pts_raw.len() - 1].y;
+
+if (first_x - last_x).abs() < 0.5 {
+                    // Boundary is vertical (right or left). The
+                    // self-loop interior (midpoint) is on the
+                    // OUTWARD side of the boundary. Offset toward
+                    // the interior direction.
+                    let interior_x = pts_raw[pts_raw.len() / 2].x;
+                    if interior_x > first_x {
+                        pts[0].x += mo;
+                    } else {
+                        pts[0].x -= mo;
+                    }
+            } else if (first_y - last_y).abs() < 0.5 {
+                // Boundary is horizontal (top or bottom). Determine side.
+                let interior_y = pts_raw[pts_raw.len() / 2].y;
+                if interior_y > first_y {
+                    // Interior is below → boundary is TOP → outward = -y
+                    pts[0].y -= mo;
+                } else {
+                    // Interior is above → boundary is BOTTOM → outward = +y
+                    pts[0].y += mo;
+                }
+            }
+        }
+    }
 
     // Build `d=` via the curve configured on this edge (offset-adjusted pts).
     let curve = e.curve.as_deref().unwrap_or("basis");

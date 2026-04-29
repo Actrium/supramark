@@ -470,13 +470,11 @@ fn build_graph_filtered_ex<'a>(
             // adjustClustersAndEdges) where `edge.start === edge.end` in
             // the ORIGINAL parsed data. Self-loops created BY anchor
             // rewriting (e.g. Sub→In becomes In→In) are NOT expanded;
-            // they're passed to dagre as raw v===w edges.
-            //
-            // Detect anchor-rewritten self-loops by checking whether the
-            // original (pre-retarget) endpoints differ from the current
-            // dagre endpoints. If orig_src != dagre_src or orig_dst !=
-            // dagre_dst, this self-loop was created by rewriting, not by
-            // the user — skip expansion and pass as a raw self-loop edge.
+            // they're passed to dagre as raw v===w edges. We skip
+            // expansion for these to avoid helper nodes inflating the
+            // viewBox; instead the self-loop path points are synthesized
+            // in `collect_edges` using upstream's `positionSelfEdges`
+            // formula.
             let orig_src_str = orig_src.unwrap_or(effective_src);
             let orig_dst_str = orig_dst.unwrap_or(effective_dst);
             let is_rewrite_self_loop = orig_src_str != dagre_src || orig_dst_str != dagre_dst;
@@ -492,7 +490,6 @@ fn build_graph_filtered_ex<'a>(
                     name,
                 );
             } else {
-                // Original self-loop: expand with helpers.
                 let owner_override = if effective_src == effective_dst && effective_src != dagre_src {
                     log::debug!(
                         "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
@@ -808,6 +805,62 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
     out
 }
 
+/// Synthesise 7 self-loop boundary points for an anchor-rewritten
+/// self-loop (e.g. Sub→In retargeted to In→In). Mirrors upstream's
+/// `positionSelfEdges` (5 base points) + `assignNodeIntersects`
+/// (2 boundary intersection points).
+///
+/// The 5 base points use upstream's formula:
+///   x5 = node.x + node.width / 2  (right boundary for TB layout)
+///   y6 = node.y                   (center y)
+///   dx = nodesep * 0.7            (loop extent — matches upstream dagre)
+///   dy = node.height / 2
+///
+/// The 2 boundary intersections use upstream's `intersectRect`.
+fn rewrite_self_loop_points(node: &NodeLabel, nodesep: f64) -> Vec<Point> {
+    let x5 = node.x.unwrap_or(0.0) + node.width / 2.0;
+    let y6 = node.y.unwrap_or(0.0);
+    let dx = nodesep * 0.7;
+    let dy = node.height / 2.0;
+
+    let base = [
+        Point { x: x5 + 2.0 * dx / 3.0, y: y6 - dy },
+        Point { x: x5 + 5.0 * dx / 6.0, y: y6 - dy },
+        Point { x: x5 + dx,              y: y6 },
+        Point { x: x5 + 5.0 * dx / 6.0, y: y6 + dy },
+        Point { x: x5 + 2.0 * dx / 3.0, y: y6 + dy },
+    ];
+
+    let cx = node.x.unwrap_or(0.0);
+    let cy = node.y.unwrap_or(0.0);
+    let hw = node.width / 2.0;
+    let hh = node.height / 2.0;
+
+    let first = intersect_rect(cx, cy, hw, hh, base[0]);
+    let last = intersect_rect(cx, cy, hw, hh, base[4]);
+
+    vec![first, base[0], base[1], base[2], base[3], base[4], last]
+}
+
+/// Mirror of upstream dagre's `intersectRect`: find the intersection
+/// of the line from the rect centre `(cx, cy)` to `point` with the
+/// rect boundary (half-width `w`, half-height `h`).
+fn intersect_rect(cx: f64, cy: f64, w: f64, h: f64, point: Point) -> Point {
+    let ddx = point.x - cx;
+    let ddy = point.y - cy;
+    if ddx == 0.0 && ddy == 0.0 {
+        return point;
+    }
+    let (sx, sy) = if ddy.abs() * w > ddx.abs() * h {
+        let h2 = if ddy < 0.0 { -h } else { h };
+        (h2 * ddx / ddy, h2)
+    } else {
+        let w2 = if ddx < 0.0 { -w } else { w };
+        (w2, w2 * ddy / ddx)
+    };
+    Point { x: cx + sx, y: cy + sy }
+}
+
 /// Pull post-layout edge spline points + label centres.
 ///
 /// `cluster_anchors`: optional map from cluster-id to the anchor leaf node
@@ -827,9 +880,21 @@ fn collect_edges(
                 return out;
             };
             if src_raw == dst_raw {
-                // Self-edges were expanded; leave routing to
-                // `routing::smooth_self_loop` which regenerates them
-                // from the node bounds rather than from the helper chain.
+                let orig_src = orig.extra.get("orig_start").map(|s| s.as_str());
+                let orig_dst = orig.extra.get("orig_end").map(|s| s.as_str());
+                let is_rewrite = orig_src.is_some_and(|s| s != src_raw)
+                    || orig_dst.is_some_and(|s| s != dst_raw);
+                if is_rewrite {
+                    if let Some(lbl) = g.node(src_raw) {
+                        let nodesep = data.node_spacing.unwrap_or(50.0);
+                        let pts = rewrite_self_loop_points(lbl, nodesep);
+                        out.points = Some(pts);
+                        if let Some(mid) = routing::place_label_midpoint(out.points.as_deref().unwrap_or(&[])) {
+                            out.label_x = Some(mid.x);
+                            out.label_y = Some(mid.y);
+                        }
+                    }
+                }
                 return out;
             }
             // Edges whose effective endpoints were remapped to cluster ids

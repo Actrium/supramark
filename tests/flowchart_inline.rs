@@ -349,3 +349,84 @@ fn round_shape_label_with_inline_paren_in_markdown_quotes() {
     let l = v.label.as_ref().expect("label populated");
     assert_eq!(l.text, "Item.(1)");
 }
+
+#[test]
+fn dump_fixture_168() {
+    let source = r#"flowchart TB
+    Out --> In
+    subgraph Sub
+      In
+    end
+    Sub --> In
+"#;
+    let id = "ref-ext-fixtures-cypress-flowchart-168";
+    let pre = preprocess::preprocess(source).unwrap();
+    let theme_name = pre.config.theme.as_deref().unwrap_or("default");
+    let mut th = theme::get_theme(theme_name);
+    if let Some(tv) = pre.config.theme_variables.as_ref() {
+        theme::apply_theme_variables(&mut th, tv);
+    }
+    let d = fcp::parse(source).unwrap();
+    let l = fcl::layout(&d, &th).unwrap();
+    
+    for e in &l.edges {
+        if e.id.contains("Sub_In") {
+            eprintln!("Edge {}: start={:?} end={:?} orig_start={:?} orig_end={:?}", 
+                e.id, e.start, e.end, 
+                e.extra.get("orig_start"), e.extra.get("orig_end"));
+            if let Some(pts) = &e.points {
+                eprintln!("  points ({}):", pts.len());
+                for (i, p) in pts.iter().enumerate() {
+                    eprintln!("    [{}] x={:.6} y={:.6}", i, p.x, p.y);
+                }
+            } else {
+                eprintln!("  points: None");
+            }
+        }
+    }
+    
+    let got = svg_flowchart::render(&d, &l, &th, id).unwrap();
+    if let Some(idx) = got.find("L_Sub_In_0") {
+        let start = idx.saturating_sub(300);
+        let end = (idx + 500).min(got.len());
+        eprintln!("\nRendered edge fragment:\n{}", &got[start..end]);
+    }
+}
+
+#[test]
+fn dump_fixture_168_clusters() {
+    let source = r#"flowchart TB
+    Out --> In
+    subgraph Sub
+      In
+    end
+    Sub --> In
+"#;
+    let id = "ref-ext-fixtures-cypress-flowchart-168";
+    let pre = preprocess::preprocess(source).unwrap();
+    let theme_name = pre.config.theme.as_deref().unwrap_or("default");
+    let mut th = theme::get_theme(theme_name);
+    if let Some(tv) = pre.config.theme_variables.as_ref() {
+        theme::apply_theme_variables(&mut th, tv);
+    }
+    let d = fcp::parse(source).unwrap();
+    let l = fcl::layout(&d, &th).unwrap();
+    
+    for c in &l.clusters {
+        eprintln!("Cluster {}: {:?}", c.id, c.bounds);
+    }
+    for n in &l.nodes {
+        eprintln!("Node {}: x={:?} y={:?} w={:?} h={:?} is_group={}", 
+            n.id, n.x, n.y, n.width, n.height, n.is_group);
+    }
+    
+    // Check the cluster clip process
+    let got = svg_flowchart::render(&d, &l, &th, id).unwrap();
+    
+    // Look at the data-points and d attribute for L_Sub_In_0
+    if let Some(idx) = got.find("data-id=\"L_Sub_In_0\"") {
+        let start = idx.saturating_sub(200);
+        let end = (idx + 200).min(got.len());
+        eprintln!("\nEdge path fragment:\n{}", &got[start..end]);
+    }
+}
