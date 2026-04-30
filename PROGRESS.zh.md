@@ -10,7 +10,7 @@
 |---|---:|
 | Diagram 完整 byte-exact 已落地 | **13 / 23** |
 | Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt） |
-| Stratum 3 byte-exact fixtures | **~552 / 632**（flowchart **212/224** 95.0%） |
+| Stratum 3 byte-exact fixtures | **~552 / 632**（flowchart **213/224** 95.5%） |
 | Lib unit 测试 | 530 passed / 0 failed / 7 ignored |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
 | 项目代码总行数 | ~55,000 行 |
