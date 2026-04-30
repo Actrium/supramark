@@ -28,12 +28,13 @@ use crate::layout::unified::{Bounds, Edge, Node, Point};
 
 // ── existing Wave 3 P0 surface ──────────────────────────────────────
 
-/// Refine edges after dagre has placed them. Today this only:
+/// Refine edges after dagre has placed them. Today this only fills in
+/// `label_x` / `label_y` at the spline's arc-length midpoint when dagre
+/// didn't set them.
 ///
-/// 1. Smooths spline points by removing consecutive near-duplicates so
-///    downstream curve emission doesn't emit zero-length segments;
-/// 2. Computes a default `label_x` / `label_y` at the geometric midpoint
-///    of the spline when dagre didn't set one.
+/// We used to also dedupe consecutive near-duplicate vertices here;
+/// `dagre@a998f68` does that itself (`dedupe_adjacent_edge_points`,
+/// step 25b in its layout pipeline) so the local pass is gone.
 ///
 /// More sophisticated routing (corridor avoidance, orthogonal routing,
 /// label-lane packing, arrowhead clipping onto shape silhouettes) is a
@@ -44,37 +45,15 @@ pub fn refine_edges(_nodes: &[Node], edges: &[Edge]) -> Vec<Edge> {
         .map(|e| {
             let mut out = e.clone();
             if let Some(pts) = out.points.as_ref() {
-                let smoothed = dedupe_collinear(pts);
-                if smoothed.len() >= 2 && (out.label_x.is_none() || out.label_y.is_none()) {
-                    let (mx, my) = midpoint_along(&smoothed);
+                if pts.len() >= 2 && (out.label_x.is_none() || out.label_y.is_none()) {
+                    let (mx, my) = midpoint_along(pts);
                     out.label_x.get_or_insert(mx);
                     out.label_y.get_or_insert(my);
                 }
-                out.points = Some(smoothed);
             }
             out
         })
         .collect()
-}
-
-/// Drop successive points that sit within `eps` of one another — dagre
-/// sometimes emits back-to-back identical vertices at ranks with no
-/// horizontal shift, which produces zero-length SVG segments and
-/// annoys downstream curve fitters.
-fn dedupe_collinear(points: &[Point]) -> Vec<Point> {
-    const EPS: f64 = 1e-4;
-    let mut out: Vec<Point> = Vec::with_capacity(points.len());
-    for &p in points {
-        if let Some(prev) = out.last() {
-            let dx = p.x - prev.x;
-            let dy = p.y - prev.y;
-            if dx.abs() < EPS && dy.abs() < EPS {
-                continue;
-            }
-        }
-        out.push(p);
-    }
-    out
 }
 
 /// Walk the polyline and return the (x, y) at its arc-length midpoint.
@@ -470,16 +449,6 @@ fn tail_polyline(points: &[Point], start_len: f64) -> Vec<Point> {
 mod tests {
     use super::*;
     use crate::layout::unified::Point;
-
-    #[test]
-    fn dedupe_drops_exact_duplicates() {
-        let pts = vec![
-            Point { x: 0.0, y: 0.0 },
-            Point { x: 0.0, y: 0.0 },
-            Point { x: 1.0, y: 0.0 },
-        ];
-        assert_eq!(dedupe_collinear(&pts).len(), 2);
-    }
 
     #[test]
     fn midpoint_of_straight_line_is_centre() {

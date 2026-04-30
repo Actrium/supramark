@@ -687,46 +687,14 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
         });
     }
 
-    // Dagre-rs panics on compound graphs where a composite (cluster) node
-    // appears directly as an edge endpoint, or cross-cluster edges cross
-    // different subtrees.  Try compound layout first; on failure fall back
-    // to a flat layout where parent relationships are dropped and cluster
-    // bounds are computed post-layout from child node positions.
-    let data_boxed = &data;
-    let theme_boxed = theme;
-    let compound_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        unified_render::layout(data_boxed, "dagre", theme_boxed)
-    }));
-
-    let result = match compound_result {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(e),
-        Err(_) => {
-            log::warn!("state layout: dagre compound-mode panic — retrying in flat mode");
-            // Flat-mode: strip all parent_id fields so dagre sees a simple
-            // directed graph.  After layout we synthesise composite-node
-            // positions from their children's bounding boxes.
-            let mut flat_data = data.clone();
-            for n in flat_data.nodes.iter_mut() {
-                n.parent_id = None;
-            }
-            let flat_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                unified_render::layout(&flat_data, "dagre", theme_boxed)
-            }));
-            let mut lr = match flat_result {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => return Err(e),
-                Err(_) => {
-                    return Err(crate::error::MermaidError::Render(
-                        "dagre panic in both compound and flat state layout".into(),
-                    ));
-                }
-            };
-            // Recompute cluster node positions from children's bounds.
-            synthesise_cluster_bounds(&mut lr.nodes, &data, DEFAULT_NODE_SPACING / 2.0);
-            lr
-        }
-    };
+    // dagre-rs used to panic on certain compound topologies (cluster as
+    // edge endpoint, cross-cluster edges, empty inner cluster). As of
+    // `dagre@a998f68` the rank pipeline + intersect helpers + BTreeMap
+    // ordering are all robust to those, and the regression tests in
+    // dagre-rs/src/layout/tests.rs::layout_does_not_panic_on_empty_subgraph_nodes
+    // exercise the exact shapes that previously crashed. The
+    // catch_unwind + flat-mode fallback is therefore retired here.
+    let result = unified_render::layout(&data, "dagre", theme)?;
 
     // Post-process: recompute edge endpoints for stateEnd nodes.
     // In upstream, after dagre layout, updateNodeBounds() updates the
@@ -926,21 +894,6 @@ fn expand_cluster_width_for_label(result: &mut crate::layout::unified::types::La
 
     const LABEL_PADDING: f64 = 8.0;
 
-    // Track per-cluster widen deltas so we can post-shift outer-level nodes
-    // and outer edges that were laid out by dagre against the unwidened
-    // cluster width. Only top-level (parent=None) widened clusters
-    // contribute, and only when all such clusters share the same column
-    // (i.e. dagre placed them at identical x), in which case the entire
-    // outer-level layout shifts uniformly by the common delta.
-    //
-    // This mirrors upstream's behaviour: mermaid-js feeds the widened
-    // cluster width into dagre **before** layout, so root_start, sibling
-    // top-level clusters, and the outer edges that connect them are all
-    // centred against the widened column. We approximate that by running
-    // dagre with the unwidened width then applying a uniform x shift after
-    // the fact when the column-uniformity precondition holds.
-    let mut top_widen_deltas: Vec<(String, f64, f64)> = Vec::new();
-
     for n in result.nodes.iter_mut() {
         if !n.is_group {
             continue;
@@ -975,107 +928,6 @@ fn expand_cluster_width_for_label(result: &mut crate::layout::unified::types::La
                     n.extra.insert("outer_tx".into(), (v + delta).to_string());
                 }
             }
-            if n.parent_id.is_none() {
-                // Outer-level dagre sees the cluster as a leaf with width
-                // `il.bbox_width = needed_w_unwidened + cluster_padding * 2`
-                // (cluster_padding = 8 on each side). When we widen the
-                // cluster's outer rect by `(needed - cur) / 2 = delta` in
-                // each direction, upstream's `il.bbox_width` would have
-                // grown by `2 * delta`, but dagre treats the leaf as an
-                // axis-aligned box so the column centre shifts only by the
-                // amount that exceeds the existing margin contribution.
-                // Empirically: `outer_shift = delta - LABEL_PADDING` for
-                // top-level columnar layouts (cy/45-47 family).
-                let outer_shift = delta - LABEL_PADDING;
-                if outer_shift > 0.0 {
-                    top_widen_deltas.push((n.id.clone(), n.x.unwrap_or(0.0), outer_shift));
-                }
-            }
-        }
-    }
-
-    // Post-pass: when every top-level widened cluster sits on the same
-    // dagre column (identical x to within an epsilon) AND shares the same
-    // delta, shift all outer-level entities (top-level nodes that aren't
-    // descendants of any cluster, and outer-level edges between them) by
-    // the common delta. This matches upstream's pre-layout widening result
-    // for the cy/45-47 family of fixtures, where every top-level cluster
-    // has the same long label and all sit in a single TB column.
-    if top_widen_deltas.is_empty() {
-        return;
-    }
-    // Require all top-level widened clusters to share the same delta. The
-    // (also same column) precondition is implicit: when every top-level
-    // cluster widens by the same amount, dagre's column placement before
-    // and after widening differ uniformly by that delta — so shifting all
-    // outer-level entities by it reproduces upstream's pre-layout
-    // widening result. Non-cluster outer-level nodes (root_start) and
-    // outer-level edges share that single column for the cy/45-47 family.
-    let first_d = top_widen_deltas[0].2;
-    let uniform = top_widen_deltas
-        .iter()
-        .all(|(_, _, d)| (d - first_d).abs() < 1e-6);
-    if !uniform {
-        return;
-    }
-    let delta = first_d;
-    let widened_ids: std::collections::HashSet<String> = top_widen_deltas
-        .iter()
-        .map(|(id, _, _)| id.clone())
-        .collect();
-
-    // Shift outer-level leaf nodes (e.g. `root_start` for `[*] --> S`) so
-    // they line up with the widened column. We deliberately do NOT touch
-    // cluster `n.x`: for isolated clusters that field is the inner-pass
-    // local centre (consumed by the renderer to draw rect/label inside the
-    // inner root group). Mutating it would shift the rect away from the
-    // cluster's children. The outer-level dagre column is instead
-    // reflected in the `points` arrays of outer edges, which we shift in
-    // the loop below.
-    for n in result.nodes.iter_mut() {
-        if widened_ids.contains(&n.id) {
-            continue;
-        }
-        if !n.is_group && n.parent_id.is_none() {
-            if let Some(x) = n.x.as_mut() {
-                *x += delta;
-            }
-        }
-    }
-
-    // Shift every outer-level edge: an edge whose endpoints both live at
-    // the top level of the diagram (no isolated-cluster ancestry). Inner
-    // edges that route within a cluster's inner pass already use that
-    // cluster's translated coord system.
-    let outer_node_ids: std::collections::HashSet<String> = result
-        .nodes
-        .iter()
-        .filter(|n| n.parent_id.is_none())
-        .map(|n| n.id.clone())
-        .collect();
-    for e in result.edges.iter_mut() {
-        let src_outer = e
-            .start
-            .as_deref()
-            .map(|s| outer_node_ids.contains(s))
-            .unwrap_or(false);
-        let dst_outer = e
-            .end
-            .as_deref()
-            .map(|s| outer_node_ids.contains(s))
-            .unwrap_or(false);
-        if !(src_outer && dst_outer) {
-            continue;
-        }
-        if let Some(pts) = e.points.as_mut() {
-            for p in pts.iter_mut() {
-                p.x += delta;
-            }
-        }
-        // Edge label position (if any) — the foreignObject wrapper is
-        // emitted at the edge's mid-point in absolute coords.
-        if let Some(lx) = e.label_x.as_mut() {
-            *lx += delta;
         }
     }
 }
@@ -1458,82 +1310,6 @@ fn measure_lines_box(lines: &[&str], font_size: f64, bold: bool) -> (f64, f64) {
     (total_w, total_h)
 }
 
-/// After a flat-mode dagre layout (where parent_id was stripped), compute
-/// the position and size of each composite (is_group) node by taking the
-/// bounding box of all its direct children plus `pad` padding on each side.
-/// The composite node's centre is placed at the centre of that bounding box.
-///
-/// `original_data` carries the original `parent_id` relationships.
-fn synthesise_cluster_bounds(
-    nodes: &mut Vec<LNode>,
-    original_data: &crate::layout::unified::types::LayoutData,
-    pad: f64,
-) {
-    // Build a map id → index for quick lookup (using owned String keys to
-    // avoid holding a reference into `nodes` while we later mutate it).
-    let id_to_idx: std::collections::HashMap<String, usize> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.id.clone(), i))
-        .collect();
-
-    // For each composite node, collect its direct children from original data.
-    let composites: Vec<String> = original_data
-        .nodes
-        .iter()
-        .filter(|n| n.is_group)
-        .map(|n| n.id.clone())
-        .collect();
-
-    for cluster_id in &composites {
-        // Children according to original data.
-        let children_ids: Vec<&str> = original_data
-            .nodes
-            .iter()
-            .filter(|n| n.parent_id.as_deref() == Some(cluster_id.as_str()))
-            .map(|n| n.id.as_str())
-            .collect();
-
-        let mut min_x = f64::INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
-        let mut found_any = false;
-
-        for cid in &children_ids {
-            if let Some(&idx) = id_to_idx.get(*cid) {
-                let cn = &nodes[idx];
-                if let (Some(cx), Some(cy)) = (cn.x, cn.y) {
-                    let w = cn.width.unwrap_or(0.0);
-                    let h = cn.height.unwrap_or(0.0);
-                    min_x = min_x.min(cx - w / 2.0);
-                    min_y = min_y.min(cy - h / 2.0);
-                    max_x = max_x.max(cx + w / 2.0);
-                    max_y = max_y.max(cy + h / 2.0);
-                    found_any = true;
-                }
-            }
-        }
-
-        if !found_any {
-            continue;
-        }
-
-        // Add padding around children.
-        let bx = min_x - pad;
-        let by = min_y - pad;
-        let bw = (max_x - min_x) + 2.0 * pad;
-        let bh = (max_y - min_y) + 2.0 * pad;
-
-        if let Some(&idx) = id_to_idx.get(cluster_id.as_str()) {
-            let n = &mut nodes[idx];
-            n.x = Some(bx + bw / 2.0);
-            n.y = Some(by + bh / 2.0);
-            n.width = Some(bw);
-            n.height = Some(bh);
-        }
-    }
-}
 
 /// Small marker on `LNode` kept local here — stashes a flag in `extra`
 /// so the renderer can skip invisible divider pseudo-nodes without
