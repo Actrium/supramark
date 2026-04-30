@@ -1868,6 +1868,28 @@ fn is_descendant_of(node_id: &str, cluster_id: &str, l: &FlowchartLayout) -> boo
     }
 }
 
+/// Prefer original cluster endpoints when deciding where an edge inside an
+/// isolated cluster should render. Anchor rewriting turns `B1 --> B2` into a
+/// leaf-to-leaf edge, but the edge still semantically belongs to the parent
+/// isolated cluster root, not to either child isolated sub-cluster.
+fn isolated_render_endpoint<'a>(
+    e: &'a UEdge,
+    key: &str,
+    fallback: Option<&'a str>,
+    cluster_id: &str,
+    l: &FlowchartLayout,
+) -> Option<&'a str> {
+    let orig = e.extra.get(key).map(|s| s.as_str());
+    if let Some(id) = orig {
+        if id == cluster_id
+            || (l.isolated_cluster_ids.contains(id) && is_descendant_of(id, cluster_id, l))
+        {
+            return Some(id);
+        }
+    }
+    fallback
+}
+
 /// Compute the cluster rendering order matching upstream mermaid's
 /// `recursiveRender` traversal.
 ///
@@ -2070,11 +2092,23 @@ fn render_isolated_cluster_inner_root(
     // cluster, excluding edges between descendants of isolated sub-clusters.
     out.push_str(&unified_shell::open_layer("edgePaths"));
     for (i, e) in l.edges.iter().enumerate() {
-        let src = match e.start.as_deref() {
+        let src = match isolated_render_endpoint(
+            e,
+            "orig_start",
+            e.start.as_deref(),
+            &cnode.id,
+            l,
+        ) {
             Some(s) => s,
             None => continue,
         };
-        let dst = match e.end.as_deref() {
+        let dst = match isolated_render_endpoint(
+            e,
+            "orig_end",
+            e.end.as_deref(),
+            &cnode.id,
+            l,
+        ) {
             Some(s) => s,
             None => continue,
         };
@@ -2123,11 +2157,23 @@ fn render_isolated_cluster_inner_root(
     // Inner <g class="edgeLabels">.
     out.push_str(&unified_shell::open_layer("edgeLabels"));
     for e in l.edges.iter() {
-        let src = match e.start.as_deref() {
+        let src = match isolated_render_endpoint(
+            e,
+            "orig_start",
+            e.start.as_deref(),
+            &cnode.id,
+            l,
+        ) {
             Some(s) => s,
             None => continue,
         };
-        let dst = match e.end.as_deref() {
+        let dst = match isolated_render_endpoint(
+            e,
+            "orig_end",
+            e.end.as_deref(),
+            &cnode.id,
+            l,
+        ) {
             Some(s) => s,
             None => continue,
         };
@@ -3975,21 +4021,21 @@ fn traverse_edge_midpoint(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
             let dy = py - ppy;
             let seg = (dx * dx + dy * dy).sqrt();
             if seg == 0.0 {
-                return Some((round_to_5(ppx), round_to_5(ppy)));
+                return Some((ppx, ppy));
             }
             if seg < remaining {
                 remaining -= seg;
             } else {
                 let ratio = remaining / seg;
                 if ratio <= 0.0 {
-                    return Some((round_to_5(ppx), round_to_5(ppy)));
+                    return Some((ppx, ppy));
                 }
                 if ratio >= 1.0 {
-                    return Some((round_to_5(px), round_to_5(py)));
+                    return Some((px, py));
                 }
                 let x = (1.0 - ratio) * ppx + ratio * px;
                 let y = (1.0 - ratio) * ppy + ratio * py;
-                return Some((round_to_5(x), round_to_5(y)));
+                return Some((x, y));
             }
         }
         prev = Some((px, py));
@@ -4000,7 +4046,8 @@ fn traverse_edge_midpoint(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
 /// When an edge enters or exits a cluster, upstream `insertEdge` re-clips
 /// the polyline at the cluster boundary (via `cutPathAtIntersect`) and the
 /// resulting `paths.updatedPath` triggers `positionEdgeLabel` to recompute
-/// the label translate via `calcLabelPosition` with 5-decimal rounding.
+/// the label translate via `calcLabelPosition`. Upstream does NOT apply
+/// `roundNumber(_, 5)` to label positions — only to path coordinates.
 ///
 /// We approximate this by checking whether the edge's `orig_start` /
 /// `orig_end` reference a cluster (`is_group=true` node) and applying the
@@ -4023,11 +4070,10 @@ fn recompute_edge_label_position(e: &UEdge, l: &FlowchartLayout) -> Option<(f64,
         let h = n.height?;
         Some((x, y, w, h))
     };
-    let mut changed = false;
+    let pts_before = pts.clone();
     if let Some(end_id) = orig_end {
         if let Some((nx, ny, nw, nh)) = cluster_bbox(end_id) {
             pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
-            changed = true;
         }
     }
     if let Some(start_id) = orig_start {
@@ -4035,10 +4081,13 @@ fn recompute_edge_label_position(e: &UEdge, l: &FlowchartLayout) -> Option<(f64,
             pts.reverse();
             pts = cut_path_at_intersect_xywh(&pts, nx, ny, nw, nh);
             pts.reverse();
-            changed = true;
         }
     }
-    if !changed {
+    let path_actually_changed = pts.len() != pts_before.len()
+        || pts.iter().zip(pts_before.iter()).any(|(a, b)| {
+            (a.0 - b.0).abs() > 1e-6 || (a.1 - b.1).abs() > 1e-6
+        });
+    if !path_actually_changed {
         return None;
     }
     if pts.len() < 2 {
