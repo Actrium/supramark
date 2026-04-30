@@ -227,10 +227,15 @@ pub fn self_loop_points(node: &Node, quadrant: SelfLoopQuadrant) -> Vec<Point> {
 // ── cluster-crossing clipping ───────────────────────────────────────
 
 /// Clip the endpoints of an edge that crosses into a cluster AABB.
-/// Ports the geometric logic of upstream `cutPathAtIntersect` in
-/// edges.js — when a point lies inside the cluster, replace it with
-/// the intersection of the previous-outside-to-current-inside
-/// segment against the cluster border.
+/// Mirrors upstream Mermaid's `outsideNode` + `intersection` +
+/// `cutPathAtIntersect` pipeline from `dagre-wrapper/edges.js`.
+///
+/// Important quirks preserved for byte parity:
+/// * Points ON the boundary count as outside (`>=`, not `>`).
+/// * The intersection math is Mermaid's bespoke box-line solver,
+///   not a generic segment clipper.
+/// * Once the path enters the cluster, all remaining interior points
+///   are dropped.
 ///
 /// Returns a fresh point list. Untouched when no point lies inside
 /// the cluster.
@@ -243,14 +248,13 @@ pub fn clip_to_cluster_border(points: &[Point], cluster: &Bounds) -> Vec<Point> 
     let mut is_inside = false;
 
     for &p in points {
-        let outside = point_outside_aabb(cluster, p);
+        let outside = point_outside_cluster(cluster, p);
         if !outside && !is_inside {
             // Transition outside → inside. Compute the intersection
             // of the segment (last_outside → p) with the cluster AABB.
-            if let Some(hit) = segment_aabb_intersection(last_outside, p, cluster) {
-                if !out.iter().any(|q| approx_eq(q, &hit)) {
-                    out.push(hit);
-                }
+            let hit = cluster_intersection(cluster, last_outside, p);
+            if !out.iter().any(|q| same_point(q, &hit)) {
+                out.push(hit);
             }
             is_inside = true;
         } else if outside {
@@ -327,11 +331,17 @@ pub fn route_edge(edge: &mut Edge, source: &Node, target: &Node) {
 
 // ── geometry primitives ─────────────────────────────────────────────
 
-fn point_outside_aabb(b: &Bounds, p: Point) -> bool {
-    p.x < b.x || p.x > b.x + b.width || p.y < b.y || p.y > b.y + b.height
+fn point_outside_cluster(b: &Bounds, p: Point) -> bool {
+    let cx = b.x + b.width / 2.0;
+    let cy = b.y + b.height / 2.0;
+    let dx = (p.x - cx).abs();
+    let dy = (p.y - cy).abs();
+    let w = b.width / 2.0;
+    let h = b.height / 2.0;
+    dx >= w || dy >= h
 }
 
-fn approx_eq(a: &Point, b: &Point) -> bool {
+fn same_point(a: &Point, b: &Point) -> bool {
     (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9
 }
 
@@ -341,52 +351,75 @@ fn seg_len(a: Point, b: Point) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
-/// Segment-versus-AABB intersection using Liang–Barsky clipping.
-/// Returns the entry point (parameter closest to `a`) when the
-/// segment intersects the rectangle, `None` when it misses entirely.
-fn segment_aabb_intersection(a: Point, b: Point, rect: &Bounds) -> Option<Point> {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
-    let mut t0 = 0.0_f64;
-    let mut t1 = 1.0_f64;
-    let xmin = rect.x;
-    let ymin = rect.y;
-    let xmax = rect.x + rect.width;
-    let ymax = rect.y + rect.height;
-    let edges: [(f64, f64); 4] = [
-        (-dx, a.x - xmin),
-        (dx, xmax - a.x),
-        (-dy, a.y - ymin),
-        (dy, ymax - a.y),
-    ];
-    for (p, q) in edges {
-        if p == 0.0 {
-            if q < 0.0 {
-                return None;
-            }
-            continue;
-        }
-        let r = q / p;
-        if p < 0.0 {
-            if r > t1 {
-                return None;
-            }
-            if r > t0 {
-                t0 = r;
-            }
+/// Mirror Mermaid's `intersection(boundaryNode, outsidePoint, insidePoint)`.
+/// This intentionally preserves upstream's branchy rectangle solver instead
+/// of using a generic line-clipper.
+fn cluster_intersection(b: &Bounds, outside: Point, inside: Point) -> Point {
+    let node_x = b.x + b.width / 2.0;
+    let node_y = b.y + b.height / 2.0;
+    let w = b.width / 2.0;
+    let h = b.height / 2.0;
+
+    let q_total = (outside.y - inside.y).abs();
+    let r_total = (outside.x - inside.x).abs();
+
+    if (node_y - outside.y).abs() * w > (node_x - outside.x).abs() * h {
+        let q = if inside.y < outside.y {
+            outside.y - h - node_y
         } else {
-            if r < t0 {
-                return None;
-            }
-            if r < t1 {
-                t1 = r;
-            }
+            node_y - h - outside.y
+        };
+        let r = r_total * q / q_total;
+        let mut res_x = if inside.x < outside.x {
+            inside.x + r
+        } else {
+            inside.x - r_total + r
+        };
+        let mut res_y = if inside.y < outside.y {
+            inside.y + q_total - q
+        } else {
+            inside.y - q_total + q
+        };
+        if r == 0.0 {
+            res_x = outside.x;
+            res_y = outside.y;
         }
+        if r_total == 0.0 {
+            res_x = outside.x;
+        }
+        if q_total == 0.0 {
+            res_y = outside.y;
+        }
+        Point { x: res_x, y: res_y }
+    } else {
+        let r = if inside.x < outside.x {
+            outside.x - w - node_x
+        } else {
+            node_x - w - outside.x
+        };
+        let q = q_total * r / r_total;
+        let mut res_x = if inside.x < outside.x {
+            inside.x + r_total - r
+        } else {
+            inside.x - r_total + r
+        };
+        let mut res_y = if inside.y < outside.y {
+            inside.y + q
+        } else {
+            inside.y - q
+        };
+        if r == 0.0 {
+            res_x = outside.x;
+            res_y = outside.y;
+        }
+        if r_total == 0.0 {
+            res_x = outside.x;
+        }
+        if q_total == 0.0 {
+            res_y = outside.y;
+        }
+        Point { x: res_x, y: res_y }
     }
-    Some(Point {
-        x: a.x + dx * t0,
-        y: a.y + dy * t0,
-    })
 }
 
 fn truncate_polyline(points: &[Point], target_len: f64) -> Vec<Point> {
@@ -568,6 +601,38 @@ mod tests {
     }
 
     #[test]
+    fn clip_to_cluster_border_treats_boundary_point_as_outside() {
+        let cluster = Bounds {
+            x: 157.970703125,
+            y: 115.296875,
+            width: 119.9609375,
+            height: 82.296875,
+        };
+        let pts = vec![
+            Point {
+                x: 89.75970740578128,
+                y: 65.296875,
+            },
+            Point {
+                x: 107.98046875,
+                y: 90.296875,
+            },
+            Point {
+                x: 107.98046875,
+                y: 115.296875,
+            },
+            Point {
+                x: 192.970703125,
+                y: 147.09821160975935,
+            },
+        ];
+        let clipped = clip_to_cluster_border(&pts, &cluster);
+        let last = clipped.last().copied().expect("cluster hit");
+        assert!((last.x - 157.970703125).abs() < 1e-9);
+        assert!((last.y - 128.39304763120504).abs() < 1e-9);
+    }
+
+    #[test]
     fn route_edge_self_loop_produces_five_points() {
         let node = demo_node();
         let mut edge = Edge::default();
@@ -581,18 +646,4 @@ mod tests {
         assert!(edge.label_y.is_some());
     }
 
-    #[test]
-    fn segment_aabb_intersection_liang_barsky_basic() {
-        let rect = Bounds {
-            x: 0.0,
-            y: 0.0,
-            width: 10.0,
-            height: 10.0,
-        };
-        let hit =
-            segment_aabb_intersection(Point { x: -5.0, y: 5.0 }, Point { x: 5.0, y: 5.0 }, &rect)
-                .unwrap();
-        assert!((hit.x - 0.0).abs() < 1e-9);
-        assert!((hit.y - 5.0).abs() < 1e-9);
-    }
 }

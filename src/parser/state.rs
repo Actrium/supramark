@@ -319,6 +319,13 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
             if !id.is_empty() {
                 let parent = parent_stack.last().cloned();
                 ensure_state(&mut diagram, &id, parent);
+                // Upstream's root-level `X: description` lines participate in the
+                // same first-touch ordering as explicit state declarations.
+                // Nested bare-colon states are left relation-driven so isolated
+                // inner-root node order matches the reference SVGs.
+                if parent_stack.is_empty() {
+                    diagram.items.push(ParseItem::StateDecl(id.clone()));
+                }
                 let desc_text = rhs.trim().to_string();
                 if let Some(s) = diagram.states.iter_mut().find(|s| s.id == id) {
                     if s.label.is_none() {
@@ -392,6 +399,35 @@ pub fn parse(source: &str) -> Result<StateDiagram> {
 /// in chunk order.
 fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
     use crate::model::state::{State, StateKind};
+    use std::collections::HashSet;
+
+    fn collect_chunk_members(
+        diagram: &crate::model::state::StateDiagram,
+        chunk_children: &[String],
+    ) -> HashSet<String> {
+        let mut members: HashSet<String> = HashSet::new();
+        let mut queue: Vec<String> = chunk_children.to_vec();
+        while let Some(cid) = queue.pop() {
+            if !members.insert(cid.clone()) {
+                continue;
+            }
+            for s in &diagram.states {
+                if s.parent.as_deref() == Some(cid.as_str()) {
+                    queue.push(s.id.clone());
+                }
+            }
+        }
+        members
+    }
+
+    fn first_state_index(
+        diagram: &crate::model::state::StateDiagram,
+        ids: &[String],
+    ) -> Option<usize> {
+        ids.iter()
+            .filter_map(|id| diagram.states.iter().position(|s| s.id == *id))
+            .min()
+    }
 
     // Identify composite parents that need translation.
     let parents_to_translate: Vec<String> = diagram
@@ -457,6 +493,9 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
         // Build wrapper states + remap children's parent pointer.
         let mut wrapper_ids: Vec<String> = Vec::new();
         for (divider_id_opt, chunk_children) in chunks {
+            let chunk_members = collect_chunk_members(diagram, &chunk_children);
+            let parent_start = format!("{parent_id}_start");
+            let parent_end = format!("{parent_id}_end");
             let wrapper_id = match divider_id_opt {
                 Some(div_id) => div_id, // reuse the divider stmt id
                 None => {
@@ -465,6 +504,31 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
                     format!("id-{}-{}", js_random_to_base36_prefix(r), generate_cnt)
                 }
             };
+            let wrapper_start = format!("{wrapper_id}_start");
+            let wrapper_end = format!("{wrapper_id}_end");
+            let mut wrapper_children = chunk_children.clone();
+            let uses_parent_start = diagram
+                .transitions
+                .iter()
+                .any(|t| t.source == parent_start && chunk_members.contains(&t.target));
+            let uses_parent_end = diagram
+                .transitions
+                .iter()
+                .any(|t| t.target == parent_end && chunk_members.contains(&t.source));
+            if uses_parent_start {
+                if let Some(pos) = wrapper_children.iter().position(|id| id == &parent_start) {
+                    wrapper_children[pos] = wrapper_start.clone();
+                } else {
+                    wrapper_children.insert(0, wrapper_start.clone());
+                }
+            }
+            if uses_parent_end {
+                if let Some(pos) = wrapper_children.iter().position(|id| id == &parent_end) {
+                    wrapper_children[pos] = wrapper_end.clone();
+                } else {
+                    wrapper_children.push(wrapper_end.clone());
+                }
+            }
 
             // Rewrite the original divider state (if reused id) into a
             // composite-like wrapper, OR insert a brand-new wrapper state.
@@ -473,7 +537,7 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
                 if let Some(s) = diagram.states.iter_mut().find(|s| s.id == wrapper_id) {
                     s.kind = StateKind::Divider; // semantically: divider-cluster
                     s.parent = Some(parent_id.clone());
-                    s.children = chunk_children.clone();
+                    s.children = wrapper_children.clone();
                     s.implicit = true;
                 }
             } else {
@@ -481,10 +545,74 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
                     id: wrapper_id.clone(),
                     kind: StateKind::Divider,
                     parent: Some(parent_id.clone()),
-                    children: chunk_children.clone(),
+                    children: wrapper_children.clone(),
                     implicit: true,
                     ..State::default()
                 });
+            }
+
+            // Upstream `docTranslator` scopes each chunk's `[ * ]` to the
+            // divider wrapper BEFORE node extraction, so concurrent regions
+            // get `divider-id-N_start` / `_end` nodes instead of sharing the
+            // composite parent's `Parent_start`. We emulate that by
+            // re-scoping transitions whose non-start endpoint lives in this
+            // chunk, then renaming/inserting the corresponding implicit
+            // start/end node under the wrapper.
+            let insert_at = first_state_index(diagram, &chunk_children).unwrap_or(diagram.states.len());
+            if uses_parent_start {
+                if chunk_children.iter().any(|id| id == &parent_start) {
+                    if let Some(s) = diagram.states.iter_mut().find(|s| s.id == parent_start) {
+                        s.id = wrapper_start.clone();
+                        s.parent = Some(wrapper_id.clone());
+                        s.kind = StateKind::StartEnd;
+                        s.implicit = true;
+                    }
+                } else {
+                    diagram.states.insert(
+                        insert_at,
+                        State {
+                            id: wrapper_start.clone(),
+                            kind: StateKind::StartEnd,
+                            parent: Some(wrapper_id.clone()),
+                            implicit: true,
+                            ..State::default()
+                        },
+                    );
+                }
+            }
+            if uses_parent_end {
+                if chunk_children.iter().any(|id| id == &parent_end) {
+                    if let Some(s) = diagram.states.iter_mut().find(|s| s.id == parent_end) {
+                        s.id = wrapper_end.clone();
+                        s.parent = Some(wrapper_id.clone());
+                        s.kind = StateKind::StartEnd;
+                        s.implicit = true;
+                    }
+                } else {
+                    let end_insert_at = first_state_index(diagram, &chunk_children)
+                        .map(|idx| idx + chunk_children.len())
+                        .unwrap_or(diagram.states.len());
+                    diagram.states.insert(
+                        end_insert_at,
+                        State {
+                            id: wrapper_end.clone(),
+                            kind: StateKind::StartEnd,
+                            parent: Some(wrapper_id.clone()),
+                            implicit: true,
+                            ..State::default()
+                        },
+                    );
+                }
+            }
+
+            for tr in &mut diagram.transitions {
+                if uses_parent_start && tr.source == parent_start && chunk_members.contains(&tr.target)
+                {
+                    tr.source = wrapper_start.clone();
+                }
+                if uses_parent_end && tr.target == parent_end && chunk_members.contains(&tr.source) {
+                    tr.target = wrapper_end.clone();
+                }
             }
 
             // Re-parent all child states to the wrapper.
@@ -500,6 +628,19 @@ fn apply_divider_translation(diagram: &mut crate::model::state::StateDiagram) {
         // Replace the parent's children list with the wrapper list.
         if let Some(ps) = diagram.states.iter_mut().find(|s| s.id == parent_id) {
             ps.children = wrapper_ids;
+        }
+
+        for stale_id in [format!("{parent_id}_start"), format!("{parent_id}_end")] {
+            let still_used = diagram
+                .transitions
+                .iter()
+                .any(|t| t.source == stale_id || t.target == stale_id);
+            if still_used {
+                continue;
+            }
+            if let Some(pos) = diagram.states.iter().position(|s| s.id == stale_id) {
+                diagram.states.remove(pos);
+            }
         }
     }
 }
@@ -870,7 +1011,23 @@ fn resolve_endpoint(
 }
 
 fn ensure_state(diagram: &mut StateDiagram, id: &str, parent: Option<String>) {
-    if !diagram.states.iter().any(|s| s.id == id) {
+    if let Some(existing) = diagram.states.iter_mut().find(|s| s.id == id) {
+        // Forward references can first materialize under the "wrong" composite
+        // when an edge points to a state that is declared later in a different
+        // nested block (`innerFirst --> 2nd` before `state Second { 2nd --> [*] }`).
+        // Upstream doc translation eventually attaches that placeholder to the
+        // declaration scope. Mirror that here, but only for still-plain
+        // placeholder nodes so we do not override explicit declarations.
+        if let Some(new_parent) = parent {
+            let is_placeholder = existing.label.is_none()
+                && existing.description.is_none()
+                && existing.children.is_empty()
+                && matches!(existing.kind, StateKind::Simple);
+            if is_placeholder && existing.parent.as_deref() != Some(new_parent.as_str()) {
+                existing.parent = Some(new_parent);
+            }
+        }
+    } else {
         diagram.states.push(State {
             id: id.to_string(),
             // label left as None so callers can set it explicitly via alias
@@ -1184,5 +1341,62 @@ mod test_divider {
             let l = by_id(leaf).unwrap();
             assert_eq!(l.parent.as_deref(), Some(wrapper));
         }
+    }
+
+    #[test]
+    fn divider_translation_rescopes_start_nodes_per_chunk() {
+        let src = "stateDiagram-v2\n[*] --> Active\nstate Active {\n  [*] --> NumLockOff\n  NumLockOff --> NumLockOn\n  --\n  [*] --> CapsLockOff\n  CapsLockOff --> CapsLockOn\n  --\n  [*] --> ScrollLockOff\n  ScrollLockOff --> ScrollLockOn\n}\n";
+        let d = parse(src).unwrap();
+        let active = d.states.iter().find(|s| s.id == "Active").unwrap();
+        assert_eq!(
+            active.children,
+            vec![
+                "divider-id-1".to_string(),
+                "divider-id-2".to_string(),
+                "id-3tkmm1l27ep-1".to_string(),
+            ]
+        );
+        for (wrapper, start_id, first_leaf) in [
+            ("divider-id-1", "divider-id-1_start", "NumLockOff"),
+            ("divider-id-2", "divider-id-2_start", "CapsLockOff"),
+            ("id-3tkmm1l27ep-1", "id-3tkmm1l27ep-1_start", "ScrollLockOff"),
+        ] {
+            let w = d.states.iter().find(|s| s.id == wrapper).unwrap();
+            assert_eq!(w.children.first().map(|s| s.as_str()), Some(start_id));
+            assert!(w.children.iter().any(|s| s == first_leaf));
+            let start = d.states.iter().find(|s| s.id == start_id).unwrap();
+            assert_eq!(start.kind, crate::model::state::StateKind::StartEnd);
+            assert_eq!(start.parent.as_deref(), Some(wrapper));
+        }
+        assert!(
+            d.states.iter().all(|s| s.id != "Active_start"),
+            "parent-scoped start node must be replaced by per-divider starts"
+        );
+        let start_edges: Vec<(&str, &str)> = d
+            .transitions
+            .iter()
+            .filter(|t| t.source.ends_with("_start"))
+            .map(|t| (t.source.as_str(), t.target.as_str()))
+            .collect();
+        assert!(start_edges.contains(&("divider-id-1_start", "NumLockOff")));
+        assert!(start_edges.contains(&("divider-id-2_start", "CapsLockOff")));
+        assert!(start_edges.contains(&("id-3tkmm1l27ep-1_start", "ScrollLockOff")));
+    }
+}
+
+#[cfg(test)]
+mod test_scope_reparenting {
+    use super::*;
+
+    #[test]
+    fn forward_ref_is_reparented_to_later_composite_scope() {
+        let src = "stateDiagram-v2\nstate First {\n  innerFirst --> 2nd\n}\nstate Second {\n  2nd --> [*]\n}\n";
+        let d = parse(src).unwrap();
+        let second_child = d.states.iter().find(|s| s.id == "2nd").unwrap();
+        assert_eq!(
+            second_child.parent.as_deref(),
+            Some("Second"),
+            "later declaration scope must own the placeholder node"
+        );
     }
 }

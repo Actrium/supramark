@@ -32,12 +32,15 @@
 //! and reports the gap against reference output.
 
 use crate::error::Result;
+use crate::layout::routing;
 use crate::layout::state::StateLayout;
 use crate::layout::unified::types::{Bounds, Edge, Node, Point};
 use crate::model::state::StateDiagram;
 use crate::render::edges::{self, CurveType};
 use crate::render::shapes::{self, types::fmt_num};
 use crate::render::unified_shell;
+use regex::Regex;
+use std::sync::OnceLock;
 use crate::theme::css as theme_css;
 use crate::theme::ThemeVariables;
 use std::cell::Cell;
@@ -174,7 +177,7 @@ fn render_inner(
         if is_replaced_self_loop(e) {
             continue;
         }
-        out.push_str(&emit_edge_path(id, e));
+        out.push_str(&emit_edge_path(id, e, &l.result.nodes));
     }
     out.push_str("</g>");
 
@@ -187,7 +190,7 @@ fn render_inner(
         if is_replaced_self_loop(e) {
             continue;
         }
-        out.push_str(&emit_edge_label(e));
+        out.push_str(&emit_edge_label(e, &l.result.nodes));
     }
     out.push_str("</g>");
 
@@ -902,7 +905,7 @@ fn render_isolated_cluster_inner_root(
         {
             continue;
         }
-        out.push_str(&emit_edge_path(svg_id, e));
+        out.push_str(&emit_edge_path(svg_id, e, &l.nodes));
     }
     out.push_str("</g>");
 
@@ -927,7 +930,7 @@ fn render_isolated_cluster_inner_root(
         {
             continue;
         }
-        out.push_str(&emit_edge_label(e));
+        out.push_str(&emit_edge_label(e, &l.nodes));
     }
     out.push_str("</g>");
 
@@ -1181,7 +1184,38 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
     out
 }
 
-fn emit_edge_path(id: &str, e: &Edge) -> String {
+fn emit_edge_path(id: &str, e: &Edge, nodes: &[Node]) -> String {
+    fn point_inside_cluster(bounds: &Bounds, p: Point) -> bool {
+        let cx = bounds.x + bounds.width / 2.0;
+        let cy = bounds.y + bounds.height / 2.0;
+        let dx = (p.x - cx).abs();
+        let dy = (p.y - cy).abs();
+        dx < bounds.width / 2.0 && dy < bounds.height / 2.0
+    }
+
+    fn should_clip_to_cluster(points: &[Point], bounds: &Bounds) -> bool {
+        points
+            .last()
+            .copied()
+            .is_some_and(|p| point_inside_cluster(bounds, p))
+            && points[..points.len().saturating_sub(1)]
+                .iter()
+                .copied()
+                .any(|p| !point_inside_cluster(bounds, p))
+    }
+
+    fn should_clip_from_cluster(points: &[Point], bounds: &Bounds) -> bool {
+        points
+            .first()
+            .copied()
+            .is_some_and(|p| point_inside_cluster(bounds, p))
+            && points
+                .iter()
+                .copied()
+                .skip(1)
+                .any(|p| !point_inside_cluster(bounds, p))
+    }
+
     let Some(points) = &e.points else {
         return String::new();
     };
@@ -1189,7 +1223,44 @@ fn emit_edge_path(id: &str, e: &Edge) -> String {
         return String::new();
     }
     let pts: Vec<Point> = points.iter().map(|p| Point { x: p.x, y: p.y }).collect();
-    let d = edges::build_path(&pts, CurveType::Basis);
+    let mut render_pts = pts.clone();
+    if let Some(cluster_id) = e.extra.get("to_cluster") {
+        if let Some(cluster) = nodes.iter().find(|n| n.id == *cluster_id) {
+            if let (Some(cx), Some(cy), Some(w), Some(h)) =
+                (cluster.x, cluster.y, cluster.width, cluster.height)
+            {
+                let bounds = Bounds {
+                    x: cx - w / 2.0,
+                    y: cy - h / 2.0,
+                    width: w,
+                    height: h,
+                };
+                if should_clip_to_cluster(&render_pts, &bounds) {
+                    render_pts = routing::clip_to_cluster_border(&render_pts, &bounds);
+                }
+            }
+        }
+    }
+    if let Some(cluster_id) = e.extra.get("from_cluster") {
+        if let Some(cluster) = nodes.iter().find(|n| n.id == *cluster_id) {
+            if let (Some(cx), Some(cy), Some(w), Some(h)) =
+                (cluster.x, cluster.y, cluster.width, cluster.height)
+            {
+                let bounds = Bounds {
+                    x: cx - w / 2.0,
+                    y: cy - h / 2.0,
+                    width: w,
+                    height: h,
+                };
+                if should_clip_from_cluster(&render_pts, &bounds) {
+                    render_pts.reverse();
+                    render_pts = routing::clip_to_cluster_border(&render_pts, &bounds);
+                    render_pts.reverse();
+                }
+            }
+        }
+    }
+    let d = edges::build_path(&render_pts, CurveType::Basis);
     let class = format!(
         " edge-thickness-{} edge-pattern-{} {}",
         e.thickness.as_deref().unwrap_or("normal"),
@@ -1219,7 +1290,8 @@ fn emit_edge_path(id: &str, e: &Edge) -> String {
         .classes
         .as_deref()
         .map_or(false, |c| c.contains("note-edge"));
-    if is_note_edge {
+    let suppress_marker_end = matches!(e.arrow_type_end.as_deref(), Some("none"));
+    if is_note_edge || suppress_marker_end {
         format!(
             r##"<path d="{d}" id="{id}-{eid}" class="{cls}" style="fill:none;;;fill:none" data-edge="true" data-et="edge" data-id="{eid}" data-points="{b64}" data-look="{look}"></path>"##,
             d = d,
@@ -1242,7 +1314,48 @@ fn emit_edge_path(id: &str, e: &Edge) -> String {
     }
 }
 
-fn emit_edge_label(e: &Edge) -> String {
+fn round_to_5(v: f64) -> f64 {
+    (v * 100_000.0).round() / 100_000.0
+}
+
+/// Upstream `utils.isLabelCoordinateInPath` is intentionally crude:
+/// round the candidate point and every decimal in the `d=` string to integers,
+/// then test whether either rounded coordinate appears anywhere in the path.
+fn label_coordinate_in_path(point: Point, d_attr: &str) -> bool {
+    static DECIMAL_RE: OnceLock<Regex> = OnceLock::new();
+    let re = DECIMAL_RE.get_or_init(|| Regex::new(r"(\d+\.\d+)").expect("valid decimal regex"));
+    let sanitized = re.replace_all(d_attr, |caps: &regex::Captures<'_>| {
+        caps[1]
+            .parse::<f64>()
+            .map(|v| v.round().to_string())
+            .unwrap_or_else(|_| caps[1].to_string())
+    });
+    let rounded_x = point.x.round().to_string();
+    let rounded_y = point.y.round().to_string();
+    sanitized.contains(&rounded_x) || sanitized.contains(&rounded_y)
+}
+
+/// Mirror upstream `positionEdgeLabel` trigger for state edges.
+///
+/// Mermaid keeps dagre's `edge.x / edge.y` unless the midpoint control point
+/// is not actually visited by the rendered basis path. In that case it falls
+/// back to `calcLabelPosition` on the polyline and rounds the result to 5
+/// decimals.
+fn recompute_edge_label_position(e: &Edge, _nodes: &[Node]) -> Option<(f64, f64)> {
+    let pts_ref = e.points.as_ref()?;
+    if pts_ref.len() < 2 {
+        return None;
+    }
+    let d = edges::build_path(pts_ref, CurveType::Basis);
+    let mid = pts_ref[pts_ref.len() / 2];
+    if label_coordinate_in_path(mid, &d) {
+        return None;
+    }
+    let mid = routing::place_label_midpoint(pts_ref)?;
+    Some((round_to_5(mid.x), round_to_5(mid.y)))
+}
+
+fn emit_edge_label(e: &Edge, nodes: &[Node]) -> String {
     use crate::font_metrics::text_width;
     use crate::render::foreign_object::{self, LabelOpts};
 
@@ -1280,8 +1393,8 @@ fn emit_edge_label(e: &Edge) -> String {
         (tw, 16.296875)
     };
 
-    let x = e.label_x.unwrap_or(0.0);
-    let y = e.label_y.unwrap_or(0.0);
+    let (x, y) = recompute_edge_label_position(e, nodes)
+        .unwrap_or((e.label_x.unwrap_or(0.0), e.label_y.unwrap_or(0.0)));
     let eid = &e.id;
 
     // Empty labels: outer <g class="edgeLabel"> with NO transform;

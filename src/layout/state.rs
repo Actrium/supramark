@@ -103,9 +103,53 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
     data.layout_algorithm = Some("dagre".into());
     data.markers.push("barbEnd".into());
 
+    let orig_state_index: std::collections::HashMap<&str, usize> = d
+        .states
+        .iter()
+        .enumerate()
+        .map(|(idx, state)| (state.id.as_str(), idx))
+        .collect();
+    let mut first_touch: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (item_idx, item) in d.items.iter().enumerate() {
+        match item {
+            ParseItem::StateDecl(state_id) => {
+                first_touch
+                    .entry(state_id.as_str())
+                    .and_modify(|cur| *cur = (*cur).min(item_idx))
+                    .or_insert(item_idx);
+            }
+            ParseItem::Relation(rel_idx) => {
+                if let Some(t) = d.transitions.get(*rel_idx) {
+                    for state_id in [&t.source, &t.target] {
+                        first_touch
+                            .entry(state_id.as_str())
+                            .and_modify(|cur| *cur = (*cur).min(item_idx))
+                            .or_insert(item_idx);
+                    }
+                }
+            }
+            ParseItem::NoteDecl(_) => {}
+        }
+    }
+    let mut ordered_states: Vec<&crate::model::state::State> = d.states.iter().collect();
+    ordered_states.sort_by(|a, b| {
+        let ka = first_touch
+            .get(a.id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        let kb = first_touch
+            .get(b.id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX);
+        ka.cmp(&kb).then_with(|| {
+            let ia = orig_state_index.get(a.id.as_str()).copied().unwrap_or(usize::MAX);
+            let ib = orig_state_index.get(b.id.as_str()).copied().unwrap_or(usize::MAX);
+            ia.cmp(&ib)
+        })
+    });
+
     // Emit nodes (dom_ids assigned later based on edge traversal order).
-    let mut node_counter: usize = 0;
-    for state in &d.states {
+    for state in ordered_states {
         let mut n = LNode::default();
         n.id = state.id.clone();
         n.parent_id = state.parent.clone();
@@ -638,6 +682,35 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
             data.edges.push(e);
             graph_item_count += 1;
         }
+    }
+
+    // Concurrent-region divider wrappers are introduced by the parser's
+    // docTranslator-style regrouping, so they do not have an explicit
+    // `StateDecl` parse item of their own. Upstream still stamps their domId
+    // during the first relation inside that chunk because the wrapper is the
+    // parent cluster of the chunk-local `*_start` node. Mirror that by
+    // inheriting the divider wrapper's dom_id suffix from its scoped start
+    // child before the generic fallback below runs.
+    let divider_dom_ids: Vec<(usize, String)> = data
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, n)| {
+            if n.shape.as_deref() != Some("divider") || n.dom_id.is_some() {
+                return None;
+            }
+            let start_id = format!("{}_start", n.id);
+            let suffix = data
+                .nodes
+                .iter()
+                .find(|c| c.id == start_id)
+                .and_then(|c| c.dom_id.as_deref())
+                .and_then(|dom_id| dom_id.rsplit_once('-').map(|(_, s)| s.to_string()))?;
+            Some((idx, format!("state-{}-{}", n.id, suffix)))
+        })
+        .collect();
+    for (idx, dom_id) in divider_dom_ids {
+        data.nodes[idx].dom_id = Some(dom_id);
     }
 
     // For any nodes not yet assigned a dom_id (e.g. bare `X: desc`

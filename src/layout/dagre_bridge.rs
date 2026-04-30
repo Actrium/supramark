@@ -490,31 +490,33 @@ fn build_graph_filtered_ex<'a>(
         if dagre_src == dagre_dst {
             // Self-edge expansion — mirrors upstream's pre-layout expansion.
             //
-            // Upstream expands self-edges in Phase 2 (before
-            // adjustClustersAndEdges) where `edge.start === edge.end` in
-            // the ORIGINAL parsed data. Self-loops created BY anchor
-            // rewriting (e.g. Sub→In becomes In→In) are NOT expanded;
-            // they're passed to dagre as raw v===w edges. We skip
-            // expansion for these to avoid helper nodes inflating the
-            // viewBox; instead the self-loop path points are synthesized
-            // in `collect_edges` using upstream's `positionSelfEdges`
-            // formula.
-            let orig_src_str = orig_src.unwrap_or(effective_src);
-            let orig_dst_str = orig_dst.unwrap_or(effective_dst);
-            let is_rewrite_self_loop = orig_src_str != dagre_src || orig_dst_str != dagre_dst;
-            if is_rewrite_self_loop {
+            // Distinguish two cases:
+            //   1. A REAL user self-loop (`effective_src == effective_dst`).
+            //      This includes cluster self-loops whose endpoint is later
+            //      rewritten to the cluster anchor leaf. These MUST still go
+            //      through `expand_self_edge`, with helper ids owned by the
+            //      cluster (`Active-cyclic-special-*`) but dagre endpoints on
+            //      the anchor leaf.
+            //   2. A self-loop created ONLY BY anchor rewriting
+            //      (`effective_src != effective_dst`, e.g. `Sub --> In`
+            //      where `In` is `Sub`'s anchor). Upstream does not expand
+            //      these; it leaves them as raw `v===w` edges and later
+            //      synthesises the loop points without helper nodes.
+            if effective_src != effective_dst {
+                let orig_src_str = orig_src.unwrap_or(effective_src);
+                let orig_dst_str = orig_dst.unwrap_or(effective_dst);
                 log::debug!(
                     "dagre_bridge: rewrite self-loop on '{}' (from original {}→{}); not expanding",
                     dagre_src, orig_src_str, orig_dst_str
                 );
-                let name = if edge.id.is_empty() { None } else { Some(edge.id.as_str()) };
-                g.set_edge(
-                    dagre_src, dagre_src,
-                    Some(make_edge_label(edge)),
-                    name,
-                );
+                let name = if edge.id.is_empty() {
+                    None
+                } else {
+                    Some(edge.id.as_str())
+                };
+                g.set_edge(dagre_src, dagre_src, Some(make_edge_label(edge)), name);
             } else {
-                let owner_override = if effective_src == effective_dst && effective_src != dagre_src {
+                let owner_override = if effective_src != dagre_src {
                     log::debug!(
                         "dagre_bridge: cluster self-loop on '{}' (anchor '{}'); helpers parented to cluster parent",
                         effective_src,
@@ -572,8 +574,12 @@ fn expand_self_edge_owned(
     let sid2 = format!("{owner}---{owner}---2");
 
     let helper = || NodeLabel {
-        width: 10.0,
-        height: 10.0,
+        // Upstream inserts the helper as a 10x10 labelRect, but the
+        // pre-layout DOM insertion immediately shrinks it to the rendered
+        // placeholder bbox (0.1x0.1) before dagre runs. Keep the dagre-side
+        // size at the post-render value so self-loop geometry matches.
+        width: 0.1,
+        height: 0.1,
         label: Some(String::new()),
         padding: 0.0,
         shape: Some("labelRect".to_string()),
@@ -597,10 +603,13 @@ fn expand_self_edge_owned(
     }
 
     let base_label = make_edge_label(edge);
+    let mut side_label = base_label.clone();
+    side_label.width = 0.0;
+    side_label.height = 0.0;
     g.set_edge(
         node_id,
         &sid1,
-        Some(base_label.clone()),
+        Some(side_label.clone()),
         Some(&format!("{owner}-cyclic-special-0")),
     );
     g.set_edge(
@@ -612,7 +621,7 @@ fn expand_self_edge_owned(
     g.set_edge(
         &sid2,
         node_id,
-        Some(base_label),
+        Some(side_label),
         Some(&format!("{owner}-cyclic-special-2")),
     );
 }
@@ -800,9 +809,25 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
             .insert("cyclic_owner".to_string(), owner.to_string());
         e.extra
             .insert("cyclic_index".to_string(), seg_idx.to_string());
+        let owner_is_group = data
+            .nodes
+            .iter()
+            .find(|n| n.id == owner)
+            .map(|n| n.is_group)
+            .unwrap_or(false);
+        if owner_is_group {
+            if seg_idx == 0 {
+                e.extra
+                    .insert("from_cluster".to_string(), owner.to_string());
+            } else if seg_idx == 2 {
+                e.extra.insert("to_cluster".to_string(), owner.to_string());
+            }
+        }
         out.push(e);
     }
-    // Stable sort: group by owner, then segment index ascending.
+    // Stable sort: group by owner, then mirror upstream DOM emission order.
+    // The label-carrying middle segment comes first, followed by the start
+    // and end legs (`mid`, `1`, `2` in the reference SVGs).
     out.sort_by(|a, b| {
         let ao = a
             .extra
@@ -824,7 +849,12 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
             .get("cyclic_index")
             .and_then(|s| s.parse::<u8>().ok())
             .unwrap_or(0);
-        ao.cmp(bo).then(ai.cmp(&bi))
+        let order_key = |idx: u8| match idx {
+            1 => 0u8,
+            0 => 1u8,
+            _ => 2u8,
+        };
+        ao.cmp(bo).then(order_key(ai).cmp(&order_key(bi)))
     });
     out
 }
@@ -896,11 +926,346 @@ fn collect_edges(
     g: &Graph<NodeLabel, EdgeLabel>,
     cluster_anchors: &std::collections::HashMap<String, String>,
 ) -> Vec<Edge> {
+    use std::collections::{BTreeSet, HashMap};
+
+    #[derive(Clone, Default)]
+    struct EdgeLayoutSnap {
+        points: Vec<Point>,
+        label_x: Option<f64>,
+        label_y: Option<f64>,
+    }
+
+    #[derive(Clone, Default)]
+    struct EdgeLookup {
+        src_raw: Option<String>,
+        dst_raw: Option<String>,
+        dagre_src: Option<String>,
+        dagre_dst: Option<String>,
+        name: Option<String>,
+        rewritten_for_dagre: bool,
+    }
+
+    fn apply_snap(out: &mut Edge, snap: &EdgeLayoutSnap) {
+        out.points = Some(snap.points.clone());
+        out.label_x = snap.label_x;
+        out.label_y = snap.label_y;
+    }
+
+    fn mark_cluster_endpoints(data: &LayoutData, orig: &Edge, out: &mut Edge) {
+        let is_group = |id: &str| data.nodes.iter().any(|n| n.id == id && n.is_group);
+        if let Some(os) = orig.extra.get("orig_start") {
+            if is_group(os) {
+                out.extra.insert("from_cluster".to_string(), os.clone());
+            }
+        }
+        if let Some(od) = orig.extra.get("orig_end") {
+            if is_group(od) {
+                out.extra.insert("to_cluster".to_string(), od.clone());
+            }
+        }
+    }
+
+    fn reclip_cluster_anchor_state_start_rect(
+        data: &LayoutData,
+        g: &Graph<NodeLabel, EdgeLabel>,
+        orig: &Edge,
+        src_raw: Option<&str>,
+        dst_raw: Option<&str>,
+        dagre_src: Option<&str>,
+        dagre_dst: Option<&str>,
+        out: &mut Edge,
+    ) {
+        let is_group = |id: &str| data.nodes.iter().any(|n| n.id == id && n.is_group);
+        let is_state_start = |shape: Option<&str>| {
+            matches!(shape, Some("stateStart" | "state_start" | "start"))
+        };
+
+        let Some(pts) = out.points.as_mut() else {
+            return;
+        };
+        if pts.len() < 2 {
+            return;
+        }
+
+        if let (Some(orig_src), Some(anchor_id), Some(raw_src), Some(raw_dst), Some(d_dst)) = (
+            orig.extra.get("orig_start"),
+            dagre_src,
+            src_raw,
+            dst_raw,
+            dagre_dst,
+        ) {
+            if is_group(orig_src) {
+                let source_rewritten = anchor_id != raw_src;
+                let opposite_rewritten = d_dst != raw_dst;
+                if source_rewritten && !opposite_rewritten {
+                    if let (Some(anchor_pos), Some(anchor_node)) = (
+                        g.node(anchor_id),
+                        data.nodes.iter().find(|n| n.id == anchor_id),
+                    ) {
+                        if let (Some(ax), Some(ay)) = (anchor_pos.x, anchor_pos.y) {
+                            if is_state_start(anchor_node.shape.as_deref()) {
+                                pts[0] = intersect_rect(
+                                    ax,
+                                    ay,
+                                    anchor_node.width.unwrap_or(DEFAULT_NODE_WIDTH) / 2.0,
+                                    anchor_node.height.unwrap_or(DEFAULT_NODE_HEIGHT) / 2.0,
+                                    pts[1],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let len = pts.len();
+        if len < 2 {
+            return;
+        }
+        if let (Some(orig_dst), Some(anchor_id), Some(raw_dst), Some(raw_src), Some(d_src)) = (
+            orig.extra.get("orig_end"),
+            dagre_dst,
+            dst_raw,
+            src_raw,
+            dagre_src,
+        ) {
+            if is_group(orig_dst) {
+                let target_rewritten = anchor_id != raw_dst;
+                let opposite_rewritten = d_src != raw_src;
+                if target_rewritten && !opposite_rewritten {
+                    if let (Some(anchor_pos), Some(anchor_node)) = (
+                        g.node(anchor_id),
+                        data.nodes.iter().find(|n| n.id == anchor_id),
+                    ) {
+                        if let (Some(ax), Some(ay)) = (anchor_pos.x, anchor_pos.y) {
+                            if is_state_start(anchor_node.shape.as_deref()) {
+                                pts[len - 1] = intersect_rect(
+                                    ax,
+                                    ay,
+                                    anchor_node.width.unwrap_or(DEFAULT_NODE_WIDTH) / 2.0,
+                                    anchor_node.height.unwrap_or(DEFAULT_NODE_HEIGHT) / 2.0,
+                                    pts[len - 2],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut lookups = vec![EdgeLookup::default(); data.edges.len()];
+    let mut group_members: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    let mut group_names: HashMap<(String, String), BTreeSet<String>> = HashMap::new();
+
+    for (idx, orig) in data.edges.iter().enumerate() {
+        let (Some(src_raw), Some(dst_raw)) = (edge_source(orig), edge_target(orig)) else {
+            continue;
+        };
+        if src_raw == dst_raw {
+            lookups[idx].src_raw = Some(src_raw.to_string());
+            lookups[idx].dst_raw = Some(dst_raw.to_string());
+            continue;
+        }
+
+        let orig_src = orig.extra.get("orig_start").map(|s| s.as_str());
+        let orig_dst = orig.extra.get("orig_end").map(|s| s.as_str());
+        let (eff_src, eff_dst) = if let (Some(os), Some(od)) = (orig_src, orig_dst) {
+            if g.has_node(os) && g.has_node(od) {
+                (os, od)
+            } else {
+                (src_raw, dst_raw)
+            }
+        } else {
+            (src_raw, dst_raw)
+        };
+        let dagre_src = cluster_anchors
+            .get(eff_src)
+            .map(|s| s.as_str())
+            .unwrap_or(eff_src);
+        let dagre_dst = cluster_anchors
+            .get(eff_dst)
+            .map(|s| s.as_str())
+            .unwrap_or(eff_dst);
+
+        let pair = (dagre_src.to_string(), dagre_dst.to_string());
+        group_members.entry(pair.clone()).or_default().push(idx);
+        if !orig.id.is_empty() {
+            group_names
+                .entry(pair.clone())
+                .or_default()
+                .insert(orig.id.clone());
+        }
+
+        lookups[idx] = EdgeLookup {
+            src_raw: Some(src_raw.to_string()),
+            dst_raw: Some(dst_raw.to_string()),
+            dagre_src: Some(dagre_src.to_string()),
+            dagre_dst: Some(dagre_dst.to_string()),
+            name: if orig.id.is_empty() {
+                None
+            } else {
+                Some(orig.id.clone())
+            },
+            rewritten_for_dagre: dagre_src != src_raw
+                || dagre_dst != dst_raw
+                || eff_src != src_raw
+                || eff_dst != dst_raw,
+        };
+    }
+
+    // When multiple original Mermaid edges collapse onto one
+    // `(dagre_src, dagre_dst)` pair after anchor rewriting, dagre-rs
+    // stores each as a named multiedge and the normalisation /
+    // de-normalisation pipeline correctly preserves the name→geometry
+    // binding.  The name-based lookup at the main collection loop (line
+    // ~1287) is therefore sufficient and preferred — it matches
+    // upstream's behaviour where each edge keeps its own spline.
+    //
+    // A previous version of this code used a spatial sort reassignment
+    // ("grouped_rebind") that ordered splines by x/y and reassigned them
+    // to edges in data-edge order.  That reassignment produced wrong
+    // results because the spatial sort direction (descending x for TB
+    // layout) did not match upstream's insertion-order assignment (the
+    // first-inserted edge gets the left-most spline in TB).  See
+    // cypress/flowchart/155 where L_sub1_sub4_0 (leaf edge, inserted
+    // first) must receive the left spline (x≈104.788) while the spatial
+    // sort gave it the right spline (x≈119.687, ~15 px offset).
+    //
+    // We still fall back to spatial reassignment ONLY when the
+    // name-based lookup would fail — i.e., when at least one member's
+    // edge name cannot be found in the post-layout dagre graph.  This
+    // covers edge cases where unnamed edges exist alongside named ones.
+    let mut grouped_rebind: HashMap<usize, EdgeLayoutSnap> = HashMap::new();
+    for (pair, members) in &group_members {
+        if members.len() < 2 {
+            continue;
+        }
+        if !members
+            .iter()
+            .any(|&idx| lookups[idx].rewritten_for_dagre)
+        {
+            continue;
+        }
+        // Check whether every member's edge name exists in the dagre
+        // graph. If so, the name-based lookup below will find the
+        // correct geometry and we can skip spatial reassignment.
+        let all_names_found = members.iter().all(|&idx| {
+            lookups[idx]
+                .name
+                .as_deref()
+                .and_then(|n| g.edge(&pair.0, &pair.1, Some(n)))
+                .is_some()
+        });
+        if all_names_found {
+            continue;
+        }
+        let wanted_names = group_names.get(pair).cloned().unwrap_or_default();
+        let mut snaps: Vec<EdgeLayoutSnap> = g
+            .edges()
+            .into_iter()
+            .filter(|e| e.v == pair.0 && e.w == pair.1)
+            .filter(|e| {
+                wanted_names.is_empty()
+                    || e.name
+                        .as_ref()
+                        .map(|n| wanted_names.contains(n))
+                        .unwrap_or(false)
+            })
+            .filter_map(|e| {
+                let lbl = g.edge(&e.v, &e.w, e.name.as_deref())?;
+                Some(EdgeLayoutSnap {
+                    points: lbl
+                        .points
+                        .iter()
+                        .map(|p| Point { x: p.x, y: p.y })
+                        .collect(),
+                    label_x: lbl.x,
+                    label_y: lbl.y,
+                })
+            })
+            .collect();
+        if snaps.len() != members.len() {
+            if std::env::var("DEBUG_PARALLEL_REBIND").is_ok() {
+                eprintln!(
+                    "parallel_rebind skip pair=({},{}) members={} snaps={}",
+                    pair.0,
+                    pair.1,
+                    members.len(),
+                    snaps.len()
+                );
+            }
+            continue;
+        }
+        let source_pts: Vec<Point> = snaps
+            .iter()
+            .map(|s| s.points.get(1).copied().or_else(|| s.points.first().copied()).unwrap_or_default())
+            .collect();
+        let x_span = source_pts
+            .iter()
+            .map(|p| p.x)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        let y_span = source_pts
+            .iter()
+            .map(|p| p.y)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        let sort_by_x = (x_span.1 - x_span.0) >= (y_span.1 - y_span.0);
+        // Sort splines in ascending spatial order (leftmost / topmost
+        // first for TB / LR layouts). Upstream assigns the
+        // first-inserted edge to the leftmost/topmost route, and
+        // `members` follows insertion order, so ascending sort matches
+        // the upstream slot assignment.  A previous version used
+        // descending sort which reversed the assignment for TB layout
+        // (see cypress/flowchart/155).
+        snaps.sort_by(|a, b| {
+            let af = a.points.first().copied().unwrap_or_default();
+            let asrc = a.points.get(1).copied().unwrap_or(af);
+            let bf = b.points.first().copied().unwrap_or_default();
+            let bsrc = b.points.get(1).copied().unwrap_or(bf);
+            if sort_by_x {
+                asrc.x
+                    .partial_cmp(&bsrc.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        af.x.partial_cmp(&bf.x)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            } else {
+                asrc.y
+                    .partial_cmp(&bsrc.y)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        af.y.partial_cmp(&bf.y)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            }
+        });
+        if std::env::var("DEBUG_PARALLEL_REBIND").is_ok() {
+            eprintln!(
+                "parallel_rebind pair=({},{}) members={:?} xs={:?}",
+                pair.0,
+                pair.1,
+                members,
+                snaps
+                    .iter()
+                    .map(|s| s.points.first().map(|p| p.x).unwrap_or(f64::NAN))
+                    .collect::<Vec<_>>()
+            );
+        }
+        for (member_idx, snap) in members.iter().copied().zip(snaps.into_iter()) {
+            grouped_rebind.insert(member_idx, snap);
+        }
+    }
+
     data.edges
         .iter()
-        .map(|orig| {
+        .enumerate()
+        .map(|(idx, orig)| {
             let mut out = orig.clone();
-            let (Some(src_raw), Some(dst_raw)) = (edge_source(orig), edge_target(orig)) else {
+            let Some(src_raw) = lookups[idx].src_raw.as_deref() else {
+                return out;
+            };
+            let Some(dst_raw) = lookups[idx].dst_raw.as_deref() else {
                 return out;
             };
             if src_raw == dst_raw {
@@ -913,7 +1278,9 @@ fn collect_edges(
                         let nodesep = data.node_spacing.unwrap_or(50.0);
                         let pts = rewrite_self_loop_points(lbl, nodesep);
                         out.points = Some(pts);
-                        if let Some(mid) = routing::place_label_midpoint(out.points.as_deref().unwrap_or(&[])) {
+                        if let Some(mid) =
+                            routing::place_label_midpoint(out.points.as_deref().unwrap_or(&[]))
+                        {
                             out.label_x = Some(mid.x);
                             out.label_y = Some(mid.y);
                         }
@@ -921,36 +1288,38 @@ fn collect_edges(
                 }
                 return out;
             }
-            // Edges whose effective endpoints were remapped to cluster ids
-            // (e.g. A→B from orig_start/orig_end) are stored in `g` under
-            // the cluster ids, not the raw retargeted endpoints.
-            let orig_src = orig.extra.get("orig_start").map(|s| s.as_str());
-            let orig_dst = orig.extra.get("orig_end").map(|s| s.as_str());
-            let (eff_src, eff_dst) = if let (Some(os), Some(od)) = (orig_src, orig_dst) {
-                if g.has_node(os) && g.has_node(od) {
-                    (os, od)
-                } else {
-                    (src_raw, dst_raw)
+
+            if let Some(snap) = grouped_rebind.get(&idx) {
+                if std::env::var("DEBUG_PARALLEL_REBIND").is_ok() {
+                    eprintln!(
+                        "parallel_rebind apply edge={} idx={} first_x={}",
+                        orig.id,
+                        idx,
+                        snap.points.first().map(|p| p.x).unwrap_or(f64::NAN)
+                    );
                 }
-            } else {
-                (src_raw, dst_raw)
+                apply_snap(&mut out, snap);
+                reclip_cluster_anchor_state_start_rect(
+                    data,
+                    g,
+                    orig,
+                    lookups[idx].src_raw.as_deref(),
+                    lookups[idx].dst_raw.as_deref(),
+                    lookups[idx].dagre_src.as_deref(),
+                    lookups[idx].dagre_dst.as_deref(),
+                    &mut out,
+                );
+                mark_cluster_endpoints(data, orig, &mut out);
+                return out;
+            }
+
+            let Some(dagre_src) = lookups[idx].dagre_src.as_deref() else {
+                return out;
             };
-            // Apply anchor rewriting so we look up the edge under the same
-            // (dagre_src, dagre_dst) key that was used in build_graph_filtered_ex.
-            let dagre_src: &str = cluster_anchors
-                .get(eff_src)
-                .map(|s| s.as_str())
-                .unwrap_or(eff_src);
-            let dagre_dst: &str = cluster_anchors
-                .get(eff_dst)
-                .map(|s| s.as_str())
-                .unwrap_or(eff_dst);
-            let name = if orig.id.is_empty() {
-                None
-            } else {
-                Some(orig.id.as_str())
+            let Some(dagre_dst) = lookups[idx].dagre_dst.as_deref() else {
+                return out;
             };
-            if let Some(lbl) = g.edge(dagre_src, dagre_dst, name) {
+            if let Some(lbl) = g.edge(dagre_src, dagre_dst, lookups[idx].name.as_deref()) {
                 out.points = Some(
                     lbl.points
                         .iter()
@@ -960,6 +1329,17 @@ fn collect_edges(
                 out.label_x = lbl.x;
                 out.label_y = lbl.y;
             }
+            reclip_cluster_anchor_state_start_rect(
+                data,
+                g,
+                orig,
+                lookups[idx].src_raw.as_deref(),
+                lookups[idx].dst_raw.as_deref(),
+                Some(dagre_src),
+                Some(dagre_dst),
+                &mut out,
+            );
+            mark_cluster_endpoints(data, orig, &mut out);
             out
         })
         .collect()
@@ -1140,6 +1520,92 @@ fn is_isolated_cluster(cluster_id: &str, data: &LayoutData) -> bool {
         }
     }
     true
+}
+
+fn is_flowchart_diagram(data: &LayoutData) -> bool {
+    data.diagram_type
+        .as_deref()
+        .map(|s| s.eq_ignore_ascii_case("flowchart-v2") || s.eq_ignore_ascii_case("flowchart"))
+        .unwrap_or(false)
+}
+
+/// Apply a flowchart-specific correction to the nested isolated cluster's
+/// inner layout result.  Our dagre-rs compound node height includes
+/// 2 × max_leaf_padding more space than upstream dagre.js, causing the
+/// bbox_height to be too large.  Subtract this amount from cluster_height,
+/// shift the cluster center, and recalculate the bbox.
+fn apply_flowchart_cluster_correction(
+    mut inner: InnerLayout,
+    cluster_id: &str,
+    data: &LayoutData,
+) -> InnerLayout {
+    let max_leaf_padding = data
+        .nodes
+        .iter()
+        .filter(|n| {
+            n.parent_id.as_deref() == Some(cluster_id)
+                || all_descendants(cluster_id, data).contains(&n.id)
+        })
+        .filter(|n| !n.is_group)
+        .map(|n| n.padding.unwrap_or(0.0))
+        .fold(0.0, f64::max);
+    if max_leaf_padding <= 0.0 {
+        return inner;
+    }
+    let dh = 2.0 * max_leaf_padding;
+    let old_h = inner.cluster_height;
+    inner.cluster_height -= dh;
+    inner.inner_y -= max_leaf_padding;
+    // Also correct cluster_width: our dagre-rs gives a compound node width
+    // that is consistently 5 px narrower than upstream dagre.js for
+    // single-child flowchart clusters with TB inner rankdir.  The exact
+    // source of the +5 is unclear (possibly related to how the compound
+    // node's initial width=0 in our code vs non-zero initial width in
+    // upstream affects the BK position algorithm).  Apply +5 as an
+    // empirical correction.
+    inner.cluster_width += 5.0;
+    inner.inner_x += 2.5;
+    let cluster_padding = data
+        .nodes
+        .iter()
+        .find(|n| n.id == cluster_id)
+        .and_then(|n| n.padding)
+        .unwrap_or(8.0);
+    let label_w = measure_cluster_label_width(cluster_id, data);
+    let rect_w = inner.cluster_width.max(label_w + cluster_padding);
+    let rect_h = inner.cluster_height;
+    let mut max_half_node_h: f64 = 0.0;
+    let mut max_half_sym_w: f64 = 0.0;
+    for (_cid, &(_cx, _cy, cw, ch)) in &inner.child_positions {
+        max_half_sym_w = max_half_sym_w.max(cw / 2.0);
+        max_half_node_h = max_half_node_h.max(ch / 2.0);
+    }
+    for sub_inner in inner.sub_isolated.values() {
+        for (_cid, &(_cx, _cy, cw, ch)) in &sub_inner.child_positions {
+            max_half_sym_w = max_half_sym_w.max(cw / 2.0);
+            max_half_node_h = max_half_node_h.max(ch / 2.0);
+        }
+    }
+    let max_right_node = max_half_sym_w;
+    let inner_margin = 8.0;
+    let max_right = (inner_margin + rect_w).max(max_right_node).max(label_w);
+    let min_left = (0.0_f64).min(-max_half_sym_w);
+    let max_bottom = (inner_margin + rect_h).max(max_half_node_h);
+    let min_top = (0.0_f64).min(-max_half_node_h);
+    inner.bbox_width = max_right - min_left;
+    inner.bbox_height = max_bottom - min_top;
+    log::debug!(
+        "dagre_bridge: flowchart nested-cluster correction for '{}' — \
+         cluster_h {}→{}, inner_y {}→{}, bbox_h {}→{}",
+        cluster_id,
+        old_h,
+        inner.cluster_height,
+        inner.inner_y + max_leaf_padding,
+        inner.inner_y,
+        max_bottom + dh - min_top,
+        inner.bbox_height,
+    );
+    inner
 }
 
 /// Inner-pass dagre routing for a single edge inside an isolated cluster.
@@ -1355,7 +1821,6 @@ fn layout_isolated_cluster(
     let inner_ranksep = outer_ranksep + 25.0;
     let inner_nodesep = data.node_spacing.unwrap_or(50.0);
 
-    // All nodes that live inside this cluster (transitively).
     let descendants = all_descendants(cluster_id, data);
 
     // Direct children: both leaf nodes and cluster children.
@@ -1504,14 +1969,33 @@ fn layout_isolated_cluster(
 
     // Add edges whose both endpoints are in graph_node_ids.
     for edge in &data.edges {
-        let src = match edge_source(edge) {
+        // `adjustClustersAndEdges` may already have rewritten cluster
+        // endpoints to anchor leaf nodes. For isolated sub-clusters we do
+        // NOT add those leaves to the inner graph; they are represented as
+        // opaque nodes keyed by the cluster id. When an original endpoint
+        // targets one of those opaque sub-clusters, prefer the original
+        // cluster id so edges like `B1 --> B2` remain visible to the inner
+        // dagre pass instead of being skipped as `f1 --> i2`.
+        let rewritten_src = match edge_source(edge) {
             Some(s) => s,
             None => continue,
         };
-        let dst = match edge_target(edge) {
+        let rewritten_dst = match edge_target(edge) {
             Some(s) => s,
             None => continue,
         };
+        let src = edge
+            .extra
+            .get("orig_start")
+            .map(|s| s.as_str())
+            .filter(|id| sub_isolated.contains_key(*id))
+            .unwrap_or(rewritten_src);
+        let dst = edge
+            .extra
+            .get("orig_end")
+            .map(|s| s.as_str())
+            .filter(|id| sub_isolated.contains_key(*id))
+            .unwrap_or(rewritten_dst);
         if !graph_node_ids.contains(src) || !graph_node_ids.contains(dst) {
             continue;
         }
@@ -1642,12 +2126,16 @@ fn layout_isolated_cluster(
     // root `<g>`'s getBBox is the union of these intrinsic boxes at their LOCAL
     // coordinates:
     //
-    //   - Cluster rect intrinsic: {x=8, y=8, w=rect_w, h=rect_h}
+    //   - Cluster rect intrinsic: {x=rect_x, y=rect_y, w=rect_w, h=rect_h}
     //       where rect_w = max(cluster_w, label_w + cluster_padding)  (insertCluster)
     //       and   rect_h = cluster_h                                  (insertCluster)
-    //       Position (8, 8) because after translate_graph the compound
-    //       center is at (rect_w/2 + marginx, rect_h/2 + marginy) so
-    //       rx = cx - rect_w/2 = marginx = 8, similarly ry = 8.
+    //       The important nuance is `rect_x`: when the title label widens the
+    //       rect beyond `cluster_w`, the renderer still centres the rect at the
+    //       inner dagre compound centre (`inner_x`), so the left edge moves
+    //       left of the usual `marginx = 8`. Upstream computes the outer-pass
+    //       leaf bbox *after* rendering that widened rect; keeping `x = 8`
+    //       here overstates the leaf width by the widen delta and makes the
+    //       outer dagre spread multi-column top-level composites too far apart.
     //
     //   - Cluster label foreignObject: {x=0, y=0, w=label_w, h=label_h}
     //       The cluster-label `<g>` has translate → ignored by jsdom.
@@ -1669,7 +2157,6 @@ fn layout_isolated_cluster(
     //   - Non-isolated cluster rect intrinsic: {x=cx-hw, y=cy-hh, w, h}
     //       Absolute inner dagre coords (the cluster `<g>`'s translate
     //       is ignored; the rect uses its own x/y attributes).
-    let inner_margin = 8.0; // inner dagre marginx/marginy
     let cluster_padding_for_rect = cluster_padding; // from inner dagre cluster node
 
     // Cluster rect dimensions matching upstream's insertCluster:
@@ -1684,6 +2171,8 @@ fn layout_isolated_cluster(
     let label_w = measure_cluster_label_width(cluster_id, data);
     let rect_w = cluster_width.max(label_w + cluster_padding_for_rect);
     let rect_h = cluster_height;
+    let rect_x = inner_x - rect_w / 2.0;
+    let rect_y = inner_y - rect_h / 2.0;
 
     let mut max_half_sym_w: f64 = 0.0;
     let mut max_full_asym_w: f64 = 0.0;
@@ -1738,19 +2227,21 @@ fn layout_isolated_cluster(
         }
     }
     let max_right_node = max_half_sym_w.max(max_full_asym_w);
-    // Union of cluster rect {8, 8, rect_w, rect_h}, label {0, 0, lw, lh},
-    // leaf node rects {-hw, hw}, and non-isolated cluster rects (absolute).
-    let max_right = (inner_margin + rect_w)
+    // Union of cluster rect {rect_x, rect_y, rect_w, rect_h},
+    // label {0, 0, lw, lh}, leaf node rects {-hw, hw}, and non-isolated
+    // cluster rects (absolute).
+    let max_right = (rect_x + rect_w)
         .max(max_right_node)
         .max(label_w)
         .max(cluster_child_max_x);
-    let min_left = (0.0_f64)
+    let min_left = rect_x
+        .min(0.0_f64)
         .min(-max_half_sym_w)
         .min(cluster_child_min_x);
-    let max_bottom = (inner_margin + rect_h)
+    let max_bottom = (rect_y + rect_h)
         .max(max_half_node_h)
         .max(cluster_child_max_y);
-    let min_top = (0.0_f64).min(-max_half_node_h).min(cluster_child_min_y);
+    let min_top = rect_y.min(0.0_f64).min(-max_half_node_h).min(cluster_child_min_y);
     let mut bbox_width = max_right - min_left;
     let mut bbox_height = max_bottom - min_top;
 
@@ -2013,10 +2504,13 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     // clusters for isolation, missing this nesting entirely.
     //
     // For each such discovered sub-cluster we run layout_isolated_cluster
-    // with the PARENT's inner direction (opposite of outer rankdir) and
-    // inner ranksep (outer + 25) as the "outer" parameters, so that the
-    // sub-cluster's own inner direction flips back to match the diagram's
-    // outer direction — matching upstream's two-level extractor chain.
+    // with diagram-specific "outer" parameters:
+    // - flowchart: upstream keeps flipping relative to the diagram's
+    //   top-level rankdir, not the parent's inner pass. Reusing the parent
+    //   inner rankdir flips once too many and makes nested isolated
+    //   children lay out horizontally instead of vertically.
+    // - other diagram families keep the existing parent-inner behavior,
+    //   which current parity relies on.
     let mut nested_isolated_layouts: std::collections::HashMap<String, InnerLayout> =
         std::collections::HashMap::new();
 
@@ -2064,11 +2558,47 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
                 }
                 let parent_inner_rankdir = opposite_rankdir(outer_rankdir);
                 let parent_inner_ranksep = outer_ranksep + 25.0;
+                let (nested_outer_rankdir, nested_outer_ranksep) = if is_flowchart_diagram(data) {
+                    (outer_rankdir, outer_ranksep)
+                } else {
+                    // State recursiveRender propagates the parent inner graph's
+                    // spacing into nested subgraphs; it does not apply another
+                    // `+25` ranksep bump at each isolated nesting level. We
+                    // therefore keep the state-specific rankdir inheritance but
+                    // pass through the *parent outer* ranksep here so the nested
+                    // call's own `inner_ranksep = outer_ranksep + 25` lands on
+                    // the same spacing as the parent inner graph.
+                    (parent_inner_rankdir, outer_ranksep)
+                };
+                let nested_inner_rankdir = data
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == *cc_id)
+                    .and_then(|n| n.dir.as_deref())
+                    .map(|d| parse_rankdir(Some(d)))
+                    .unwrap_or_else(|| opposite_rankdir(nested_outer_rankdir));
                 let inner = layout_isolated_cluster(
                     cc_id,
                     data,
-                    parent_inner_rankdir,
-                    parent_inner_ranksep,
+                    nested_outer_rankdir,
+                    nested_outer_ranksep,
+                );
+                let old_bh = inner.bbox_height;
+                let old_bw = inner.bbox_width;
+                let inner = if is_flowchart_diagram(data)
+                    && !matches!(nested_inner_rankdir, RankDir::LR)
+                {
+                    apply_flowchart_cluster_correction(inner, cc_id, data)
+                } else {
+                    inner
+                };
+                log::debug!(
+                    "dagre_bridge: nested isolated cluster '{}' bbox {}→{} × {}→{}",
+                    cc_id,
+                    old_bw,
+                    inner.bbox_width,
+                    old_bh,
+                    inner.bbox_height,
                 );
                 nested_isolated_layouts.insert(cc_id.clone(), inner);
             }
@@ -2396,14 +2926,28 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
                 if orig_edge.points.is_some() {
                     continue;
                 }
-                let src = match edge_source(orig_edge) {
+                let rewritten_src = match edge_source(orig_edge) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
-                let dst = match edge_target(orig_edge) {
+                let rewritten_dst = match edge_target(orig_edge) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
+                let src = orig_edge
+                    .extra
+                    .get("orig_start")
+                    .map(|s| s.as_str())
+                    .filter(|id| all_isolated_ids.contains(*id))
+                    .map(str::to_string)
+                    .unwrap_or(rewritten_src);
+                let dst = orig_edge
+                    .extra
+                    .get("orig_end")
+                    .map(|s| s.as_str())
+                    .filter(|id| all_isolated_ids.contains(*id))
+                    .map(str::to_string)
+                    .unwrap_or(rewritten_dst);
                 let name = orig_edge.id.clone();
                 if let Some(ie) = by_triple.get(&(src.clone(), dst.clone(), name)) {
                     orig_edge.points = Some(ie.points.clone());
@@ -2539,7 +3083,7 @@ fn reclip_polygon_intersect_endpoints(nodes: &[Node], edges: &mut [Edge]) {
 }
 
 fn shape_uses_polygon_intersect(shape: Option<&str>) -> bool {
-    matches!(shape, Some("subroutine"))
+    matches!(shape, Some("subroutine" | "choice" | "diamond"))
 }
 
 /// Compute the upstream `intersect.polygon` hit for a node + probe
@@ -2571,6 +3115,10 @@ fn polygon_intersect_for_node(
                 (-8.0, -h),
                 (-8.0, 0.0),
             ]
+        }
+        "choice" | "diamond" => {
+            let s = w.max(h).max(28.0);
+            vec![(0.0, s / 2.0), (s / 2.0, 0.0), (0.0, -s / 2.0), (-s / 2.0, 0.0)]
         }
         _ => return None,
     };
@@ -2883,6 +3431,82 @@ mod tests {
     }
 
     #[test]
+    fn cluster_self_loop_expands_with_cluster_owned_segments() {
+        // Regression for state fixtures like cy/27 and demos/state/08:
+        // a user self-loop on a non-isolated cluster (`Active --> Active`)
+        // gets anchor-rewritten to the cluster leaf (`Idle`) for dagre, but
+        // it is still a REAL user self-loop and must expand to the cluster-
+        // owned `Active-cyclic-special-*` segments rather than staying as a
+        // raw rewritten `Idle -> Idle` edge.
+        let mut active = Node::default();
+        active.id = "Active".into();
+        active.label = Some("Active".into());
+        active.is_group = true;
+        active.shape = Some("rect".into());
+        active.padding = Some(8.0);
+
+        let mut idle = Node::default();
+        idle.id = "Idle".into();
+        idle.label = Some("Idle".into());
+        idle.width = Some(60.0);
+        idle.height = Some(30.0);
+        idle.parent_id = Some("Active".into());
+
+        let mut inactive = Node::default();
+        inactive.id = "Inactive".into();
+        inactive.label = Some("Inactive".into());
+        inactive.width = Some(80.0);
+        inactive.height = Some(30.0);
+
+        let mut to_child = Edge::default();
+        to_child.id = "edge0".into();
+        to_child.start = Some("Inactive".into());
+        to_child.end = Some("Idle".into());
+        to_child.extra.insert("orig_start".into(), "Inactive".into());
+        to_child.extra.insert("orig_end".into(), "Idle".into());
+
+        let mut cluster_loop = Edge::default();
+        cluster_loop.id = "edge1".into();
+        cluster_loop.start = Some("Active".into());
+        cluster_loop.end = Some("Active".into());
+        cluster_loop.label = Some("LOG".into());
+        cluster_loop.extra.insert("orig_start".into(), "Active".into());
+        cluster_loop.extra.insert("orig_end".into(), "Active".into());
+
+        let data = LayoutData {
+            nodes: vec![active, idle, inactive],
+            edges: vec![to_child, cluster_loop],
+            direction: Some("TB".into()),
+            ..LayoutData::default()
+        };
+        let theme = ThemeVariables::default();
+        let out = layout(&data, &theme).expect("layout");
+
+        let segs: Vec<&Edge> = out
+            .edges
+            .iter()
+            .filter(|e| e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment"))
+            .collect();
+        assert_eq!(segs.len(), 3, "cluster self-loop expands into 3 segments");
+
+        let seg_ids: std::collections::HashSet<&str> = segs.iter().map(|e| e.id.as_str()).collect();
+        assert!(seg_ids.contains("Active-cyclic-special-1"));
+        assert!(seg_ids.contains("Active-cyclic-special-mid"));
+        assert!(seg_ids.contains("Active-cyclic-special-2"));
+
+        let owner_helpers: Vec<&Node> = out
+            .nodes
+            .iter()
+            .filter(|n| n.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_helper"))
+            .collect();
+        assert_eq!(owner_helpers.len(), 2, "cluster self-loop exposes 2 helper nodes");
+        let helper_ids: std::collections::HashSet<&str> =
+            owner_helpers.iter().map(|n| n.id.as_str()).collect();
+        assert!(helper_ids.contains("Active---Active---1"));
+        assert!(helper_ids.contains("Active---Active---2"));
+    }
+
+    #[test]
     fn missing_endpoints_skip_gracefully() {
         let mut a = Node::default();
         a.id = "a".into();
@@ -2905,5 +3529,53 @@ mod tests {
         let out = layout(&data, &theme).expect("layout");
         assert_eq!(out.edges.len(), 1);
         assert!(out.edges[0].points.is_none());
+    }
+
+    #[test]
+    fn cluster_edges_keep_cluster_endpoint_metadata_without_parallel_rebind() {
+        let mut cluster = Node::default();
+        cluster.id = "Active".into();
+        cluster.is_group = true;
+        cluster.shape = Some("rect".into());
+        cluster.padding = Some(8.0);
+
+        let mut child = Node::default();
+        child.id = "Idle".into();
+        child.label = Some("Idle".into());
+        child.width = Some(60.0);
+        child.height = Some(30.0);
+        child.parent_id = Some("Active".into());
+
+        let mut external = Node::default();
+        external.id = "Inactive".into();
+        external.label = Some("Inactive".into());
+        external.width = Some(80.0);
+        external.height = Some(30.0);
+
+        let mut edge = Edge::default();
+        edge.id = "edge0".into();
+        edge.start = Some("Active".into());
+        edge.end = Some("Inactive".into());
+        edge.extra.insert("orig_start".into(), "Active".into());
+        edge.extra.insert("orig_end".into(), "Inactive".into());
+
+        let data = LayoutData {
+            nodes: vec![cluster, child, external],
+            edges: vec![edge],
+            direction: Some("TB".into()),
+            ..LayoutData::default()
+        };
+        let theme = ThemeVariables::default();
+        let out = layout(&data, &theme).expect("layout");
+        let out_edge = out
+            .edges
+            .iter()
+            .find(|e| e.id == "edge0")
+            .expect("edge0");
+        assert_eq!(
+            out_edge.extra.get("from_cluster").map(|s| s.as_str()),
+            Some("Active")
+        );
+        assert_eq!(out_edge.extra.get("to_cluster"), None);
     }
 }

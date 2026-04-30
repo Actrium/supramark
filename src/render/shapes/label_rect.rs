@@ -67,12 +67,17 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         opts.is_node = true;
         opts.add_background = false;
         opts.wrap_in_p = false;
-        // 10 px is the post-shape width upstream stamps on these
-        // `expand_self_edge` helper nodes. `node.width` is set to 10 by
-        // `dagre_bridge::expand_self_edge`; falling back to 10 keeps
-        // legacy callers (no width set) byte-stable for the canonical
-        // upstream emission.
-        let helper_width = node.width.unwrap_or(10.0);
+        // Cyclic self-loop helpers are rendered from an initial 10 px budget,
+        // then the DOM pass shrinks the actual shape bbox to 0.1x0.1 before
+        // dagre runs. Preserve the 10 px HTML label budget here even though
+        // the post-layout helper node now carries the shrunken bbox.
+        let helper_width = if node.extra.get("synthetic").map(|s| s.as_str())
+            == Some("cyclic_helper")
+        {
+            10.0
+        } else {
+            node.width.unwrap_or(10.0)
+        };
         opts.max_width = helper_width;
         // Match upstream's `<g class="label" style="" transform="translate(0, -8.1484375)">`.
         // The translate is `(0, -line_height/2)` for empty labels — they
