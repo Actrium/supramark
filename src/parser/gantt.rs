@@ -28,8 +28,11 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
         ..GanttDiagram::default()
     };
 
-    // First pass: hoover up any remaining `%%{init:...}%%` directives.
-    let source_after_directives = extract_init_directives(source, &mut d);
+    // First strip an optional leading YAML frontmatter (`---\n...\n---`).
+    let source = strip_frontmatter(source, &mut d);
+
+    // Second pass: hoover up any remaining `%%{init:...}%%` directives.
+    let source_after_directives = extract_init_directives(&source, &mut d);
 
     // Second pass: line-oriented parse of the body.
     let lines: Vec<&str> = source_after_directives.lines().collect();
@@ -146,16 +149,15 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
             }
             continue;
         }
-        if let Some(rest) = strip_kw_ci(line, "accTitle") {
-            if let Some(val) = rest.strip_prefix(':') {
-                d.meta.acc_title = Some(val.trim().to_string());
-            }
+        // accTitle / accDescr — match `accTitle:` or `accTitle :` (with
+        // or without a space before the colon). Upstream's grammar
+        // (`title.spec.ts`) treats the `:` as a token-separator.
+        if let Some(rest) = strip_kw_punct(line, "accTitle") {
+            d.meta.acc_title = Some(rest.trim().to_string());
             continue;
         }
-        if let Some(rest) = strip_kw_ci(line, "accDescr") {
-            if let Some(val) = rest.strip_prefix(':') {
-                d.meta.acc_descr = Some(val.trim().to_string());
-            }
+        if let Some(rest) = strip_kw_punct(line, "accDescr") {
+            d.meta.acc_descr = Some(rest.trim().to_string());
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "displayMode") {
@@ -338,6 +340,54 @@ fn parse_click(rest: &str, _d: &mut GanttDiagram) {
     let _ = rest;
 }
 
+/// Strip leading YAML frontmatter `---\n...\n---\n`, lifting the
+/// `displayMode` / `title` keys we care about. This is a coarse
+/// best-effort scan, tolerant of trailing CR/LF.
+fn strip_frontmatter(source: &str, d: &mut GanttDiagram) -> String {
+    let trimmed = source.trim_start_matches('\u{FEFF}');
+    if !trimmed.starts_with("---") {
+        return source.to_string();
+    }
+    let after_open = match trimmed.find('\n') {
+        Some(idx) if &trimmed[..idx].trim() == &"---" => &trimmed[idx + 1..],
+        _ => return source.to_string(),
+    };
+    // Find closing `---` line.
+    let mut end_idx = None;
+    let mut pos = 0usize;
+    for line in after_open.split('\n') {
+        if line.trim() == "---" {
+            end_idx = Some(pos + line.len());
+            break;
+        }
+        pos += line.len() + 1;
+    }
+    let close_pos = match end_idx {
+        Some(p) => p,
+        None => return source.to_string(),
+    };
+    let body = &after_open[..close_pos.saturating_sub(3).min(after_open.len())];
+    // Trivial key:value scan for displayMode, title.
+    for line in body.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("displayMode:") {
+            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            if !v.is_empty() {
+                d.display_mode = Some(v);
+            }
+        } else if let Some(rest) = line.strip_prefix("title:") {
+            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            if !v.is_empty() && d.meta.title.is_none() {
+                d.meta.title = Some(v);
+            }
+        }
+    }
+    let after_close = &after_open[close_pos..];
+    // Skip trailing newline after the closing fence.
+    let after_close = after_close.strip_prefix('\n').unwrap_or(after_close);
+    after_close.to_string()
+}
+
 /// Remove `%%{init:...}%%` blocks and capture the handful of gantt
 /// config keys we care about. Matches the behaviour of
 /// [`crate::preprocess::preprocess`] well enough for fixtures that
@@ -416,11 +466,34 @@ fn is_skip_line(raw: &str) -> bool {
     t.is_empty() || (t.starts_with("%%") && !t.starts_with("%%{"))
 }
 
+/// Variant of [`strip_kw_ci`] that accepts a literal `:` (with optional
+/// surrounding whitespace) immediately after the keyword.
+fn strip_kw_punct<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
+    let trimmed = line.trim_start();
+    if !trimmed.is_char_boundary(kw.len()) {
+        return None;
+    }
+    if trimmed.len() < kw.len() {
+        return None;
+    }
+    if !trimmed[..kw.len()].eq_ignore_ascii_case(kw) {
+        return None;
+    }
+    let after = &trimmed[kw.len()..];
+    let after = after.trim_start();
+    after.strip_prefix(':').map(|r| r.trim_start())
+}
+
 /// Case-insensitive keyword stripping. Returns `Some(rest)` if `line`
 /// starts with `kw` followed by whitespace or end-of-string.
 fn strip_kw_ci<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
     let line = line.trim_start();
     if line.len() < kw.len() {
+        return None;
+    }
+    // Guard against multi-byte boundaries: line[..kw.len()] panics if
+    // the kw.len()-th byte is mid-codepoint (e.g. CJK input).
+    if !line.is_char_boundary(kw.len()) {
         return None;
     }
     if line[..kw.len()].eq_ignore_ascii_case(kw) {

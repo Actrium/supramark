@@ -1,17 +1,8 @@
 //! Byte-exact parity tests for every gantt reference SVG under
 //! `tests/reference/ext_fixtures/{cypress,demos}/gantt/`.
 
-use mermaid_little::layout::gantt as layout_mod;
-use mermaid_little::parser::gantt as parser_mod;
-use mermaid_little::render::svg_gantt as render_mod;
-use mermaid_little::theme::get_theme;
-
 fn render_fixture(source: &str, id: &str) -> String {
-    let diagram = parser_mod::parse(source).expect("parse");
-    let name = diagram.theme_name.as_deref().unwrap_or("default");
-    let theme = get_theme(name);
-    let lay = layout_mod::layout(&diagram, &theme).expect("layout");
-    render_mod::render(&diagram, &lay, &theme, id).expect("render")
+    mermaid_little::convert_with_id(source, id).expect("convert")
 }
 
 fn assert_fixture(source_path: &str, reference_path: &str, id: &str) {

@@ -950,6 +950,80 @@ pub fn format_time(ms: f64, fmt: &str) -> String {
                 // d3 Ss = padded seconds-of-minute with leading space
                 b's' => out.push_str(&format!("{}", se)),
                 b'L' => out.push_str(&format!("{msp:03}")),
+                b'a' => {
+                    // Short weekday name (Sun, Mon, …)
+                    let dow = day_of_week(y, m, d); // 1..=7 ISO
+                    let name = match dow {
+                        1 => "Mon",
+                        2 => "Tue",
+                        3 => "Wed",
+                        4 => "Thu",
+                        5 => "Fri",
+                        6 => "Sat",
+                        7 => "Sun",
+                        _ => "",
+                    };
+                    out.push_str(name);
+                }
+                b'A' => {
+                    let dow = day_of_week(y, m, d);
+                    let name = match dow {
+                        1 => "Monday",
+                        2 => "Tuesday",
+                        3 => "Wednesday",
+                        4 => "Thursday",
+                        5 => "Friday",
+                        6 => "Saturday",
+                        7 => "Sunday",
+                        _ => "",
+                    };
+                    out.push_str(name);
+                }
+                b'b' => {
+                    let name = match m {
+                        1 => "Jan",
+                        2 => "Feb",
+                        3 => "Mar",
+                        4 => "Apr",
+                        5 => "May",
+                        6 => "Jun",
+                        7 => "Jul",
+                        8 => "Aug",
+                        9 => "Sep",
+                        10 => "Oct",
+                        11 => "Nov",
+                        12 => "Dec",
+                        _ => "",
+                    };
+                    out.push_str(name);
+                }
+                b'B' => {
+                    let name = match m {
+                        1 => "January",
+                        2 => "February",
+                        3 => "March",
+                        4 => "April",
+                        5 => "May",
+                        6 => "June",
+                        7 => "July",
+                        8 => "August",
+                        9 => "September",
+                        10 => "October",
+                        11 => "November",
+                        12 => "December",
+                        _ => "",
+                    };
+                    out.push_str(name);
+                }
+                b'j' => {
+                    // Day of year (001-366)
+                    let mut doy = 0u32;
+                    for mm in 1..m {
+                        doy += days_in_month(y, mm);
+                    }
+                    doy += d;
+                    out.push_str(&format!("{doy:03}"));
+                }
                 b'%' => out.push('%'),
                 _ => {
                     // Unrecognized — emit literally.

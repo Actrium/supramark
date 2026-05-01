@@ -22,9 +22,31 @@ pub fn render(
     let w = layout.width;
     let h = layout.height;
 
+    let mut svg_attrs = String::new();
+    if d.meta.acc_descr.is_some() {
+        svg_attrs.push_str(&format!(r#" aria-describedby="chart-desc-{id}""#));
+    }
+    if d.meta.acc_title.is_some() {
+        svg_attrs.push_str(&format!(r#" aria-labelledby="chart-title-{id}""#));
+    }
     out.push_str(&format!(
-        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" style="max-width: {w}px;" role="graphics-document document" aria-roledescription="gantt">"#,
+        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" style="max-width: {w}px;" role="graphics-document document" aria-roledescription="gantt"{svg_attrs}>"#,
     ));
+    // accTitle / accDescr <title> and <desc> elements come right after
+    // the opening <svg> tag, in title-then-desc order (upstream calls
+    // `insert(:first-child)` for desc first then title).
+    if let Some(t) = d.meta.acc_title.as_deref() {
+        out.push_str(&format!(
+            r#"<title id="chart-title-{id}">{t}</title>"#,
+            t = escape_text(t),
+        ));
+    }
+    if let Some(t) = d.meta.acc_descr.as_deref() {
+        out.push_str(&format!(
+            r#"<desc id="chart-desc-{id}">{t}</desc>"#,
+            t = escape_text(t),
+        ));
+    }
     out.push_str(&build_style_block(id, theme));
 
     // Single leading anchor group (matches `svg.append('g')` for the
