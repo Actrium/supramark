@@ -62,6 +62,8 @@ pub struct GitGraphLayout {
     pub commit_label_widths: Vec<f64>,
     /// Height of the commit-label text (font-size 10 sans-serif).
     pub commit_label_text_height: f64,
+    /// Title text x-coordinate (centred over the pre-title bbox).
+    pub title_x: f64,
 }
 
 pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLayout> {
@@ -309,6 +311,32 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         acc(0.0, 0.0, lw, lh);
     }
 
+    // Title position is computed *before* the title text is itself
+    // appended, so its bbox doesn't see itself. The renderer keeps the
+    // pre-title bbox center for x; we record it now.
+    drop(acc); // release the mutable borrow on min_*/max_*
+    let title_x = min_x + (max_x - min_x) / 2.0;
+
+    // After title insertion, the title text intrinsic bbox is (0, 0,
+    // title_w, title_h) under the shim — measured at 14px sans-serif
+    // because no `font-size` attribute is set on the title element
+    // (the `gitTitleText` CSS class is not consulted by the bbox shim).
+    if let Some(title) = d.meta.title.as_deref() {
+        let title_w = font_metrics::text_width(title, font_family, label_size, false, false);
+        if title_w > max_x {
+            max_x = title_w;
+        }
+        if 0.0 < min_x {
+            min_x = 0.0;
+        }
+        if label_h > max_y {
+            max_y = label_h;
+        }
+        if 0.0 < min_y {
+            min_y = 0.0;
+        }
+    }
+
     let pad = 8.0;
     let viewbox_x = min_x - pad;
     let viewbox_y = min_y - pad;
@@ -328,5 +356,6 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         commit_label_height: bbox_h,
         commit_label_widths: label_widths,
         commit_label_text_height,
+        title_x,
     })
 }

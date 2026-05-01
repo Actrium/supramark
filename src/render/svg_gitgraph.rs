@@ -144,6 +144,18 @@ pub fn render(
     }
     out.push_str("</g>");
 
+    // ── Title (gitTitleText) ─────────────────────────────────────────
+    if let Some(title) = d.meta.title.as_deref() {
+        if !title.is_empty() {
+            // titleTopMargin defaults to 25 for gitGraph upstream.
+            out.push_str(&format!(
+                r#"<text text-anchor="middle" x="{x}" y="-25" class="gitTitleText">{t}</text>"#,
+                x = fmt_num(l.title_x),
+                t = escape_text(title),
+            ));
+        }
+    }
+
     out.push_str("</svg>");
     Ok(out)
 }
