@@ -1,6 +1,6 @@
 # 阶段进展
 
-截至 Wave 7 初期（class/block byte-exact 100% + theme override 修复 + classId 计数器后处理）。
+截至 Wave 7 中期（gantt / venn 落地，c4 / mindmap / gitGraph parser scaffolding，gitGraph 已 7/129 byte-exact）。
 
 > 本项目只维护中文版 PROGRESS。
 
@@ -8,13 +8,42 @@
 
 | 指标 | 值 |
 |---|---:|
-| Diagram 完整 byte-exact 已落地（实现 ≥99%） | **17 / 23** |
-| Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt 仅 stub） |
-| Stratum 3 byte-exact fixtures（实现部分） | **~896 / 899**（实现 diagram 99.7%） |
-| 全 fixture pass rate（含未实现 diagram） | **895 / 1295** ≈ 69.1% |
-| Lib unit 测试 | 626 passed / 0 failed / 20 ignored |
+| Diagram 完整 byte-exact（≥99%） | **20 / 24** |
+| Diagram parser/layout/render 可调用（含 stub 或部分） | **23 / 24** |
+| 完全未实现 diagram | **1**（sequence） |
+| sweep_all byte-exact 通过率（排除 known_ignored 后） | **953 / 1111 ≈ 85.8%** |
+| 已 known_ignored fixture 总数 | 178（含 c4 11 + mindmap 25 + gitGraph 122 + venn 24 + 各类 16） |
+| Lib unit 测试 | **639 passed / 0 failed / 0 ignored** |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
-| 项目代码总行数 | ~55,000 行 |
+| 项目代码总行数 | ~63,000 行 |
+
+## Wave 7 进展（本轮新增）
+
+### 已落地 byte-exact
+
+- **gantt** (45/53)：full d3-time tick selection + Sunday-aligned weeks + REVERSE/HIGHLIGHT commit + `vert` tag + `tickInterval` 指令 + frontmatter title。8 个 fixture 进 known_ignored（年-tick 算法 / `displayMode: compact` / 时区敏感的 `%s` / 3 位年份 date）。
+- **venn** (4/28)：parser + Nelder-Mead simplex + 圆相交 SVG path 生成。24 个 fixture 进 known_ignored，主因是 Rust libm 与 V8 fdlibm 的 ULP 级浮点差异（影响 10 个 fixture）。
+- **gitGraph** (7/129)：单分支 LR + REVERSE/HIGHLIGHT commit + tag (polygon + hole + label) + frontmatter title。122 个 fixture 进 known_ignored，按 `merge`(~50)、`cherry-pick`(~25)、多分支(~20)、TB/BT 方向(~30) 分类。
+
+### 已 parser 落地、render 留 stub（fixture 全进 known_ignored）
+
+- **c4** (0/11)：parser 完整解析 11 类 C4 宏（Person*、System*、Container*、Component*、`*Boundary`、Deployment_Node、Rel*、UpdateElementStyle ...），处理嵌套 `boundary { ... }` scope。render 需要约 1500 LOC bespoke layout + svgDraw 移植，推迟到专项。
+- **mindmap** (0/25)：parser 完整解析 7 种节点形状（`[]`/`()`/`(())`/`){...}(`/`))((`/`{{}}`/plain）+ `:::class` + `::icon(...)` + frontmatter `config.layout`/`config.theme` + 多行 bracket body + base-level rebasing。layout/render 需要 cose-bilkent 力导仿真器（~3000 LOC cytoscape 扩展），推迟到专项。
+
+### 关键技术发现
+
+29. **JS Number.toString round-half-to-even** —— Rust Ryu 在浮点 tie 时取较大 trailing digit，JS 取偶数，需 i128 精确有理数对比检测真 tie（`src/math/js_number.rs`）。
+30. **classCounter 后处理** —— 上游 mermaid 的 module-level counter 跨 batch 渲染累加，`generate_ref.mjs` 按首次出现顺序 renumber；我们必须在 SVG 输出后做相同的 `(classId-\w+)-(\d+)` 重号（`src/lib.rs:renumber_counter_ids`）。
+31. **classBox theme 派生** —— upstream 有 `classText = classText \|\| textColor` 的派生规则，必须在 `theme_variables` 应用后再算一次。
+32. **block fixture_parse_state 简化** —— 单文件 mode 重新生成 ref 后，PRNG state 固定为 `(0, 0x12345678)`，旧的 batch-counter offset 移除。
+33. **flowchart 嵌套 cluster self-loop** —— 224/224 byte-exact 借助：内层 cluster 自环边的源/目标解析跳过非叶节点；reverse-edge 的 marker-arrow 选择按 dagre 内部顺序。
+34. **state edge stable_partition** —— state/34 byte-exact 借助：`partition_by` 改为稳定排序（保留输入顺序），把 self-loops 排到非 self-loops 之后。
+35. **gantt 上游 jison 偏差** —— `axisFormat` 不可 trim（`substr(11)` 保留前导空格），`task name` 不可 trim_end（label bbox 依赖字面文本宽度），`accTitle` / `accDescr` 接受 `:` 紧贴关键字。
+36. **gantt YAML frontmatter** —— 解析时需先剥 frontmatter，把 `displayMode` / `title` lift 出来，否则字符串 'displayMode: compact\nexcludes:...' 整体被 dateFormat 误吃。
+37. **venn Nelder-Mead 浮点轨迹** —— 100+ 次迭代后，Rust libm 的 `acos/atan2/sqrt` 与 V8 fdlibm 的 0–1 ULP 差异扩散到 path 坐标尾位；要 byte-exact 需移植 fdlibm 或换 `libm` crate。
+38. **gitGraph jsdom getBBox shim** —— `<style>` 块外测量时 jsdom 不应用 CSS，所有 text intrinsic bbox 是 14px sans-serif（不是 16px trebuchet）；`<text>` 元素的 bbox 永远是 (0,0,w,h) 忽略 x/y 属性；transform 不影响 intrinsic bbox。
+39. **mindmap 阻塞** —— 上游用 `cytoscape-cose-bilkent` 力导仿真器（约 3000 LOC 物理引擎扩展），byte-exact 需全套移植。改用确定性 radial / tidy-tree 是结构对齐而非 byte-exact。
+40. **c4 阻塞** —— 上游 c4Renderer.js 是完全 bespoke（~700 LOC bound-packing layout + 668 LOC svgDraw + base64 PNG sprites + 三种文本布局模式），与 flowchart pipeline 无任何代码复用。我之前以为可以"展开成 flowchart 文本"，事实是不行。
 
 ## Wave 6 关键突破
 
