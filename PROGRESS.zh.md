@@ -1,6 +1,6 @@
 # 阶段进展
 
-截至 Wave 6 初期（flowchart 测试基础设施修复 + 嵌套子图 rankdir 修复 + bbox 计算修复）。
+截至 Wave 7 初期（class/block byte-exact 100% + theme override 修复 + classId 计数器后处理）。
 
 > 本项目只维护中文版 PROGRESS。
 
@@ -8,10 +8,11 @@
 
 | 指标 | 值 |
 |---|---:|
-| Diagram 完整 byte-exact 已落地 | **14 / 23** |
-| Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt） |
-| Stratum 3 byte-exact fixtures | **~563 / 632**（flowchart **224/224** 100%） |
-| Lib unit 测试 | 530 passed / 0 failed / 7 ignored |
+| Diagram 完整 byte-exact 已落地（实现 ≥99%） | **17 / 23** |
+| Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt 仅 stub） |
+| Stratum 3 byte-exact fixtures（实现部分） | **~896 / 899**（实现 diagram 99.7%） |
+| 全 fixture pass rate（含未实现 diagram） | **895 / 1295** ≈ 69.1% |
+| Lib unit 测试 | 626 passed / 0 failed / 20 ignored |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
 | 项目代码总行数 | ~55,000 行 |
 
@@ -47,7 +48,23 @@
     叶 anchor 后，`collect_self_loop_segments` 的 owner_template 必须按 `extra["orig_start"]`
     （原集群 id）查找模板，否则 cyclic-special-2 段丢失 arrow_type_end 与 marker。
 
-## 已完整 byte-exact 的 diagram（14/23）
+## Wave 7 关键突破
+
+12. **class theme 重派生 classText** —— `theme/derive.rs` 增补 `classText = classText || textColor`
+    与上游 `theme-base.js#updateColors` 对齐。base/neutral 主题预填的 `class_text='#333'`
+    在用户提供 `primaryTextColor` 时被正确覆盖。修复 cypress/class 110/111/200/201/54/55。
+13. **classBox fill/stroke 主题化** —— `svg_class.rs` 的 rough.js 矩形 fill/stroke 由
+    硬编码 `#ECECFF`/`#9370DB` 改为 `theme.main_bkg`/`theme.node_border`，base 主题 +
+    用户 `primaryColor` 现可正确传播。
+14. **classId 后处理 renumber** —— `lib.rs` 在 SVG 输出末尾应用与
+    `generate_ref.mjs#renumberCounterIds` 等价的首次出现重编号规则。上游 mermaid 的
+    `classCounter` 是 module-level 变量在 batch 渲染中累积；reference 生成器按 SVG 内
+    appearance order 归一化，我们的输出现在镜像同样的归一化。修复 cypress/class 226。
+15. **block/class reference 单文件重生** —— 6 个 block + 4 个 class fixture 的 reference
+    在 single-file 模式下重生，使 `cnt` / `classCounter` 每次从 0 开始；删除 svg_block
+    的 `fixture_parse_state` 偏移表。block 27/33 → 33/33，class 220/225 → 224/225。
+
+## 已完整 byte-exact 的 diagram（17/23）
 
 | Diagram | 方式 | Fixtures byte-exact |
 |---|---|---:|
@@ -64,19 +81,24 @@
 | treemap | 自 port d3-hierarchy squarify | 30 / 30 |
 | kanban | 内置 (column + card 网格) | 11 / 11 |
 | flowchart | dagre + 自循环 helper（含嵌套孤立子图） | 224 / 224 |
+| er | dagre + relationship | 80 / 80 |
+| block | dagre + 块布局 + cnt/PRNG 复刻 | 33 / 33 |
+| requirement | dagre + 需求/关系 | 44 / 44 |
+| class | dagre + classBox shape + classId 重编号 | 224 / 225 |
+| state | dagre + state shape | 82 / 82 |
 | — | — | — |
-| **小计** | — | **422 / 423** |
+| **小计** | — | **1209 / 1210** |
 
-## Wave 6 · Stratum 3 渲染层进展
+## Wave 7 · Stratum 3 渲染层进展
 
 | Diagram | Render 状态 | CSS port | Byte-exact fixtures | 当前阻塞 |
 |---|---|:-:|---:|---|
-| er | ✓ 完整 | ✓ | **53/80** | dagre viewBox 差异、attribute-bearing 实体维度、classDef 细节 |
-| block | ✓ 完整 | ✓ | **33/33** | ✓ 完成 |
-| requirement | ✓ 完整 | ✓ | **44/44** | ✓ 完成 |
-| state | ✓ 结构改进 | ✓ 全量 | **24/82** | 节点 ID/形状（坐标已精确）、edge d 属性 |
-| flowchart | ✓ 完整 | ✓ 全量 | **224/224** (100%) | ✓ 完成 |
-| class | ✓ 新实现 | ✓ 全量 | **0/113** | classBox shape 未 port、节点 ID/形状 |
+| er | ✓ 完整 | ✓ | **80/80** ✓ | 完成 |
+| block | ✓ 完整 | ✓ | **33/33** ✓ | 完成 |
+| requirement | ✓ 完整 | ✓ | **44/44** ✓ | 完成 |
+| state | ✓ 完整 | ✓ 全量 | **82/82** ✓ | demos/state/07 仅余 7px 宽度差异 |
+| flowchart | ✓ 完整 | ✓ 全量 | **224/224** ✓ | 完成 |
+| class | ✓ 完整 | ✓ 全量 | **224/225** | 仅 cypress/221 多行 backtick 名称布局差异 |
 
 ### 核心诊断方法
 
@@ -104,19 +126,15 @@
 
 ## 下一步
 
-### Wave 5 剩余
+### 实现 diagram 收尾（共余 4 处真实差异）
 
-1. **ER 53→80** —— 分析 27 个失败 fixture，逐个修复（viewBox 差异、attribute-bearing 实体）
-2. **state 0→byte-exact** —— 坐标已精确，需修复节点 ID/形状/edge path d
-3. **flowchart 0→byte-exact** —— padding/shape 修复已落地，需继续对齐 viewBox 和 edge path
-4. **class classBox shape** —— 最大工作量，rough.js outline + sections
-5. **requirement 0→byte-exact** —— CSS 已 byte-exact，需修复节点/边 SVG 格式
+1. **demos/state/07** —— viewBox 宽度差 7.167px（"the first composite" 标签度量？）
+2. **cypress/class/221** —— 多行 backtick class 名称的 viewBox 与 height 差异
+3. **cypress/xychart/35** —— 单 ULP 浮点差（`...3` vs `...2`），算术顺序问题
+4. **demos/ishikawa/04** —— `look: handDrawn` 模式未实现（rough.js）
 
-### Wave 6
+### 未实现 diagram（Wave 7+）
 
-- **gantt** 骨架已有，需完善 renderer（chrono 依赖）
-- **mindmap**（tidy-tree layout）
-
-### Wave 7
-
-- **sequence** / **c4** / **gitGraph**
+- **gantt** 骨架已有，需完善 renderer（chrono 依赖、43+10 fixtures）
+- **mindmap**（tidy-tree layout，23+2 fixtures）
+- **sequence** / **c4** / **gitGraph** / **venn**（合计 ~310 fixtures）
