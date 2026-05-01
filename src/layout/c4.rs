@@ -809,12 +809,16 @@ impl<'a> LayoutState<'a> {
 /// Splits on line breaks, returns (max line width, total height).
 /// Mirrors:
 ///   for line: width = max(round(textWidth(line)), width); height += round(lineHeight)
+/// Upstream `calculateTextDimensions` splits the source text by
+/// `lineBreakRegex = /<br\s*\/?>/gi`, processing each segment as a separate
+/// line. We mirror that here so descriptions containing `<br/>` produce
+/// multi-line geometry.
 fn measure_lines(text: &str, family: &str, size: f64, bold: bool, italic: bool) -> (f64, f64, u32) {
     let lh = round_w(fm_line_height(family, size, bold, italic));
     if text.is_empty() {
         return (0.0, lh, 1);
     }
-    let lines: Vec<&str> = text.split(['\n', '\r']).collect();
+    let lines = split_line_breaks(text);
     let mut w: f64 = 0.0;
     let mut h: f64 = 0.0;
     for line in &lines {
@@ -825,6 +829,57 @@ fn measure_lines(text: &str, family: &str, size: f64, bold: bool, italic: bool) 
         h += lh;
     }
     (w, h, lines.len() as u32)
+}
+
+/// Splits a text by upstream's `lineBreakRegex = /<br\s*\/?>/gi` and by raw
+/// '\n'/'\r' as well. Returns owned strings to avoid borrow lifetime issues
+/// from regex iteration.
+pub(crate) fn split_line_breaks(text: &str) -> Vec<String> {
+    // Walk the string, accumulating segments split by any case-insensitive
+    // `<br\s*/?>` token. Mirrors JS regex split semantics.
+    let bytes = text.as_bytes();
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // Try to match `<br...>` starting at i.
+        if bytes[i] == b'<'
+            && i + 2 < bytes.len()
+            && (bytes[i + 1] == b'b' || bytes[i + 1] == b'B')
+            && (bytes[i + 2] == b'r' || bytes[i + 2] == b'R')
+        {
+            // Skip optional whitespace.
+            let mut j = i + 3;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                j += 1;
+            }
+            // Optional self-close '/'.
+            if j < bytes.len() && bytes[j] == b'/' {
+                j += 1;
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                    j += 1;
+                }
+            }
+            // Closing '>'.
+            if j < bytes.len() && bytes[j] == b'>' {
+                out.push(std::mem::take(&mut cur));
+                i = j + 1;
+                continue;
+            }
+        }
+        // Also split on raw newline characters.
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            out.push(std::mem::take(&mut cur));
+            i += 1;
+            continue;
+        }
+        // Push current byte (UTF-8 safe — copy whole char).
+        let ch = text[i..].chars().next().unwrap();
+        cur.push(ch);
+        i += ch.len_utf8();
+    }
+    out.push(cur);
+    out
 }
 
 

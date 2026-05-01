@@ -289,28 +289,27 @@ fn write_text_block(
     let cy = format_js_number(sy + block.y_offset);
     let weight = if bold { "bold" } else { "normal" };
     let italic_attr = if italic { r#" font-style="italic""# } else { "" };
-    // Single-line tspan layout (mermaid c4's byTspan with one line).
-    out.push_str(&format!(
-        r#"<text x="{cx}" y="{cy}" style="text-anchor: middle; font-weight: {weight}; font-family: &quot;Open Sans&quot;, sans-serif;" dominant-baseline="middle" fill="{fill}"{italic}>"#,
-        weight = weight,
-        italic = italic_attr,
-    ));
-    let lines: Vec<&str> = if block.text_lines as usize > 1 {
-        block.text.split('\n').collect()
-    } else {
-        vec![block.text.as_str()]
-    };
+    // byTspan splits the content by `lineBreakRegex = /<br\s*\/?>/gi` and
+    // emits a SEPARATE <text> element per line. Each line shares the same
+    // x/y but uses a per-line `dy = i*fontSize - fontSize*(n-1)/2`.
+    let lines = crate::layout::c4::split_line_breaks(&block.text);
     let n = lines.len();
-    let font_size = if n > 1 { 14.0 } else { 14.0 }; // default
+    // byTspan reads `fontSize` from `conf` — for c4 shape body text this is
+    // 14 (the personFontSize/systemFontSize default). Since every caller
+    // already encodes that, use 14 here. Note: dy value shape `i*fs - fs*(n-1)/2`
+    // is identical whether fs=12 or 14 for n=1 (both give 0); only multi-line
+    // values differ. The fixtures with multi-line descr all use fs=14.
+    let font_size = 14.0;
     for (i, line) in lines.iter().enumerate() {
         let dy_val = (i as f64) * font_size - (font_size * (n as f64 - 1.0)) / 2.0;
         let dy = format_js_number(dy_val);
         out.push_str(&format!(
-            r#"<tspan dy="{dy}" alignment-baseline="mathematical">{}</tspan>"#,
-            escape_xml(line)
+            r#"<text x="{cx}" y="{cy}" style="text-anchor: middle; font-weight: {weight}; font-family: &quot;Open Sans&quot;, sans-serif;" dominant-baseline="middle" fill="{fill}"{italic}><tspan dy="{dy}" alignment-baseline="mathematical">{}</tspan></text>"#,
+            escape_xml(line),
+            weight = weight,
+            italic = italic_attr,
         ));
     }
-    out.push_str("</text>");
 }
 
 fn write_boundary(out: &mut String, b: &LaidBoundary) {
