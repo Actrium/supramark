@@ -66,11 +66,6 @@ ext_fixtures/cypress/mindmap/01.mmd	Mindmap uses cose-bilkent force-directed lay
 ext_fixtures/cypress/mindmap/02.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/03.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/04.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/05.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/06.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/07.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/08.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/09.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/10.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/11.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/12.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
@@ -79,14 +74,12 @@ ext_fixtures/cypress/mindmap/14.mmd	Mindmap uses cose-bilkent force-directed lay
 ext_fixtures/cypress/mindmap/15.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/16.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/17.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/cypress/mindmap/18.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/19.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/20.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/21.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/22.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/cypress/mindmap/23.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/demos/mindmap/01.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
-ext_fixtures/demos/mindmap/02.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 
 # ----------------------------------------------------------------
 # Sequence diagrams (Wave 7): scaffold parser/layout/render in
