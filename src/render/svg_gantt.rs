@@ -31,8 +31,20 @@ pub fn render(
     // diagram-id attribute).
     out.push_str("<g></g>");
 
-    // Exclude ranges group — only when excludes/includes were defined.
-    if !d.excludes.is_empty() || !d.includes.is_empty() {
+    // Exclude ranges group — emitted iff `drawExcludeDays` reached its
+    // `svg.append('g')` call. That requires (a) excludes/includes is
+    // non-empty, (b) min/max times are valid, and (c) max-min < 5
+    // years (upstream uses dayjs `diff('year') > 5` which is strict
+    // calendar-year diff; we approximate with millisecond span).
+    let has_directives = !d.excludes.is_empty() || !d.includes.is_empty();
+    let times_valid = layout.tasks.iter().any(|_| true)
+        && layout.min_time_ms.is_finite()
+        && layout.max_time_ms.is_finite();
+    let span_years_ms = layout.max_time_ms - layout.min_time_ms;
+    // dayjs diff('year') is calendar-aware; for our heuristic, anything
+    // strictly greater than 5*365 days bypasses excludes.
+    let within_span = span_years_ms <= 5.0 * 365.0 * 86_400_000.0;
+    if has_directives && times_valid && within_span {
         out.push_str("<g>");
         for ex in &layout.exclude_ranges {
             emit_exclude_rect(&mut out, ex, layout, id);

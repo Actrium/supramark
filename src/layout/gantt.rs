@@ -500,81 +500,188 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
     if !min_ms.is_finite() || !max_ms.is_finite() || max_ms <= min_ms {
         return Vec::new();
     }
-    // Pick an interval whose count is closest to 10 (d3 default).
     let span = max_ms - min_ms;
     let target: f64 = 10.0;
-    // d3-time interval candidates with multiples that d3-time-scale uses.
-    // Each tuple: (interval_ms, multiplier).
-    let candidates: &[(f64, f64)] = &[
-        (1.0, 1.0),
-        (1.0, 5.0),
-        (1.0, 10.0),
-        (1.0, 50.0),
-        (1.0, 100.0),
-        (1.0, 500.0),
-        (1000.0, 1.0),
-        (1000.0, 5.0),
-        (1000.0, 15.0),
-        (1000.0, 30.0),
-        (60_000.0, 1.0),
-        (60_000.0, 5.0),
-        (60_000.0, 15.0),
-        (60_000.0, 30.0),
-        (3_600_000.0, 1.0),
-        (3_600_000.0, 3.0),
-        (3_600_000.0, 6.0),
-        (3_600_000.0, 12.0),
-        (86_400_000.0, 1.0),
-        (86_400_000.0, 2.0),
-        (86_400_000.0, 7.0),
-        (86_400_000.0, 30.0),
-        (86_400_000.0, 90.0),
-        (86_400_000.0 * 365.0, 1.0),
+    let target_step = span / target;
+
+    // d3-time-scale tick interval table (ms step + interval kind).
+    // Source: d3-time-scale `tickIntervals`. Each row: (step_ms,
+    // interval_id) where interval_id is one of:
+    //   "ms", "s", "m", "h", "d", "w", "M", "y"
+    // and the multiplier baked into step_ms.
+    let candidates: &[(f64, &str, u32)] = &[
+        (1.0, "ms", 1),
+        (5.0, "ms", 5),
+        (25.0, "ms", 25),
+        (50.0, "ms", 50),
+        (100.0, "ms", 100),
+        (250.0, "ms", 250),
+        (500.0, "ms", 500),
+        (1_000.0, "s", 1),
+        (5_000.0, "s", 5),
+        (15_000.0, "s", 15),
+        (30_000.0, "s", 30),
+        (60_000.0, "m", 1),
+        (60_000.0 * 5.0, "m", 5),
+        (60_000.0 * 15.0, "m", 15),
+        (60_000.0 * 30.0, "m", 30),
+        (3_600_000.0, "h", 1),
+        (3_600_000.0 * 3.0, "h", 3),
+        (3_600_000.0 * 6.0, "h", 6),
+        (3_600_000.0 * 12.0, "h", 12),
+        (86_400_000.0, "d", 1),
+        (86_400_000.0 * 2.0, "d", 2),
+        (86_400_000.0 * 7.0, "w", 1),
+        (86_400_000.0 * 30.0, "M", 1),
+        (86_400_000.0 * 90.0, "M", 3),
+        (86_400_000.0 * 365.0, "y", 1),
     ];
-    let mut best_step = 86_400_000.0; // default: day
-    let mut best_diff = f64::INFINITY;
-    for (interval, mult) in candidates {
-        let step = interval * mult;
-        let count = span / step;
-        let diff = (count - target).abs();
-        if diff < best_diff {
-            best_diff = diff;
-            best_step = step;
+
+    // Bisect right: find first index where candidate.step > target_step.
+    let mut idx = candidates.len();
+    for (i, (step, _, _)) in candidates.iter().enumerate() {
+        if *step > target_step {
+            idx = i;
+            break;
         }
     }
-
-    // Generate ticks: start at the first multiple of `best_step`
-    // (aligned to day boundary if step is day-based) within domain.
-    let mut ticks: Vec<AxisTick> = Vec::new();
-    if best_step >= 86_400_000.0 - 1.0 {
-        // Day-aligned ticks (start of day in UTC).
-        let day_ms = 86_400_000.0;
-        let first_day = (min_ms / day_ms).ceil() * day_ms;
-        let mult_days = (best_step / day_ms).max(1.0);
-        let mut t = first_day;
-        // Align to day-multiple counted from epoch.
-        let n = (t / day_ms / mult_days).ceil();
-        t = n * mult_days * day_ms;
-        while t <= max_ms + 0.5 {
-            ticks.push(AxisTick {
-                time_ms: t,
-                label: format_time(t, axis_format),
-            });
-            t += best_step;
-        }
+    // Pick whichever of [idx-1] or [idx] is closer to target_step
+    // (geometric mean rule: idx if target_step / step[idx-1] >
+    // step[idx] / target_step).
+    let chosen = if idx == 0 {
+        0
+    } else if idx >= candidates.len() {
+        candidates.len() - 1
     } else {
-        // Sub-day step: start at multiple of step from epoch.
-        let n = (min_ms / best_step).ceil();
-        let mut t = n * best_step;
-        while t <= max_ms + 0.5 {
-            ticks.push(AxisTick {
-                time_ms: t,
-                label: format_time(t, axis_format),
-            });
-            t += best_step;
+        let prev = candidates[idx - 1].0;
+        let cur = candidates[idx].0;
+        if target_step / prev >= cur / target_step {
+            idx
+        } else {
+            idx - 1
         }
-    }
+    };
+    let (best_step, kind, _mult) = candidates[chosen];
 
+    // Generate ticks aligned to interval boundary.
+    let mut ticks: Vec<AxisTick> = Vec::new();
+    let aligned_starts = match kind {
+        "ms" => {
+            let n = (min_ms / best_step).ceil();
+            let mut t = n * best_step;
+            let mut v = Vec::new();
+            while t <= max_ms + 0.5 {
+                v.push(t);
+                t += best_step;
+            }
+            v
+        }
+        "s" => {
+            // align to second multiples
+            let n = (min_ms / best_step).ceil();
+            let mut t = n * best_step;
+            let mut v = Vec::new();
+            while t <= max_ms + 0.5 {
+                v.push(t);
+                t += best_step;
+            }
+            v
+        }
+        "m" | "h" => {
+            let n = (min_ms / best_step).ceil();
+            let mut t = n * best_step;
+            let mut v = Vec::new();
+            while t <= max_ms + 0.5 {
+                v.push(t);
+                t += best_step;
+            }
+            v
+        }
+        "d" => {
+            // Day-aligned (UTC midnight).
+            let day_ms = 86_400_000.0;
+            let mult_days = best_step / day_ms;
+            let n = (min_ms / day_ms / mult_days).ceil();
+            let mut t = n * mult_days * day_ms;
+            let mut v = Vec::new();
+            while t <= max_ms + 0.5 {
+                v.push(t);
+                t += best_step;
+            }
+            v
+        }
+        "w" => {
+            // Week-aligned to Sunday (d3 default `timeWeek`).
+            // 1970-01-04 (Sunday) is 3 days after epoch.
+            let day_ms = 86_400_000.0;
+            let sunday_anchor = 3.0 * day_ms;
+            let n = ((min_ms - sunday_anchor) / best_step).ceil();
+            let mut t = sunday_anchor + n * best_step;
+            let mut v = Vec::new();
+            while t <= max_ms + 0.5 {
+                v.push(t);
+                t += best_step;
+            }
+            v
+        }
+        "M" => {
+            // Month aligned: walk by calendar months from min.
+            let mult = (best_step / (86_400_000.0 * 30.0)).round() as u32;
+            let (y0, m0, _, _, _, _, _) = ms_to_date(min_ms);
+            let mut y = y0;
+            let mut m = m0;
+            // Round up to next month if min isn't on month boundary.
+            let min_floor_ms = date_to_ms(y, m, 1, 0, 0, 0, 0);
+            if min_floor_ms < min_ms {
+                m += mult;
+                while m > 12 {
+                    m -= 12;
+                    y += 1;
+                }
+            } else if min_floor_ms > min_ms {
+                // shouldn't happen
+            }
+            let mut v = Vec::new();
+            loop {
+                let t = date_to_ms(y, m, 1, 0, 0, 0, 0);
+                if t > max_ms + 0.5 {
+                    break;
+                }
+                v.push(t);
+                m += mult;
+                while m > 12 {
+                    m -= 12;
+                    y += 1;
+                }
+            }
+            v
+        }
+        "y" => {
+            let (y0, _, _, _, _, _, _) = ms_to_date(min_ms);
+            let mut y = y0;
+            // round up
+            if date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
+                y += 1;
+            }
+            let mut v = Vec::new();
+            loop {
+                let t = date_to_ms(y, 1, 1, 0, 0, 0, 0);
+                if t > max_ms + 0.5 {
+                    break;
+                }
+                v.push(t);
+                y += 1;
+            }
+            v
+        }
+        _ => Vec::new(),
+    };
+    for t in aligned_starts {
+        ticks.push(AxisTick {
+            time_ms: t,
+            label: format_time(t, axis_format),
+        });
+    }
     ticks
 }
 
