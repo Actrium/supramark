@@ -269,8 +269,13 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
     }
 
     // Strict `YYYY-MM-DD` (10 chars, hyphens at positions 4 and 7).
+    // Strict mode failure falls through to the lenient `new Date(str)`
+    // path that upstream uses as fallback.
     if fmt == "YYYY-MM-DD" {
-        return parse_iso_date(s);
+        if let Some(t) = parse_iso_date(s) {
+            return Some(t);
+        }
+        return parse_iso_date_lenient(s);
     }
 
     // YYYY-MM-DD with time component(s).
@@ -289,7 +294,9 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
     if let Some(t) = parse_iso_date(s) {
         return Some(t);
     }
-    None
+    // Final fallback mirrors upstream's `new Date(str)` path — try a
+    // lenient ISO parse so things like "2019-09-1" still work.
+    parse_iso_date_lenient(s)
 }
 
 fn parse_time_suffix(s: &str) -> (u32, u32, u32) {
@@ -314,6 +321,31 @@ fn parse_iso_date(s: &str) -> Option<f64> {
     let y: i32 = std::str::from_utf8(&bytes[0..4]).ok()?.parse().ok()?;
     let m: u32 = std::str::from_utf8(&bytes[5..7]).ok()?.parse().ok()?;
     let d: u32 = std::str::from_utf8(&bytes[8..10]).ok()?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some(date_to_ms(y, m, d, 0, 0, 0, 0))
+}
+
+/// Lenient ISO parse — accepts `YYYY-MM-D` or `YYYY-M-DD` etc. used as
+/// `new Date(str)` fallback in upstream when strict parsing fails.
+fn parse_iso_date_lenient(s: &str) -> Option<f64> {
+    if let Some(v) = parse_iso_date(s) {
+        return Some(v);
+    }
+    let parts: Vec<&str> = s.splitn(3, '-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: i32 = parts[0].parse().ok()?;
+    let m: u32 = parts[1].parse().ok()?;
+    // Day part may have trailing time-of-day separated by `T` or space.
+    let d_str = parts[2];
+    let d_only: &str = d_str
+        .find(|c: char| c == 'T' || c == ' ')
+        .map(|i| &d_str[..i])
+        .unwrap_or(d_str);
+    let d: u32 = d_only.parse().ok()?;
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;
     }
