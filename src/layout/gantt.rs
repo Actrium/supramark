@@ -756,6 +756,40 @@ fn anchor_for_iso_weekday(target_dow: u32) -> f64 {
     (offset_days as f64) * day_ms
 }
 
+/// d3-array `tickStep(start, stop, count)` — returns the increment used by
+/// d3 to step between ticks for a linear domain. Used by d3-time when the
+/// year candidate is the only viable bucket (very long domain spans).
+fn year_tick_step(start: f64, stop: f64, count: f64) -> f64 {
+    let reverse = stop < start;
+    let (a, b) = if reverse { (stop, start) } else { (start, stop) };
+    let inc = tick_increment(a, b, count);
+    let signed = if reverse { -1.0 } else { 1.0 };
+    signed * if inc < 0.0 { 1.0 / -inc } else { inc }
+}
+
+fn tick_increment(start: f64, stop: f64, count: f64) -> f64 {
+    let step = (stop - start) / count.max(0.0);
+    let power = step.log10().floor();
+    let error = step / 10f64.powf(power);
+    let e10 = 50f64.sqrt();
+    let e5 = 10f64.sqrt();
+    let e2 = 2f64.sqrt();
+    let factor = if error >= e10 {
+        10.0
+    } else if error >= e5 {
+        5.0
+    } else if error >= e2 {
+        2.0
+    } else {
+        1.0
+    };
+    if power < 0.0 {
+        -10f64.powf(-power) / factor
+    } else {
+        10f64.powf(power) * factor
+    }
+}
+
 fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &str) -> Vec<AxisTick> {
     if !min_ms.is_finite() || !max_ms.is_finite() || max_ms <= min_ms {
         return Vec::new();
@@ -936,11 +970,30 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
             v
         }
         "y" => {
+            // d3-time `year.every(k)` — k comes from `tickStep(start_year,
+            // stop_year, count)` when the requested target is larger than
+            // the largest fixed candidate (1 year). For shorter spans k=1.
+            // We mirror d3's behaviour: pick `k` as the year multiplier
+            // computed from d3-array's `tickSpec` over fractional years.
+            let duration_year_ms = 86_400_000.0 * 365.0;
+            let start_year_f = min_ms / duration_year_ms;
+            let stop_year_f = max_ms / duration_year_ms;
+            let count = 10.0;
+            let k = year_tick_step(start_year_f, stop_year_f, count).max(1.0) as i32;
+            let k = k.max(1) as i32;
+
             let (y0, _, _, _, _, _, _) = ms_to_date(min_ms);
+            // Align first candidate year to a multiple of k (relative to 0).
             let mut y = y0;
-            // round up
-            if date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
-                y += 1;
+            // round up to next k-aligned year >= min.
+            // d3 `timeYear.every(k)` produces years where (year % k == 0).
+            let rem = ((y as i64) % (k as i64) + k as i64) % k as i64;
+            if rem != 0 {
+                y += (k - rem as i32) as i32;
+            }
+            // If the resulting Jan 1 is still before min_ms, advance one k step.
+            while y as i32 != 0 && date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
+                y += k;
             }
             let mut v = Vec::new();
             loop {
@@ -949,7 +1002,7 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
                     break;
                 }
                 v.push(t);
-                y += 1;
+                y += k;
             }
             v
         }

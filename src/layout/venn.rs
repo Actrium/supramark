@@ -62,6 +62,11 @@ pub struct AreaLayout {
     /// Text centre (Math.floor in JS).
     pub text_x: i64,
     pub text_y: i64,
+    /// Raw float text centre (matches upstream `area.text.x/y` from
+    /// venn.js's `computeTextCentres`). Used by the text-node
+    /// foreignObject placement which needs the unfloored values.
+    pub text_x_f: f64,
+    pub text_y_f: f64,
     /// Set the label uses for the circle case (single-set: id; otherwise empty
     /// unless data.label is set).
     pub render_label: String,
@@ -199,6 +204,8 @@ pub fn layout(d: &VennDiagram, theme: &ThemeVariables) -> Result<VennLayout> {
             path,
             text_x: centre.0.floor() as i64,
             text_y: centre.1.floor() as i64,
+            text_x_f: centre.0,
+            text_y_f: centre.1,
             render_label,
         });
     }

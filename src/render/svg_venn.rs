@@ -153,8 +153,182 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
         }
     }
 
+    // ── Text nodes (foreignObject) ──────────────────────────────────
+    // Mirrors `renderTextNodes` in upstream `vennRenderer.ts`.
+    if !d.text_nodes.is_empty() {
+        render_text_nodes(&mut out, d, l, &style_by_key, scale);
+    }
+
     out.push_str("</g></svg>");
     Ok(out)
+}
+
+/// Render `<g class="venn-text-nodes">…</g>` block from `d.text_nodes`,
+/// mirroring `renderTextNodes` in `vennRenderer.ts`.
+fn render_text_nodes(
+    out: &mut String,
+    d: &crate::model::venn::VennDiagram,
+    l: &crate::layout::venn::VennLayout,
+    style_by_key: &std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    scale: f64,
+) {
+    use crate::layout::venn::AreaLayout;
+
+    // Group text nodes by their (sorted) sets-key. Preserve the insertion
+    // order of the FIRST node in each group so the output matches upstream
+    // (which uses `Map`'s iteration order).
+    let mut order: Vec<String> = Vec::new();
+    let mut nodes_by_area: std::collections::BTreeMap<String, Vec<&crate::model::venn::VennTextNode>> =
+        std::collections::BTreeMap::new();
+    for node in &d.text_nodes {
+        let key = node.sets.join("|");
+        if !nodes_by_area.contains_key(&key) {
+            order.push(key.clone());
+        }
+        nodes_by_area.entry(key).or_default().push(node);
+    }
+
+    // Look up areas by their (sorted-sets) join("|") key.
+    let mut areas_by_key: std::collections::BTreeMap<String, &AreaLayout> =
+        std::collections::BTreeMap::new();
+    for a in &l.areas {
+        let mut sorted = a.sets.clone();
+        sorted.sort();
+        areas_by_key.insert(sorted.join("|"), a);
+    }
+
+    out.push_str(r#"<g class="venn-text-nodes">"#);
+
+    for key in &order {
+        let nodes = match nodes_by_area.get(key) {
+            Some(v) => v,
+            None => continue,
+        };
+        let area = match areas_by_key.get(key) {
+            Some(a) => *a,
+            None => continue, // upstream's `if (!area?.text)` guard
+        };
+
+        let center_x = area.text_x_f;
+        let center_y = area.text_y_f;
+        // Math.min over circle radii (NaN if empty — no text would render then).
+        let min_radius = area
+            .circles
+            .iter()
+            .map(|c| c.radius)
+            .fold(f64::INFINITY, f64::min);
+        let inner_radius_raw = area
+            .circles
+            .iter()
+            .map(|c| c.radius - ((center_x - c.x).hypot(center_y - c.y)))
+            .fold(f64::INFINITY, f64::min);
+        let mut inner_radius = if inner_radius_raw.is_finite() {
+            inner_radius_raw.max(0.0)
+        } else {
+            0.0
+        };
+        if inner_radius == 0.0 && min_radius.is_finite() {
+            inner_radius = min_radius * 0.6;
+        }
+
+        let font_size = 40.0 * scale;
+        out.push_str(&format!(
+            r#"<g class="venn-text-area" font-size="{fs}px">"#,
+            fs = num(font_size),
+        ));
+
+        if d.use_debug_layout {
+            out.push_str(&format!(
+                r#"<circle class="venn-text-debug-circle" cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="purple" stroke-width="{sw}" stroke-dasharray="{da1} {da2}"></circle>"#,
+                cx = num(center_x),
+                cy = num(center_y),
+                r = num(inner_radius),
+                sw = num(1.5 * scale),
+                da1 = num(6.0 * scale),
+                da2 = num(4.0 * scale),
+            ));
+        }
+
+        let inner_width = (80.0 * scale).max(inner_radius * 2.0 * 0.95);
+        let inner_height = (60.0 * scale).max(inner_radius * 2.0 * 0.95);
+        let has_label = area
+            .label
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let label_offset_base = if has_label {
+            (32.0 * scale).min(inner_radius * 0.25)
+        } else {
+            0.0
+        };
+        let label_offset = label_offset_base
+            + if nodes.len() <= 2 { 30.0 * scale } else { 0.0 };
+        let start_x = center_x - inner_width / 2.0;
+        let start_y = center_y - inner_height / 2.0 + label_offset;
+        let cols = ((nodes.len() as f64).sqrt().ceil() as usize).max(1);
+        let rows = ((nodes.len() as f64) / (cols as f64)).ceil() as usize;
+        let rows = rows.max(1);
+        let cell_width = inner_width / (cols as f64);
+        let cell_height = inner_height / (rows as f64);
+
+        for (i, node) in nodes.iter().enumerate() {
+            let col = (i % cols) as f64;
+            let row = (i / cols) as f64;
+            let x = start_x + cell_width * (col + 0.5);
+            let y = start_y + cell_height * (row + 0.5);
+
+            if d.use_debug_layout {
+                out.push_str(&format!(
+                    r#"<rect class="venn-text-debug-cell" x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="teal" stroke-width="{sw}" stroke-dasharray="{da1} {da2}"></rect>"#,
+                    x = num(start_x + cell_width * col),
+                    y = num(start_y + cell_height * row),
+                    w = num(cell_width),
+                    h = num(cell_height),
+                    sw = num(1.0 * scale),
+                    da1 = num(4.0 * scale),
+                    da2 = num(3.0 * scale),
+                ));
+            }
+
+            let box_width = cell_width * 0.9;
+            let box_height = cell_height * 0.9;
+            let fo_x = x - box_width / 2.0;
+            let fo_y = y - box_height / 2.0;
+
+            // Text colour comes from `style <id> color:...` — keyed on the
+            // node's own id (single-element targets list).
+            let text_color = style_by_key
+                .get(&node.id)
+                .and_then(|m| m.get("color"))
+                .cloned();
+
+            // Body of the <span style="…">: trailing `color: <c>;` only when
+            // the node has a custom colour. Mirrors d3 `.style('color', …)`
+            // which appends a single declaration without leading whitespace.
+            let mut span_style = String::from(
+                "display: flex; width: 100%; height: 100%; white-space: normal; align-items: center; justify-content: center; text-align: center; overflow-wrap: normal; word-break: normal;",
+            );
+            if let Some(c) = &text_color {
+                span_style.push_str(&format!(" color: {c};"));
+            }
+
+            let label_text = node.label.clone().unwrap_or_else(|| node.id.clone());
+
+            out.push_str(&format!(
+                r#"<foreignObject class="venn-text-node-fo" width="{w}" height="{h}" x="{x}" y="{y}" overflow="visible"><span class="venn-text-node" style="{style}">{label}</span></foreignObject>"#,
+                w = num(box_width),
+                h = num(box_height),
+                x = num(fo_x),
+                y = num(fo_y),
+                style = span_style,
+                label = escape_text(&label_text),
+            ));
+        }
+
+        out.push_str("</g>");
+    }
+
+    out.push_str("</g>");
 }
 
 /// CSS style block — fixed shape with theme-derived colors.
