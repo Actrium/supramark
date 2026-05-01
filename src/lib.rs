@@ -254,6 +254,16 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
             let l = layout::flowchart::layout(&d, &theme)?;
             render::svg_flowchart::render(&d, &l, &theme, id)
         }
+        detect::DiagramKind::Venn => {
+            let d = parser::venn::parse(source)?;
+            let effective_theme = if let Some(name) = d.theme_name.as_deref() {
+                theme::get_theme(name)
+            } else {
+                theme.clone()
+            };
+            let l = layout::venn::layout(&d, &effective_theme)?;
+            render::svg_venn::render(&d, &l, &effective_theme, id)
+        }
         detect::DiagramKind::Gantt => {
             let d = parser::gantt::parse(source)?;
             let effective_theme = if let Some(name) = d.theme_name.as_deref() {
