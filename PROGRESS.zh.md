@@ -1,6 +1,6 @@
 # 阶段进展
 
-截至 Wave 7 中期（gantt / venn 落地，c4 / mindmap / gitGraph parser scaffolding，gitGraph 已 7/129 byte-exact）。
+截至 Wave 8（c4 11/11 + sequence 27/150 + gantt year-tick + mindmap single-node + dagre stadium polygon + roughjs path/hachure groundwork + venn libm/khroma 修正）。
 
 > 本项目只维护中文版 PROGRESS。
 
@@ -8,14 +8,39 @@
 
 | 指标 | 值 |
 |---|---:|
-| Diagram 完整 byte-exact（≥99%） | **20 / 24** |
-| Diagram parser/layout/render 可调用（含 stub 或部分） | **23 / 24** |
-| 完全未实现 diagram | **1**（sequence） |
-| sweep_all byte-exact 通过率（排除 known_ignored 后） | **953 / 1111 ≈ 85.8%** |
-| 已 known_ignored fixture 总数 | 178（含 c4 11 + mindmap 25 + gitGraph 122 + venn 24 + 各类 16） |
-| Lib unit 测试 | **639 passed / 0 failed / 0 ignored** |
+| Diagram 完整 byte-exact（≥99%） | **21 / 24** |
+| Diagram parser/layout/render 可调用（含 stub 或部分） | **24 / 24** |
+| 完全未实现 diagram | **0** |
+| sweep_all byte-exact 通过率（排除 known_ignored 后） | **1135 / 1135 = 100%** |
+| 已 known_ignored fixture 总数 | 195（sequence 123 + flowchart 27 + mindmap 18 + venn 18 + 其它 9） |
+| Lib unit 测试 | **648 passed / 0 failed / 0 ignored** |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
-| 项目代码总行数 | ~63,000 行 |
+| 项目代码总行数 | ~70,000 行 |
+
+## Wave 8 进展（本轮新增 +182：953 → 1135 byte-exact）
+
+通过 6 路并行子 agent + Wave 5 4 路并行 agent，分阶段推进：
+
+### Wave 4（c4 / sequence phase 1 / gitGraph roughjs / venn libm / gantt year-tick）
+
+- **c4 0/11 → 11/11**：bespoke layout + render 移植，处理 `<br/>` descr 拆分、screen.availWidth=0 wrap、techn fontSize=12 fallback、interleave shape/boundary DFS。
+- **sequence 0/150 → 4/150**：renderer phase 1 scaffolding（DOM 顺序 + max-message-width margin）。
+- **roughjs 引擎落地**：移植 `path()` 解析器（M/L/H/V/Z/C 子集）+ stadium polygon body，未来 ishikawa/venn handDrawn 路径的前置依赖。
+- **venn +1**：`khroma` colour adjustment 修正（cypress/07）。
+- **gantt +2**：year-multiplier tick 算法。
+
+### Wave 5（4 路并行：dagre / sequence phase 2 / mindmap / roughjs hachure）
+
+- **dagre stadium polygon +6**：诊断出"0.008 ULP dagre drift"实为 stadium 102-point polygon 的 `getBBox().width` 比 analytical width 短 `2r·(1-cos(π/98)) ≈ 0.0161 px`；将修正 baked 进 `measure_vertex_box`，恢复下游 polygon 几何。同时补齐 stadium 的 `classDef` / `userNodeOverrides` 通路。
+- **sequence phase 2 +23**（4 → 27/150）：actor stickman / `<br>` 多行 / 单行 note / ZWS 占位 / `wrap-label` + `@{ "alias": ... }` / `mirrorActors=false` / 空 items diagram。
+- **mindmap single-node +7**（0 → 7/25）：probe-derived `centre = (W/2+15, H/2+15)` cose-bilkent 单节点 fast path + 完整 SVG envelope（viewBox + 12 套 section CSS + marker defs + drop-shadow filter）+ default/rect/icon labelBkg 形状。多节点物理引擎仍待移植（~3000 LOC）。
+- **roughjs hachure**：移植 hachure-fill scan-line 算法（530 行 + 9 byte-exact 单测），groundwork 入库；ishikawa/04 + venn/10/11/12 真正解锁还需 `rough.path()` getBBox 模拟器 + ellipse 移植。
+
+### 工程方法论
+
+- **多 agent 并发隔离**：每个 agent 一个 git worktree，文件域互不重叠（dagre→flowchart.rs、sequence→svg_sequence*.rs、mindmap→mindmap.rs、roughjs→rough.rs）。基于 72bb088 分别起 90min 硬上限。
+- **byte-exact 子 agent 必须 commit-early**：prompt 写死"首破即刻 commit 退出"，避免贪心挖到时限到了一无所获。
+- **check_ignored 审计工具**：`src/bin/check_ignored.rs` 跑遍 known_ignored 报 false positives / no_reference / errored，每次合并后必跑。本 wave 0 false positives。
 
 ## Wave 7 进展（本轮新增）
 
