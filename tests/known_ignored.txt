@@ -105,3 +105,125 @@ ext_fixtures/cypress/mindmap/22.mmd	Mindmap uses cose-bilkent force-directed lay
 ext_fixtures/cypress/mindmap/23.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/demos/mindmap/01.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
 ext_fixtures/demos/mindmap/02.mmd	Mindmap uses cose-bilkent force-directed layout (cytoscape extension); byte-exact parity requires porting the physics simulation engine. Parser is wired; layout/render pending.
+ext_fixtures/cypress/gitGraph/05.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/06.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/07.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/08.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/100.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/101.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/102.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/103.mmd	MVP scope: gitGraph custom main-branch name (`mainBranchName: trunk`) — requires reading `gitGraph.mainBranchName` from the init directive / config; not yet ported.
+ext_fixtures/cypress/gitGraph/104.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/105.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/11.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/12.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/13.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/14.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/15.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/16.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/18.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/19.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/20.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/21.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/22.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/23.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/24.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/25.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/26.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/27.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/28.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/29.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/30.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/31.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/32.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/33.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/34.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/35.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/36.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/37.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/38.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/39.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/40.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/41.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/42.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/43.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/44.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/45.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/46.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/47.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/48.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/49.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/50.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/51.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/52.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/53.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/54.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/55.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/56.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/57.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/58.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/59.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/60.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/61.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/62.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/63.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/64.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/65.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/66.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/67.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/68.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/69.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/70.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/71.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/72.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/73.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/74.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/75.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/76.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/77.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/78.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/79.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/80.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/81.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/82.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/83.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/cypress/gitGraph/84.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/85.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/86.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/87.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/88.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/89.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/90.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/cypress/gitGraph/91.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/92.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/93.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/94.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/cypress/gitGraph/95.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/96.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/97.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/98.mmd	MVP scope: gitGraph `TB`/`BT` orientation — vertical layout swaps the role of the lane axis and changes label/tag transforms; not yet ported.
+ext_fixtures/cypress/gitGraph/99.mmd	MVP scope: gitGraph multi-branch layout (`branch` / `checkout` to non-main) — needs lane-assignment and per-branch HEAD tracking the current LR-only single-branch port has not yet ported.
+ext_fixtures/demos/gitGraph/01.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/02.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/03.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/04.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/05.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/06.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/07.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/08.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/09.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/10.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/11.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/12.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/13.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/14.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/15.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/16.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/17.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/18.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/19.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/20.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/21.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/22.mmd	MVP scope: gitGraph `merge` keyword — requires merge-commit geometry (double-circle bullet + curved arrow back to source branch); not yet ported.
+ext_fixtures/demos/gitGraph/23.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.
+ext_fixtures/demos/gitGraph/24.mmd	MVP scope: gitGraph `cherry-pick` keyword — requires cherry-pick bullet (split lines + dual highlight dots) and inheriting parent commit relations; not yet ported.

@@ -299,9 +299,19 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
             let l = layout::mindmap::layout(&d, &effective_theme)?;
             render::svg_mindmap::render(&d, &l, &effective_theme, id)
         }
+        detect::DiagramKind::GitGraph => {
+            let d = parser::gitgraph::parse(source)?;
+            let effective_theme = if let Some(name) = d.theme_name.as_deref() {
+                theme::get_theme(name)
+            } else {
+                theme.clone()
+            };
+            let l = layout::gitgraph::layout(&d, &effective_theme)?;
+            render::svg_gitgraph::render(&d, &l, &effective_theme, id)
+        }
         detect::DiagramKind::Info => render::svg_info::render(&theme, id),
         other => Err(MermaidError::Unsupported(format!(
-            "diagram kind '{}' not yet implemented — Wave 7: sequence/gitgraph",
+            "diagram kind '{}' not yet implemented — Wave 7: sequence",
             other.id()
         ))),
     }

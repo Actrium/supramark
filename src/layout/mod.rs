@@ -4,6 +4,7 @@
 
 pub mod dagre_bridge;
 pub mod gantt;
+pub mod gitgraph;
 pub mod intersect;
 pub mod packet;
 pub mod pie;

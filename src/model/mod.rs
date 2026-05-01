@@ -9,6 +9,7 @@
 pub mod richtext;
 
 pub mod gantt;
+pub mod gitgraph;
 pub mod packet;
 pub mod pie;
 pub mod radar;
