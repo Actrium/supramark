@@ -43,6 +43,7 @@ pub enum DiagramLayout {
     Venn(()),
 }
 pub mod block;
+pub mod c4;
 pub mod class;
 pub mod er;
 pub mod flowchart;
