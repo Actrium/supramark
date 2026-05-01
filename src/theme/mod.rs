@@ -849,6 +849,104 @@ pub fn apply_theme_variables(theme: &mut ThemeVariables, vars: &serde_json::Valu
     over!("noteTextColor", theme.note_text_color);
     over!("noteBorderColor", theme.note_border_color);
 
+    // Per-scale palette overrides (cScale0..11, cScaleInv0..11). These
+    // drive the timeline / mindmap / kanban section colors. When the user
+    // provides a `cScaleN`, the matching `cScaleInvN` slot must be
+    // recomputed (`invert(darken(cScaleN, 25 or 75))`) unless the user
+    // also supplied it explicitly — mirroring upstream theme-base.js
+    // `updateColors()`.
+    macro_rules! over_idx {
+        ($key:literal, $idx:tt, $slot_field:ident) => {
+            if let Some(serde_json::Value::String(s)) = map.get($key) {
+                theme.$slot_field = Some(s.clone());
+            }
+        };
+    }
+    over_idx!("cScale0", 0, c_scale0);
+    over_idx!("cScale1", 1, c_scale1);
+    over_idx!("cScale2", 2, c_scale2);
+    over_idx!("cScale3", 3, c_scale3);
+    over_idx!("cScale4", 4, c_scale4);
+    over_idx!("cScale5", 5, c_scale5);
+    over_idx!("cScale6", 6, c_scale6);
+    over_idx!("cScale7", 7, c_scale7);
+    over_idx!("cScale8", 8, c_scale8);
+    over_idx!("cScale9", 9, c_scale9);
+    over_idx!("cScale10", 10, c_scale10);
+    over_idx!("cScale11", 11, c_scale11);
+    over_idx!("cScaleInv0", 0, c_scale_inv0);
+    over_idx!("cScaleInv1", 1, c_scale_inv1);
+    over_idx!("cScaleInv2", 2, c_scale_inv2);
+    over_idx!("cScaleInv3", 3, c_scale_inv3);
+    over_idx!("cScaleInv4", 4, c_scale_inv4);
+    over_idx!("cScaleInv5", 5, c_scale_inv5);
+    over_idx!("cScaleInv6", 6, c_scale_inv6);
+    over_idx!("cScaleInv7", 7, c_scale_inv7);
+    over_idx!("cScaleInv8", 8, c_scale_inv8);
+    over_idx!("cScaleInv9", 9, c_scale_inv9);
+    over_idx!("cScaleInv10", 10, c_scale_inv10);
+    over_idx!("cScaleInv11", 11, c_scale_inv11);
+
+    // Recompute cScaleInvN for any overridden cScaleN where the user
+    // didn't supply cScaleInvN explicitly. Upstream theme-base.js applies
+    // `darken(cScaleN, 25)` (non-darkMode) or `darken(cScaleN, 75)`
+    // (darkMode) before the inversion; we mirror that.
+    let darken_amount = if dark_mode { 75.0 } else { 25.0 };
+    let scale_pairs = [
+        ("cScale0", "cScaleInv0"),
+        ("cScale1", "cScaleInv1"),
+        ("cScale2", "cScaleInv2"),
+        ("cScale3", "cScaleInv3"),
+        ("cScale4", "cScaleInv4"),
+        ("cScale5", "cScaleInv5"),
+        ("cScale6", "cScaleInv6"),
+        ("cScale7", "cScaleInv7"),
+        ("cScale8", "cScaleInv8"),
+        ("cScale9", "cScaleInv9"),
+        ("cScale10", "cScaleInv10"),
+        ("cScale11", "cScaleInv11"),
+    ];
+    for (idx, (scale_key, inv_key)) in scale_pairs.iter().enumerate() {
+        if !map.contains_key(*scale_key) || map.contains_key(*inv_key) {
+            continue;
+        }
+        let scale_val = match idx {
+            0 => theme.c_scale0.clone(),
+            1 => theme.c_scale1.clone(),
+            2 => theme.c_scale2.clone(),
+            3 => theme.c_scale3.clone(),
+            4 => theme.c_scale4.clone(),
+            5 => theme.c_scale5.clone(),
+            6 => theme.c_scale6.clone(),
+            7 => theme.c_scale7.clone(),
+            8 => theme.c_scale8.clone(),
+            9 => theme.c_scale9.clone(),
+            10 => theme.c_scale10.clone(),
+            11 => theme.c_scale11.clone(),
+            _ => None,
+        };
+        let Some(scale_val) = scale_val else {
+            continue;
+        };
+        let darkened = color::darken(&scale_val, darken_amount);
+        let inv = color::invert(&darkened);
+        match idx {
+            0 => theme.c_scale_inv0 = Some(inv),
+            1 => theme.c_scale_inv1 = Some(inv),
+            2 => theme.c_scale_inv2 = Some(inv),
+            3 => theme.c_scale_inv3 = Some(inv),
+            4 => theme.c_scale_inv4 = Some(inv),
+            5 => theme.c_scale_inv5 = Some(inv),
+            6 => theme.c_scale_inv6 = Some(inv),
+            7 => theme.c_scale_inv7 = Some(inv),
+            8 => theme.c_scale_inv8 = Some(inv),
+            9 => theme.c_scale_inv9 = Some(inv),
+            10 => theme.c_scale_inv10 = Some(inv),
+            11 => theme.c_scale_inv11 = Some(inv),
+            _ => {}
+        }
+    }
+
     // darkMode-driven derivations — applied AFTER direct overrides so
     // explicit `textColor` / `primaryTextColor` keys still win.
     if dark_mode {

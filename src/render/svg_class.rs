@@ -1022,8 +1022,16 @@ fn render_node(id: &str, n: &LayoutNode, theme: &ThemeVariables, d: &ClassDiagra
     }
 
     // basic label-container outer-path: rough.js rectangle (two paths).
-    let fill_attr = style_overrides.fill.as_deref().unwrap_or("#ECECFF");
-    let stroke_attr = style_overrides.stroke.as_deref().unwrap_or("#9370DB");
+    // Upstream classBox.ts pulls `mainBkg` / `nodeBorder` for the fill /
+    // stroke defaults; theme overrides (e.g. base + user `primaryColor`)
+    // must propagate, so we resolve via theme rather than hard-code.
+    let main_bkg_default = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
+    let node_border_default = theme.node_border.as_deref().unwrap_or("#9370DB");
+    let fill_attr = style_overrides.fill.as_deref().unwrap_or(main_bkg_default);
+    let stroke_attr = style_overrides
+        .stroke
+        .as_deref()
+        .unwrap_or(node_border_default);
     let stroke_w_attr = style_overrides.stroke_width.as_deref().unwrap_or("1.3");
     out.push_str(r#"<g class="basic label-container outer-path">"#);
     out.push_str(&format!(

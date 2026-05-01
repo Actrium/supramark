@@ -102,6 +102,21 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
             } else {
                 theme.clone()
             };
+            // Detect whether this theme recomputes cScaleInv from cScale
+            // when the user overrides cScale. Upstream's default/forest/dark
+            // themes call `updateColors()` in their constructor, baking the
+            // derived `cScaleInv` into the prototype before any user override
+            // arrives, so user-provided `cScale*` does NOT propagate to
+            // `cScaleInv*`. Base/neutral DON'T call updateColors in the
+            // constructor — their `cScaleInv` is only ever computed from the
+            // current `cScale`, so a user override DOES propagate.
+            let resolved_theme_name = d
+                .theme_name
+                .as_deref()
+                .or(pre.config.theme.as_deref())
+                .unwrap_or("default");
+            let theme_recomputes_inv =
+                matches!(resolved_theme_name, "base" | "neutral");
             for (i, v) in d.theme_overrides.c_scale.iter().enumerate() {
                 if let Some(s) = v {
                     match i {
@@ -118,6 +133,25 @@ pub fn convert_with_id(source: &str, id: &str) -> Result<String, MermaidError> {
                         10 => effective_theme.c_scale10 = Some(s.clone()),
                         11 => effective_theme.c_scale11 = Some(s.clone()),
                         _ => {}
+                    }
+                    if theme_recomputes_inv {
+                        let darkened = theme::color::darken(s, 25.0);
+                        let inv = theme::color::invert(&darkened);
+                        match i {
+                            0 => effective_theme.c_scale_inv0 = Some(inv),
+                            1 => effective_theme.c_scale_inv1 = Some(inv),
+                            2 => effective_theme.c_scale_inv2 = Some(inv),
+                            3 => effective_theme.c_scale_inv3 = Some(inv),
+                            4 => effective_theme.c_scale_inv4 = Some(inv),
+                            5 => effective_theme.c_scale_inv5 = Some(inv),
+                            6 => effective_theme.c_scale_inv6 = Some(inv),
+                            7 => effective_theme.c_scale_inv7 = Some(inv),
+                            8 => effective_theme.c_scale_inv8 = Some(inv),
+                            9 => effective_theme.c_scale_inv9 = Some(inv),
+                            10 => effective_theme.c_scale_inv10 = Some(inv),
+                            11 => effective_theme.c_scale_inv11 = Some(inv),
+                            _ => {}
+                        }
                     }
                 }
             }

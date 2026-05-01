@@ -132,6 +132,18 @@ pub fn re_derive_base(
         }
     }
 
+    // classText = classText || textColor
+    // Note: our base/neutral/default themes pre-bake `class_text` from
+    // the snapshot run, so we must overwrite it here when the user
+    // didn't explicitly supply `classText` — matching upstream's
+    // `theme-base.js#updateColors` semantics where classText is
+    // undefined until updateColors() runs against the merged seed.
+    if !user_has(overrides, "classText") {
+        if let Some(tc) = theme.text_color.clone() {
+            theme.class_text = Some(tc);
+        }
+    }
+
     // border2 = border2 || tertiaryBorderColor
     if !user_has(overrides, "border2") && !tertiary_border.is_empty() {
         theme.border2 = Some(tertiary_border.clone());

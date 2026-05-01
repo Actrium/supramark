@@ -455,8 +455,16 @@ fn build_style_block(
     css.push_str(&format!(
         r#"#{id} [data-look="neo"].icon-shape .icon-neo path{{stroke:{border};filter:{drop_shadow};}}"#
     ));
+    // Upstream emits the theme's default font family in `:root`, not the
+    // user-overridden one. The SVG text inside the diagram uses the user
+    // font; this CSS variable always reflects the theme baseline.
+    let root_font_family = theme
+        .font_family
+        .as_deref()
+        .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
+    let root_font_min = minify_font_family(root_font_family);
     css.push_str(&format!(
-        "#{id} :root{{--mermaid-font-family:{font_family_min};}}"
+        "#{id} :root{{--mermaid-font-family:{root_font_min};}}"
     ));
     css.push_str("</style>");
     css
