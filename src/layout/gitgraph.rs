@@ -26,6 +26,8 @@ use crate::theme::ThemeVariables;
 
 pub const LAYOUT_OFFSET: f64 = 10.0;
 pub const COMMIT_STEP: f64 = 40.0;
+/// `defaultPos` from upstream — the initial cursor offset for TB/BT.
+pub const DEFAULT_POS: f64 = 30.0;
 
 #[derive(Debug, Clone)]
 pub struct BranchPosition {
@@ -58,6 +60,9 @@ pub struct CommitGeom {
 #[derive(Debug, Clone)]
 pub struct GitGraphLayout {
     pub orientation: Orientation,
+    /// True for `gitGraph TB:` (top-to-bottom) — the renderer flips its
+    /// per-element math when this is set.
+    pub is_tb: bool,
     /// Branches in **render** order (sorted by `order` then insertion).
     pub branches: Vec<BranchPosition>,
     pub commits: Vec<CommitGeom>,
@@ -103,20 +108,21 @@ fn sort_branches_by_order(d: &GitGraphDiagram) -> Vec<usize> {
 }
 
 pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLayout> {
-    if d.orientation != Orientation::LR {
+    if matches!(d.orientation, Orientation::BT) {
         return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: TB/BT orientations not yet implemented".into(),
+            "gitGraph: BT orientation not yet implemented".into(),
         ));
     }
+    let is_tb = matches!(d.orientation, Orientation::TB);
 
     // Branch label widths — measured at 14px sans-serif (jsdom shim does
     // not honour CSS, so the bbox always reports the default-font width).
     let label_h = font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
     let order = sort_branches_by_order(d);
-    let lane_step = 50.0 + if d.config.rotate_commit_label { 40.0 } else { 0.0 };
     let mut branch_positions: Vec<BranchPosition> = Vec::with_capacity(d.branches.len());
     let mut pos: f64 = 0.0;
+    let rotate_term = if d.config.rotate_commit_label { 40.0 } else { 0.0 };
     for (idx, &orig_idx) in order.iter().enumerate() {
         let b = &d.branches[orig_idx];
         let lw = font_metrics::text_width(&b.name, FONT_FAMILY, LABEL_SIZE, false, false);
@@ -127,13 +133,16 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
             label_width: lw,
             label_height: label_h,
         });
-        pos += lane_step;
+        // setBranchPosition increment: 50 + (rotate ? 40 : 0) + (TB|BT ? bbox/2 : 0)
+        let tb_term = if is_tb { lw / 2.0 } else { 0.0 };
+        pos += 50.0 + rotate_term + tb_term;
     }
 
-    // Commit positions along LR — positions match upstream's `drawCommits`.
+    // Commit positions along the running axis (X for LR, Y for TB).
+    // Positions match upstream's `drawCommits`.
     let mut commits: Vec<CommitGeom> = Vec::with_capacity(d.commits.len());
-    let mut x_pos: f64 = 0.0;
-    let mut max_pos: f64 = 0.0;
+    let mut cursor: f64 = if is_tb { DEFAULT_POS } else { 0.0 };
+    let mut max_pos: f64 = if is_tb { DEFAULT_POS } else { 0.0 };
     let label_widths: Vec<f64> = d
         .commits
         .iter()
@@ -143,7 +152,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
     for c in &d.commits {
-        let pos_with_offset = x_pos + LAYOUT_OFFSET;
+        let pos_with_offset = cursor + LAYOUT_OFFSET;
         let bp = branch_positions
             .iter()
             .find(|bp| bp.name == c.branch)
@@ -154,22 +163,25 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
                     message: format!("commit references unknown branch '{}'", c.branch),
                 }
             })?;
-        let lane_y = bp.pos;
-        let cx = pos_with_offset;
-        // LR / non-redux: bullet sits at branch.pos - 2.
-        let cy = lane_y - 2.0;
+        let lane = bp.pos;
+        let (cx, cy) = if is_tb {
+            (lane, pos_with_offset)
+        } else {
+            // LR / non-redux: bullet sits at branch.pos - 2.
+            (pos_with_offset, lane - 2.0)
+        };
         commits.push(CommitGeom {
             id: c.id.clone(),
             seq: c.seq,
             cx,
             cy,
             pos_with_offset,
-            pos: x_pos,
+            pos: cursor,
             branch_index: bp.index,
         });
-        x_pos += COMMIT_STEP + LAYOUT_OFFSET;
-        if x_pos > max_pos {
-            max_pos = x_pos;
+        cursor += COMMIT_STEP + LAYOUT_OFFSET;
+        if cursor > max_pos {
+            max_pos = cursor;
         }
     }
 
@@ -188,22 +200,33 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     };
     let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
 
-    // Per-branch line spine (x: 0..max_pos, y: pos-2)
-    // + branch label rect + branch label text — each accumulates.
+    // Per-branch line spine + label background + label text.
     // `showBranches: false` short-circuits this whole section.
     if d.config.show_branches {
         for bp in &branch_positions {
-            let spine_y = bp.pos - 2.0;
-            acc(0.0, spine_y, max_pos, 0.0);
             let bbox_w = bp.label_width;
             let bbox_h = bp.label_height;
-            let bkg_x = -bbox_w - 4.0 - rotate_pad;
-            let bkg_y = -bbox_h / 2.0 + 10.0;
-            let bkg_w = bbox_w + 18.0;
-            let bkg_h = bbox_h + 4.0;
-            acc(bkg_x, bkg_y, bkg_w, bkg_h);
-            // Branch label text intrinsic (0,0,w,h) — independent of lane.
-            acc(0.0, 0.0, bbox_w, bbox_h);
+            if is_tb {
+                // Vertical line: x=bp.pos, y in [DEFAULT_POS, max_pos].
+                acc(bp.pos, DEFAULT_POS, 0.0, max_pos - DEFAULT_POS);
+                // Branch label rect at top: x=pos - bbox.w/2 - 10, y=0.
+                let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
+                let bkg_y = 0.0;
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                acc(bkg_x, bkg_y, bkg_w, bkg_h);
+                // Branch label text intrinsic (0,0,w,h).
+                acc(0.0, 0.0, bbox_w, bbox_h);
+            } else {
+                let spine_y = bp.pos - 2.0;
+                acc(0.0, spine_y, max_pos, 0.0);
+                let bkg_x = -bbox_w - 4.0 - rotate_pad;
+                let bkg_y = -bbox_h / 2.0 + 10.0;
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                acc(bkg_x, bkg_y, bkg_w, bkg_h);
+                acc(0.0, 0.0, bbox_w, bbox_h);
+            }
         }
     }
 
@@ -252,8 +275,16 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         if label_emitted {
             let lw = label_widths[i];
             let lh = commit_label_text_height;
-            acc(c.pos_with_offset - lw / 2.0 - py, c.cy + 13.5, lw + 2.0 * py, lh + 2.0 * py);
-            acc(0.0, 0.0, lw, lh);
+            if is_tb {
+                let px = 4.0;
+                let rect_x = c.cx - (lw + 4.0 * px + 5.0);
+                let rect_y = c.cy - 12.0;
+                acc(rect_x, rect_y, lw + 2.0 * py, lh + 2.0 * py);
+                acc(0.0, 0.0, lw, lh);
+            } else {
+                acc(c.pos_with_offset - lw / 2.0 - py, c.cy + 13.5, lw + 2.0 * py, lh + 2.0 * py);
+                acc(0.0, 0.0, lw, lh);
+            }
         }
     }
 
@@ -276,24 +307,43 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         }
         let mut y_off = 0.0_f64;
         for t in tags.iter().rev() {
-            let ly = c.cy - 19.2 - y_off;
-            let p1x = c.pos - max_w / 2.0 - px / 2.0;
-            let p1y = ly + py;
-            let p2y = ly - py;
-            let p3x = c.pos_with_offset - max_w / 2.0 - px;
-            let p3y = ly - h2 - py;
-            let p4x = c.pos_with_offset + max_w / 2.0 + px;
-            let p5y = ly + h2 + py;
-            let p6x = c.pos_with_offset - max_w / 2.0 - px;
-            let lo_x = p1x.min(p3x).min(p4x).min(p6x);
-            let hi_x = p1x.max(p3x).max(p4x).max(p6x);
-            let lo_y = p1y.min(p2y).min(p3y).min(p5y);
-            let hi_y = p1y.max(p2y).max(p3y).max(p5y);
-            acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
-            let hole_cx = c.pos - max_w / 2.0 + px / 2.0;
-            acc(hole_cx - 1.5, ly - 1.5, 3.0, 3.0);
-            let w_tag = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
-            acc(0.0, 0.0, w_tag, tag_lh);
+            if is_tb {
+                // TB intrinsic bbox of the polygon (jsdom shim ignores
+                // the rotate transform).
+                let y_origin = c.pos + y_off;
+                let lo = 10.0;
+                let pad = 2.0;
+                let h2_tb = tag_lh / 2.0;
+                // Polygon points span x in [c.cx, c.cx + lo + max_w + 4]
+                // and y in [y_origin - h2_tb - pad, y_origin + h2_tb + pad].
+                let lo_x = c.cx;
+                let hi_x = c.cx + lo + max_w + 4.0;
+                let lo_y = y_origin - h2_tb - pad;
+                let hi_y = y_origin + h2_tb + pad;
+                acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
+                acc(c.cx + px / 2.0 - 1.5, y_origin - 1.5, 3.0, 3.0);
+                let w_tag = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
+                acc(0.0, 0.0, w_tag, tag_lh);
+            } else {
+                let ly = c.cy - 19.2 - y_off;
+                let p1x = c.pos - max_w / 2.0 - px / 2.0;
+                let p1y = ly + py;
+                let p2y = ly - py;
+                let p3x = c.pos_with_offset - max_w / 2.0 - px;
+                let p3y = ly - h2 - py;
+                let p4x = c.pos_with_offset + max_w / 2.0 + px;
+                let p5y = ly + h2 + py;
+                let p6x = c.pos_with_offset - max_w / 2.0 - px;
+                let lo_x = p1x.min(p3x).min(p4x).min(p6x);
+                let hi_x = p1x.max(p3x).max(p4x).max(p6x);
+                let lo_y = p1y.min(p2y).min(p3y).min(p5y);
+                let hi_y = p1y.max(p2y).max(p3y).max(p5y);
+                acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
+                let hole_cx = c.pos - max_w / 2.0 + px / 2.0;
+                acc(hole_cx - 1.5, ly - 1.5, 3.0, 3.0);
+                let w_tag = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
+                acc(0.0, 0.0, w_tag, tag_lh);
+            }
             y_off += 20.0;
         }
     }
@@ -317,6 +367,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
 
     Ok(GitGraphLayout {
         orientation: d.orientation,
+        is_tb,
         branches: branch_positions,
         commits,
         max_pos,

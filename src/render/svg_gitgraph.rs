@@ -64,42 +64,77 @@ pub fn render(
         let bbox_w = bp.label_width;
         let bbox_h = bp.label_height;
         let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
-        let bkg_x = -bbox_w - 4.0 - rotate_pad;
-        let bkg_y = -bbox_h / 2.0 + 10.0;
-        let bkg_w = bbox_w + 18.0;
-        let bkg_h = bbox_h + 4.0;
-        let spine_y = bp.pos - 2.0;
-        let label_translate_x = -bbox_w - 14.0 - rotate_pad;
-        let label_translate_y = spine_y - bbox_h / 2.0 - 2.0;
-        let bkg_translate_x = -19.0;
-        // Upstream sets `bkg.attr('transform', 'translate(-19, ' + (spineY - 12 - labelPaddingY/2) + ')')`
-        // labelPaddingY = 0 outside redux, so the second arg is `spineY - 12`.
-        let bkg_translate_y = spine_y - 12.0;
         let cidx = color_idx(bp.index);
 
-        out.push_str(&format!(
-            r#"<line x1="0" y1="{sy}" x2="{maxp}" y2="{sy}" class="branch branch{idx}"></line>"#,
-            sy = fmt_num(spine_y),
-            maxp = fmt_num(l.max_pos),
-            idx = cidx,
-        ));
-        out.push_str(&format!(
-            r#"<rect class="branchLabelBkg label{idx}" style="" rx="4" ry="4" x="{x}" y="{y}" width="{w}" height="{h}" transform="translate({tx}, {ty})"></rect>"#,
-            idx = cidx,
-            x = fmt_num(bkg_x),
-            y = fmt_num(bkg_y),
-            w = fmt_num(bkg_w),
-            h = fmt_num(bkg_h),
-            tx = fmt_num(bkg_translate_x),
-            ty = fmt_num(bkg_translate_y),
-        ));
-        out.push_str(&format!(
-            r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text><tspan xml:space="preserve" dy="1em" x="0" class="row">{name}</tspan></text></g></g>"#,
-            idx = cidx,
-            tx = fmt_num(label_translate_x),
-            ty = fmt_num(label_translate_y),
-            name = escape_text(&bp.name),
-        ));
+        if l.is_tb {
+            // Vertical line: x=pos, y in [DEFAULT_POS, max_pos].
+            let line_x = bp.pos;
+            // Branch label rect at top (overrides LR transform).
+            // Upstream TB code: `bkg.attr('x', pos - bbox.width / 2 - 10).attr('y', 0)`.
+            let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
+            let bkg_y = 0.0;
+            let bkg_w = bbox_w + 18.0;
+            let bkg_h = bbox_h + 4.0;
+            // label.attr('transform', 'translate(' + (pos - bbox.width / 2 - 5) + ', ' + 0 + ')')
+            let label_translate_x = bp.pos - bbox_w / 2.0 - 5.0;
+            let label_translate_y = 0.0;
+            out.push_str(&format!(
+                r#"<line x1="{x}" y1="{y1}" x2="{x}" y2="{y2}" class="branch branch{idx}"></line>"#,
+                x = fmt_num(line_x),
+                y1 = fmt_num(crate::layout::gitgraph::DEFAULT_POS),
+                y2 = fmt_num(l.max_pos),
+                idx = cidx,
+            ));
+            out.push_str(&format!(
+                r#"<rect class="branchLabelBkg label{idx}" style="" rx="4" ry="4" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+                idx = cidx,
+                x = fmt_num(bkg_x),
+                y = fmt_num(bkg_y),
+                w = fmt_num(bkg_w),
+                h = fmt_num(bkg_h),
+            ));
+            out.push_str(&format!(
+                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text><tspan xml:space="preserve" dy="1em" x="0" class="row">{name}</tspan></text></g></g>"#,
+                idx = cidx,
+                tx = fmt_num(label_translate_x),
+                ty = fmt_num(label_translate_y),
+                name = escape_text(&bp.name),
+            ));
+        } else {
+            let bkg_x = -bbox_w - 4.0 - rotate_pad;
+            let bkg_y = -bbox_h / 2.0 + 10.0;
+            let bkg_w = bbox_w + 18.0;
+            let bkg_h = bbox_h + 4.0;
+            let spine_y = bp.pos - 2.0;
+            let label_translate_x = -bbox_w - 14.0 - rotate_pad;
+            let label_translate_y = spine_y - bbox_h / 2.0 - 2.0;
+            let bkg_translate_x = -19.0;
+            let bkg_translate_y = spine_y - 12.0;
+
+            out.push_str(&format!(
+                r#"<line x1="0" y1="{sy}" x2="{maxp}" y2="{sy}" class="branch branch{idx}"></line>"#,
+                sy = fmt_num(spine_y),
+                maxp = fmt_num(l.max_pos),
+                idx = cidx,
+            ));
+            out.push_str(&format!(
+                r#"<rect class="branchLabelBkg label{idx}" style="" rx="4" ry="4" x="{x}" y="{y}" width="{w}" height="{h}" transform="translate({tx}, {ty})"></rect>"#,
+                idx = cidx,
+                x = fmt_num(bkg_x),
+                y = fmt_num(bkg_y),
+                w = fmt_num(bkg_w),
+                h = fmt_num(bkg_h),
+                tx = fmt_num(bkg_translate_x),
+                ty = fmt_num(bkg_translate_y),
+            ));
+            out.push_str(&format!(
+                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text><tspan xml:space="preserve" dy="1em" x="0" class="row">{name}</tspan></text></g></g>"#,
+                idx = cidx,
+                tx = fmt_num(label_translate_x),
+                ty = fmt_num(label_translate_y),
+                name = escape_text(&bp.name),
+            ));
+        }
     }
     out.push_str("</g>");
     }
@@ -110,8 +145,15 @@ pub fn render(
     // `lanes` accumulates Y values used by `findLane` — initially seeded
     // with each visible branch's spine Y, then mutated as we route.
     out.push_str(r#"<g class="commit-arrows">"#);
+    // `lanes` seed: in LR each spine y = bp.pos - 2; in TB each lane x
+    // = bp.pos. Mirrors upstream's `lanes.push(spineY)` which uses the
+    // same coordinate as the line's primary axis.
     let mut lanes: Vec<f64> = if d.config.show_branches {
-        l.branches.iter().map(|bp| bp.pos - 2.0).collect()
+        if l.is_tb {
+            l.branches.iter().map(|bp| bp.pos).collect()
+        } else {
+            l.branches.iter().map(|bp| bp.pos - 2.0).collect()
+        }
     } else {
         Vec::new()
     };
@@ -124,9 +166,11 @@ pub fn render(
             let pa = &l.commits[parent_idx];
             let pb = &l.commits[i];
             let parent_commit = &d.commits[parent_idx];
-            let needs_reroute = should_reroute(parent_commit, c, pa, pb, &d.commits);
+            let needs_reroute = should_reroute(parent_commit, c, pa, pb, &d.commits, l.is_tb);
             let line_def = if needs_reroute {
-                build_arrow_path_rerouted(pa, pb, c, parent_commit, &mut lanes)
+                build_arrow_path_rerouted(pa, pb, c, parent_commit, &mut lanes, l.is_tb)
+            } else if l.is_tb {
+                build_arrow_path_tb(pa, pb, c, parent_commit)
             } else {
                 build_arrow_path(pa, pb, c, parent_commit)
             };
@@ -134,19 +178,23 @@ pub fn render(
             // - for non-merge edges: dest branch color
             // - for merge edges where `commitA.id !== commitB.parents[0]`:
             //   source branch color
-            // Color rule for LR (mirrors upstream `drawArrow`):
+            // Color rule (mirrors upstream `drawArrow`):
             //   - default: destination branch color
             //   - merge with non-primary parent: source branch color
-            //   - rerouted with source-below-dest (p1.y > p2.y): source
-            //     branch color (the rising-arrow override at line 734).
-            //   - non-rerouted with source-below-dest: still source-branch
-            //     in TB/BT mode, but for LR mode upstream does NOT override
-            //     in the non-rerouted branch. We follow upstream literally.
-            let raw_idx = if matches!(c.kind, CommitKind::Merge)
-                && c.parents.first() != Some(parent_id)
-            {
+            //   - rerouted with source-on-bottom-side: source-branch
+            //     color (the override at upstream line 734 / 704).
+            //   - TB non-rerouted with source.x > dest.x AND merge
+            //     non-primary: source-branch color (line 704).
+            let is_merge_2nd = matches!(c.kind, CommitKind::Merge)
+                && c.parents.first() != Some(parent_id);
+            let reroute_axis_swap = if l.is_tb {
+                pa.cx > pb.cx
+            } else {
+                pa.cy > pb.cy
+            };
+            let raw_idx = if is_merge_2nd {
                 pa.branch_index
-            } else if needs_reroute && pa.cy > pb.cy {
+            } else if needs_reroute && reroute_axis_swap {
                 pa.branch_index
             } else {
                 pb.branch_index
@@ -270,40 +318,85 @@ pub fn render(
         if !skip_label {
             let lw = l.commit_label_widths[i];
             let lh = l.commit_label_text_height;
-            let rect_x = c.pos_with_offset - lw / 2.0 - py;
-            let rect_y = c.cy + 13.5;
-            let rect_w = lw + 2.0 * py;
-            let rect_h = lh + 2.0 * py;
-            let text_x = c.pos_with_offset - lw / 2.0;
-            let text_y = c.cy + 25.0;
-            if d.config.rotate_commit_label {
-                let r_x = -7.5 - ((lw + 10.0) / 25.0) * 9.5;
-                let r_y = 10.0 + (lw / 25.0) * 8.5;
-                out.push_str(&format!(
-                    r#"<g transform="translate({rx}, {ry}) rotate(-45, {pos}, {cy})"><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}"></rect><text x="{tx}" y="{ty}" class="commit-label">{label}</text></g>"#,
-                    rx = fmt_num(r_x),
-                    ry = fmt_num(r_y),
-                    pos = fmt_num(c.pos),
-                    cy = fmt_num(c.cy),
-                    x = fmt_num(rect_x),
-                    y = fmt_num(rect_y),
-                    w = fmt_num(rect_w),
-                    h = fmt_num(rect_h),
-                    tx = fmt_num(text_x),
-                    ty = fmt_num(text_y),
-                    label = escape_text(&commit.id),
-                ));
+            if l.is_tb {
+                // TB layout (upstream lines 360-368):
+                //   labelBkg.x = cx - (bbox.w + 4*PX + 5)
+                //          .y = cy - 12
+                //          .w = bbox.w + 2*PY (set in the LR pre-block,
+                //                              still the same value)
+                //          .h = bbox.h + 2*PY
+                //   text.x = cx - (bbox.w + 4*PX)
+                //   text.y = cy + bbox.h - 12
+                let px = 4.0_f64;
+                let rect_x = c.cx - (lw + 4.0 * px + 5.0);
+                let rect_y = c.cy - 12.0;
+                let rect_w = lw + 2.0 * py;
+                let rect_h = lh + 2.0 * py;
+                let text_x = c.cx - (lw + 4.0 * px);
+                let text_y = c.cy + lh - 12.0;
+                if d.config.rotate_commit_label {
+                    // TB+rotate: text + bkg each get a `rotate(-45, cx, cy)`
+                    // (NOT a wrapper transform — see upstream lines 372-380).
+                    out.push_str(&format!(
+                        r#"<g><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}" transform="rotate(-45, {cx}, {cy})"></rect><text x="{tx}" y="{ty}" class="commit-label" transform="rotate(-45, {cx}, {cy})">{label}</text></g>"#,
+                        x = fmt_num(rect_x),
+                        y = fmt_num(rect_y),
+                        w = fmt_num(rect_w),
+                        h = fmt_num(rect_h),
+                        tx = fmt_num(text_x),
+                        ty = fmt_num(text_y),
+                        cx = fmt_num(c.cx),
+                        cy = fmt_num(c.cy),
+                        label = escape_text(&commit.id),
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        r#"<g><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}"></rect><text x="{tx}" y="{ty}" class="commit-label">{label}</text></g>"#,
+                        x = fmt_num(rect_x),
+                        y = fmt_num(rect_y),
+                        w = fmt_num(rect_w),
+                        h = fmt_num(rect_h),
+                        tx = fmt_num(text_x),
+                        ty = fmt_num(text_y),
+                        label = escape_text(&commit.id),
+                    ));
+                }
             } else {
-                out.push_str(&format!(
-                    r#"<g><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}"></rect><text x="{tx}" y="{ty}" class="commit-label">{label}</text></g>"#,
-                    x = fmt_num(rect_x),
-                    y = fmt_num(rect_y),
-                    w = fmt_num(rect_w),
-                    h = fmt_num(rect_h),
-                    tx = fmt_num(text_x),
-                    ty = fmt_num(text_y),
-                    label = escape_text(&commit.id),
-                ));
+                let rect_x = c.pos_with_offset - lw / 2.0 - py;
+                let rect_y = c.cy + 13.5;
+                let rect_w = lw + 2.0 * py;
+                let rect_h = lh + 2.0 * py;
+                let text_x = c.pos_with_offset - lw / 2.0;
+                let text_y = c.cy + 25.0;
+                if d.config.rotate_commit_label {
+                    let r_x = -7.5 - ((lw + 10.0) / 25.0) * 9.5;
+                    let r_y = 10.0 + (lw / 25.0) * 8.5;
+                    out.push_str(&format!(
+                        r#"<g transform="translate({rx}, {ry}) rotate(-45, {pos}, {cy})"><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}"></rect><text x="{tx}" y="{ty}" class="commit-label">{label}</text></g>"#,
+                        rx = fmt_num(r_x),
+                        ry = fmt_num(r_y),
+                        pos = fmt_num(c.pos),
+                        cy = fmt_num(c.cy),
+                        x = fmt_num(rect_x),
+                        y = fmt_num(rect_y),
+                        w = fmt_num(rect_w),
+                        h = fmt_num(rect_h),
+                        tx = fmt_num(text_x),
+                        ty = fmt_num(text_y),
+                        label = escape_text(&commit.id),
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        r#"<g><rect class="commit-label-bkg" x="{x}" y="{y}" width="{w}" height="{h}"></rect><text x="{tx}" y="{ty}" class="commit-label">{label}</text></g>"#,
+                        x = fmt_num(rect_x),
+                        y = fmt_num(rect_y),
+                        w = fmt_num(rect_w),
+                        h = fmt_num(rect_h),
+                        tx = fmt_num(text_x),
+                        ty = fmt_num(text_y),
+                        label = escape_text(&commit.id),
+                    ));
+                }
             }
         }
 
@@ -317,38 +410,95 @@ pub fn render(
             }
             let mut y_off = 0.0_f64;
             for t in commit.tags.iter().rev() {
-                let ly = c.cy - 19.2 - y_off;
-                let pwo = c.pos_with_offset;
-                let pos = c.pos;
-                let points = format!(
-                    "\n      {p1x},{p1y}  \n      {p1x},{p2y}\n      {p3x},{p3y}\n      {p4x},{p3y}\n      {p4x},{p5y}\n      {p6x},{p5y}",
-                    p1x = fmt_num(pos - max_w / 2.0 - px / 2.0),
-                    p1y = fmt_num(ly + py),
-                    p2y = fmt_num(ly - py),
-                    p3x = fmt_num(pwo - max_w / 2.0 - px),
-                    p3y = fmt_num(ly - h2 - py),
-                    p4x = fmt_num(pwo + max_w / 2.0 + px),
-                    p5y = fmt_num(ly + h2 + py),
-                    p6x = fmt_num(pwo - max_w / 2.0 - px),
-                );
                 let w_tag = crate::font_metrics::text_width(t, "sans-serif", 14.0, false, false);
-                let tx = pwo - w_tag / 2.0;
-                let hole_cx = pos - max_w / 2.0 + px / 2.0;
-                out.push_str(&format!(
-                    r#"<polygon class="tag-label-bkg" points="{p}"></polygon>"#,
-                    p = points,
-                ));
-                out.push_str(&format!(
-                    r#"<circle cy="{cy}" cx="{cx}" r="1.5" class="tag-hole"></circle>"#,
-                    cy = fmt_num(ly),
-                    cx = fmt_num(hole_cx),
-                ));
-                out.push_str(&format!(
-                    r#"<text y="{ty}" class="tag-label" x="{tx}">{label}</text>"#,
-                    ty = fmt_num(c.cy - 16.0 - y_off),
-                    tx = fmt_num(tx),
-                    label = escape_text(t),
-                ));
+                if l.is_tb {
+                    // TB tag geometry — see upstream lines 464-487.
+                    // commitPosition.x = c.cx, pos = c.pos (= cy - 10),
+                    // yOrigin = pos + yOffset.
+                    let y_origin = c.pos + y_off;
+                    let lo = 10.0_f64; // LAYOUT_OFFSET
+                    let pad = 2.0_f64;
+                    let h2_tb = tag_lh / 2.0;
+                    // Polygon points with leading newline-space prefix
+                    // matching upstream's template literal (4 spaces + 4
+                    // spaces of body indent so 8 leading spaces total per
+                    // line break).
+                    let points = format!(
+                        "\n        {p1x},{p1y}\n        {p2x},{p2y}\n        {p3x},{p3y}\n        {p4x},{p4y}\n        {p5x},{p5y}\n        {p6x},{p6y}",
+                        p1x = fmt_num(c.cx),
+                        p1y = fmt_num(y_origin + pad),
+                        p2x = fmt_num(c.cx),
+                        p2y = fmt_num(y_origin - pad),
+                        p3x = fmt_num(c.cx + lo),
+                        p3y = fmt_num(y_origin - h2_tb - pad),
+                        p4x = fmt_num(c.cx + lo + max_w + 4.0),
+                        p4y = fmt_num(y_origin - h2_tb - pad),
+                        p5x = fmt_num(c.cx + lo + max_w + 4.0),
+                        p5y = fmt_num(y_origin + h2_tb + pad),
+                        p6x = fmt_num(c.cx + lo),
+                        p6y = fmt_num(y_origin + h2_tb + pad),
+                    );
+                    let transform = format!(
+                        "translate(12,12) rotate(45, {},{})",
+                        fmt_num(c.cx), fmt_num(c.pos),
+                    );
+                    out.push_str(&format!(
+                        r#"<polygon class="tag-label-bkg" points="{p}" transform="{tr}"></polygon>"#,
+                        p = points, tr = transform,
+                    ));
+                    out.push_str(&format!(
+                        r#"<circle cy="{cy}" cx="{cx}" r="1.5" class="tag-hole" transform="{tr}"></circle>"#,
+                        cy = fmt_num(y_origin),
+                        cx = fmt_num(c.cx + px / 2.0),
+                        tr = transform,
+                    ));
+                    let tag_translate = format!(
+                        "translate(14,14) rotate(45, {},{})",
+                        fmt_num(c.cx), fmt_num(c.pos),
+                    );
+                    out.push_str(&format!(
+                        r#"<text y="{ty}" class="tag-label" x="{tx}" transform="{tr}">{label}</text>"#,
+                        // upstream first sets `y = c.cy - 16 - yOff`, then in the TB block
+                        // overrides `y = yOrigin + 3`.
+                        ty = fmt_num(y_origin + 3.0),
+                        tx = fmt_num(c.cx + 5.0),
+                        tr = tag_translate,
+                        label = escape_text(t),
+                    ));
+                    let _ = w_tag;
+                } else {
+                    let ly = c.cy - 19.2 - y_off;
+                    let pwo = c.pos_with_offset;
+                    let pos = c.pos;
+                    let points = format!(
+                        "\n      {p1x},{p1y}  \n      {p1x},{p2y}\n      {p3x},{p3y}\n      {p4x},{p3y}\n      {p4x},{p5y}\n      {p6x},{p5y}",
+                        p1x = fmt_num(pos - max_w / 2.0 - px / 2.0),
+                        p1y = fmt_num(ly + py),
+                        p2y = fmt_num(ly - py),
+                        p3x = fmt_num(pwo - max_w / 2.0 - px),
+                        p3y = fmt_num(ly - h2 - py),
+                        p4x = fmt_num(pwo + max_w / 2.0 + px),
+                        p5y = fmt_num(ly + h2 + py),
+                        p6x = fmt_num(pwo - max_w / 2.0 - px),
+                    );
+                    let tx = pwo - w_tag / 2.0;
+                    let hole_cx = pos - max_w / 2.0 + px / 2.0;
+                    out.push_str(&format!(
+                        r#"<polygon class="tag-label-bkg" points="{p}"></polygon>"#,
+                        p = points,
+                    ));
+                    out.push_str(&format!(
+                        r#"<circle cy="{cy}" cx="{cx}" r="1.5" class="tag-hole"></circle>"#,
+                        cy = fmt_num(ly),
+                        cx = fmt_num(hole_cx),
+                    ));
+                    out.push_str(&format!(
+                        r#"<text y="{ty}" class="tag-label" x="{tx}">{label}</text>"#,
+                        ty = fmt_num(c.cy - 16.0 - y_off),
+                        tx = fmt_num(tx),
+                        label = escape_text(t),
+                    ));
+                }
                 y_off += 20.0;
             }
         }
@@ -370,17 +520,20 @@ pub fn render(
     Ok(out)
 }
 
-/// Mirror upstream `shouldRerouteArrow` for LR mode. Returns `true`
-/// when there is at least one commit between A and B (by `seq`) on the
-/// "outer" branch (`commitB.branch` if `p1.y < p2.y`, else `commitA.branch`).
+/// Mirror upstream `shouldRerouteArrow`. Returns `true` when there is
+/// at least one commit between A and B (by `seq`) on the "outer"
+/// branch — `commitB.branch` if "B is furthest forward" along the
+/// running axis, else `commitA.branch`. The running axis is X for
+/// TB/BT and Y for LR.
 fn should_reroute(
     commit_a: &crate::model::gitgraph::Commit,
     commit_b: &crate::model::gitgraph::Commit,
     p1: &crate::layout::gitgraph::CommitGeom,
     p2: &crate::layout::gitgraph::CommitGeom,
     all_commits: &[crate::model::gitgraph::Commit],
+    is_tb: bool,
 ) -> bool {
-    let commit_b_is_furthest = p1.cy < p2.cy;
+    let commit_b_is_furthest = if is_tb { p1.cx < p2.cx } else { p1.cy < p2.cy };
     let branch_to_get_curve = if commit_b_is_furthest {
         &commit_b.branch
     } else {
@@ -413,15 +566,17 @@ fn find_lane(y1: f64, y2: f64, lanes: &mut Vec<f64>) -> f64 {
     unreachable!()
 }
 
-/// Rerouted arrow (LR mode only) — mirrors upstream `drawArrow` when
+/// Rerouted arrow — mirrors upstream `drawArrow` when
 /// `arrowNeedsRerouting`. Uses two 10×10 arc detours through a
-/// dynamically-allocated lane y in the inter-branch gap.
+/// dynamically-allocated lane in the inter-branch gap. TB pivots the
+/// detour onto the X axis; LR onto the Y axis.
 fn build_arrow_path_rerouted(
     pa: &crate::layout::gitgraph::CommitGeom,
     pb: &crate::layout::gitgraph::CommitGeom,
     _commit_b: &crate::model::gitgraph::Commit,
     _commit_a: &crate::model::gitgraph::Commit,
     lanes: &mut Vec<f64>,
+    is_tb: bool,
 ) -> String {
     let p1x = pa.cx;
     let p1y = pa.cy;
@@ -429,48 +584,147 @@ fn build_arrow_path_rerouted(
     let p2y = pb.cy;
     let radius = 10.0_f64;
     let offset = 10.0_f64;
-    let line_y = if p1y < p2y {
-        find_lane(p1y, p2y, lanes)
-    } else {
-        find_lane(p2y, p1y, lanes)
-    };
 
-    if p1y < p2y {
-        // Source above dest — go down through `line_y`.
-        // arc = `A 10 10, 0, 0, 0,`, arc2 = `A 10 10, 0, 0, 1,`
-        format!(
-            "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-            fmt_num(p1x), fmt_num(p1y),
-            fmt_num(p1x), fmt_num(line_y - radius),
-            fmt_num(radius), fmt_num(radius),
-            fmt_num(p1x + offset), fmt_num(line_y),
-            fmt_num(p2x - radius), fmt_num(line_y),
-            fmt_num(radius), fmt_num(radius),
-            fmt_num(p2x), fmt_num(line_y + offset),
-            fmt_num(p2x), fmt_num(p2y),
-        )
+    if is_tb {
+        // TB rerouted: detour along X. lane = findLane on the X axis.
+        let line_x = if p1x < p2x {
+            find_lane(p1x, p2x, lanes)
+        } else {
+            find_lane(p2x, p1x, lanes)
+        };
+        if p1x < p2x {
+            // arc = A r r 0 0 1, arc2 = A r r 0 0 0 (TB-down-right per upstream)
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(line_x - radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(line_x), fmt_num(p1y + offset),
+                fmt_num(line_x), fmt_num(p2y - radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(line_x + offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(line_x + radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(line_x), fmt_num(p1y + offset),
+                fmt_num(line_x), fmt_num(p2y - radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(line_x - offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
     } else {
-        // Source below dest — go up through `line_y`.
-        format!(
-            "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-            fmt_num(p1x), fmt_num(p1y),
-            fmt_num(p1x), fmt_num(line_y + radius),
-            fmt_num(radius), fmt_num(radius),
-            fmt_num(p1x + offset), fmt_num(line_y),
-            fmt_num(p2x - radius), fmt_num(line_y),
-            fmt_num(radius), fmt_num(radius),
-            fmt_num(p2x), fmt_num(line_y - offset),
-            fmt_num(p2x), fmt_num(p2y),
-        )
+        let line_y = if p1y < p2y {
+            find_lane(p1y, p2y, lanes)
+        } else {
+            find_lane(p2y, p1y, lanes)
+        };
+        if p1y < p2y {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(line_y - radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x + offset), fmt_num(line_y),
+                fmt_num(p2x - radius), fmt_num(line_y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(line_y + offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(line_y + radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x + offset), fmt_num(line_y),
+                fmt_num(p2x - radius), fmt_num(line_y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(line_y - offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
     }
 }
 
-/// Build the `d=` attribute for one parent → commit arrow.
+/// Build the `d=` attribute for one parent → commit arrow (TB mode,
+/// non-rerouted). Mirrors upstream `drawArrow` lines 747–777.
+fn build_arrow_path_tb(
+    pa: &crate::layout::gitgraph::CommitGeom,
+    pb: &crate::layout::gitgraph::CommitGeom,
+    commit_b: &crate::model::gitgraph::Commit,
+    _commit_a: &crate::model::gitgraph::Commit,
+) -> String {
+    let p1x = pa.cx;
+    let p1y = pa.cy;
+    let p2x = pb.cx;
+    let p2y = pb.cy;
+    let radius = 20.0_f64;
+    let offset = 20.0_f64;
+    let is_merge_secondary = matches!(commit_b.kind, CommitKind::Merge)
+        && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
+
+    if (p1x - p2x).abs() < f64::EPSILON {
+        return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
+    }
+
+    if p1x < p2x {
+        // Source on left of dest. arc = A20 0 0 0, arc2 = A20 0 0 1.
+        if is_merge_secondary {
+            // M p1 L p1.x p2.y-r A20...0 p1.x+off p2.y L p2
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(p2y - radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x + offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            // M p1 L p2.x-r p1.y A20...1 p2.x p1.y+off L p2
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p2x - radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(p1y + offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
+    } else {
+        // p1.x > p2.x: source on right of dest.
+        if is_merge_secondary {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(p2y - radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x - offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p2x + radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(p1y + offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
+    }
+}
+
+/// Build the `d=` attribute for one parent → commit arrow (LR mode).
 ///
-/// Mirrors upstream `drawArrow` for LR mode, non-redux geometry. Only
-/// the non-rerouted case is implemented for now (no obstacles between
-/// p1 and p2 on the `branchToGetCurve`); rerouting (smaller 10×10 arc
-/// detour) is a follow-up.
+/// Mirrors upstream `drawArrow` non-redux geometry. Only the
+/// non-rerouted branch — rerouting is handled in
+/// `build_arrow_path_rerouted`.
 fn build_arrow_path(
     pa: &crate::layout::gitgraph::CommitGeom,
     pb: &crate::layout::gitgraph::CommitGeom,
@@ -487,7 +741,6 @@ fn build_arrow_path(
         && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
 
     if (p1y - p2y).abs() < f64::EPSILON {
-        // Same lane.
         return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
     }
 
