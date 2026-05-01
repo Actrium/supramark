@@ -51,10 +51,15 @@ pub struct ResolvedTask {
 pub struct ExcludeRange {
     /// Day in `YYYY-MM-DD` form for ID generation.
     pub start_iso: String,
-    /// Time-scaled to ms (start of day).
+    /// Time-scaled to ms (start of day) — used for `x` and the `cx`
+    /// half of `transform-origin` along with `raw_end_ms`.
     pub start_ms: f64,
-    /// Time-scaled to ms (end of day, i.e. start of next day - 1ms).
-    pub end_ms: f64,
+    /// Last invalid day's midnight (== start_ms when single-day).
+    /// Used for `transform-origin` cx midpoint.
+    pub raw_end_ms: f64,
+    /// End of last invalid day (start_ms_of_next_day - 1ms) — used for
+    /// `width = timeScale(end_eod) - timeScale(start)`.
+    pub end_eod_ms: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -102,18 +107,19 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
     // Resolve tasks (date / duration / after / until).
     let resolved = resolve_tasks(d);
 
-    // Sort by start time (stable) for rendering — upstream calls
-    // `taskArray.sort(taskCompare)` which only compares startTime.
-    let mut tasks = resolved;
-    tasks.sort_by(|a, b| a.start_ms.partial_cmp(&b.start_ms).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Compute categories (unique section names in first-encounter order).
+    // Categories use insertion order — upstream computes them BEFORE
+    // sorting `taskArray.sort(taskCompare)`.
     let mut categories: Vec<String> = Vec::new();
-    for t in &tasks {
+    for t in &resolved {
         if !categories.iter().any(|c| c == &t.section_name) {
             categories.push(t.section_name.clone());
         }
     }
+
+    // Sort by start time (stable) for rendering — upstream calls
+    // `taskArray.sort(taskCompare)` which only compares startTime.
+    let mut tasks = resolved;
+    tasks.sort_by(|a, b| a.start_ms.partial_cmp(&b.start_ms).unwrap_or(std::cmp::Ordering::Equal));
 
     // Compute category heights and total height.
     // (Compact mode unsupported for byte-exact target; only the few
@@ -598,15 +604,34 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
             v
         }
         "d" => {
-            // Day-aligned (UTC midnight).
+            // d3 `timeDay.every(k)` anchors on day-of-month (1, k+1,
+            // 2k+1, …), resetting at each month boundary.
             let day_ms = 86_400_000.0;
-            let mult_days = best_step / day_ms;
-            let n = (min_ms / day_ms / mult_days).ceil();
-            let mut t = n * mult_days * day_ms;
+            let k = (best_step / day_ms).round().max(1.0) as u32;
             let mut v = Vec::new();
-            while t <= max_ms + 0.5 {
-                v.push(t);
-                t += best_step;
+            let (y0, m0, _, _, _, _, _) = ms_to_date(min_ms);
+            let mut y = y0;
+            let mut m = m0;
+            let mut done = false;
+            while !done && y <= 9999 {
+                let dim = days_in_month(y, m);
+                let mut anchor_day: u32 = 1;
+                while anchor_day <= dim {
+                    let t = date_to_ms(y, m, anchor_day, 0, 0, 0, 0);
+                    if t > max_ms + 0.5 {
+                        done = true;
+                        break;
+                    }
+                    if t >= min_ms {
+                        v.push(t);
+                    }
+                    anchor_day += k;
+                }
+                m += 1;
+                if m > 12 {
+                    m = 1;
+                    y += 1;
+                }
             }
             v
         }
@@ -751,15 +776,14 @@ fn compute_exclude_ranges(min_ms: f64, max_ms: f64, d: &GanttDiagram) -> Vec<Exc
                 None => Some((day, day)),
             };
         } else if let Some((s, e)) = current.take() {
-            let (_, m, dy, _, _, _, _) = ms_to_date(s);
-            let (yy, _, _, _, _, _, _) = ms_to_date(s);
+            let (yy, m, dy, _, _, _, _) = ms_to_date(s);
             let iso = format!("{:04}-{:02}-{:02}", yy, m, dy);
-            // end-of-day for `e`.
             let end_eod = e + day_ms - 1.0;
             ranges.push(ExcludeRange {
                 start_iso: iso,
                 start_ms: s,
-                end_ms: end_eod,
+                raw_end_ms: e,
+                end_eod_ms: end_eod,
             });
         }
         day += day_ms;
@@ -771,7 +795,8 @@ fn compute_exclude_ranges(min_ms: f64, max_ms: f64, d: &GanttDiagram) -> Vec<Exc
         ranges.push(ExcludeRange {
             start_iso: iso,
             start_ms: s,
-            end_ms: end_eod,
+            raw_end_ms: e,
+            end_eod_ms: end_eod,
         });
     }
     ranges
@@ -818,6 +843,29 @@ fn is_invalid_date(
         return true;
     }
     false
+}
+
+fn days_in_month(y: i32, m: u32) -> u32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+fn ticks_from(times: Vec<f64>, axis_format: &str) -> Vec<f64> {
+    // Helper kept for symmetry — actual conversion happens in
+    // `generate_ticks` after the match. We just return times here.
+    let _ = axis_format;
+    times
 }
 
 fn day_of_week(y: i32, m: u32, d: u32) -> u32 {

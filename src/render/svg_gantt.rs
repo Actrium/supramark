@@ -41,13 +41,11 @@ pub fn render(
         && layout.min_time_ms.is_finite()
         && layout.max_time_ms.is_finite();
     let span_years_ms = layout.max_time_ms - layout.min_time_ms;
-    // dayjs diff('year') is calendar-aware; for our heuristic, anything
-    // strictly greater than 5*365 days bypasses excludes.
     let within_span = span_years_ms <= 5.0 * 365.0 * 86_400_000.0;
     if has_directives && times_valid && within_span {
         out.push_str("<g>");
-        for ex in &layout.exclude_ranges {
-            emit_exclude_rect(&mut out, ex, layout, id);
+        for (i, ex) in layout.exclude_ranges.iter().enumerate() {
+            emit_exclude_rect(&mut out, ex, layout, id, i);
         }
         out.push_str("</g>");
     }
@@ -97,21 +95,23 @@ pub fn render(
 
 // ── Exclude rect ─────────────────────────────────────────────────────
 
-fn emit_exclude_rect(out: &mut String, ex: &ExcludeRange, layout: &GanttLayout, id: &str) {
+fn emit_exclude_rect(out: &mut String, ex: &ExcludeRange, layout: &GanttLayout, id: &str, index: usize) {
     let w = layout.width;
     let h = layout.height;
     let theta = layout.min_time_ms;
     let max = layout.max_time_ms;
+    let gap = (l::BAR_HEIGHT + l::BAR_GAP) as f64;
     // x = timeScale(start_of_day) + leftPadding
     let x = l::time_scale(ex.start_ms, theta, max, w) + l::LEFT_PADDING;
-    let width = l::time_scale(ex.end_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w);
+    let width = l::time_scale(ex.end_eod_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w);
     let y = l::GRID_LINE_START_PADDING;
     let height = h - l::TOP_PADDING - l::GRID_LINE_START_PADDING;
-    // transform-origin: cx px cy px
+    // transform-origin uses raw start/end (not start/end-of-day) per
+    // upstream — when single-day they coincide and cx = x.
     let cx = (l::time_scale(ex.start_ms, theta, max, w) as f64)
         + l::LEFT_PADDING as f64
-        + 0.5 * ((l::time_scale(ex.end_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w)) as f64);
-    let cy = 0.0 * (l::BAR_HEIGHT + l::BAR_GAP) as f64 + 0.5 * h as f64;
+        + 0.5 * ((l::time_scale(ex.raw_end_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w)) as f64);
+    let cy = (index as f64) * gap + 0.5 * h as f64;
     out.push_str(&format!(
         r#"<rect id="{id}-exclude-{iso}" x="{x}" y="{y}" width="{width}" height="{height}" transform-origin="{cx}px {cy}px" class="exclude-range"></rect>"#,
         iso = ex.start_iso,
@@ -288,11 +288,13 @@ fn task_class(t: &ResolvedTask, layout: &GanttLayout) -> String {
     if task_class.is_empty() {
         task_class = " task".to_string();
     }
+    // Upstream prepends with a literal trailing space, so
+    // `' crit'` becomes `' milestone  crit'` (double inner space).
     if t.milestone {
-        task_class = format!(" milestone {}", task_class.trim_start());
+        task_class = format!(" milestone {}", task_class);
     }
     if t.vert {
-        task_class = format!(" vert {}", task_class.trim_start());
+        task_class = format!(" vert {}", task_class);
     }
     let mut s = format!("task{}{}", task_class, sec_num);
     let cls_str = if !t.classes.is_empty() {
