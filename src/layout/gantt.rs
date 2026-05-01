@@ -51,14 +51,13 @@ pub struct ResolvedTask {
 pub struct ExcludeRange {
     /// Day in `YYYY-MM-DD` form for ID generation.
     pub start_iso: String,
-    /// Time-scaled to ms (start of day) — used for `x` and the `cx`
-    /// half of `transform-origin` along with `raw_end_ms`.
-    pub start_ms: f64,
-    /// Last invalid day's midnight (== start_ms when single-day).
-    /// Used for `transform-origin` cx midpoint.
+    /// Raw start (inherits minTime's time-of-day).
+    pub raw_start_ms: f64,
+    /// Raw end of the run (last invalid day at same time-of-day).
     pub raw_end_ms: f64,
-    /// End of last invalid day (start_ms_of_next_day - 1ms) — used for
-    /// `width = timeScale(end_eod) - timeScale(start)`.
+    /// `start.startOf('day')` — used for `x`.
+    pub start_of_day_ms: f64,
+    /// `end.endOf('day')` — used for `width`.
     pub end_eod_ms: f64,
 }
 
@@ -274,13 +273,33 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
         return parse_iso_date(s);
     }
 
+    // YYYY-MM-DD with time component(s).
+    if fmt.starts_with("YYYY-MM-DD ") || fmt.starts_with("YYYY-MM-DDT") {
+        // Trim everything after the date portion.
+        if s.len() < 10 {
+            return None;
+        }
+        let date = parse_iso_date(&s[..10])?;
+        // Parse trailing time HH:mm:ss / HH:mm if present.
+        let (h, mi, se) = parse_time_suffix(&s[10..]);
+        return Some(date + (h as f64) * 3_600_000.0 + (mi as f64) * 60_000.0 + (se as f64) * 1000.0);
+    }
+
     // Some common compounds with time component.
-    // We don't attempt to support all dayjs formats; only the ones the
-    // fixtures use. Fallback: try ISO date.
     if let Some(t) = parse_iso_date(s) {
         return Some(t);
     }
     None
+}
+
+fn parse_time_suffix(s: &str) -> (u32, u32, u32) {
+    // "T20:30:30" or " 20:30:30" or " 20:30" — return 0,0,0 if any failure.
+    let s = s.trim_start_matches(|c: char| c == 'T' || c.is_whitespace());
+    let parts: Vec<&str> = s.split(':').collect();
+    let h = parts.first().and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let mi = parts.get(1).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    let se = parts.get(2).and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+    (h, mi, se)
 }
 
 /// Parse `YYYY-MM-DD` into ms since unix epoch (UTC).
@@ -441,10 +460,15 @@ fn compute_task_times(
     } else {
         prev_end.unwrap_or(0.0)
     };
+    // Upstream: `dayjs(endTimeData, 'YYYY-MM-DD', true).isValid()`
+    // — strict mode, so the entire string must match exactly.
     let manual_end = t
         .end
         .as_deref()
-        .map(|e| parse_iso_date(e.trim()).is_some())
+        .map(|e| {
+            let s = e.trim();
+            s.len() == 10 && parse_iso_date(s).is_some()
+        })
         .unwrap_or(false);
     let end_ms = if let Some(end_str) = t.end.as_deref() {
         get_end_date(end_str, date_format, start_ms, id_to_idx, resolved).unwrap_or(start_ms)
@@ -959,8 +983,12 @@ fn compute_exclude_ranges(min_ms: f64, max_ms: f64, d: &GanttDiagram) -> Vec<Exc
     let mut ranges: Vec<ExcludeRange> = Vec::new();
     let mut current: Option<(f64, f64)> = None;
     let day_ms = 86_400_000.0;
-    let start_day = (min_ms / day_ms).floor() * day_ms;
-    let mut day = start_day;
+    // Upstream starts at `dayjs(minTime)` (== minTime as-is, including
+    // its time-of-day) and adds 1 day per step. The range start/end
+    // therefore inherit minTime's time-of-day; the `x`/`width`
+    // computations use `startOf('day')`/`endOf('day')` which
+    // re-anchor to midnight.
+    let mut day = min_ms;
     while day <= max_ms {
         let invalid = is_invalid_date(day, &date_format, &d.excludes, &d.includes, &d.weekend);
         if invalid {
@@ -969,30 +997,33 @@ fn compute_exclude_ranges(min_ms: f64, max_ms: f64, d: &GanttDiagram) -> Vec<Exc
                 None => Some((day, day)),
             };
         } else if let Some((s, e)) = current.take() {
-            let (yy, m, dy, _, _, _, _) = ms_to_date(s);
-            let iso = format!("{:04}-{:02}-{:02}", yy, m, dy);
-            let end_eod = e + day_ms - 1.0;
-            ranges.push(ExcludeRange {
-                start_iso: iso,
-                start_ms: s,
-                raw_end_ms: e,
-                end_eod_ms: end_eod,
-            });
+            ranges.push(make_exclude_range(s, e, day_ms));
         }
         day += day_ms;
     }
     if let Some((s, e)) = current.take() {
-        let (yy, m, dy, _, _, _, _) = ms_to_date(s);
-        let iso = format!("{:04}-{:02}-{:02}", yy, m, dy);
-        let end_eod = e + day_ms - 1.0;
-        ranges.push(ExcludeRange {
-            start_iso: iso,
-            start_ms: s,
-            raw_end_ms: e,
-            end_eod_ms: end_eod,
-        });
+        ranges.push(make_exclude_range(s, e, day_ms));
     }
     ranges
+}
+
+fn make_exclude_range(s: f64, e: f64, day_ms: f64) -> ExcludeRange {
+    let (yy, m, dy, _, _, _, _) = ms_to_date(s);
+    let iso = format!("{:04}-{:02}-{:02}", yy, m, dy);
+    let start_of_day_s = floor_to_day(s);
+    let end_of_day_e = floor_to_day(e) + day_ms - 1.0;
+    ExcludeRange {
+        start_iso: iso,
+        raw_start_ms: s,
+        raw_end_ms: e,
+        start_of_day_ms: start_of_day_s,
+        end_eod_ms: end_of_day_e,
+    }
+}
+
+fn floor_to_day(ms: f64) -> f64 {
+    let day_ms = 86_400_000.0;
+    (ms / day_ms).floor() * day_ms
 }
 
 fn is_invalid_date(

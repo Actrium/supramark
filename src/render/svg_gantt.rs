@@ -85,9 +85,11 @@ pub fn render(
     // Today marker.
     emit_today(&mut out, layout, h);
 
-    // Title.
-    if let Some(title) = d.meta.title.as_deref() {
+    // Title — upstream always emits this <text> node with the result
+    // of `getDiagramTitle()`, even if the diagram had no `title`.
+    {
         let half = w as f64 / 2.0;
+        let title = d.meta.title.as_deref().unwrap_or("");
         out.push_str(&format!(
             r#"<text x="{x}" y="{y}" class="titleText">{title}</text>"#,
             x = fmt_int_or_dec(half),
@@ -108,16 +110,16 @@ fn emit_exclude_rect(out: &mut String, ex: &ExcludeRange, layout: &GanttLayout, 
     let theta = layout.min_time_ms;
     let max = layout.max_time_ms;
     let gap = (l::BAR_HEIGHT + l::BAR_GAP) as f64;
-    // x = timeScale(start_of_day) + leftPadding
-    let x = l::time_scale(ex.start_ms, theta, max, w) + l::LEFT_PADDING;
-    let width = l::time_scale(ex.end_eod_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w);
+    // x = timeScale(start.startOf('day')) + leftPadding
+    let x = l::time_scale(ex.start_of_day_ms, theta, max, w) + l::LEFT_PADDING;
+    // width = timeScale(end.endOf('day')) - timeScale(start.startOf('day'))
+    let width = l::time_scale(ex.end_eod_ms, theta, max, w) - l::time_scale(ex.start_of_day_ms, theta, max, w);
     let y = l::GRID_LINE_START_PADDING;
     let height = h - l::TOP_PADDING - l::GRID_LINE_START_PADDING;
-    // transform-origin uses raw start/end (not start/end-of-day) per
-    // upstream — when single-day they coincide and cx = x.
-    let cx = (l::time_scale(ex.start_ms, theta, max, w) as f64)
+    // transform-origin uses raw start/end (NOT startOf'd / endOf'd).
+    let cx = (l::time_scale(ex.raw_start_ms, theta, max, w) as f64)
         + l::LEFT_PADDING as f64
-        + 0.5 * ((l::time_scale(ex.raw_end_ms, theta, max, w) - l::time_scale(ex.start_ms, theta, max, w)) as f64);
+        + 0.5 * ((l::time_scale(ex.raw_end_ms, theta, max, w) - l::time_scale(ex.raw_start_ms, theta, max, w)) as f64);
     let cy = (index as f64) * gap + 0.5 * h as f64;
     out.push_str(&format!(
         r#"<rect id="{id}-exclude-{iso}" x="{x}" y="{y}" width="{width}" height="{height}" transform-origin="{cx}px {cy}px" class="exclude-range"></rect>"#,

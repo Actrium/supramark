@@ -10,8 +10,8 @@ fn main() {
     let theme = get_theme("default");
     let l = layout_mod::layout(&d, &theme).unwrap();
     println!("min_ms={}, max_ms={}, span_days={:.3}", l.min_time_ms, l.max_time_ms, (l.max_time_ms - l.min_time_ms)/86400000.0);
-    println!("ticks: {}", l.axis_ticks.len());
-    for tick in &l.axis_ticks {
-        println!("  {} -> {}", tick.label, tick.time_ms);
+    for t in &l.tasks {
+        println!("TASK {}: start={} end={} render_end={:?}", t.id, t.start_ms, t.end_ms, t.render_end_ms);
     }
+    println!("ticks: {}", l.axis_ticks.len());
 }
