@@ -31,9 +31,17 @@ use crate::render::rough::{path_out_to_svg, to_paths, RoughGenerator, RoughOptio
 use crate::theme::ThemeVariables;
 
 pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
-    let w = node.width.unwrap_or(0.0);
+    // `node.width` is the polygon-bbox-corrected dagre width.  Recover the
+    // analytical (`upstream stadium.ts` formula) width from which the
+    // 102-point polygon was sampled — both the path geometry and the
+    // intersection logic (see `flowchart::fix_polygon_edge_endpoints`,
+    // `edges::intersect_node_boundary`) operate on this analytical width.
     let h = node.height.unwrap_or(0.0);
     let radius = h / 2.0;
+    let n_arc_points = 50_usize;
+    let half_step = std::f64::consts::PI / (2.0 * (n_arc_points as f64 - 1.0));
+    let polygon_correction = 2.0 * radius * (1.0 - half_step.cos());
+    let w = node.width.unwrap_or(0.0) + polygon_correction;
 
     let classes = get_node_classes(node.look.as_deref(), node.css_classes.as_deref(), None);
     let id = node.dom_id.clone().unwrap_or_else(|| node.id.clone());
@@ -50,10 +58,34 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         .node_border
         .clone()
         .unwrap_or_else(|| "#9370DB".into());
-    // TODO: parse css_styles for fill / stroke / stroke-width / stroke-dasharray.
-    let fill = main_bkg;
-    let stroke = node_border;
-    let stroke_width = 1.3_f64;
+
+    // Compile node css styles → key/value map. Mirrors compileStyles() in
+    // upstream handDrawnShapeStyles.ts: cssCompiledStyles + cssStyles +
+    // labelStyle, dedup on key (last wins).
+    let css_styles = node.css_styles.as_deref().unwrap_or(&[]);
+    let mut styles_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for s in css_styles {
+        if let Some((k, v)) = s.split_once(':') {
+            styles_map.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    let fill = styles_map
+        .get("fill")
+        .cloned()
+        .unwrap_or(main_bkg);
+    let stroke = styles_map
+        .get("stroke")
+        .cloned()
+        .unwrap_or(node_border);
+    let stroke_width: f64 = styles_map
+        .get("stroke-width")
+        .map(|s| {
+            s.trim_end_matches("px")
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(1.3)
+        })
+        .unwrap_or(1.3);
 
     // Build the 102-point polygon.
     let path_d = build_stadium_path_d(w, h, radius);
@@ -83,7 +115,42 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     // Compose SVG. The non-handDrawn branch wraps with style="" (empty
     // when the node has no inline styles, matching d3's
     // `attr('style', '')` behaviour).
-    let path_style = ""; // when style fields populated, this would be `nodeStyles`.
+    //
+    // `nodeStyles` from upstream `styles2String`: every non-label-style key
+    // emitted as `key:value !important`, joined with `;`.
+    let label_style_keys: &[&str] = &[
+        "color",
+        "font-size",
+        "font-family",
+        "font-weight",
+        "font-style",
+        "text-decoration",
+        "text-align",
+        "text-transform",
+        "line-height",
+        "letter-spacing",
+        "word-spacing",
+        "text-shadow",
+        "text-overflow",
+        "white-space",
+        "word-wrap",
+        "word-break",
+        "overflow-wrap",
+        "hyphens",
+    ];
+    let mut node_style_parts: Vec<String> = Vec::new();
+    // Iterate over the original css_styles vec to preserve declaration order.
+    for s in css_styles {
+        if let Some((k, v)) = s.split_once(':') {
+            let k = k.trim();
+            let v = v.trim();
+            if !label_style_keys.contains(&k) {
+                node_style_parts.push(format!("{}:{} !important", k, v));
+            }
+        }
+    }
+    let path_style = node_style_parts.join(";");
+    let path_style = path_style.as_str();
 
     let mut paths_svg = String::new();
     for p in &paths {

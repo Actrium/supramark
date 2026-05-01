@@ -13,12 +13,6 @@ ext_fixtures/demos/class/08.mmd	Upstream-bug: the fixture text is lifted verbati
 ext_fixtures/cypress/flowchart/116.mmd	Icon shapes (@{ icon: "aws:..." }) require upstream icon SVG registry; byte-exact parity needs porting ~500 icon paths.
 ext_fixtures/cypress/flowchart/117.mmd	Icon shapes (@{ icon: "aws:..." }) require upstream icon SVG registry; byte-exact parity needs porting ~500 icon paths.
 ext_fixtures/cypress/flowchart/118.mmd	Icon shapes (@{ icon: "aws:..." }) require upstream icon SVG registry; byte-exact parity needs porting ~500 icon paths.
-ext_fixtures/cypress/flowchart/80.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/cypress/flowchart/131.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/cypress/flowchart/213.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/demos/flowchart/22.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/demos/flowchart/23.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/demos/flowchart/57.mmd	Stadium shape uses roughjs for path generation even with roughness=0; byte-exact parity requires porting roughjs rendering algorithm.
 ext_fixtures/demos/flowchart/42.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.
 ext_fixtures/demos/flowchart/43.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.
 ext_fixtures/demos/flowchart/44.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.

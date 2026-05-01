@@ -1397,8 +1397,19 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
         // pure ellipse, especially when w and h differ — without this
         // branch flowchart edges that anchor on stadium nodes show
         // ~0.05 px drift.
+        //
+        // NB: `node.width` here is the polygon-bbox-corrected dagre width
+        // (see `flowchart::measure_vertex_box`). The stadium's analytical
+        // dimensions are `(w_analytical, h_analytical)` where
+        //   w_analytical = w_polygon + 2 * (h/2) * (1 - cos(pi/(2*49)))
+        // and the intersection polygon must be built from those, otherwise
+        // the rounded end-caps live ~0.008 px inside their true position.
         "stadium" | "pill" => {
-            let poly = stadium_polygon(cx, cy, w, h);
+            let radius = h / 2.0;
+            let delta = std::f64::consts::PI / (2.0 * 49.0);
+            let correction = 2.0 * radius * (1.0 - delta.cos());
+            let w_analytical = w + correction;
+            let poly = stadium_polygon(cx, cy, w_analytical, h);
             if let Some((x, y)) = ray_polygon_intersection(centre, dir, &poly) {
                 return Point {
                     x: x as f64,

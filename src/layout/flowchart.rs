@@ -265,13 +265,27 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
             // and feeds those to intersect.polygon. Without this we
             // fall back to dagre's AABB rectangle clip which sits a
             // pixel or two inside the rounded end-caps.
+            //
+            // NB: `node.width` here is the polygon-bbox-corrected dagre width
+            // (see `measure_vertex_box`). The polygon must be sized at the
+            // analytical width `w + 2*radius*(1 - cos(pi/(2*49)))` so the
+            // sample points lie on the same circle the upstream code uses.
             "stadium" | "pill" => {
                 let radius = h / 2.0;
-                let mut verts: Vec<(f64, f64)> = Vec::with_capacity(102);
-                verts.push((cx + (-w / 2.0 + radius), cy + (-h / 2.0)));
-                verts.push((cx + (w / 2.0 - radius), cy + (-h / 2.0)));
                 let n = 50usize;
-                let arc1_cx = -w / 2.0 + radius;
+                let half_step = std::f64::consts::PI / (2.0 * (n as f64 - 1.0));
+                let correction = 2.0 * radius * (1.0 - half_step.cos());
+                let w_analytical = w + correction;
+                let mut verts: Vec<(f64, f64)> = Vec::with_capacity(102);
+                verts.push((
+                    cx + (-w_analytical / 2.0 + radius),
+                    cy + (-h / 2.0),
+                ));
+                verts.push((
+                    cx + (w_analytical / 2.0 - radius),
+                    cy + (-h / 2.0),
+                ));
+                let arc1_cx = -w_analytical / 2.0 + radius;
                 let start1 = std::f64::consts::PI / 2.0;
                 let end1 = std::f64::consts::PI * 3.0 / 2.0;
                 let step1 = (end1 - start1) / (n as f64 - 1.0);
@@ -281,8 +295,8 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                     let yr = radius * angle.sin();
                     verts.push((cx + (-xr), cy + (-yr)));
                 }
-                verts.push((cx + (w / 2.0 - radius), cy + (h / 2.0)));
-                let arc2_cx = w / 2.0 - radius;
+                verts.push((cx + (w_analytical / 2.0 - radius), cy + (h / 2.0)));
+                let arc2_cx = w_analytical / 2.0 - radius;
                 let start2 = std::f64::consts::PI * 3.0 / 2.0;
                 let end2 = std::f64::consts::PI * 5.0 / 2.0;
                 let step2 = (end2 - start2) / (n as f64 - 1.0);
@@ -1227,13 +1241,31 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
         //   h = bbox.height + labelPaddingY                 → th + p
         //   w = bbox.width  + h/4         + labelPaddingX   → tw + (th+p)/4 + p
         //   radius = h/2  (used for the rounded end-caps)
-        //   getBBox() of the resulting points spans the full w × h, so
-        //   updateNodeBounds feeds those exact dimensions to dagre.
-        // Note: edge intersection in src/render/edges.rs still works
-        // off the older (th + p*2, p*2) geometry so end-to-end byte
-        // exactness for stadium fixtures (192, 113, 144, ...) waits on
-        // a matching update there.
-        "stadium" | "pill" => ((th + p) / 4.0 + p, p),
+        //
+        // The actual polygon fed to roughjs/intersect uses
+        // `generateCirclePoints(..., 50, ...)` for each rounded end-cap, sampling
+        // the half-circle at 50 evenly-spaced angles. With the 90→270 sweep this
+        // means the closest sample to the true horizontal extreme (180°) sits at
+        //   delta = (180° / 49) / 2  = 1.83673...° away,
+        // so each end-cap's bbox falls short of `radius` by
+        //   radius * (1 - cos(delta))
+        // and the polygon's total width is
+        //   w_polygon = w_analytical - 2 * radius * (1 - cos(delta))
+        // upstream's `updateNodeBounds(node, polygon)` reads that polygon bbox
+        // (not the analytical w), so dagre receives the corrected width. We
+        // bake the same correction here to match byte-for-byte.
+        // (height correction is zero — top/bottom horizontal lines reach ±h/2 exactly.)
+        "stadium" | "pill" => {
+            let h_stadium = th + p;
+            let w_analytical = tw + h_stadium / 4.0 + p;
+            // delta in radians: half the angular step of generateCirclePoints(.., 50, 90, 270)
+            let step = std::f64::consts::PI / 49.0;
+            let delta = step / 2.0;
+            let radius = h_stadium / 2.0;
+            let correction = 2.0 * radius * (1.0 - delta.cos());
+            let w_polygon = w_analytical - correction;
+            return (w_polygon, h_stadium);
+        }
         // Upstream cylinder.ts (mermaid 11.14.0 mermaid.js:43045-43113):
         //   labelPaddingX = labelPaddingY = nodePadding (= p) for non-neo look
         //   w4 = bbox.width  + labelPaddingY  → tw + p
