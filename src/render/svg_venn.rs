@@ -287,7 +287,9 @@ fn adjust_l(color: &str, delta: f64) -> String {
                 parts[2].strip_suffix('%').and_then(|p| p.parse::<f64>().ok()),
             ) {
                 let new_l = (ll + delta).clamp(0.0, 100.0);
-                let new_l = (new_l * 1e10).round() / 1e10;
+                // V8 Math.round semantics (floor(x+0.5)). Applied here for
+                // parity with khroma's lightness rounding.
+                let new_l = libm::floor(new_l * 1e10 + 0.5) / 1e10;
                 return format!("hsl({h}, {s}%, {nl}%)", h = num(h), s = num(s), nl = num(new_l));
             }
         }

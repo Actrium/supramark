@@ -48,6 +48,11 @@ regex = "1"
 # dagre-rs has a published release that exposes intersectPolygon /
 # intersectRect helpers required by mermaid's edge-endpoint clipping.
 dagre = { git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
+# Pure-Rust port of fdlibm. Used by the venn layout to match V8's
+# Math.* (acos/atan2/sqrt/sin/cos) byte-for-byte — V8 ships fdlibm too,
+# so routing all venn FP through libm eliminates ULP-level drift in the
+# Nelder-Mead simplex trajectory that propagates to scaled SVG coords.
+libm = "0.2"
 
 [dev-dependencies]
 # SVG parser used by the structural-diff evaluator under `tests/eval/`.
