@@ -105,10 +105,16 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
                 .and_then(|m| m.get("color"))
                 .cloned()
                 .unwrap_or_else(|| {
+                    // Mirror upstream `vennRenderer.ts` line 154:
+                    // `themeDark ? lighten(baseColor, 30) : darken(baseColor, 30)`.
+                    // Khroma's lighten/darken also handles hex / rgb inputs by
+                    // converting to HSL first; the legacy `adjust_l` here only
+                    // matched HSL strings, missing the hex-input branch used
+                    // by `style A fill:#ff6b6b` etc.
                     if dark_bg {
-                        adjust_l(&base_color, 30.0)
+                        crate::theme::color::lighten(&base_color, 30.0)
                     } else {
-                        adjust_l(&base_color, -30.0)
+                        crate::theme::color::darken(&base_color, 30.0)
                     }
                 });
 
@@ -449,22 +455,3 @@ fn minify_font_family(s: &str) -> String {
     out
 }
 
-/// Adjust HSL lightness by `delta` (negative = darken). Mirrors khroma's
-/// behaviour: clamp to [0, 100] then round to 10 decimal places.
-fn adjust_l(color: &str, delta: f64) -> String {
-    if let Some(stripped) = color.strip_prefix("hsl(").and_then(|s| s.strip_suffix(')')) {
-        let parts: Vec<&str> = stripped.split(',').map(|p| p.trim()).collect();
-        if parts.len() == 3 {
-            if let (Ok(h), Some(s), Some(ll)) = (
-                parts[0].parse::<f64>(),
-                parts[1].strip_suffix('%').and_then(|p| p.parse::<f64>().ok()),
-                parts[2].strip_suffix('%').and_then(|p| p.parse::<f64>().ok()),
-            ) {
-                let new_l = (ll + delta).clamp(0.0, 100.0);
-                let new_l = (new_l * 1e10).round() / 1e10;
-                return format!("hsl({h}, {s}%, {nl}%)", h = num(h), s = num(s), nl = num(new_l));
-            }
-        }
-    }
-    color.to_string()
-}
