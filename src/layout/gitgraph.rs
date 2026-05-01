@@ -63,6 +63,8 @@ pub struct GitGraphLayout {
     /// True for `gitGraph TB:` (top-to-bottom) — the renderer flips its
     /// per-element math when this is set.
     pub is_tb: bool,
+    /// True for `gitGraph BT:` (bottom-to-top).
+    pub is_bt: bool,
     /// Branches in **render** order (sorted by `order` then insertion).
     pub branches: Vec<BranchPosition>,
     pub commits: Vec<CommitGeom>,
@@ -108,12 +110,9 @@ fn sort_branches_by_order(d: &GitGraphDiagram) -> Vec<usize> {
 }
 
 pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLayout> {
-    if matches!(d.orientation, Orientation::BT) {
-        return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: BT orientation not yet implemented".into(),
-        ));
-    }
     let is_tb = matches!(d.orientation, Orientation::TB);
+    let is_bt = matches!(d.orientation, Orientation::BT);
+    let is_vert = is_tb || is_bt;
 
     // Branch label widths — measured at 14px sans-serif (jsdom shim does
     // not honour CSS, so the bbox always reports the default-font width).
@@ -134,15 +133,19 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
             label_height: label_h,
         });
         // setBranchPosition increment: 50 + (rotate ? 40 : 0) + (TB|BT ? bbox/2 : 0)
-        let tb_term = if is_tb { lw / 2.0 } else { 0.0 };
+        let tb_term = if is_vert { lw / 2.0 } else { 0.0 };
         pos += 50.0 + rotate_term + tb_term;
     }
 
-    // Commit positions along the running axis (X for LR, Y for TB).
+    // Commit positions along the running axis (X for LR, Y for TB/BT).
     // Positions match upstream's `drawCommits`.
+    // For BT, upstream reverses the sorted-keys list so the iteration
+    // goes from latest seq to oldest. We mirror that by iterating
+    // d.commits in reverse for BT, then re-sort by seq before writing
+    // back so `commits[i]` still aligns with `d.commits[i]`.
     let mut commits: Vec<CommitGeom> = Vec::with_capacity(d.commits.len());
-    let mut cursor: f64 = if is_tb { DEFAULT_POS } else { 0.0 };
-    let mut max_pos: f64 = if is_tb { DEFAULT_POS } else { 0.0 };
+    let mut cursor: f64 = if is_vert { DEFAULT_POS } else { 0.0 };
+    let mut max_pos: f64 = if is_vert { DEFAULT_POS } else { 0.0 };
     let label_widths: Vec<f64> = d
         .commits
         .iter()
@@ -151,7 +154,14 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     let commit_label_text_height =
         font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
-    for c in &d.commits {
+    let iter_indices: Vec<usize> = if is_bt {
+        (0..d.commits.len()).rev().collect()
+    } else {
+        (0..d.commits.len()).collect()
+    };
+    let mut placed: Vec<Option<CommitGeom>> = vec![None; d.commits.len()];
+    for &i in &iter_indices {
+        let c = &d.commits[i];
         let pos_with_offset = cursor + LAYOUT_OFFSET;
         let bp = branch_positions
             .iter()
@@ -164,13 +174,12 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
                 }
             })?;
         let lane = bp.pos;
-        let (cx, cy) = if is_tb {
+        let (cx, cy) = if is_vert {
             (lane, pos_with_offset)
         } else {
-            // LR / non-redux: bullet sits at branch.pos - 2.
             (pos_with_offset, lane - 2.0)
         };
-        commits.push(CommitGeom {
+        placed[i] = Some(CommitGeom {
             id: c.id.clone(),
             seq: c.seq,
             cx,
@@ -183,6 +192,9 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         if cursor > max_pos {
             max_pos = cursor;
         }
+    }
+    for opt in placed {
+        commits.push(opt.expect("every commit visited"));
     }
 
     // ── viewBox / bbox accumulation ─────────────────────────────────
@@ -206,16 +218,15 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         for bp in &branch_positions {
             let bbox_w = bp.label_width;
             let bbox_h = bp.label_height;
-            if is_tb {
+            if is_vert {
                 // Vertical line: x=bp.pos, y in [DEFAULT_POS, max_pos].
                 acc(bp.pos, DEFAULT_POS, 0.0, max_pos - DEFAULT_POS);
-                // Branch label rect at top: x=pos - bbox.w/2 - 10, y=0.
+                // Branch label rect: TB at top (y=0), BT at bottom (y=maxPos).
                 let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
-                let bkg_y = 0.0;
+                let bkg_y = if is_bt { max_pos } else { 0.0 };
                 let bkg_w = bbox_w + 18.0;
                 let bkg_h = bbox_h + 4.0;
                 acc(bkg_x, bkg_y, bkg_w, bkg_h);
-                // Branch label text intrinsic (0,0,w,h).
                 acc(0.0, 0.0, bbox_w, bbox_h);
             } else {
                 let spine_y = bp.pos - 2.0;
@@ -275,7 +286,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         if label_emitted {
             let lw = label_widths[i];
             let lh = commit_label_text_height;
-            if is_tb {
+            if is_vert {
                 let px = 4.0;
                 let rect_x = c.cx - (lw + 4.0 * px + 5.0);
                 let rect_y = c.cy - 12.0;
@@ -307,7 +318,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         }
         let mut y_off = 0.0_f64;
         for t in tags.iter().rev() {
-            if is_tb {
+            if is_vert {
                 // TB intrinsic bbox of the polygon (jsdom shim ignores
                 // the rotate transform).
                 let y_origin = c.pos + y_off;
@@ -368,6 +379,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     Ok(GitGraphLayout {
         orientation: d.orientation,
         is_tb,
+        is_bt,
         branches: branch_positions,
         commits,
         max_pos,

@@ -66,23 +66,27 @@ pub fn render(
         let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
         let cidx = color_idx(bp.index);
 
-        if l.is_tb {
-            // Vertical line: x=pos, y in [DEFAULT_POS, max_pos].
+        if l.is_tb || l.is_bt {
+            // Vertical line: x=pos, y between DEFAULT_POS and max_pos.
+            // BT swaps the line's y1/y2 endpoints (y1=max_pos, y2=DEFAULT_POS).
             let line_x = bp.pos;
-            // Branch label rect at top (overrides LR transform).
-            // Upstream TB code: `bkg.attr('x', pos - bbox.width / 2 - 10).attr('y', 0)`.
+            let (line_y1, line_y2) = if l.is_bt {
+                (l.max_pos, crate::layout::gitgraph::DEFAULT_POS)
+            } else {
+                (crate::layout::gitgraph::DEFAULT_POS, l.max_pos)
+            };
+            // Branch label rect: TB → top (y=0), BT → bottom (y=maxPos).
             let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
-            let bkg_y = 0.0;
+            let bkg_y = if l.is_bt { l.max_pos } else { 0.0 };
             let bkg_w = bbox_w + 18.0;
             let bkg_h = bbox_h + 4.0;
-            // label.attr('transform', 'translate(' + (pos - bbox.width / 2 - 5) + ', ' + 0 + ')')
             let label_translate_x = bp.pos - bbox_w / 2.0 - 5.0;
-            let label_translate_y = 0.0;
+            let label_translate_y = bkg_y;
             out.push_str(&format!(
                 r#"<line x1="{x}" y1="{y1}" x2="{x}" y2="{y2}" class="branch branch{idx}"></line>"#,
                 x = fmt_num(line_x),
-                y1 = fmt_num(crate::layout::gitgraph::DEFAULT_POS),
-                y2 = fmt_num(l.max_pos),
+                y1 = fmt_num(line_y1),
+                y2 = fmt_num(line_y2),
                 idx = cidx,
             ));
             out.push_str(&format!(
@@ -149,7 +153,7 @@ pub fn render(
     // = bp.pos. Mirrors upstream's `lanes.push(spineY)` which uses the
     // same coordinate as the line's primary axis.
     let mut lanes: Vec<f64> = if d.config.show_branches {
-        if l.is_tb {
+        if l.is_tb || l.is_bt {
             l.branches.iter().map(|bp| bp.pos).collect()
         } else {
             l.branches.iter().map(|bp| bp.pos - 2.0).collect()
@@ -166,11 +170,14 @@ pub fn render(
             let pa = &l.commits[parent_idx];
             let pb = &l.commits[i];
             let parent_commit = &d.commits[parent_idx];
-            let needs_reroute = should_reroute(parent_commit, c, pa, pb, &d.commits, l.is_tb);
+            let is_v = l.is_tb || l.is_bt;
+            let needs_reroute = should_reroute(parent_commit, c, pa, pb, &d.commits, is_v);
             let line_def = if needs_reroute {
-                build_arrow_path_rerouted(pa, pb, c, parent_commit, &mut lanes, l.is_tb)
+                build_arrow_path_rerouted(pa, pb, c, parent_commit, &mut lanes, is_v, l.is_bt)
             } else if l.is_tb {
                 build_arrow_path_tb(pa, pb, c, parent_commit)
+            } else if l.is_bt {
+                build_arrow_path_bt(pa, pb, c, parent_commit)
             } else {
                 build_arrow_path(pa, pb, c, parent_commit)
             };
@@ -187,7 +194,7 @@ pub fn render(
             //     non-primary: source-branch color (line 704).
             let is_merge_2nd = matches!(c.kind, CommitKind::Merge)
                 && c.parents.first() != Some(parent_id);
-            let reroute_axis_swap = if l.is_tb {
+            let reroute_axis_swap = if l.is_tb || l.is_bt {
                 pa.cx > pb.cx
             } else {
                 pa.cy > pb.cy
@@ -209,8 +216,17 @@ pub fn render(
     out.push_str("</g>");
 
     // ── Commit bullets ───────────────────────────────────────────────
+    // BT iterates the sortedKeys in reverse (upstream line 588), so the
+    // emit order is newest-first. Mirror that by walking indices in
+    // reverse for BT.
     out.push_str(r#"<g class="commit-bullets">"#);
-    for (i, c) in l.commits.iter().enumerate() {
+    let bullet_order: Vec<usize> = if l.is_bt {
+        (0..d.commits.len()).rev().collect()
+    } else {
+        (0..d.commits.len()).collect()
+    };
+    for &i in &bullet_order {
+        let c = &l.commits[i];
         let commit = &d.commits[i];
         let id_esc = escape_text(&commit.id);
         // Effective symbol type: `commit.customType ?? commit.type`.
@@ -307,7 +323,8 @@ pub fn render(
     let px = 4.0_f64;
     let tag_lh = l.commit_label_text_height;
     let h2 = tag_lh / 2.0;
-    for (i, c) in l.commits.iter().enumerate() {
+    for &i in &bullet_order {
+        let c = &l.commits[i];
         let commit = &d.commits[i];
         // Skip the commit-LABEL (text + bkg) for cherry-pick and
         // non-customId merge, plus when `showCommitLabel` is off — but
@@ -318,7 +335,7 @@ pub fn render(
         if !skip_label {
             let lw = l.commit_label_widths[i];
             let lh = l.commit_label_text_height;
-            if l.is_tb {
+            if l.is_tb || l.is_bt {
                 // TB layout (upstream lines 360-368):
                 //   labelBkg.x = cx - (bbox.w + 4*PX + 5)
                 //          .y = cy - 12
@@ -411,7 +428,7 @@ pub fn render(
             let mut y_off = 0.0_f64;
             for t in commit.tags.iter().rev() {
                 let w_tag = crate::font_metrics::text_width(t, "sans-serif", 14.0, false, false);
-                if l.is_tb {
+                if l.is_tb || l.is_bt {
                     // TB tag geometry — see upstream lines 464-487.
                     // commitPosition.x = c.cx, pos = c.pos (= cy - 10),
                     // yOrigin = pos + yOffset.
@@ -576,7 +593,8 @@ fn build_arrow_path_rerouted(
     _commit_b: &crate::model::gitgraph::Commit,
     _commit_a: &crate::model::gitgraph::Commit,
     lanes: &mut Vec<f64>,
-    is_tb: bool,
+    is_vert: bool,
+    is_bt: bool,
 ) -> String {
     let p1x = pa.cx;
     let p1y = pa.cy;
@@ -585,15 +603,40 @@ fn build_arrow_path_rerouted(
     let radius = 10.0_f64;
     let offset = 10.0_f64;
 
-    if is_tb {
-        // TB rerouted: detour along X. lane = findLane on the X axis.
+    if is_vert {
         let line_x = if p1x < p2x {
             find_lane(p1x, p2x, lanes)
         } else {
             find_lane(p2x, p1x, lanes)
         };
-        if p1x < p2x {
-            // arc = A r r 0 0 1, arc2 = A r r 0 0 0 (TB-down-right per upstream)
+        if is_bt {
+            // BT (upstream lines 708-721): going up.
+            if p1x < p2x {
+                format!(
+                    "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                    fmt_num(p1x), fmt_num(p1y),
+                    fmt_num(line_x - radius), fmt_num(p1y),
+                    fmt_num(radius), fmt_num(radius),
+                    fmt_num(line_x), fmt_num(p1y - offset),
+                    fmt_num(line_x), fmt_num(p2y + radius),
+                    fmt_num(radius), fmt_num(radius),
+                    fmt_num(line_x + offset), fmt_num(p2y),
+                    fmt_num(p2x), fmt_num(p2y),
+                )
+            } else {
+                format!(
+                    "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                    fmt_num(p1x), fmt_num(p1y),
+                    fmt_num(line_x + radius), fmt_num(p1y),
+                    fmt_num(radius), fmt_num(radius),
+                    fmt_num(line_x), fmt_num(p1y - offset),
+                    fmt_num(line_x), fmt_num(p2y + radius),
+                    fmt_num(radius), fmt_num(radius),
+                    fmt_num(line_x - offset), fmt_num(p2y),
+                    fmt_num(p2x), fmt_num(p2y),
+                )
+            }
+        } else if p1x < p2x {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
                 fmt_num(p1x), fmt_num(p1y),
@@ -714,6 +757,72 @@ fn build_arrow_path_tb(
                 fmt_num(p2x + radius), fmt_num(p1y),
                 fmt_num(radius), fmt_num(radius),
                 fmt_num(p2x), fmt_num(p1y + offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
+    }
+}
+
+/// Build the `d=` attribute for one parent → commit arrow (BT mode,
+/// non-rerouted). Mirrors upstream `drawArrow` lines 778-809.
+fn build_arrow_path_bt(
+    pa: &crate::layout::gitgraph::CommitGeom,
+    pb: &crate::layout::gitgraph::CommitGeom,
+    commit_b: &crate::model::gitgraph::Commit,
+    _commit_a: &crate::model::gitgraph::Commit,
+) -> String {
+    let p1x = pa.cx;
+    let p1y = pa.cy;
+    let p2x = pb.cx;
+    let p2y = pb.cy;
+    let radius = 20.0_f64;
+    let offset = 20.0_f64;
+    let is_merge_secondary = matches!(commit_b.kind, CommitKind::Merge)
+        && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
+
+    if (p1x - p2x).abs() < f64::EPSILON {
+        return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
+    }
+
+    if p1x < p2x {
+        if is_merge_secondary {
+            // M p1 L p1.x p2.y+r A20...1 p1.x+off p2.y L p2
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(p2y + radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x + offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            // M p1 L p2.x-r p1.y A20...0 p2.x p1.y-off L p2
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p2x - radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(p1y - offset),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        }
+    } else {
+        if is_merge_secondary {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p1x), fmt_num(p2y + radius),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p1x - offset), fmt_num(p2y),
+                fmt_num(p2x), fmt_num(p2y),
+            )
+        } else {
+            format!(
+                "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
+                fmt_num(p1x), fmt_num(p1y),
+                fmt_num(p2x + radius), fmt_num(p1y),
+                fmt_num(radius), fmt_num(radius),
+                fmt_num(p2x), fmt_num(p1y - offset),
                 fmt_num(p2x), fmt_num(p2y),
             )
         }
