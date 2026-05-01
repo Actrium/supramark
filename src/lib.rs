@@ -5,7 +5,9 @@
 //! `convert_with_id` dispatches the Wave 1/2 geometry families plus the
 //! active Stratum 3 dagre family (`er` / `block` / `requirement` /
 //! `class` / `state` / `flowchart`). `gantt` is parser/layout-only for
-//! now; `sequence` / `c4` / `gitGraph` / `mindmap` are still pending.
+//! now; `sequence` / `gitGraph` / `mindmap` are still pending. `c4`
+//! has parser scaffolding only — its layout/render port is open work
+//! tracked in `tests/known_ignored.txt`.
 //!
 //! Licensing: core crate is MIT. Portions vendored from sister
 //! projects (plantuml-little, dagre-rs, selkie, mmdr, mmdflux) are
@@ -262,9 +264,19 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
             let l = layout::gantt::layout(&d, &effective_theme)?;
             render::svg_gantt::render(&d, &l, &effective_theme, id)
         }
+        detect::DiagramKind::C4 => {
+            // Parser is in place; layout/render are placeholders. The
+            // 11 c4 fixtures are listed in tests/known_ignored.txt
+            // until the upstream `c4Renderer.js` + `svgDraw.js` port
+            // lands. Returning the parser's outcome (then a stub
+            // `Unsupported` from the renderer) lets the rest of the
+            // dispatch arm be exhaustive without crashing on c4 input.
+            let d = parser::c4::parse(source)?;
+            render::svg_c4::render(&d, &theme, id)
+        }
         detect::DiagramKind::Info => render::svg_info::render(&theme, id),
         other => Err(MermaidError::Unsupported(format!(
-            "diagram kind '{}' not yet implemented — Wave 7: sequence/c4/gitgraph; mindmap TBD",
+            "diagram kind '{}' not yet implemented — Wave 7: sequence/gitgraph; mindmap TBD",
             other.id()
         ))),
     }

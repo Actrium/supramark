@@ -2,6 +2,7 @@
 //! [`crate::detect`]; each submodule here owns one diagram kind.
 
 pub mod block;
+pub mod c4;
 pub mod class;
 pub mod common;
 pub mod er;

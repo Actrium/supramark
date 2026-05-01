@@ -10,6 +10,7 @@ pub mod shapes;
 pub mod stylis;
 pub mod svg;
 pub mod svg_block;
+pub mod svg_c4;
 pub mod svg_class;
 pub mod svg_er;
 pub mod svg_flowchart;
