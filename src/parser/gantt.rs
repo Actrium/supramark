@@ -81,7 +81,11 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "axisFormat") {
-            d.axis_format = Some(rest.trim().to_string());
+            // Upstream jison does `$1.substr(11)`, preserving any
+            // leading whitespace between "axisFormat" and the format
+            // string. d3 timeFormat passes that through verbatim, so
+            // ` %d/%m` and `%d/%m` produce different tick labels.
+            d.axis_format = Some(rest.trim_end().to_string());
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "tickInterval") {
@@ -186,9 +190,13 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
         // The jison grammar matches `[^:\n]+` for taskTxt and
         // `:[^#\n;]+` for taskData.
         if let Some(colon_pos) = line.find(':') {
-            let task_txt = line[..colon_pos].trim();
+            // Upstream jison's `[^:\n]+` matches the raw task text
+            // including trailing whitespace; the renderer outputs that
+            // verbatim (and uses its bbox width). Trimming here would
+            // shrink the task label and skew text-width-based branches.
+            let task_txt = line[..colon_pos].trim_start();
             let task_data = line[colon_pos + 1..].trim();
-            if !task_txt.is_empty() && !task_data.is_empty() {
+            if !task_txt.trim().is_empty() && !task_data.is_empty() {
                 // Ensure an implicit section exists if no section declared yet.
                 if current_section_idx == 0 && !has_implicit_section {
                     has_implicit_section = true;
