@@ -29,6 +29,7 @@ pub mod svg_requirement;
 pub mod svg_richtext;
 pub mod svg_sankey;
 pub mod svg_sequence;
+pub mod svg_sequence_consts;
 pub mod svg_state;
 pub mod svg_timeline;
 pub mod svg_treemap;
