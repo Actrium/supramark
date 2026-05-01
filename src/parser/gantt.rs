@@ -19,7 +19,7 @@ use crate::model::gantt::{GanttDiagram, Section, Task};
 
 /// Tags that can appear in task data (matched case-insensitively,
 /// as a whole token in the comma-separated data).
-const TASK_TAGS: &[&str] = &["active", "done", "crit", "milestone"];
+const TASK_TAGS: &[&str] = &["active", "done", "crit", "milestone", "vert"];
 
 pub fn parse(source: &str) -> Result<GanttDiagram> {
     let mut d = GanttDiagram {
@@ -28,8 +28,11 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
         ..GanttDiagram::default()
     };
 
-    // First pass: hoover up any remaining `%%{init:...}%%` directives.
-    let source_after_directives = extract_init_directives(source, &mut d);
+    // First strip an optional leading YAML frontmatter (`---\n...\n---`).
+    let source = strip_frontmatter(source, &mut d);
+
+    // Second pass: hoover up any remaining `%%{init:...}%%` directives.
+    let source_after_directives = extract_init_directives(&source, &mut d);
 
     // Second pass: line-oriented parse of the body.
     let lines: Vec<&str> = source_after_directives.lines().collect();
@@ -81,7 +84,11 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "axisFormat") {
-            d.axis_format = Some(rest.trim().to_string());
+            // Upstream jison does `$1.substr(11)`, preserving any
+            // leading whitespace between "axisFormat" and the format
+            // string. d3 timeFormat passes that through verbatim, so
+            // ` %d/%m` and `%d/%m` produce different tick labels.
+            d.axis_format = Some(rest.trim_end().to_string());
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "tickInterval") {
@@ -142,16 +149,15 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
             }
             continue;
         }
-        if let Some(rest) = strip_kw_ci(line, "accTitle") {
-            if let Some(val) = rest.strip_prefix(':') {
-                d.meta.acc_title = Some(val.trim().to_string());
-            }
+        // accTitle / accDescr — match `accTitle:` or `accTitle :` (with
+        // or without a space before the colon). Upstream's grammar
+        // (`title.spec.ts`) treats the `:` as a token-separator.
+        if let Some(rest) = strip_kw_punct(line, "accTitle") {
+            d.meta.acc_title = Some(rest.trim().to_string());
             continue;
         }
-        if let Some(rest) = strip_kw_ci(line, "accDescr") {
-            if let Some(val) = rest.strip_prefix(':') {
-                d.meta.acc_descr = Some(val.trim().to_string());
-            }
+        if let Some(rest) = strip_kw_punct(line, "accDescr") {
+            d.meta.acc_descr = Some(rest.trim().to_string());
             continue;
         }
         if let Some(rest) = strip_kw_ci(line, "displayMode") {
@@ -186,9 +192,13 @@ pub fn parse(source: &str) -> Result<GanttDiagram> {
         // The jison grammar matches `[^:\n]+` for taskTxt and
         // `:[^#\n;]+` for taskData.
         if let Some(colon_pos) = line.find(':') {
-            let task_txt = line[..colon_pos].trim();
+            // Upstream jison's `[^:\n]+` matches the raw task text
+            // including trailing whitespace; the renderer outputs that
+            // verbatim (and uses its bbox width). Trimming here would
+            // shrink the task label and skew text-width-based branches.
+            let task_txt = line[..colon_pos].trim_start();
             let task_data = line[colon_pos + 1..].trim();
-            if !task_txt.is_empty() && !task_data.is_empty() {
+            if !task_txt.trim().is_empty() && !task_data.is_empty() {
                 // Ensure an implicit section exists if no section declared yet.
                 if current_section_idx == 0 && !has_implicit_section {
                     has_implicit_section = true;
@@ -241,6 +251,7 @@ fn parse_task(name: &str, data: &str, section_idx: usize, auto_id_counter: &mut 
     let mut active = false;
     let mut critical = false;
     let mut milestone = false;
+    let mut vert = false;
 
     let mut found_tag = true;
     while found_tag {
@@ -256,6 +267,7 @@ fn parse_task(name: &str, data: &str, section_idx: usize, auto_id_counter: &mut 
                     "done" => done = true,
                     "crit" => critical = true,
                     "milestone" => milestone = true,
+                    "vert" => vert = true,
                     _ => {}
                 }
                 parts.remove(0);
@@ -313,18 +325,85 @@ fn parse_task(name: &str, data: &str, section_idx: usize, auto_id_counter: &mut 
         active,
         critical,
         milestone,
+        vert,
         section: section_idx,
         classes: Vec::new(),
     }
 }
 
-/// Parse `click` interactivity lines. We only extract enough to add CSS
-/// classes; we don't store JS callbacks or links since the Rust side
-/// doesn't execute JavaScript.
-fn parse_click(rest: &str, _d: &mut GanttDiagram) {
-    // `click <id> [call <fn>(<args>)] [href "<url>"]`
-    // Just consume — no-op for now.
-    let _ = rest;
+/// Parse `click` interactivity lines, mapping `clickable` CSS classes
+/// onto the targeted task(s). We don't store the JS callback / URL
+/// itself since the Rust side never executes JavaScript.
+fn parse_click(rest: &str, d: &mut GanttDiagram) {
+    // Format: `click <ids> call <fn>(<args>)` or `click <ids> href "<url>"`.
+    // We just need to know which ids are clickable.
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return;
+    }
+    // First whitespace-separated token after `click` is the id list.
+    let mut iter = rest.splitn(2, char::is_whitespace);
+    let id_blob = iter.next().unwrap_or("");
+    let _verb_and_rest = iter.next().unwrap_or("");
+    for id in id_blob.split(',') {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        for t in d.tasks.iter_mut() {
+            if t.id.as_deref() == Some(id) && !t.classes.iter().any(|c| c == "clickable") {
+                t.classes.push("clickable".to_string());
+            }
+        }
+    }
+}
+
+/// Strip leading YAML frontmatter `---\n...\n---\n`, lifting the
+/// `displayMode` / `title` keys we care about. This is a coarse
+/// best-effort scan, tolerant of trailing CR/LF.
+fn strip_frontmatter(source: &str, d: &mut GanttDiagram) -> String {
+    let trimmed = source.trim_start_matches('\u{FEFF}');
+    if !trimmed.starts_with("---") {
+        return source.to_string();
+    }
+    let after_open = match trimmed.find('\n') {
+        Some(idx) if &trimmed[..idx].trim() == &"---" => &trimmed[idx + 1..],
+        _ => return source.to_string(),
+    };
+    // Find closing `---` line.
+    let mut end_idx = None;
+    let mut pos = 0usize;
+    for line in after_open.split('\n') {
+        if line.trim() == "---" {
+            end_idx = Some(pos + line.len());
+            break;
+        }
+        pos += line.len() + 1;
+    }
+    let close_pos = match end_idx {
+        Some(p) => p,
+        None => return source.to_string(),
+    };
+    let body = &after_open[..close_pos.saturating_sub(3).min(after_open.len())];
+    // Trivial key:value scan for displayMode, title.
+    for line in body.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("displayMode:") {
+            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            if !v.is_empty() {
+                d.display_mode = Some(v);
+            }
+        } else if let Some(rest) = line.strip_prefix("title:") {
+            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            if !v.is_empty() && d.meta.title.is_none() {
+                d.meta.title = Some(v);
+            }
+        }
+    }
+    let after_close = &after_open[close_pos..];
+    // Skip trailing newline after the closing fence.
+    let after_close = after_close.strip_prefix('\n').unwrap_or(after_close);
+    after_close.to_string()
 }
 
 /// Remove `%%{init:...}%%` blocks and capture the handful of gantt
@@ -405,11 +484,34 @@ fn is_skip_line(raw: &str) -> bool {
     t.is_empty() || (t.starts_with("%%") && !t.starts_with("%%{"))
 }
 
+/// Variant of [`strip_kw_ci`] that accepts a literal `:` (with optional
+/// surrounding whitespace) immediately after the keyword.
+fn strip_kw_punct<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
+    let trimmed = line.trim_start();
+    if !trimmed.is_char_boundary(kw.len()) {
+        return None;
+    }
+    if trimmed.len() < kw.len() {
+        return None;
+    }
+    if !trimmed[..kw.len()].eq_ignore_ascii_case(kw) {
+        return None;
+    }
+    let after = &trimmed[kw.len()..];
+    let after = after.trim_start();
+    after.strip_prefix(':').map(|r| r.trim_start())
+}
+
 /// Case-insensitive keyword stripping. Returns `Some(rest)` if `line`
 /// starts with `kw` followed by whitespace or end-of-string.
 fn strip_kw_ci<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
     let line = line.trim_start();
     if line.len() < kw.len() {
+        return None;
+    }
+    // Guard against multi-byte boundaries: line[..kw.len()] panics if
+    // the kw.len()-th byte is mid-codepoint (e.g. CJK input).
+    if !line.is_char_boundary(kw.len()) {
         return None;
     }
     if line[..kw.len()].eq_ignore_ascii_case(kw) {
@@ -445,7 +547,10 @@ gantt
         assert_eq!(d.sections[0].name, "Section");
         assert_eq!(d.tasks.len(), 2);
         assert_eq!(d.tasks[0].id.as_deref(), Some("a1"));
-        assert_eq!(d.tasks[0].name, "A task");
+        // Trailing whitespace is preserved verbatim — upstream's
+        // `[^:\n]+` jison rule keeps it, and the renderer relies on
+        // the bbox of the literal text for its outside-label branch.
+        assert_eq!(d.tasks[0].name.trim_end(), "A task");
         assert_eq!(d.tasks[0].start.as_deref(), Some("2014-01-01"));
         assert_eq!(d.tasks[0].end.as_deref(), Some("30d"));
         assert_eq!(d.tasks[1].start.as_deref(), Some("after a1"));

@@ -70,6 +70,9 @@ pub struct Task {
     pub active: bool,
     pub critical: bool,
     pub milestone: bool,
+    /// Vertical milestone marker (`vert` tag). Renders as a thin
+    /// vertical bar spanning the full chart height.
+    pub vert: bool,
     /// Section index into `GanttDiagram.sections`.
     pub section: usize,
     /// CSS classes added via `click` / `setClass`.
