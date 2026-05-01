@@ -172,13 +172,4 @@ fn demos_07() {
 }
 demos!(demos_08, "08");
 demos!(demos_09, "09");
-// demos_10: displayMode=compact; row-collapsing not implemented.
-#[test]
-#[ignore = "displayMode compact: row-collapsing layout not implemented"]
-fn demos_10() {
-    assert_fixture(
-        "tests/ext_fixtures/demos/gantt/10.mmd",
-        "tests/reference/ext_fixtures/demos/gantt/10.svg",
-        "ref-ext-fixtures-demos-gantt-10",
-    );
-}
+demos!(demos_10, "10");
