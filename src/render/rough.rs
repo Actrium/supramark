@@ -363,6 +363,455 @@ impl RoughGenerator {
             sets,
         }
     }
+
+    /// `rc.path(d, options)` — accepts an SVG path `d` string. Mirrors
+    /// upstream `RoughGenerator.path` for the M/L/Z subset that mermaid
+    /// shapes (stadium, etc.) feed in via `createPathFromPoints`.
+    ///
+    /// Critical detail: upstream allocates one `Random` instance the
+    /// first time `_o(options)` is materialised on the caller's option
+    /// bag, then `Object.assign({}, o, {...})` for the fill copies the
+    /// `randomizer` reference. Both calls share the same RNG state.
+    /// We mirror that by running `svg_path` once for the stroke first
+    /// (consuming N reads), then `svg_path` again for the fill — both
+    /// against the same `RoughRandom`.
+    ///
+    /// Path order matches upstream:
+    ///   1. fillPath (after `_mergedShape`) when `hasFill && fillStyle == 'solid'`.
+    ///   2. stroke path.
+    /// The `_o` order of operations in upstream is:
+    ///   `shape = svgPath(d, o)`     ← stroke path, runs first, advances RNG
+    ///   `fillShape = svgPath(d, fillOpts)` ← fill path, RNG continues
+    /// then `paths.push(fill)`, `paths.push(stroke)`. Output emit order
+    /// is `[fill, stroke]`. We follow that exact ordering.
+    pub fn path(&mut self, d: &str, o: &RoughOptions) -> Drawable {
+        let mut rng = self.make_random(o);
+        let mut sets: Vec<OpSet> = Vec::with_capacity(2);
+
+        let segs = path_normalize(&path_absolutize(&path_parse(d)));
+        let has_fill = match &o.fill {
+            None => false,
+            Some(s) => s != "none" && s != "transparent",
+        };
+        let has_stroke = o.stroke != "none";
+
+        // Stroke pass first — same as upstream. Even if hasStroke is
+        // false, the RNG is still advanced by upstream because
+        // `shape = svgPath(d, o)` runs unconditionally before the
+        // hasFill / hasStroke checks.
+        let stroke_ops = svg_path_ops(&segs, o, &mut rng);
+
+        // Fill pass — fillShape uses {disableMultiStroke: true,
+        // roughness: o.roughness ? o.roughness + fill_shape_roughness_gain : 0}.
+        if has_fill {
+            let mut fill_opts = o.clone();
+            fill_opts.disable_multi_stroke = true;
+            fill_opts.roughness = if o.roughness != 0.0 {
+                o.roughness + o.fill_shape_roughness_gain
+            } else {
+                0.0
+            };
+            let fill_ops = svg_path_ops(&segs, &fill_opts, &mut rng);
+            // _mergedShape: keep first op, drop subsequent moves.
+            let merged = merged_shape(fill_ops);
+            sets.push(OpSet {
+                op_type: OpSetType::FillPath,
+                ops: merged,
+            });
+        }
+
+        if has_stroke {
+            sets.push(OpSet {
+                op_type: OpSetType::Path,
+                ops: stroke_ops,
+            });
+        }
+
+        if let Some(fb) = rng.fallback {
+            self.fallback = fb;
+        }
+        Drawable {
+            shape: "path",
+            sets,
+        }
+    }
+}
+
+/// Filter ops: keep first op, drop subsequent `Move` ops. Mirrors
+/// upstream `_mergedShape`.
+fn merged_shape(ops: Vec<Op>) -> Vec<Op> {
+    let mut out: Vec<Op> = Vec::with_capacity(ops.len());
+    for (i, op) in ops.into_iter().enumerate() {
+        if i == 0 {
+            out.push(op);
+            continue;
+        }
+        if matches!(op, Op::Move(_, _)) {
+            continue;
+        }
+        out.push(op);
+    }
+    out
+}
+
+// ── SVG path d parser (M/L/H/V/Z subset) ─────────────────────────────
+//
+// Mermaid only ever feeds rough.path() strings of the form
+//   "M x,y L x,y L x,y ... Z"
+// (from `createPathFromPoints`). To stay tractable and byte-exact we
+// implement just the M / L / H / V / Z commands plus their relative
+// counterparts. Anything more exotic (curves, arcs) is silently
+// dropped — the caller has fallback paths for those shapes.
+
+#[derive(Debug, Clone)]
+struct RawSeg {
+    key: char,
+    data: Vec<f64>,
+}
+
+fn path_parse(d: &str) -> Vec<RawSeg> {
+    // Tokenize: commands | numbers | whitespace/comma.
+    let bytes = d.as_bytes();
+    let mut tokens: Vec<(char, Option<f64>)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r' {
+            i += 1;
+            continue;
+        }
+        if c.is_ascii_alphabetic() && "MmLlHhVvZzCcSsQqTtAa".contains(c) {
+            tokens.push((c, None));
+            i += 1;
+            continue;
+        }
+        // Parse number.
+        let start = i;
+        if bytes[i] == b'-' || bytes[i] == b'+' {
+            i += 1;
+        }
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+            i += 1;
+        }
+        if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+            i += 1;
+            if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'+') {
+                i += 1;
+            }
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        if start == i {
+            // Unknown char — skip.
+            i += 1;
+            continue;
+        }
+        if let Ok(v) = std::str::from_utf8(&bytes[start..i]).unwrap().parse::<f64>() {
+            tokens.push(('#', Some(v)));
+        }
+    }
+
+    let params_count = |k: char| -> usize {
+        match k {
+            'M' | 'm' | 'L' | 'l' | 'T' | 't' => 2,
+            'H' | 'h' | 'V' | 'v' => 1,
+            'C' | 'c' => 6,
+            'S' | 's' | 'Q' | 'q' => 4,
+            'A' | 'a' => 7,
+            'Z' | 'z' => 0,
+            _ => 0,
+        }
+    };
+
+    let mut segs = Vec::new();
+    let mut idx = 0;
+    let mut mode = '\0';
+    while idx < tokens.len() {
+        let t = tokens[idx];
+        if t.0 != '#' {
+            mode = t.0;
+            idx += 1;
+            if mode == 'Z' || mode == 'z' {
+                segs.push(RawSeg {
+                    key: mode,
+                    data: vec![],
+                });
+                continue;
+            }
+        }
+        let need = params_count(mode);
+        if idx + need > tokens.len() {
+            break;
+        }
+        let mut data = Vec::with_capacity(need);
+        for j in 0..need {
+            if let (_, Some(v)) = tokens[idx + j] {
+                data.push(v);
+            } else {
+                return segs;
+            }
+        }
+        idx += need;
+        segs.push(RawSeg { key: mode, data });
+        // Per SVG spec, after an M, subsequent implicit numbers are L.
+        if mode == 'M' {
+            mode = 'L';
+        } else if mode == 'm' {
+            mode = 'l';
+        }
+    }
+    segs
+}
+
+fn path_absolutize(segs: &[RawSeg]) -> Vec<RawSeg> {
+    let mut out = Vec::with_capacity(segs.len());
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    let mut subx = 0.0_f64;
+    let mut suby = 0.0_f64;
+    for seg in segs {
+        match seg.key {
+            'M' => {
+                out.push(seg.clone());
+                cx = seg.data[0];
+                cy = seg.data[1];
+                subx = cx;
+                suby = cy;
+            }
+            'm' => {
+                cx += seg.data[0];
+                cy += seg.data[1];
+                out.push(RawSeg {
+                    key: 'M',
+                    data: vec![cx, cy],
+                });
+                subx = cx;
+                suby = cy;
+            }
+            'L' => {
+                out.push(seg.clone());
+                cx = seg.data[0];
+                cy = seg.data[1];
+            }
+            'l' => {
+                cx += seg.data[0];
+                cy += seg.data[1];
+                out.push(RawSeg {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
+            }
+            'H' => {
+                out.push(seg.clone());
+                cx = seg.data[0];
+            }
+            'h' => {
+                cx += seg.data[0];
+                out.push(RawSeg {
+                    key: 'H',
+                    data: vec![cx],
+                });
+            }
+            'V' => {
+                out.push(seg.clone());
+                cy = seg.data[0];
+            }
+            'v' => {
+                cy += seg.data[0];
+                out.push(RawSeg {
+                    key: 'V',
+                    data: vec![cy],
+                });
+            }
+            'C' => {
+                out.push(seg.clone());
+                cx = seg.data[4];
+                cy = seg.data[5];
+            }
+            'c' => {
+                let mut data = seg.data.clone();
+                for (i, v) in data.iter_mut().enumerate() {
+                    if i % 2 == 0 {
+                        *v += cx;
+                    } else {
+                        *v += cy;
+                    }
+                }
+                cx = data[4];
+                cy = data[5];
+                out.push(RawSeg { key: 'C', data });
+            }
+            'Z' | 'z' => {
+                out.push(RawSeg {
+                    key: 'Z',
+                    data: vec![],
+                });
+                cx = subx;
+                cy = suby;
+            }
+            _ => {
+                // Unsupported command — pass through. Mermaid stadium
+                // does not exercise this branch.
+                out.push(seg.clone());
+            }
+        }
+    }
+    out
+}
+
+fn path_normalize(segs: &[RawSeg]) -> Vec<RawSeg> {
+    // For our M/L/H/V/Z subset, normalize collapses H and V into L.
+    let mut out: Vec<RawSeg> = Vec::with_capacity(segs.len());
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    let mut subx = 0.0_f64;
+    let mut suby = 0.0_f64;
+    for seg in segs {
+        match seg.key {
+            'M' => {
+                out.push(seg.clone());
+                cx = seg.data[0];
+                cy = seg.data[1];
+                subx = cx;
+                suby = cy;
+            }
+            'L' => {
+                out.push(seg.clone());
+                cx = seg.data[0];
+                cy = seg.data[1];
+            }
+            'H' => {
+                cx = seg.data[0];
+                out.push(RawSeg {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
+            }
+            'V' => {
+                cy = seg.data[0];
+                out.push(RawSeg {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
+            }
+            'C' => {
+                out.push(seg.clone());
+                cx = seg.data[4];
+                cy = seg.data[5];
+            }
+            'Z' => {
+                out.push(seg.clone());
+                cx = subx;
+                cy = suby;
+            }
+            _ => {
+                out.push(seg.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Mirrors upstream `svgPath(path, o)` from `renderer.js`.
+fn svg_path_ops(segs: &[RawSeg], o: &RoughOptions, rng: &mut RoughRandom) -> Vec<Op> {
+    let mut ops: Vec<Op> = Vec::new();
+    let mut first = (0.0_f64, 0.0_f64);
+    let mut current = (0.0_f64, 0.0_f64);
+    for seg in segs {
+        match seg.key {
+            'M' => {
+                current = (seg.data[0], seg.data[1]);
+                first = current;
+            }
+            'L' => {
+                ops.extend(double_line(
+                    current.0, current.1, seg.data[0], seg.data[1], o, false, rng,
+                ));
+                current = (seg.data[0], seg.data[1]);
+            }
+            'C' => {
+                let x1 = seg.data[0];
+                let y1 = seg.data[1];
+                let x2 = seg.data[2];
+                let y2 = seg.data[3];
+                let x = seg.data[4];
+                let y = seg.data[5];
+                ops.extend(bezier_to(x1, y1, x2, y2, x, y, current, o, rng));
+                current = (x, y);
+            }
+            'Z' => {
+                ops.extend(double_line(
+                    current.0, current.1, first.0, first.1, o, false, rng,
+                ));
+                current = first;
+            }
+            _ => {}
+        }
+    }
+    ops
+}
+
+/// Mirrors upstream `_bezierTo`. Used by `svg_path_ops` for `C`
+/// segments. Stadium doesn't hit this in its M/L/Z form, but other
+/// shapes use it via `path()`.
+fn bezier_to(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    x: f64,
+    y: f64,
+    current: (f64, f64),
+    o: &RoughOptions,
+    rng: &mut RoughRandom,
+) -> Vec<Op> {
+    let mut ops = Vec::with_capacity(4);
+    let max_off = if o.max_randomness_offset == 0.0 {
+        1.0
+    } else {
+        o.max_randomness_offset
+    };
+    let ros = [max_off, max_off + 0.3];
+    let iterations = if o.disable_multi_stroke { 1 } else { 2 };
+    let preserve = o.preserve_vertices;
+    for i in 0..iterations {
+        let move_x;
+        let move_y;
+        if i == 0 {
+            move_x = current.0;
+            move_y = current.1;
+        } else {
+            move_x = current.0
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(ros[0], o, 1.0, rng)
+                };
+            move_y = current.1
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(ros[0], o, 1.0, rng)
+                };
+        }
+        ops.push(Op::Move(move_x, move_y));
+        let f0;
+        let f1;
+        if preserve {
+            f0 = x;
+            f1 = y;
+        } else {
+            f0 = x + offset_opt(ros[i], o, 1.0, rng);
+            f1 = y + offset_opt(ros[i], o, 1.0, rng);
+        }
+        let cx1 = x1 + offset_opt(ros[i], o, 1.0, rng);
+        let cy1 = y1 + offset_opt(ros[i], o, 1.0, rng);
+        let cx2 = x2 + offset_opt(ros[i], o, 1.0, rng);
+        let cy2 = y2 + offset_opt(ros[i], o, 1.0, rng);
+        ops.push(Op::BCurveTo(cx1, cy1, cx2, cy2, f0, f1));
+    }
+    ops
 }
 
 // ── `rectangle(x, y, w, h, o)` from renderer.js — pure outline ─────────

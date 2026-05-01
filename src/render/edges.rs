@@ -1390,8 +1390,24 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
 
     let shape = node.shape.as_deref().unwrap_or("rect");
     match shape {
-        "circle" | "ellipse" | "doublecircle" | "stadium" | "stateStart" | "state_start"
-        | "start" | "stateEnd" | "state_end" | "end" => {
+        // Stadium / pill: upstream `stadium.ts` builds a polygon of
+        // (line + 50-point arc + line + 50-point arc) and calls
+        // `intersect.polygon(node, points, point)`. The two end-caps
+        // and the long edges hit at slightly different points than a
+        // pure ellipse, especially when w and h differ — without this
+        // branch flowchart edges that anchor on stadium nodes show
+        // ~0.05 px drift.
+        "stadium" | "pill" => {
+            let poly = stadium_polygon(cx, cy, w, h);
+            if let Some((x, y)) = ray_polygon_intersection(centre, dir, &poly) {
+                return Point {
+                    x: x as f64,
+                    y: y as f64,
+                };
+            }
+        }
+        "circle" | "ellipse" | "doublecircle" | "stateStart" | "state_start" | "start"
+        | "stateEnd" | "state_end" | "end" => {
             let rx = (w / 2.0) as f32;
             let ry = (h / 2.0) as f32;
             if let Some((x, y)) = ray_ellipse_intersection(centre, dir, centre, rx, ry) {
@@ -1490,6 +1506,57 @@ fn intersection_rect_aabb(cx: f64, cy: f64, w: f64, h: f64, probe: Point) -> Poi
         x: cx + dx * t,
         y: cy + dy * t,
     }
+}
+
+/// Build the 102-point polygon upstream `stadium.ts` feeds to
+/// `intersect.polygon(node, points, point)`. Mirrors the JS code 1:1:
+///
+/// ```js
+/// const points = [
+///   { x: -w / 2 + radius, y: -h / 2 },
+///   { x:  w / 2 - radius, y: -h / 2 },
+///   ...generateCirclePoints(-w / 2 + radius, 0, radius, 50,  90, 270),
+///   { x:  w / 2 - radius, y:  h / 2 },
+///   ...generateCirclePoints( w / 2 - radius, 0, radius, 50, 270, 450),
+/// ];
+/// ```
+///
+/// `generateCirclePoints(cx, cy, r, n, a0, a1)` returns
+/// `{x: -(cx + r*cos(angle)), y: -(cy + r*sin(angle))}` — note the
+/// negation. The polygon is centred on the node centre (cx, cy) so we
+/// add (cx, cy) when emitting the polygon for intersection.
+fn stadium_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {
+    let radius = h / 2.0;
+    let mut pts: Vec<(f32, f32)> = Vec::with_capacity(102);
+    let cxf = cx as f32;
+    let cyf = cy as f32;
+    pts.push((cxf + (-w / 2.0 + radius) as f32, cyf + (-h / 2.0) as f32));
+    pts.push((cxf + (w / 2.0 - radius) as f32, cyf + (-h / 2.0) as f32));
+    // Arc 1: cx_raw = -w/2 + radius, cy_raw = 0, 50 points from 90° to 270°.
+    let arc1_cx = -w / 2.0 + radius;
+    let n: usize = 50;
+    let start1 = std::f64::consts::PI / 2.0; // 90°
+    let end1 = std::f64::consts::PI * 3.0 / 2.0; // 270°
+    let step1 = (end1 - start1) / (n as f64 - 1.0);
+    for i in 0..n {
+        let angle = start1 + i as f64 * step1;
+        let xr = arc1_cx + radius * angle.cos();
+        let yr = 0.0 + radius * angle.sin();
+        pts.push((cxf + (-xr) as f32, cyf + (-yr) as f32));
+    }
+    pts.push((cxf + (w / 2.0 - radius) as f32, cyf + (h / 2.0) as f32));
+    // Arc 2: cx_raw = w/2 - radius, cy_raw = 0, 50 points from 270° to 450°.
+    let arc2_cx = w / 2.0 - radius;
+    let start2 = std::f64::consts::PI * 3.0 / 2.0; // 270°
+    let end2 = std::f64::consts::PI * 5.0 / 2.0; // 450°
+    let step2 = (end2 - start2) / (n as f64 - 1.0);
+    for i in 0..n {
+        let angle = start2 + i as f64 * step2;
+        let xr = arc2_cx + radius * angle.cos();
+        let yr = 0.0 + radius * angle.sin();
+        pts.push((cxf + (-xr) as f32, cyf + (-yr) as f32));
+    }
+    pts
 }
 
 fn diamond_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {

@@ -257,6 +257,48 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                     adjustment: (0.0, 0.0),
                 }
             }
+            // Upstream stadium.ts builds a 102-point polygon:
+            //   [{-w/2 + r, -h/2}, {w/2 - r, -h/2},
+            //    ...generateCirclePoints(-w/2 + r, 0, r, 50, 90, 270),
+            //    {w/2 - r, h/2},
+            //    ...generateCirclePoints( w/2 - r, 0, r, 50, 270, 450)]
+            // and feeds those to intersect.polygon. Without this we
+            // fall back to dagre's AABB rectangle clip which sits a
+            // pixel or two inside the rounded end-caps.
+            "stadium" | "pill" => {
+                let radius = h / 2.0;
+                let mut verts: Vec<(f64, f64)> = Vec::with_capacity(102);
+                verts.push((cx + (-w / 2.0 + radius), cy + (-h / 2.0)));
+                verts.push((cx + (w / 2.0 - radius), cy + (-h / 2.0)));
+                let n = 50usize;
+                let arc1_cx = -w / 2.0 + radius;
+                let start1 = std::f64::consts::PI / 2.0;
+                let end1 = std::f64::consts::PI * 3.0 / 2.0;
+                let step1 = (end1 - start1) / (n as f64 - 1.0);
+                for i in 0..n {
+                    let angle = start1 + i as f64 * step1;
+                    let xr = arc1_cx + radius * angle.cos();
+                    let yr = radius * angle.sin();
+                    verts.push((cx + (-xr), cy + (-yr)));
+                }
+                verts.push((cx + (w / 2.0 - radius), cy + (h / 2.0)));
+                let arc2_cx = w / 2.0 - radius;
+                let start2 = std::f64::consts::PI * 3.0 / 2.0;
+                let end2 = std::f64::consts::PI * 5.0 / 2.0;
+                let step2 = (end2 - start2) / (n as f64 - 1.0);
+                for i in 0..n {
+                    let angle = start2 + i as f64 * step2;
+                    let xr = arc2_cx + radius * angle.cos();
+                    let yr = radius * angle.sin();
+                    verts.push((cx + (-xr), cy + (-yr)));
+                }
+                PolygonInfo {
+                    vertices: verts,
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
             // Upstream hexagon.ts: m = h/f (f=4 for default look), w_total = w + 2m
             // local points: [(m, 0), (w-m, 0), (w, -h/2), (w-m, -h), (m, -h), (0, -h/2)]
             // intersectPolygon: minX=0, minY=-h → left = cx - w/2, top = cy + h/2.
