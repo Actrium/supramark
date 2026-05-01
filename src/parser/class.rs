@@ -1004,7 +1004,17 @@ fn parse_annotation(line: &str, line_no: usize, d: &mut ClassDiagram) -> Result<
         let anno = t[..end].trim().to_string();
         let rest = t[end + 2..].trim();
         if !rest.is_empty() {
-            d.class_mut(rest).annotations.push(anno);
+            // Strip backtick wrapping so `<<Interface>> `Foo`` resolves to
+            // the same class as `class `Foo``. Without this we'd create a
+            // duplicate class keyed by the backtick-wrapped form, which
+            // breaks both class count (cypress/class/221) and downstream
+            // annotation rendering.
+            let key = if rest.len() >= 2 && rest.starts_with('`') && rest.ends_with('`') {
+                &rest[1..rest.len() - 1]
+            } else {
+                rest
+            };
+            d.class_mut(key).annotations.push(anno);
         }
         Ok(())
     } else {

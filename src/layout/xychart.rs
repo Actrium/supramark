@@ -1311,19 +1311,11 @@ fn line_plot_path(
 
 // ── Formatting helpers ───────────────────────────────────────────────
 
-/// Stringify like JS's `Number.prototype.toString()`:
-/// - `-0` → `"0"`.
-/// - integers without fractional part: no decimal.
-/// - otherwise: Rust `Display` (which matches JS for non-scientific).
+/// Stringify like JS's `Number.prototype.toString()`. Delegates to the
+/// shared `math::js_number` helper so Ryu's round-half-up tie-breaking
+/// is converted to JS's round-half-to-even.
 pub(crate) fn fmt_num(v: f64) -> String {
-    if v == 0.0 {
-        return "0".to_string();
-    }
-    // Match jsdom / upstream: full precision for non-integer.
-    if v.fract() == 0.0 && v.is_finite() && v.abs() < 1e21 {
-        return format!("{}", v as i64);
-    }
-    format!("{}", v)
+    crate::math::js_number::js_number_to_string(v)
 }
 
 /// d3-path's `digits=3` rounding for line-plot paths.
