@@ -27,6 +27,7 @@ pub mod svg_sankey;
 pub mod svg_state;
 pub mod svg_timeline;
 pub mod svg_treemap;
+pub mod svg_venn;
 pub mod svg_wardley;
 pub mod svg_xychart;
 pub mod unified_shell;

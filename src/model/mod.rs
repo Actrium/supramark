@@ -12,6 +12,7 @@ pub mod gantt;
 pub mod packet;
 pub mod pie;
 pub mod radar;
+pub mod venn;
 
 /// Shared metadata every diagram carries — extracted from frontmatter
 /// (`---\ntitle: ...\n---`) or directives (`%%{init:...}%%`) by the
