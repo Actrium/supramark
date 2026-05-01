@@ -104,7 +104,7 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
     };
 
     // Resolve tasks (date / duration / after / until).
-    let resolved = resolve_tasks(d);
+    let mut resolved = resolve_tasks(d);
 
     // Categories use insertion order — upstream computes them BEFORE
     // sorting `taskArray.sort(taskCompare)`.
@@ -115,21 +115,72 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
         }
     }
 
+    // Compact mode rewrites every task's `order` to a row index that
+    // collapses non-overlapping tasks of the same section onto the same
+    // row. Mirrors upstream `getMaxIntersections`. We capture the
+    // per-category row count as the running height — used both for the
+    // total chart height and for `category_heights` (consumed by section
+    // labels).
+    let compact = d.display_mode.as_deref() == Some("compact");
+
+    let mut category_heights: Vec<(String, i32)> = Vec::new();
+    if compact {
+        let mut intersections = 0i32;
+        for cat in &categories {
+            // Indices in `resolved` of tasks belonging to this category.
+            let mut idxs: Vec<usize> = resolved
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| &t.section_name == cat)
+                .map(|(i, _)| i)
+                .collect();
+            // Sort by (startTime, order) — `order` here is the input
+            // index, which is what we want for the tie-break.
+            idxs.sort_by(|&a, &b| {
+                let ta = &resolved[a];
+                let tb = &resolved[b];
+                ta.start_ms
+                    .partial_cmp(&tb.start_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| ta.order.cmp(&tb.order))
+            });
+            // Greedy first-fit row assignment.
+            let mut timeline: Vec<f64> = vec![f64::NEG_INFINITY; idxs.len()];
+            let mut max_intersections: i32 = 0;
+            for &i in &idxs {
+                for j in 0..timeline.len() {
+                    if resolved[i].start_ms >= timeline[j] {
+                        timeline[j] = resolved[i].end_ms;
+                        resolved[i].order = (j as i32 + intersections) as usize;
+                        if (j as i32) > max_intersections {
+                            max_intersections = j as i32;
+                        }
+                        break;
+                    }
+                }
+            }
+            let category_height = max_intersections + 1;
+            intersections += category_height;
+            category_heights.push((cat.clone(), category_height));
+        }
+    } else {
+        for cat in &categories {
+            let count = resolved.iter().filter(|t| &t.section_name == cat).count() as i32;
+            category_heights.push((cat.clone(), count));
+        }
+    }
+
     // Sort by start time (stable) for rendering — upstream calls
     // `taskArray.sort(taskCompare)` which only compares startTime.
     let mut tasks = resolved;
     tasks.sort_by(|a, b| a.start_ms.partial_cmp(&b.start_ms).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Compute category heights and total height.
-    // (Compact mode unsupported for byte-exact target; only the few
-    // fixtures that opt in via `displayMode compact` would need it.)
-    let mut category_heights: Vec<(String, i32)> = Vec::new();
-    for cat in &categories {
-        let count = tasks.iter().filter(|t| &t.section_name == cat).count() as i32;
-        category_heights.push((cat.clone(), count));
-    }
-
-    let h = 2 * TOP_PADDING + (tasks.len() as i32) * (BAR_HEIGHT + BAR_GAP);
+    let h = if compact {
+        let total_rows: i32 = category_heights.iter().map(|(_, n)| *n).sum();
+        2 * TOP_PADDING + total_rows * (BAR_HEIGHT + BAR_GAP)
+    } else {
+        2 * TOP_PADDING + (tasks.len() as i32) * (BAR_HEIGHT + BAR_GAP)
+    };
 
     // Time domain.
     let (min_ms, max_ms) = if tasks.is_empty() {
@@ -266,6 +317,16 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
             // input value zero-padded.
             return Some((n - 1.0) * 86_400_000.0);
         }
+    }
+    // Time-of-day formats (no calendar date) — used by gantt charts that
+    // only care about hh:mm:ss within a single day. We anchor to
+    // 1970-01-01 so the resulting ms value is the time-of-day.
+    if fmt == "HH:mm:ss" || fmt == "HH:mm" || fmt == "H:mm:ss" || fmt == "H:mm" {
+        let parts: Vec<&str> = s.split(':').collect();
+        let h: u32 = parts.first().and_then(|x| x.parse().ok())?;
+        let mi: u32 = parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
+        let se: u32 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
+        return Some((h as f64) * 3_600_000.0 + (mi as f64) * 60_000.0 + (se as f64) * 1000.0);
     }
 
     // Strict `YYYY-MM-DD` (10 chars, hyphens at positions 4 and 7).

@@ -105,17 +105,7 @@ fn cypress_24() {
 }
 cypress!(cypress_25, "25");
 cypress!(cypress_26, "26");
-// cypress_27: displayMode=compact; multi-task row collapsing is
-// out-of-scope for this wave.
-#[test]
-#[ignore = "displayMode compact: row-collapsing layout not implemented"]
-fn cypress_27() {
-    assert_fixture(
-        "tests/ext_fixtures/cypress/gantt/27.mmd",
-        "tests/reference/ext_fixtures/cypress/gantt/27.svg",
-        "ref-ext-fixtures-cypress-gantt-27",
-    );
-}
+cypress!(cypress_27, "27");
 cypress!(cypress_28, "28");
 cypress!(cypress_29, "29");
 cypress!(cypress_30, "30");
