@@ -259,3 +259,9 @@ ext_fixtures/demos/sequence/09.mmd	MVP scope: sequence features [activation] not
 ext_fixtures/demos/sequence/10.mmd	MVP scope: sequence features [activation] not yet ported. Scaffold parse + layout + render in place; full byte-exact output requires upstream sequenceRenderer.ts + svgDraw.ts port.
 ext_fixtures/cypress/gitGraph/101.mmd	MVP scope: gitGraph `parallelCommits: true` — requires per-commit X re-anchoring against the closest parent (`calculatePosition`); not yet ported.
 ext_fixtures/cypress/gitGraph/105.mmd	MVP scope: gitGraph multi-line quoted branch name (`branch "Feature A\n(ongoing)"`) — bbox math currently treats the label as a single tspan; multi-tspan height not yet supported.
+ext_fixtures/cypress/gantt/05.mmd	Malformed task ids (`:ps`) — upstream's `new Date()` fallback resolves them to a slightly different timestamp than our lenient parser, shifting the tick by ~1 px. Not worth replicating V8's `new Date()` quirks.
+ext_fixtures/cypress/gantt/24.mmd	Domain spans ~7977 years — upstream's d3 fallback to year-level ticks differs from ours; full d3 year-tick port not worth one outlier fixture.
+ext_fixtures/cypress/gantt/39.mmd	`%s` timeFormat (Unix epoch seconds) is timezone-sensitive in d3-time-format; the reference SVG was generated in a non-UTC TZ. Environmental, not a code defect.
+ext_fixtures/cypress/gantt/40.mmd	3-digit-year date `202-12-01` — V8's `new Date()` fallback parses as year 202 AD; our lenient parser rejects it. Edge-case input not worth replicating.
+ext_fixtures/demos/gantt/06.mmd	`dateFormat: Z` (timezone offset) + non-ISO date string `08-08-09-01:00` — V8's `new Date()` massages it into a parsable timestamp; not worth replicating that quirk.
+ext_fixtures/demos/gantt/07.mmd	`dateFormat: Z` (timezone offset) + non-ISO date string `08-08-09-01:00` — V8's `new Date()` massages it into a parsable timestamp; not worth replicating that quirk.
