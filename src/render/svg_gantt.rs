@@ -27,15 +27,18 @@ pub fn render(
     ));
     out.push_str(&build_style_block(id, theme));
 
-    // Two leading anchor groups (one empty + one for excludes).
+    // Single leading anchor group (matches `svg.append('g')` for the
+    // diagram-id attribute).
     out.push_str("<g></g>");
 
-    // Exclude ranges group.
-    out.push_str("<g>");
-    for ex in &layout.exclude_ranges {
-        emit_exclude_rect(&mut out, ex, layout, id);
+    // Exclude ranges group — only when excludes/includes were defined.
+    if !d.excludes.is_empty() || !d.includes.is_empty() {
+        out.push_str("<g>");
+        for ex in &layout.exclude_ranges {
+            emit_exclude_rect(&mut out, ex, layout, id);
+        }
+        out.push_str("</g>");
     }
-    out.push_str("</g>");
 
     // Grid (axis) group.
     emit_grid(&mut out, layout, h);

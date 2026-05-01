@@ -252,11 +252,9 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
     }
     if fmt == "D" {
         if let Ok(n) = s.parse::<f64>() {
-            // Use day-of-month n as ms since epoch's day-anchor
-            // (matches dayjs strict parsing of just the day field —
-            // implicit year-month from "now" — which we approximate by
-            // assuming arbitrary epoch day).
-            return Some(n * 86_400_000.0);
+            // Map day-N to 1970-01-N so `%d` formatting yields the
+            // input value zero-padded.
+            return Some((n - 1.0) * 86_400_000.0);
         }
     }
 
