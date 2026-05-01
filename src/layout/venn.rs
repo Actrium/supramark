@@ -27,6 +27,29 @@ use std::collections::BTreeMap;
 
 const SMALL: f64 = 1e-10;
 
+// All transcendental and root math in this module is routed through the
+// `libm` crate (a pure-Rust port of fdlibm). V8's Math.* implementations
+// are also fdlibm-derived, so going through libm gives byte-for-byte
+// parity on acos/atan2/sqrt/sin/cos — eliminating ULP-level drift in
+// the Nelder-Mead simplex trajectory that otherwise propagates to scaled
+// SVG path coordinates and breaks byte-exact fixture comparison.
+//
+// Plain IEEE-754 ops (powi, abs, min, max, fract, comparisons) are NOT
+// rerouted: the hardware path is identical across V8 and Rust.
+#[inline] fn fsqrt(x: f64) -> f64 { libm::sqrt(x) }
+#[inline] fn facos(x: f64) -> f64 { libm::acos(x) }
+#[inline] fn fsin(x: f64) -> f64 { libm::sin(x) }
+#[inline] fn fcos(x: f64) -> f64 { libm::cos(x) }
+#[inline] fn fatan2(y: f64, x: f64) -> f64 { libm::atan2(y, x) }
+#[inline] fn ffloor(x: f64) -> f64 { libm::floor(x) }
+#[inline] fn fround(x: f64) -> f64 {
+    // V8 Math.round: round-half-to-+infinity (toward +∞ on .5).
+    // libm::round is round-half-away-from-zero (e.g. -0.5 -> -1.0),
+    // which differs from V8 only on negative .5 values. Emulate V8's
+    // semantics directly: floor(x + 0.5).
+    libm::floor(x + 0.5)
+}
+
 #[derive(Debug, Clone)]
 pub struct VennLayout {
     pub viewbox_w: f64,
@@ -197,8 +220,8 @@ pub fn layout(d: &VennDiagram, theme: &ThemeVariables) -> Result<VennLayout> {
             label: labels_by_key.get(&key).cloned(),
             circles: circles_for_area,
             path,
-            text_x: centre.0.floor() as i64,
-            text_y: centre.1.floor() as i64,
+            text_x: ffloor(centre.0) as i64,
+            text_y: ffloor(centre.1) as i64,
             render_label,
         });
     }
@@ -256,16 +279,16 @@ struct Area {
 // Geometry (circleintersection.js port)
 
 fn distance(a: &Circle, b: &Circle) -> f64 {
-    ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt()
+    fsqrt((a.x - b.x).powi(2) + (a.y - b.y).powi(2))
 }
 
 fn dist_xy(a: (f64, f64), b: (f64, f64)) -> f64 {
-    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+    fsqrt((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2))
 }
 
 /// circular segment area: r² acos(1-w/r) - (r-w) sqrt(w(2r-w))
 fn circle_area(r: f64, width: f64) -> f64 {
-    r * r * (1.0 - width / r).acos() - (r - width) * (width * (2.0 * r - width)).sqrt()
+    r * r * facos(1.0 - width / r) - (r - width) * fsqrt(width * (2.0 * r - width))
 }
 
 fn circle_overlap(r1: f64, r2: f64, d: f64) -> f64 {
@@ -327,7 +350,7 @@ fn circle_circle_intersection(p1: &Circle, p2: &Circle) -> Vec<(f64, f64)> {
         return Vec::new();
     }
     let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
-    let h = (r1 * r1 - a * a).sqrt();
+    let h = fsqrt(r1 * r1 - a * a);
     let x0 = p1.x + a * (p2.x - p1.x) / d;
     let y0 = p1.y + a * (p2.y - p1.y) / d;
     let rx = -(p2.y - p1.y) * (h / d);
@@ -408,7 +431,7 @@ fn intersection_area(circles: &[Circle], stats: &mut AreaStats) -> f64 {
     if inner_points.len() > 1 {
         let centre = get_center(&inner_points);
         for p in inner_points.iter_mut() {
-            p.angle = (p.x - centre.0).atan2(p.y - centre.1);
+            p.angle = fatan2(p.x - centre.0, p.y - centre.1);
         }
         // Sort descending by angle.
         inner_points.sort_by(|a, b| b.angle.partial_cmp(&a.angle).unwrap_or(std::cmp::Ordering::Equal));
@@ -423,8 +446,8 @@ fn intersection_area(circles: &[Circle], stats: &mut AreaStats) -> f64 {
             for &pj in p1.parent_index.iter() {
                 if p2.parent_index.contains(&pj) {
                     let circle = circles[pj];
-                    let a1 = (p1.x - circle.x).atan2(p1.y - circle.y);
-                    let a2 = (p2.x - circle.x).atan2(p2.y - circle.y);
+                    let a1 = fatan2(p1.x - circle.x, p1.y - circle.y);
+                    let a2 = fatan2(p2.x - circle.x, p2.y - circle.y);
                     let mut angle_diff = a2 - a1;
                     if angle_diff < 0.0 {
                         angle_diff += 2.0 * std::f64::consts::PI;
@@ -433,8 +456,8 @@ fn intersection_area(circles: &[Circle], stats: &mut AreaStats) -> f64 {
                     let mut width = dist_xy(
                         mid,
                         (
-                            circle.x + circle.radius * a.sin(),
-                            circle.y + circle.radius * a.cos(),
+                            circle.x + circle.radius * fsin(a),
+                            circle.y + circle.radius * fcos(a),
                         ),
                     );
                     if width > circle.radius * 2.0 {
@@ -510,7 +533,8 @@ fn arcs_to_path(arcs: &[Arc], round: Option<i32>) -> String {
     let r_factor = 10f64.powi(round.unwrap_or(0));
     let r = |v: f64| -> f64 {
         if round.is_some() {
-            (v * r_factor).round() / r_factor
+            // V8 Math.round semantics — see fround() in this module.
+            fround(v * r_factor) / r_factor
         } else {
             v
         }
@@ -635,7 +659,7 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
     for area in areas {
         if area.sets.len() == 1 {
             let setid = &area.sets[0];
-            let r = (area.size / std::f64::consts::PI).sqrt();
+            let r = fsqrt(area.size / std::f64::consts::PI);
             if !order.iter().any(|x| x == setid) {
                 order.push(setid.clone());
                 circles_data.push((
@@ -1007,9 +1031,10 @@ fn normalize_solution(
     for i in 0..n {
         for j in (i + 1)..n {
             let max_d = circles[i].radius + circles[j].radius;
-            let d = ((circles[i].x - circles[j].x).powi(2)
-                + (circles[i].y - circles[j].y).powi(2))
-            .sqrt();
+            let d = fsqrt(
+                (circles[i].x - circles[j].x).powi(2)
+                    + (circles[i].y - circles[j].y).powi(2),
+            );
             if d + 1e-10 < max_d {
                 let ri = find(&mut parent, i);
                 let rj = find(&mut parent, j);
@@ -1157,7 +1182,7 @@ fn orientate_circles(circles: &mut Vec<ClusterCircle>, orientation: f64) {
     if circles.len() == 2 {
         let dx = circles[0].x - circles[1].x;
         let dy = circles[0].y - circles[1].y;
-        let d = (dx * dx + dy * dy).sqrt();
+        let d = fsqrt(dx * dx + dy * dy);
         if d < (circles[1].radius - circles[0].radius).abs() {
             circles[1].x = circles[0].x + circles[0].radius - circles[1].radius - 1e-10;
             circles[1].y = circles[0].y;
@@ -1165,9 +1190,9 @@ fn orientate_circles(circles: &mut Vec<ClusterCircle>, orientation: f64) {
     }
 
     if circles.len() > 1 {
-        let rotation = circles[1].x.atan2(circles[1].y) - orientation;
-        let cos_r = rotation.cos();
-        let sin_r = rotation.sin();
+        let rotation = fatan2(circles[1].x, circles[1].y) - orientation;
+        let cos_r = fcos(rotation);
+        let sin_r = fsin(rotation);
         for c in circles.iter_mut() {
             let x = c.x;
             let y = c.y;
@@ -1177,7 +1202,7 @@ fn orientate_circles(circles: &mut Vec<ClusterCircle>, orientation: f64) {
     }
 
     if circles.len() > 2 {
-        let mut angle = circles[2].x.atan2(circles[2].y) - orientation;
+        let mut angle = fatan2(circles[2].x, circles[2].y) - orientation;
         while angle < 0.0 {
             angle += 2.0 * std::f64::consts::PI;
         }
