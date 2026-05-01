@@ -309,6 +309,15 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
             let l = layout::gitgraph::layout(&d, &effective_theme)?;
             render::svg_gitgraph::render(&d, &l, &effective_theme, id)
         }
+        detect::DiagramKind::Sequence => {
+            // Scaffold-only: parser is tolerant, layout/render emit a
+            // minimum-viable SVG. All sequence fixtures sit in
+            // `tests/known_ignored.txt` until the upstream
+            // `sequenceRenderer.ts` + `svgDraw.js` ports land.
+            let d = parser::sequence::parse(source)?;
+            let l = layout::sequence::layout(&d, &theme)?;
+            render::svg_sequence::render(&d, &l, &theme, id)
+        }
         detect::DiagramKind::Info => render::svg_info::render(&theme, id),
         other => Err(MermaidError::Unsupported(format!(
             "diagram kind '{}' not yet implemented — Wave 7: sequence",

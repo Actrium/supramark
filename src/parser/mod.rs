@@ -20,6 +20,7 @@ pub mod radar;
 pub mod requirement;
 pub mod richtext;
 pub mod sankey;
+pub mod sequence;
 pub mod state;
 pub mod timeline;
 pub mod treemap;

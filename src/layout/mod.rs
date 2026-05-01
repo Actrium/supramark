@@ -53,6 +53,7 @@ pub mod mindmap;
 pub mod quadrant;
 pub mod requirement;
 pub mod sankey;
+pub mod sequence;
 pub mod state;
 pub mod timeline;
 pub mod treemap;
