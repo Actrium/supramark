@@ -43,3 +43,27 @@ ext_fixtures/demos/flowchart/40.mmd	Stadium + linkStyle/style uses roughjs rende
 ext_fixtures/demos/flowchart/41.mmd	Stadium + linkStyle/style uses roughjs rendering; byte-exact parity requires porting roughjs rendering algorithm.
 ext_fixtures/demos/flowchart/63.mmd	Stadium + linkStyle/style uses roughjs rendering; byte-exact parity requires porting roughjs rendering algorithm.
 ext_fixtures/demos/flowchart/65.mmd	Stadium + thick arrows + linkStyle/classDef uses roughjs rendering; byte-exact parity requires porting roughjs rendering algorithm.
+ext_fixtures/cypress/venn/01.mmd	Nelder-Mead simplex trajectory ULP-level FP noise differs from V8 fdlibm; circles end up clean (0,0)/(d,0) here vs JS's 1e-7-tail values, propagating to scaled radii (210 vs 209.999...).
+ext_fixtures/cypress/venn/02.mmd	Nelder-Mead trajectory FP noise + 3-circle inner-arc starting vertex selection diverges from V8 due to ULP-level angle differences.
+ext_fixtures/cypress/venn/03.mmd	Nelder-Mead trajectory FP noise (3 circles + title); same root cause as 02.
+ext_fixtures/cypress/venn/05.mmd	Nelder-Mead trajectory FP noise (2 circles + bracket labels).
+ext_fixtures/cypress/venn/06.mmd	Foreign-object text-node rendering not yet ported (text "..." inside set/union).
+ext_fixtures/cypress/venn/07.mmd	Style fill color path uses khroma's hex→hsl→darken → emits hsl-string; our adjust_l only handles HSL inputs.
+ext_fixtures/cypress/venn/10.mmd	Foreign-object text-node rendering not yet ported.
+ext_fixtures/cypress/venn/11.mmd	Foreign-object text-node rendering with per-node style colors not yet ported.
+ext_fixtures/cypress/venn/13.mmd	Combined: text nodes + style fill darken (hex→hsl) + 3-circle FP noise.
+ext_fixtures/cypress/venn/14.mmd	Same as 01: Nelder-Mead trajectory FP noise.
+ext_fixtures/cypress/venn/15.mmd	`look: handDrawn` uses roughjs; byte-exact parity requires porting roughjs rendering algorithm.
+ext_fixtures/cypress/venn/16.mmd	Combined: text nodes + style fill (hex darken).
+ext_fixtures/demos/venn/01.mmd	Nelder-Mead trajectory FP noise (basic 2-circle with title).
+ext_fixtures/demos/venn/02.mmd	Nelder-Mead trajectory FP noise (3 circles).
+ext_fixtures/demos/venn/03.mmd	`theme: 'dark'` style block + Nelder-Mead trajectory FP noise.
+ext_fixtures/demos/venn/04.mmd	4 sets × 6 pairwise overlaps = 10 areas — triggers constrainedMDS layout which uses Math.random for initial guess; not reproducible without the V8 PRNG state.
+ext_fixtures/demos/venn/05.mmd	Disjoint set D triggers normalize_solution multi-cluster placement; tail-FP noise.
+ext_fixtures/demos/venn/06.mmd	Foreign-object text nodes + style colors (rgba/rgb/hex/named).
+ext_fixtures/demos/venn/07.mmd	`useDebugLayout: true` plus many text nodes (debug rectangles/circles not ported).
+ext_fixtures/demos/venn/08.mmd	`theme: 'forest'` style block + Nelder-Mead trajectory FP noise.
+ext_fixtures/demos/venn/09.mmd	`theme: 'neutral'` style block has different `.marker` / `.neo-*` rules; theme propagation incomplete.
+ext_fixtures/demos/venn/10.mmd	`look: handDrawn` uses roughjs.
+ext_fixtures/demos/venn/11.mmd	`look: handDrawn` uses roughjs + foreign-object text nodes.
+ext_fixtures/demos/venn/12.mmd	`look: handDrawn` + `theme: 'dark'`; uses roughjs.
