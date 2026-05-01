@@ -416,6 +416,7 @@ fn resolve_tasks(d: &GanttDiagram) -> Vec<ResolvedTask> {
             prev_end,
             &id_to_idx,
             &resolved,
+            d.inclusive_end_dates,
         );
 
         let (final_end, render_end) = if !d.excludes.is_empty() && !manual_end {
@@ -454,6 +455,7 @@ fn compute_task_times(
     prev_end: Option<f64>,
     id_to_idx: &std::collections::HashMap<String, usize>,
     resolved: &[ResolvedTask],
+    inclusive: bool,
 ) -> (f64, f64, bool) {
     let start_ms = if let Some(start_str) = t.start.as_deref() {
         get_start_date(start_str, date_format, id_to_idx, resolved).unwrap_or(0.0)
@@ -471,7 +473,8 @@ fn compute_task_times(
         })
         .unwrap_or(false);
     let end_ms = if let Some(end_str) = t.end.as_deref() {
-        get_end_date(end_str, date_format, start_ms, id_to_idx, resolved).unwrap_or(start_ms)
+        get_end_date(end_str, date_format, start_ms, id_to_idx, resolved, inclusive)
+            .unwrap_or(start_ms)
     } else {
         start_ms
     };
@@ -506,6 +509,7 @@ fn get_end_date(
     start_ms: f64,
     id_to_idx: &std::collections::HashMap<String, usize>,
     resolved: &[ResolvedTask],
+    inclusive: bool,
 ) -> Option<f64> {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("until ") {
@@ -521,7 +525,8 @@ fn get_end_date(
         return earliest;
     }
     if let Some(d) = parse_date(s, date_format) {
-        return Some(d);
+        // Inclusive end-dates: when the end was a parsed date, add 1d.
+        return Some(if inclusive { d + 86_400_000.0 } else { d });
     }
     if let Some(dur) = parse_duration(s) {
         return Some(start_ms + dur);

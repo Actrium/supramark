@@ -331,13 +331,31 @@ fn parse_task(name: &str, data: &str, section_idx: usize, auto_id_counter: &mut 
     }
 }
 
-/// Parse `click` interactivity lines. We only extract enough to add CSS
-/// classes; we don't store JS callbacks or links since the Rust side
-/// doesn't execute JavaScript.
-fn parse_click(rest: &str, _d: &mut GanttDiagram) {
-    // `click <id> [call <fn>(<args>)] [href "<url>"]`
-    // Just consume — no-op for now.
-    let _ = rest;
+/// Parse `click` interactivity lines, mapping `clickable` CSS classes
+/// onto the targeted task(s). We don't store the JS callback / URL
+/// itself since the Rust side never executes JavaScript.
+fn parse_click(rest: &str, d: &mut GanttDiagram) {
+    // Format: `click <ids> call <fn>(<args>)` or `click <ids> href "<url>"`.
+    // We just need to know which ids are clickable.
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return;
+    }
+    // First whitespace-separated token after `click` is the id list.
+    let mut iter = rest.splitn(2, char::is_whitespace);
+    let id_blob = iter.next().unwrap_or("");
+    let _verb_and_rest = iter.next().unwrap_or("");
+    for id in id_blob.split(',') {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        for t in d.tasks.iter_mut() {
+            if t.id.as_deref() == Some(id) && !t.classes.iter().any(|c| c == "clickable") {
+                t.classes.push("clickable".to_string());
+            }
+        }
+    }
 }
 
 /// Strip leading YAML frontmatter `---\n...\n---\n`, lifting the
