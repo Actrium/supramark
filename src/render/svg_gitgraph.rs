@@ -340,7 +340,7 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
     let error_text = theme.error_text_color.as_deref().unwrap_or("#552222");
     let line_color = theme.line_color.as_deref().unwrap_or("#333333");
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
-    let main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
+    let _main_bkg = theme.main_bkg.as_deref().unwrap_or("#ECECFF");
     let primary_color = theme.primary_color.as_deref().unwrap_or("#ECECFF");
     let stroke_width = theme.stroke_width.unwrap_or(1);
     let commit_label_bg = theme

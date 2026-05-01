@@ -178,8 +178,8 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     // Then transform: translate(-19, spineY - 12 - 0) where spineY = -2
     // So actual visual rect: x = -bbox_w-34-19 = -bbox_w-53, y = ... + (spineY-12) = ... + -14
     //                        width = bbox_w + 18; height = bbox_h + 4.
-    let rect_left = -bbox_w - 53.0; // visual left edge of branch-label background
-    let line_right = max_pos;
+    let _rect_left = -bbox_w - 53.0; // visual left edge of branch-label background
+    let _line_right = max_pos;
     // Padding from `setupGraphViewbox` is `gitGraphConfig.diagramPadding` (= 8 default).
     // But the reference 01 has padding 8 already baked: viewBox left = -76.97 vs rect_left.
     // For "main", bbox_w = 24.something from font metrics; -bbox_w-53 ≈ -77.
