@@ -72,14 +72,18 @@ pub fn render(
     {
         return Ok(placeholder(d, id));
     }
-    // Reject any non-message item or non-SolidArrow message.
-    fn only_solid_msgs(items: &[DiagramItem]) -> bool {
+    // Reject any non-message item or non-supported arrow.
+    // Currently supported: SolidArrow (`->>`) and DottedArrow (`-->>`).
+    fn only_supported_msgs(items: &[DiagramItem]) -> bool {
         items.iter().all(|it| match it {
-            DiagramItem::Message(m) => matches!(m.arrow, Some(ArrowType::SolidArrow)),
+            DiagramItem::Message(m) => matches!(
+                m.arrow,
+                Some(ArrowType::SolidArrow) | Some(ArrowType::DottedArrow)
+            ),
             _ => false,
         })
     }
-    if !only_solid_msgs(&d.items) {
+    if !only_supported_msgs(&d.items) {
         return Ok(placeholder(d, id));
     }
     // No `box`, no created/destroyed actors.
@@ -462,6 +466,8 @@ fn emit_actor_top(out: &mut String, a: &ActorRender, bottom_y: f64, rank: usize)
 }
 
 fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
+    let is_dotted = matches!(m.arrow, ArrowType::DottedArrow);
+
     // <text> first
     out.push_str("<text x=\"");
     push_num(out, m.text_x);
@@ -475,7 +481,14 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     out.push_str(&xml_escape(&m.text));
     out.push_str("</text>");
 
-    // <line> next
+    // <line> next.
+    //
+    // Solid arrows (`->>`) emit `class="messageLine0"` with style
+    // `fill: none;`. Dotted arrows (`-->>`) emit `class="messageLine1"`
+    // with style `stroke-dasharray: 3, 3; fill: none;`. The d3 ordering
+    // in upstream sets `style.stroke-dasharray` BEFORE the stroke and
+    // attr-class, so the on-disk attribute order for dotted is:
+    //   x1, y1, x2, y2, style (with both props), class, data-*, ...
     out.push_str("<line x1=\"");
     push_num(out, m.line_x1);
     out.push_str("\" y1=\"");
@@ -484,22 +497,26 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     push_num(out, m.line_x2);
     out.push_str("\" y2=\"");
     push_num(out, m.line_start_y);
-    out.push_str("\" class=\"messageLine0\" data-et=\"message\" data-id=\"i");
+    if is_dotted {
+        out.push_str("\" style=\"stroke-dasharray: 3, 3; fill: none;");
+    }
+    out.push_str("\" class=\"messageLine");
+    out.push_str(if is_dotted { "1" } else { "0" });
+    out.push_str("\" data-et=\"message\" data-id=\"i");
     out.push_str(&m.idx.to_string());
     out.push_str("\" data-from=\"");
     out.push_str(&attr_escape(&m.from));
     out.push_str("\" data-to=\"");
     out.push_str(&attr_escape(&m.to));
-    out.push_str(
-        "\" stroke-width=\"2\" stroke=\"none\" style=\"fill: none;\" marker-end=\"url(#",
-    );
+    if is_dotted {
+        out.push_str("\" stroke-width=\"2\" stroke=\"none\" marker-end=\"url(#");
+    } else {
+        out.push_str(
+            "\" stroke-width=\"2\" stroke=\"none\" style=\"fill: none;\" marker-end=\"url(#",
+        );
+    }
     out.push_str(id);
-    let marker = match m.arrow {
-        ArrowType::SolidArrow | ArrowType::DottedArrow => "-arrowhead",
-        _ => "-arrowhead",
-    };
-    out.push_str(marker);
-    out.push_str(")\"></line>");
+    out.push_str("-arrowhead)\"></line>");
     let _ = m.starty;
 }
 
