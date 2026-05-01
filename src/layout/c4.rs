@@ -193,8 +193,13 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
         conf.diagram_margin_y,
         conf.diagram_margin_y,
     );
-    // Match upstream: screen.data.widthLimit = screen.availWidth (1024 in our shim).
-    screen.data.width_limit = Some(1024.0);
+    // Match upstream: screen.data.widthLimit = screen.availWidth.
+    // jsdom's Screen reports availWidth=0 by default, and the
+    // generate_ref shim keeps that value (its `if (!globalThis.screen)`
+    // guard never fires because jsdom preserves the original Screen
+    // object). With widthLimit=0, every shape's _stopx >= 0 triggers
+    // the wrap branch, which is what makes c4 fixtures stack vertically.
+    screen.data.width_limit = Some(0.0);
 
     // Top-level: just the synthetic 'global' boundary, which has
     // parent_boundary == "" in our model. Upstream's getBoundaries('')
@@ -685,12 +690,18 @@ impl<'a> LayoutState<'a> {
             //   - For container/component: techn="techn" descr=descr → use techn.
             // So we render either techn or none on this slot.
             let _ = has_type;
-            // Techn slot
+            // Techn slot.
+            // Upstream bug: `c4ShapeFont(conf, c4Shape.techn.text)` uses
+            // the bracketed techn TEXT as the font key, which never
+            // resolves; calcC4ShapeTextWH then sees undefined fields and
+            // calculateTextDimensions falls back to {fontSize:12,
+            // fontFamily:'Arial'}. So techn is measured at 12px Arial
+            // (which the DejaVu shim treats as sans).
             let mut techn = TextBlock::default();
             let has_techn = !s.techn.text.is_empty();
             if has_techn {
                 let t = format!("[{}]", s.techn.text);
-                let (tw, th, tn) = measure_lines(&t, &cf_fam, cf_sz, false, false);
+                let (tw, th, tn) = measure_lines(&t, "Arial", 12.0, false, false);
                 techn.text = t;
                 techn.width = tw;
                 techn.height = th;
