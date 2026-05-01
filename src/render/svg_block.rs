@@ -1075,32 +1075,12 @@ mod tests {
     use crate::parser::block::{parse, parse_with_state};
     use crate::theme::get_theme;
 
-    // Per-fixture (id_cnt_start, rng_state) to match the batch reference
-    // generator's cross-fixture cnt accumulation.  The rng_state is reset
-    // to 0x12345678 before each fixture render, but cnt accumulates across
-    // fixtures within a worker.  Values derived by inspecting composite-node
-    // ids in the reference SVGs.
-    //
-    // rng_state legend:
-    //   0x12345678 => first mulberry32 call yields "3tkmm1l27ep"
-    //   0x7f5fd06d => first mulberry32 call yields "xvw6pgo6faq" (state after 1 call)
-    fn fixture_parse_state(num: &str) -> (u64, u32) {
-        // cnt_start: number of generateId() calls made by prior fixtures in the
-        // same batch worker. The JS PRNG is reset to 0x12345678 before each
-        // render but cnt accumulates across renders within a worker.
-        // rng_state is always 0x12345678 (reset per render in generate_ref.mjs).
-        match num {
-            "01" => (2, 0x12345678),
-            "02" => (1, 0x12345678),
-            // "03" => (0, 0x12345678),  // default, passes already
-            "04" => (7, 0x12345678),
-            "05" => (3, 0x12345678),
-            "08" => (1, 0x12345678),
-            "09" => (4, 0x12345678),
-            // "10" => (0, 0x12345678),  // default
-            // "11" => (0, 0x12345678),  // default
-            _ => (0, 0x12345678),
-        }
+    // Single-file render state: cnt and rng both reset per render.
+    // References for fixtures 01/02/04/05/08/09 were regenerated in
+    // single-file mode (no batch cnt accumulation) so all fixtures
+    // share the same fresh starting state.
+    fn fixture_parse_state(_num: &str) -> (u64, u32) {
+        (0, 0x12345678)
     }
 
     fn render_fixture(num: &str, id: &str) -> String {
