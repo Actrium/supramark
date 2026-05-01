@@ -506,7 +506,7 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
         }
         None => (s, None),
     };
-    let (id, descr) = match find_as(head) {
+    let (id, mut descr) = match find_as(head) {
         Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
         None => {
             let id = head.trim().to_string();
@@ -514,6 +514,17 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
         }
     };
     let actor_type = type_anno.and_then(parse_type_anno).unwrap_or(default_type);
+    // Optional `@{ ..., "alias": "Display Name" }` overrides the
+    // description (when no `as` clause was given). Mirrors upstream
+    // sequenceDb's `addActor(actor, name, description, type)` flow:
+    // when `alias` is provided, mermaid uses it as the rendered label.
+    if descr == id {
+        if let Some(anno) = type_anno {
+            if let Some(alias) = parse_alias_anno(anno) {
+                descr = alias;
+            }
+        }
+    }
     Actor {
         id,
         description: descr,
@@ -522,6 +533,21 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
         created: false,
         destroyed: false,
     }
+}
+
+/// Extract the `alias` value from an `@{ ... }` annotation. The
+/// upstream sequenceDb mini-grammar lets users write `participant X@{
+/// "alias": "Display Name" }` to set the label without an `as`
+/// clause. We parse this with a tolerant string-search rather than
+/// the full JSON grammar — it covers every cypress fixture.
+fn parse_alias_anno(s: &str) -> Option<String> {
+    let s_lower = s.to_ascii_lowercase();
+    let key_idx = s_lower.find("\"alias\"")?;
+    let after = &s[key_idx + 7..];
+    let after = after.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+    let after = after.strip_prefix('"')?;
+    let end = after.find('"')?;
+    Some(after[..end].to_string())
 }
 
 fn find_as(s: &str) -> Option<(&str, &str)> {
@@ -699,6 +725,17 @@ fn strip_init_directives(src: &str, d: &mut SequenceDiagram) -> String {
             if let Some(theme) = sniff_theme(block) {
                 d.theme_name.get_or_insert(theme);
             }
+            // Sniff `mirrorActors: false`. Default is true; only the
+            // explicit `false` (with optional whitespace) flips it.
+            if let Some(v) = sniff_bool(block, "mirrorActors") {
+                d.config.mirror_actors = v;
+            }
+            // Sniff `wrap: true|false`. Sets the diagram-level wrap
+            // flag (applied to messages/notes that don't carry their
+            // own `wrap:` / `nowrap:` prefix).
+            if let Some(v) = sniff_bool(block, "wrap") {
+                d.config.wrap = v;
+            }
             rest = &after[end + 3..];
         } else {
             out.push_str(after);
@@ -716,4 +753,30 @@ fn sniff_theme(block: &str) -> Option<String> {
     let after = after.strip_prefix('"')?;
     let close = after.find('"')?;
     Some(after[..close].to_string())
+}
+
+/// Sniff a boolean directive value of the form `"key": true|false` or
+/// `key: true|false` from an `%%{init: { ... }}%%` block. Returns
+/// `Some(value)` when the key is present, `None` otherwise.
+fn sniff_bool(block: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{}\"", key);
+    let p = block.find(&needle).or_else(|| {
+        // Unquoted key fallback (some directives use bare-key syntax).
+        let bare = format!("{}:", key);
+        block.find(&bare).map(|i| i)
+    })?;
+    let key_len = if block[p..].starts_with('"') {
+        needle.len()
+    } else {
+        key.len()
+    };
+    let after = &block[p + key_len..];
+    let after = after.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
+    if after.starts_with("true") {
+        Some(true)
+    } else if after.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
