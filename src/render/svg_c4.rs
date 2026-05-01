@@ -19,7 +19,7 @@
 //! 13. `</svg>`.
 
 use crate::error::MermaidError;
-use crate::layout::c4::{LaidBoundary, LaidRel, LaidShape, TextBlock, layout};
+use crate::layout::c4::{LaidBoundary, LaidElement, LaidRel, LaidShape, TextBlock, layout};
 use crate::math::js_number::js_number_to_string;
 use crate::model::c4::C4Diagram;
 use crate::theme::ThemeVariables;
@@ -131,20 +131,13 @@ pub fn render(
         p = CLOCK_ICON_PATH,
     ));
 
-    // 7. shapes (in declaration order). Upstream invokes drawC4Shape
-    // inside drawC4ShapeArray as it loops, which iterates through each
-    // boundary's shapes first, then descends into children. Because we
-    // record shapes in the order they were laid out (DFS of boundaries),
-    // l.shapes is already in correct emission order.
-    for sh in &l.shapes {
-        write_shape(&mut out, sh);
-    }
-
-    // 8. boundaries — order: deepest-first (post-order), matching upstream's
-    // drawInsideBoundary which calls drawBoundary AFTER recursing into
-    // nested boundaries. Our layout builds them in that order already.
-    for b in &l.boundaries {
-        write_boundary(&mut out, b);
+    // 7. + 8. shapes and boundaries interleaved in upstream emit order
+    // (drawC4ShapeArray + drawBoundary as drawInsideBoundary unrolls).
+    for el in &l.elements {
+        match el {
+            LaidElement::Shape(s) => write_shape(&mut out, s),
+            LaidElement::Boundary(b) => write_boundary(&mut out, b),
+        }
     }
 
     // 10. arrow markers

@@ -141,12 +141,23 @@ pub struct LaidRel {
     pub render_order: usize,
 }
 
+/// Element emitted by the layout in draw order.
+#[derive(Debug, Clone)]
+pub enum LaidElement {
+    Shape(LaidShape),
+    Boundary(LaidBoundary),
+}
+
 #[derive(Debug, Clone)]
 pub struct C4Layout {
     pub conf: C4Conf,
     pub shapes: Vec<LaidShape>,
     pub boundaries: Vec<LaidBoundary>,
     pub rels: Vec<LaidRel>,
+    /// Shapes and boundaries in emission order (matches upstream's
+    /// drawC4ShapeArray/drawBoundary call sequence inside
+    /// drawInsideBoundary).
+    pub elements: Vec<LaidElement>,
     /// SVG viewBox: `(min_x, min_y, width, height)`
     pub view_min_x: f64,
     pub view_min_y: f64,
@@ -180,6 +191,7 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
         conf: conf.clone(),
         shapes_out: Vec::new(),
         boundaries_out: Vec::new(),
+        elements_out: Vec::new(),
         rels_out: Vec::new(),
         global_max_x: conf.diagram_margin_x,
         global_max_y: conf.diagram_margin_y,
@@ -313,6 +325,7 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
         conf,
         shapes: state.shapes_out,
         boundaries: state.boundaries_out,
+        elements: state.elements_out,
         rels: rels_out,
         view_min_x,
         view_min_y,
@@ -445,6 +458,7 @@ struct LayoutState<'a> {
     conf: C4Conf,
     shapes_out: Vec<LaidShape>,
     boundaries_out: Vec<LaidBoundary>,
+    elements_out: Vec<LaidElement>,
     rels_out: Vec<LaidRel>,
     global_max_x: f64,
     global_max_y: f64,
@@ -597,7 +611,7 @@ impl<'a> LayoutState<'a> {
                     .unwrap_or_else(|| "#444444".to_string());
                 let bg = bnd.bg_color.clone().unwrap_or_else(|| "none".to_string());
                 let font_color = bnd.font_color.clone().unwrap_or_else(|| "black".to_string());
-                self.boundaries_out.push(LaidBoundary {
+                let laid = LaidBoundary {
                     idx: b_idx,
                     alias: bnd.alias.clone(),
                     x: bx,
@@ -613,7 +627,9 @@ impl<'a> LayoutState<'a> {
                     bg_color: bg,
                     font_color,
                     stroke_dasharray: stroke_dash,
-                });
+                };
+                self.boundaries_out.push(laid.clone());
+                self.elements_out.push(LaidElement::Boundary(laid));
             }
 
             // parentBounds.data.stopy/x = max(currentBounds.data.* + c4ShapeMargin, parentBounds.data.*)
@@ -755,7 +771,7 @@ impl<'a> LayoutState<'a> {
                 .unwrap_or_else(|| default_border_color(&kind).to_string());
             let font_color = s.font_color.clone().unwrap_or_else(|| "#FFFFFF".to_string());
 
-            self.shapes_out.push(LaidShape {
+            let laid = LaidShape {
                 idx: s_idx,
                 kind: kind.clone(),
                 alias: s.alias.clone(),
@@ -778,7 +794,9 @@ impl<'a> LayoutState<'a> {
                 has_techn,
                 has_type: false,
                 has_descr,
-            });
+            };
+            self.shapes_out.push(laid.clone());
+            self.elements_out.push(LaidElement::Shape(laid));
         }
         current_bounds.bump_last_margin(self.conf.c4_shape_margin);
     }
