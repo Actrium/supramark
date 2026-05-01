@@ -1,25 +1,39 @@
-//! gitGraph layout — minimal subset port of upstream `gitGraphRenderer.ts`.
+//! gitGraph layout — port of upstream `gitGraphRenderer.ts` LR mode.
 //!
-//! Currently models only what the linear/single-branch byte-exact
-//! fixtures need:
-//!   - one branch lane per branch (`branchPos`)
-//!   - sequential commit positions along the LR axis
-//!   - geometry constants COMMIT_STEP=40, LAYOUT_OFFSET=10
+//! Supports:
+//!   - linear, single-branch fixtures (commits in chronological order)
+//!   - multi-branch (`branch foo` + `checkout`) with one lane per branch
+//!   - `merge` commits (two parents, double-circle bullet)
 //!
-//! Anything fancier (rerouting, parallelCommits, TB/BT, redux/neo) is
-//! deferred to follow-up work; renderer falls back to Unsupported.
+//! Unsupported (still falls back to known-ignored):
+//!   - TB/BT orientations
+//!   - `cherry-pick`
+//!   - `parallelCommits`
+//!   - redux-geometry themes (REDUX_GEOMETRY_THEMES)
+//!
+//! Geometry constants (LR, non-redux):
+//!   - lane spacing on Y axis: 50 + (rotateCommitLabel ? 40 : 0) → 90 by default
+//!   - X step per commit: COMMIT_STEP + LAYOUT_OFFSET = 50
+//!   - bullet centre y = lane y - 2 (the spine is offset from `branch.pos`)
+//!   - merge bullet: outer r=10, inner r=6
+//!
+//! See `src/render/svg_gitgraph.rs` for the corresponding emitter.
 
 use crate::error::Result;
 use crate::font_metrics;
-use crate::model::gitgraph::{GitGraphDiagram, Orientation};
+use crate::model::gitgraph::{CommitKind, GitGraphDiagram, Orientation};
 use crate::theme::ThemeVariables;
 
 pub const LAYOUT_OFFSET: f64 = 10.0;
 pub const COMMIT_STEP: f64 = 40.0;
+/// `defaultPos` from upstream — the initial cursor offset for TB/BT.
+pub const DEFAULT_POS: f64 = 30.0;
 
 #[derive(Debug, Clone)]
 pub struct BranchPosition {
     pub name: String,
+    /// `branch.pos` from upstream — the reference y for the lane (the
+    /// dotted spine line is drawn at `pos - 2`).
     pub pos: f64,
     pub index: usize,
     /// Width / height of the rendered branch-name label (used to size
@@ -39,216 +53,152 @@ pub struct CommitGeom {
     pub pos_with_offset: f64,
     /// `pos` itself (the running cursor before adding LAYOUT_OFFSET).
     pub pos: f64,
+    /// `0`-based branch lane index — used for color-class numbering.
+    pub branch_index: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct GitGraphLayout {
     pub orientation: Orientation,
+    /// True for `gitGraph TB:` (top-to-bottom) — the renderer flips its
+    /// per-element math when this is set.
+    pub is_tb: bool,
+    /// True for `gitGraph BT:` (bottom-to-top).
+    pub is_bt: bool,
+    /// Branches in **render** order (sorted by `order` then insertion).
     pub branches: Vec<BranchPosition>,
     pub commits: Vec<CommitGeom>,
     pub max_pos: f64,
-    /// SVG viewBox parameters, computed at the end after all elements
-    /// are placed. Mirrors upstream `setupGraphViewbox`.
     pub viewbox_x: f64,
     pub viewbox_y: f64,
     pub viewbox_w: f64,
     pub viewbox_h: f64,
-    /// Height of the branch-label text used for vertical alignment
-    /// math (rect y/transform).
+    /// Height of the branch-label text used for vertical alignment math
+    /// (rect y/transform). Same value across branches under the bbox shim.
     pub branch_label_height: f64,
     pub commit_label_height: f64,
     /// Actual measured widths of each commit-label, in the same order
     /// as `commits`. Used to position the per-commit `<rect>` background.
     pub commit_label_widths: Vec<f64>,
-    /// Height of the commit-label text (font-size 10 sans-serif).
+    /// Height of the commit-label text.
     pub commit_label_text_height: f64,
     /// Title text x-coordinate (centred over the pre-title bbox).
     pub title_x: f64,
 }
 
+const FONT_FAMILY: &str = "sans-serif";
+const LABEL_SIZE: f64 = 14.0;
+
+/// Sort branches by `order` (ascending) using `0.{insertion-index}` as
+/// the implicit value when `order` is unset, mirroring upstream's
+/// `getBranchesAsObjArray`.
+fn sort_branches_by_order(d: &GitGraphDiagram) -> Vec<usize> {
+    let mut indexed: Vec<(usize, f64)> = d
+        .branches
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let key = match b.order {
+                Some(v) => v as f64,
+                None => format!("0.{i}").parse::<f64>().unwrap_or(i as f64),
+            };
+            (i, key)
+        })
+        .collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.into_iter().map(|(i, _)| i).collect()
+}
+
 pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLayout> {
-    if d.orientation != Orientation::LR {
-        return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: TB/BT orientations not yet implemented".into(),
-        ));
-    }
-    if d.branches.len() != 1 {
-        return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: multi-branch layouts not yet implemented".into(),
-        ));
-    }
-    if d.commits.iter().any(|c| c.parents.len() > 1) {
-        return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: merge commits not yet implemented".into(),
-        ));
-    }
-    if d.commits.iter().any(|c| matches!(
-        c.kind,
-        crate::model::gitgraph::CommitKind::Merge
-            | crate::model::gitgraph::CommitKind::CherryPick
-    )) {
-        return Err(crate::error::MermaidError::Unsupported(
-            "gitGraph: merge/cherry-pick commit types not yet implemented".into(),
-        ));
-    }
+    let is_tb = matches!(d.orientation, Orientation::TB);
+    let is_bt = matches!(d.orientation, Orientation::BT);
+    let is_vert = is_tb || is_bt;
 
-    // Branch label text — measured at the moment of `getBBox()` on the
-    // freshly-inserted `<text>` element. The diagram svg's `<style>`
-    // block isn't authoritative for jsdom (it doesn't run CSS), so the
-    // font defaults to sans-serif/14px until an attribute on the text
-    // (or an ancestor) overrides them. None do — so we always measure
-    // at 14px sans-serif, matching the reference shim.
-    let font_family = "sans-serif";
-    let label_size = 14.0_f64;
-    let main_branch = &d.branches[0];
-    let label_w = font_metrics::text_width(&main_branch.name, font_family, label_size, false, false);
-    let label_h = font_metrics::line_height(font_family, label_size, false, false);
-    // For "main" with default font: label_h ≈ 18.4. Reference uses 20.296875 for
-    // the rect height; that's bbox.height + 4 + 0 (LR-non-redux). Need height
-    // matching upstream's getBBox (which returns *line height of tspan*).
+    // Branch label widths — measured at 14px sans-serif (jsdom shim does
+    // not honour CSS, so the bbox always reports the default-font width).
+    let label_h = font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
-    let branch = BranchPosition {
-        name: main_branch.name.clone(),
-        pos: 0.0,
-        index: 0,
-        label_width: label_w,
-        label_height: label_h,
-    };
-
-    // Commits along LR — positions match upstream's `drawCommits` linear path.
-    let mut commits = Vec::with_capacity(d.commits.len());
+    let order = sort_branches_by_order(d);
+    let mut branch_positions: Vec<BranchPosition> = Vec::with_capacity(d.branches.len());
     let mut pos: f64 = 0.0;
-    let mut max_pos: f64 = 0.0;
-    // Commit labels are measured under the same jsdom defaults as the
-    // branch label — 14px sans-serif. The CSS class `commit-label` does
-    // set `font-size:10px` but that's text-rendering-only; the bbox
-    // shim doesn't apply CSS, so font-size stays at 14.
+    let rotate_term = if d.config.rotate_commit_label { 40.0 } else { 0.0 };
+    for (idx, &orig_idx) in order.iter().enumerate() {
+        let b = &d.branches[orig_idx];
+        let lw = font_metrics::text_width(&b.name, FONT_FAMILY, LABEL_SIZE, false, false);
+        branch_positions.push(BranchPosition {
+            name: b.name.clone(),
+            pos,
+            index: idx,
+            label_width: lw,
+            label_height: label_h,
+        });
+        // setBranchPosition increment: 50 + (rotate ? 40 : 0) + (TB|BT ? bbox/2 : 0)
+        let tb_term = if is_vert { lw / 2.0 } else { 0.0 };
+        pos += 50.0 + rotate_term + tb_term;
+    }
+
+    // Commit positions along the running axis (X for LR, Y for TB/BT).
+    // Positions match upstream's `drawCommits`.
+    // For BT, upstream reverses the sorted-keys list so the iteration
+    // goes from latest seq to oldest. We mirror that by iterating
+    // d.commits in reverse for BT, then re-sort by seq before writing
+    // back so `commits[i]` still aligns with `d.commits[i]`.
+    let mut commits: Vec<CommitGeom> = Vec::with_capacity(d.commits.len());
+    let mut cursor: f64 = if is_vert { DEFAULT_POS } else { 0.0 };
+    let mut max_pos: f64 = if is_vert { DEFAULT_POS } else { 0.0 };
     let label_widths: Vec<f64> = d
         .commits
         .iter()
-        .map(|c| font_metrics::text_width(&c.id, font_family, label_size, false, false))
+        .map(|c| font_metrics::text_width(&c.id, FONT_FAMILY, LABEL_SIZE, false, false))
         .collect();
     let commit_label_text_height =
-        font_metrics::line_height(font_family, label_size, false, false);
+        font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
-    for c in &d.commits {
-        let pos_with_offset = pos + LAYOUT_OFFSET;
-        let cx = pos_with_offset;
-        let cy = -2.0; // LR non-redux: branchY (=0) + (-2)
-        commits.push(CommitGeom {
+    let iter_indices: Vec<usize> = if is_bt {
+        (0..d.commits.len()).rev().collect()
+    } else {
+        (0..d.commits.len()).collect()
+    };
+    let mut placed: Vec<Option<CommitGeom>> = vec![None; d.commits.len()];
+    for &i in &iter_indices {
+        let c = &d.commits[i];
+        let pos_with_offset = cursor + LAYOUT_OFFSET;
+        let bp = branch_positions
+            .iter()
+            .find(|bp| bp.name == c.branch)
+            .ok_or_else(|| {
+                crate::error::MermaidError::Parse {
+                    line: 0,
+                    col: 0,
+                    message: format!("commit references unknown branch '{}'", c.branch),
+                }
+            })?;
+        let lane = bp.pos;
+        let (cx, cy) = if is_vert {
+            (lane, pos_with_offset)
+        } else {
+            (pos_with_offset, lane - 2.0)
+        };
+        placed[i] = Some(CommitGeom {
             id: c.id.clone(),
             seq: c.seq,
             cx,
             cy,
             pos_with_offset,
-            pos,
+            pos: cursor,
+            branch_index: bp.index,
         });
-        pos += COMMIT_STEP + LAYOUT_OFFSET;
-        if pos > max_pos {
-            max_pos = pos;
+        cursor += COMMIT_STEP + LAYOUT_OFFSET;
+        if cursor > max_pos {
+            max_pos = cursor;
         }
     }
-    // Upstream's drawBranches uses `maxPos` AFTER the loop without the trailing
-    // increment? Actually no — the increment happens unconditionally at end of
-    // loop body, so for N commits with COMMIT_STEP=40 + LAYOUT_OFFSET=10, max_pos
-    // ends at N*50. For N=3: max_pos=150. That matches the reference where the
-    // branch line goes x1=0 → x2=150.
+    for opt in placed {
+        commits.push(opt.expect("every commit visited"));
+    }
 
-    // Compute viewBox. Upstream's setupGraphViewbox takes the bbox of the
-    // diagram <g> and adds padding. Reference 01:
-    //   viewBox="-76.9794921875 -20 234.9794921875 59.796875"
-    //   max-width: 234.9794921875
-    // The bbox spans:
-    //   left = -bbox_width(main label) - 18 (label rect x value)
-    //          actually: branch-label rect has x = -bbox.width - 4 - (rotateCommitLabel?30:0)
-    //          and a transform translate(-19, ...). With rotateCommitLabel=true
-    //          its left edge is at -bbox_w - 4 - 30 - 19 = -bbox_w - 53.
-    //          For "main" bbox_w=24..., that gives -77 ish — matches.
-    //   right = max_pos (line x2)
-    //   top = the smallest y across all elements (branch label rect top, commit
-    //         labels above-the-line, etc.)
-    //   bottom = the largest y across all elements (commit labels below the
-    //            line + their rotated bbox extends).
-    // The reference viewBox values were produced by jsdom's getBBox; our
-    // font-metrics give us the same numeric values for byte-exact parity.
-    let bbox_w = label_w; // text bbox.width in upstream
-    let bbox_h = label_h; // text bbox.height
-    // branch label rect (LR, non-redux): x = -bbox_w - 4 - 30, y = -bbox_h/2 + 10
-    // width = bbox_w + 18 + 0; height = bbox_h + 4
-    // Then transform: translate(-19, spineY - 12 - 0) where spineY = -2
-    // So actual visual rect: x = -bbox_w-34-19 = -bbox_w-53, y = ... + (spineY-12) = ... + -14
-    //                        width = bbox_w + 18; height = bbox_h + 4.
-    let _rect_left = -bbox_w - 53.0; // visual left edge of branch-label background
-    let _line_right = max_pos;
-    // Padding from `setupGraphViewbox` is `gitGraphConfig.diagramPadding` (= 8 default).
-    // But the reference 01 has padding 8 already baked: viewBox left = -76.97 vs rect_left.
-    // For "main", bbox_w = 24.something from font metrics; -bbox_w-53 ≈ -77.
-    // The viewBox actually adds NO extra padding on the left in this fixture
-    // because the viewBox is computed from the inner <g> bbox + padding,
-    // and the branchLabel rect already extends past the SVG's x=0 anchor.
-    // We approximate: viewBox_x = rect_left, w = line_right - rect_left, etc.
-
-    // For commit labels (rotated -45°), each commit-label group is at
-    // commit cx, with rect centred at (cx) horizontally then translated by
-    // (translate_x, translate_y) and rotated. The rotated bbox extends below
-    // the line by ~20px and to the upper-right by some, but since we only need
-    // viewBox numbers for byte-exact, we hard-derive from the reference once
-    // by computing the bbox of all elements.
-
-    // ── Compute commit-label rotated bbox extents ─────────────────────────
-    // Each label group: <g transform="translate(tx, ty) rotate(-45, cx, cy)">
-    //   <rect x=cx_local y=11.5 width=rect_w height=rect_h>
-    //   <text x=tx_text y=23>
-    // tx = -7.5 - ((rect_w + 10) / 25) * 9.5  ... but this is wrapper transform.
-    //
-    // For simplicity and because we want byte-exact numbers, replicate
-    // upstream's drawCommitLabel + jsdom getBBox by computing what the
-    // visual extents WILL BE after the rotation. This is non-trivial.
-    //
-    // Empirically (verified against fixture 01):
-    //   viewBox y_min = -20
-    //   viewBox y_max = 39.796875  → height = 59.796875
-    // The 39.796875 number = 13.02845703125 (the wrapper translate y) +
-    //   rect bottom of post-rotate bbox.
-    // Pull these from a known formula: the rotated rect has corners at
-    // (x, y), (x+w, y), (x+w, y+h), (x, y+h) before rotation. After rotating
-    // -45° around (cx, cy), the y-extent depends on the rect's centre offset.
-    //
-    // Simpler: we derive the global bbox by simulating transform of every
-    // anchor point.
-
-    // Branch-label rect — already accounted for above (top at spineY-14 =
-    // -16, height bbox_h+4 ≈ 22 → bottom ≈ +6).
-    // top_branch = -16
-    // bottom_branch = -16 + (bbox_h + 4)
-
-    // Commit-label rotation.
-    // We mirror upstream:
-    //   bbox_text.width = label_w_i (font_metrics), bbox_text.height = font_metrics line height.
-    //   labelBkg attrs (after `text.attr('x',...)` second pass): x = posWithOffset - bbox.width/2 - PY,
-    //     y = commitPosition.y + 13.5, w = bbox.width + 2*PY, h = bbox.height + 2*PY
-    //   text attr: x = posWithOffset - bbox.width/2, y = commitPosition.y + 25, font 10px
-    // Then wrapper g gets transform `translate(r_x, r_y) rotate(-45, pos, cy)` where
-    //   r_x = -7.5 - ((bbox.width + 10) / 25) * 9.5
-    //   r_y = 10 + (bbox.width / 25) * 8.5
-    // With pos = posWithOffset - LAYOUT_OFFSET (= cx - 10), cy = -2.
-    //
-    // We'll just compute the rotated bbox of the wrapper's combined rect+text.
-
-    // Compute the diagram bbox the way jsdom's getBBox shim does — by
-    // unioning each rendered element's intrinsic box (without applying
-    // transforms). Mirrors `tests/support/generate_ref.mjs` `intrinsicBox`
-    // exactly, since the reference SVGs are produced through that shim.
-    //
-    // Elements rendered by the renderer:
-    //   - line spine: x1=0..max_pos, y=-2 → bbox (0, -2, max_pos, 0)
-    //   - branch label rect: (rect_x, rect_y, rect_w, rect_h)
-    //   - branch label `<text>`: shim returns (0, 0, text_w, text_h)
-    //     — we still include this because mermaid renders one.
-    //   - commit bullets <circle cx, cy, r=10>: (cx-10, cy-10, 20, 20)
-    //   - commit-arrow <path d="M..L..">: bbox of segment endpoints
-    //   - commit-label rect at (cx-lw/2-py, cy+13.5, lw+2py, lh+2py)
-    //   - commit-label <text>: (0, 0, lw, lh)
+    // ── viewBox / bbox accumulation ─────────────────────────────────
+    // Mirrors `tests/support/generate_ref.mjs` `intrinsicBox` exactly.
     let py = 2.0_f64;
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -260,54 +210,96 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         if x + w > max_x { max_x = x + w; }
         if y + h > max_y { max_y = y + h; }
     };
-    // Empty commit-bullet pre-pass <g></g>s contribute nothing (no rendered
-    // children of their own with bbox-relevant attrs).
-    // Initial empty placeholders (commit-bullets/commit-labels first pass)
-    // each have NO children → no contribution.
-    //
-    // The third <g> (branch group) has line + rect + text.
-    // line spine
-    acc(0.0, -2.0, max_pos, 0.0);
-    // branch label rect (x,y,w,h)
     let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
-    let bkg_x = -bbox_w - 4.0 - rotate_pad;
-    let bkg_y = -bbox_h / 2.0 + 10.0;
-    let bkg_w = bbox_w + 18.0;
-    let bkg_h = bbox_h + 4.0;
-    acc(bkg_x, bkg_y, bkg_w, bkg_h);
-    // branch label text (intrinsic 0,0,w,h)
-    acc(0.0, 0.0, bbox_w, bbox_h);
 
-    // commit-arrows
-    for win in commits.windows(2) {
-        let a = &win[0];
-        let b = &win[1];
-        let lx = a.cx.min(b.cx);
-        let ly = a.cy.min(b.cy);
-        let w = (a.cx - b.cx).abs();
-        let h = (a.cy - b.cy).abs();
-        acc(lx, ly, w, h);
+    // Per-branch line spine + label background + label text.
+    // `showBranches: false` short-circuits this whole section.
+    if d.config.show_branches {
+        for bp in &branch_positions {
+            let bbox_w = bp.label_width;
+            let bbox_h = bp.label_height;
+            if is_vert {
+                // Vertical line: x=bp.pos, y in [DEFAULT_POS, max_pos].
+                acc(bp.pos, DEFAULT_POS, 0.0, max_pos - DEFAULT_POS);
+                // Branch label rect: TB at top (y=0), BT at bottom (y=maxPos).
+                let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
+                let bkg_y = if is_bt { max_pos } else { 0.0 };
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                acc(bkg_x, bkg_y, bkg_w, bkg_h);
+                acc(0.0, 0.0, bbox_w, bbox_h);
+            } else {
+                let spine_y = bp.pos - 2.0;
+                acc(0.0, spine_y, max_pos, 0.0);
+                let bkg_x = -bbox_w - 4.0 - rotate_pad;
+                let bkg_y = -bbox_h / 2.0 + 10.0;
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                acc(bkg_x, bkg_y, bkg_w, bkg_h);
+                acc(0.0, 0.0, bbox_w, bbox_h);
+            }
+        }
     }
-    // commit-bullets (circles)
+
+    // commit-arrows: bbox of each parent → commit segment endpoints.
+    // Mirrors upstream's per-arrow path. For straight segments the bbox
+    // is simply the rectangle spanning (p1, p2). For curved segments
+    // including arc endpoints the bbox the shim sees is also derived
+    // from the path's M/L/A control points (it ignores the curve shape).
+    // We approximate by accumulating each segment endpoint as a 0×0 box.
+    for (i, c) in d.commits.iter().enumerate() {
+        for parent_id in &c.parents {
+            let parent_idx = match d.commits.iter().position(|cc| &cc.id == parent_id) {
+                Some(p) => p,
+                None => continue,
+            };
+            let p1 = &commits[parent_idx];
+            let p2 = &commits[i];
+            // Endpoints — covers straight + curved cases at endpoints.
+            // The shim's `intrinsicBox` for paths takes (M.x, M.y, dx, dy)
+            // where dx/dy = abs differences of M and last L. We need to
+            // match exactly so we accumulate the rectangle spanning M
+            // and the final L. Curves with intermediate arcs still end
+            // at p2 so the final-segment bbox is the same as the straight
+            // case for our purposes.
+            let lx = p1.cx.min(p2.cx);
+            let ly = p1.cy.min(p2.cy);
+            let w = (p1.cx - p2.cx).abs();
+            let h = (p1.cy - p2.cy).abs();
+            acc(lx, ly, w, h);
+        }
+    }
+    // commit-bullets (circles) + merge inner circle (smaller bbox is
+    // subsumed by the outer r=10 box, so accumulating the outer once
+    // is enough).
     for c in &commits {
         acc(c.cx - 10.0, c.cy - 10.0, 20.0, 20.0);
     }
-    // commit-labels (rect + text). All rotated, but jsdom's shim doesn't
-    // apply transforms. Each commit's rect intrinsic bbox is at
-    // (cx - lw/2 - py, cy + 13.5, lw+2py, lh+2py), and the text intrinsic
-    // is (0, 0, lw, lh).
+    // commit-labels (rect + text). For merge commits without `customId`
+    // upstream skips the label entirely; `showCommitLabel: false` skips
+    // every label diagram-wide.
     for (i, c) in commits.iter().enumerate() {
-        let lw = label_widths[i];
-        let lh = commit_label_text_height;
-        // Don't render commit-label for cherry-pick or non-customId merge —
-        // but we don't have those types here yet.
-        acc(c.pos_with_offset - lw / 2.0 - py, c.cy + 13.5, lw + 2.0 * py, lh + 2.0 * py);
-        acc(0.0, 0.0, lw, lh);
+        let commit = &d.commits[i];
+        let label_emitted = d.config.show_commit_label
+            && !matches!(commit.kind, CommitKind::CherryPick)
+            && !(matches!(commit.kind, CommitKind::Merge) && !commit.custom_id);
+        if label_emitted {
+            let lw = label_widths[i];
+            let lh = commit_label_text_height;
+            if is_vert {
+                let px = 4.0;
+                let rect_x = c.cx - (lw + 4.0 * px + 5.0);
+                let rect_y = c.cy - 12.0;
+                acc(rect_x, rect_y, lw + 2.0 * py, lh + 2.0 * py);
+                acc(0.0, 0.0, lw, lh);
+            } else {
+                acc(c.pos_with_offset - lw / 2.0 - py, c.cy + 13.5, lw + 2.0 * py, lh + 2.0 * py);
+                acc(0.0, 0.0, lw, lh);
+            }
+        }
     }
 
-    // commit-tags. Each tag adds a polygon, a hole-circle, and a text.
-    // Geometry mirrors `drawCommitTags`; tags are rendered in reverse
-    // order, with `yOffset` incrementing by 20 per tag.
+    // commit-tags.
     let px = 4.0_f64;
     let tag_lh = commit_label_text_height;
     let h2 = tag_lh / 2.0;
@@ -317,67 +309,65 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         if tags.is_empty() {
             continue;
         }
-        // First pass: compute max width across all tags on this commit.
         let mut max_w = 0.0_f64;
         for t in tags {
-            let w = font_metrics::text_width(t, font_family, label_size, false, false);
+            let w = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
             if w > max_w {
                 max_w = w;
             }
         }
         let mut y_off = 0.0_f64;
         for t in tags.iter().rev() {
-            let ly = c.cy - 19.2 - y_off;
-            // polygon points (LR / non-redux):
-            let p1x = c.pos - max_w / 2.0 - px / 2.0;
-            let p1y = ly + py;
-            let p2y = ly - py;
-            let p3x = c.pos_with_offset - max_w / 2.0 - px;
-            let p3y = ly - h2 - py;
-            let p4x = c.pos_with_offset + max_w / 2.0 + px;
-            let p5y = ly + h2 + py;
-            let p6x = c.pos_with_offset - max_w / 2.0 - px;
-            // bbox of polygon
-            let lo_x = p1x.min(p3x).min(p4x).min(p6x);
-            let hi_x = p1x.max(p3x).max(p4x).max(p6x);
-            let lo_y = p1y.min(p2y).min(p3y).min(p5y);
-            let hi_y = p1y.max(p2y).max(p3y).max(p5y);
-            acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
-            // hole-circle at (cx = pos - maxW/2 + PX/2, cy = ly, r = 1.5)
-            let hole_cx = c.pos - max_w / 2.0 + px / 2.0;
-            acc(hole_cx - 1.5, ly - 1.5, 3.0, 3.0);
-            // text intrinsic (0, 0, w_tag, lh)
-            let w_tag = font_metrics::text_width(t, font_family, label_size, false, false);
-            acc(0.0, 0.0, w_tag, tag_lh);
+            if is_vert {
+                // TB intrinsic bbox of the polygon (jsdom shim ignores
+                // the rotate transform).
+                let y_origin = c.pos + y_off;
+                let lo = 10.0;
+                let pad = 2.0;
+                let h2_tb = tag_lh / 2.0;
+                // Polygon points span x in [c.cx, c.cx + lo + max_w + 4]
+                // and y in [y_origin - h2_tb - pad, y_origin + h2_tb + pad].
+                let lo_x = c.cx;
+                let hi_x = c.cx + lo + max_w + 4.0;
+                let lo_y = y_origin - h2_tb - pad;
+                let hi_y = y_origin + h2_tb + pad;
+                acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
+                acc(c.cx + px / 2.0 - 1.5, y_origin - 1.5, 3.0, 3.0);
+                let w_tag = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
+                acc(0.0, 0.0, w_tag, tag_lh);
+            } else {
+                let ly = c.cy - 19.2 - y_off;
+                let p1x = c.pos - max_w / 2.0 - px / 2.0;
+                let p1y = ly + py;
+                let p2y = ly - py;
+                let p3x = c.pos_with_offset - max_w / 2.0 - px;
+                let p3y = ly - h2 - py;
+                let p4x = c.pos_with_offset + max_w / 2.0 + px;
+                let p5y = ly + h2 + py;
+                let p6x = c.pos_with_offset - max_w / 2.0 - px;
+                let lo_x = p1x.min(p3x).min(p4x).min(p6x);
+                let hi_x = p1x.max(p3x).max(p4x).max(p6x);
+                let lo_y = p1y.min(p2y).min(p3y).min(p5y);
+                let hi_y = p1y.max(p2y).max(p3y).max(p5y);
+                acc(lo_x, lo_y, hi_x - lo_x, hi_y - lo_y);
+                let hole_cx = c.pos - max_w / 2.0 + px / 2.0;
+                acc(hole_cx - 1.5, ly - 1.5, 3.0, 3.0);
+                let w_tag = font_metrics::text_width(t, FONT_FAMILY, LABEL_SIZE, false, false);
+                acc(0.0, 0.0, w_tag, tag_lh);
+            }
             y_off += 20.0;
-            let _ = w_tag;
         }
     }
 
-    // Title position is computed *before* the title text is itself
-    // appended, so its bbox doesn't see itself. The renderer keeps the
-    // pre-title bbox center for x; we record it now.
-    drop(acc); // release the mutable borrow on min_*/max_*
+    drop(acc);
     let title_x = min_x + (max_x - min_x) / 2.0;
 
-    // After title insertion, the title text intrinsic bbox is (0, 0,
-    // title_w, title_h) under the shim — measured at 14px sans-serif
-    // because no `font-size` attribute is set on the title element
-    // (the `gitTitleText` CSS class is not consulted by the bbox shim).
     if let Some(title) = d.meta.title.as_deref() {
-        let title_w = font_metrics::text_width(title, font_family, label_size, false, false);
-        if title_w > max_x {
-            max_x = title_w;
-        }
-        if 0.0 < min_x {
-            min_x = 0.0;
-        }
-        if label_h > max_y {
-            max_y = label_h;
-        }
-        if 0.0 < min_y {
-            min_y = 0.0;
-        }
+        let title_w = font_metrics::text_width(title, FONT_FAMILY, LABEL_SIZE, false, false);
+        if title_w > max_x { max_x = title_w; }
+        if 0.0 < min_x { min_x = 0.0; }
+        if label_h > max_y { max_y = label_h; }
+        if 0.0 < min_y { min_y = 0.0; }
     }
 
     let pad = 8.0;
@@ -388,7 +378,9 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
 
     Ok(GitGraphLayout {
         orientation: d.orientation,
-        branches: vec![branch],
+        is_tb,
+        is_bt,
+        branches: branch_positions,
         commits,
         max_pos,
         viewbox_x,
@@ -396,7 +388,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         viewbox_w,
         viewbox_h,
         branch_label_height: label_h,
-        commit_label_height: bbox_h,
+        commit_label_height: label_h,
         commit_label_widths: label_widths,
         commit_label_text_height,
         title_x,
