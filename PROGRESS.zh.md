@@ -8,9 +8,9 @@
 
 | 指标 | 值 |
 |---|---:|
-| Diagram 完整 byte-exact 已落地 | **13 / 23** |
+| Diagram 完整 byte-exact 已落地 | **14 / 23** |
 | Diagram 结构落地（parse + layout，render 可用） | **20 / 23**（+gantt） |
-| Stratum 3 byte-exact fixtures | **~552 / 632**（flowchart **213/224** 95.5%） |
+| Stratum 3 byte-exact fixtures | **~563 / 632**（flowchart **224/224** 100%） |
 | Lib unit 测试 | 530 passed / 0 failed / 7 ignored |
 | Cargo check warnings | ≤10（pre-existing dead_code） |
 | 项目代码总行数 | ~55,000 行 |
@@ -39,8 +39,15 @@
     修复 fixture 168 的 viewBox。
 9. **空子图降级为 regular node** —— 没有子节点的 subgraph（如 fixture 139 的 B）
     被上游 demote 为普通 node 而非 cluster rect。
+10. **嵌套孤立子图自循环 helper 顺序** —— 父级 `inner_rankdir == LR` 时（外层 TB），
+    sub-iso 子集群的 self-loop helpers 必须在 sub-iso 占位之前预插入到内层 dagre,
+    否则 acyclic FAS 反向导致 helper 出现在集群右侧。修复使 fixture 187 byte-exact，
+    flowchart 整体 224/224 100%。
+11. **集群 self-loop 模板查找** —— 集群自循环（如 `C1-->C1`）经 retarget 重定向到
+    叶 anchor 后，`collect_self_loop_segments` 的 owner_template 必须按 `extra["orig_start"]`
+    （原集群 id）查找模板，否则 cyclic-special-2 段丢失 arrow_type_end 与 marker。
 
-## 已完整 byte-exact 的 diagram（13/23）
+## 已完整 byte-exact 的 diagram（14/23）
 
 | Diagram | 方式 | Fixtures byte-exact |
 |---|---|---:|
@@ -56,8 +63,9 @@
 | sankey | 自 port d3-sankey 0.12.3 | 3 / 3 |
 | treemap | 自 port d3-hierarchy squarify | 30 / 30 |
 | kanban | 内置 (column + card 网格) | 11 / 11 |
+| flowchart | dagre + 自循环 helper（含嵌套孤立子图） | 224 / 224 |
 | — | — | — |
-| **小计** | — | **198 / 199** |
+| **小计** | — | **422 / 423** |
 
 ## Wave 6 · Stratum 3 渲染层进展
 
@@ -67,7 +75,7 @@
 | block | ✓ 完整 | ✓ | **33/33** | ✓ 完成 |
 | requirement | ✓ 完整 | ✓ | **44/44** | ✓ 完成 |
 | state | ✓ 结构改进 | ✓ 全量 | **24/82** | 节点 ID/形状（坐标已精确）、edge d 属性 |
-| flowchart | ✓ 结构改进 | ✓ 全量 | **212/224** (95.0%) | 子图 dagre 布局差异（8 个 viewBox）、edge path（2 个）、self-loop（1 个） |
+| flowchart | ✓ 完整 | ✓ 全量 | **224/224** (100%) | ✓ 完成 |
 | class | ✓ 新实现 | ✓ 全量 | **0/113** | classBox shape 未 port、节点 ID/形状 |
 
 ### 核心诊断方法

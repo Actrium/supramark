@@ -414,14 +414,21 @@ fn build_graph_filtered_ex<'a>(
         for (idx, edge) in data.edges.iter().enumerate() {
             let orig_src = edge.extra.get("orig_start").map(|s| s.as_str());
             let orig_dst = edge.extra.get("orig_end").map(|s| s.as_str());
-            let (effective_src, effective_dst) = if let (Some(os), Some(od)) = (orig_src, orig_dst) {
+            let (effective_src, effective_dst) = if let (Some(os), Some(od)) = (orig_src, orig_dst)
+            {
                 if g.has_node(os) && g.has_node(od) {
                     (os, od)
                 } else {
-                    (edge_source(edge).unwrap_or(""), edge_target(edge).unwrap_or(""))
+                    (
+                        edge_source(edge).unwrap_or(""),
+                        edge_target(edge).unwrap_or(""),
+                    )
                 }
             } else {
-                (edge_source(edge).unwrap_or(""), edge_target(edge).unwrap_or(""))
+                (
+                    edge_source(edge).unwrap_or(""),
+                    edge_target(edge).unwrap_or(""),
+                )
             };
             if excluded.contains(effective_src) || excluded.contains(effective_dst) {
                 continue;
@@ -796,12 +803,46 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
     // segments can inherit pattern/style/label/look from the user-provided
     // self-edge).
     let mut owner_template: HashMap<String, &Edge> = HashMap::new();
+    // First pass: register leaf self-loop templates keyed by their leaf id.
+    // Skip cluster self-loops here so they don't overwrite the leaf template
+    // when retargeting collapsed both endpoints onto the same leaf anchor.
     for e in &data.edges {
         let (Some(s), Some(t)) = (edge_source(e), edge_target(e)) else {
             continue;
         };
-        if s == t {
+        if s != t {
+            continue;
+        }
+        let is_cluster_self_loop = matches!(
+            (
+                e.extra.get("orig_start").map(|s| s.as_str()),
+                e.extra.get("orig_end").map(|s| s.as_str()),
+            ),
+            (Some(os), Some(ot)) if os == ot && os != s
+        );
+        if !is_cluster_self_loop {
             owner_template.insert(s.to_string(), e);
+        }
+    }
+    // Second pass: register cluster self-loop templates keyed by the original
+    // cluster id (extra["orig_start"]). Upstream's `expand_self_edge` uses
+    // that id as the owner for helper/segment names, so cyclic-special
+    // collection has to look up the template by it. Insert without
+    // overwriting any leaf template (insert only when key is absent).
+    for e in &data.edges {
+        let (Some(s), Some(t)) = (edge_source(e), edge_target(e)) else {
+            continue;
+        };
+        if s != t {
+            continue;
+        }
+        if let (Some(os), Some(ot)) = (
+            e.extra.get("orig_start").map(|s| s.as_str()),
+            e.extra.get("orig_end").map(|s| s.as_str()),
+        ) {
+            if os == ot && os != s {
+                owner_template.entry(os.to_string()).or_insert(e);
+            }
         }
     }
 
@@ -889,8 +930,22 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
         out.push(e);
     }
     // Stable sort: group by owner, then mirror upstream DOM emission order.
-    // The label-carrying middle segment comes first, followed by the start
-    // and end legs (`mid`, `1`, `2` in the reference SVGs).
+    //
+    // The order depends on whether the owner is a cluster (group) or a leaf
+    // node:
+    //   - Cluster self-loops emit in `mid, 1, 2` order (label segment first).
+    //     This is what dagre's `acyclic` produces after rewriting endpoints
+    //     onto the cluster's anchor leaf — the mid edge ends up iterated
+    //     before the legs.
+    //   - Leaf self-loops emit in `1, mid, 2` order (insertion order). The
+    //     simpler graph topology means dagre's edge iteration matches the
+    //     insertion sequence.
+    let cluster_ids: std::collections::HashSet<&str> = data
+        .nodes
+        .iter()
+        .filter(|n| n.is_group)
+        .map(|n| n.id.as_str())
+        .collect();
     out.sort_by(|a, b| {
         let ao = a
             .extra
@@ -912,12 +967,23 @@ fn collect_self_loop_segments(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>
             .get("cyclic_index")
             .and_then(|s| s.parse::<u8>().ok())
             .unwrap_or(0);
-        let order_key = |idx: u8| match idx {
+        let cluster_order_key = |idx: u8| match idx {
             1 => 0u8,
             0 => 1u8,
             _ => 2u8,
         };
-        ao.cmp(bo).then(order_key(ai).cmp(&order_key(bi)))
+        let leaf_order_key = |idx: u8| idx;
+        let ak = if cluster_ids.contains(ao) {
+            cluster_order_key(ai)
+        } else {
+            leaf_order_key(ai)
+        };
+        let bk = if cluster_ids.contains(bo) {
+            cluster_order_key(bi)
+        } else {
+            leaf_order_key(bi)
+        };
+        ao.cmp(bo).then(ak.cmp(&bk))
     });
     out
 }
@@ -1736,6 +1802,15 @@ struct InnerLayout {
     bbox_width: f64,
     /// Outer dagre leaf node height: `(8 + cluster_height) + max(node.height/2)`.
     bbox_height: f64,
+    /// Bbox extents in the cluster's local frame (i.e., what `getBBox()` of
+    /// the cluster's `<g class="root">` would return).  Used by parent
+    /// `compute_bbox` to merge a sub-isolated cluster's actual extent — its
+    /// `<g>` transform is ignored by upstream's getBBox shim, so descendants
+    /// contribute to the parent at their literal local coordinates.
+    bbox_min_x: f64,
+    bbox_max_x: f64,
+    bbox_min_y: f64,
+    bbox_max_y: f64,
     /// Post-layout (x, y) for ALL direct children (leaf nodes and
     /// sub-cluster leaf representations).  For isolated sub-clusters
     /// the position is what O's inner dagre assigned; actual children of
@@ -1998,6 +2073,82 @@ fn layout_isolated_cluster(
     for child in &leaf_children {
         g.set_node(child.id.clone(), Some(make_node_label(child)));
         g.set_parent(&child.id, Some(cluster_id));
+    }
+
+    // Pre-add self-loop helpers for sub-isolated clusters BEFORE adding the
+    // sub-cluster placeholders themselves — but only when inner rankdir is LR
+    // (i.e., the outer was TB).
+    //
+    // Upstream's mermaid runs `expandSelfEdge` on the OUTER graph during the
+    // pre-render adjust pass, BEFORE `extractor` splits each cluster's inner
+    // content into its own dagre graph. As a result, when an inner cluster's
+    // dagre is built, helper nodes for sub-cluster self-loops are already
+    // present and their insertion order precedes the sub-cluster placeholder.
+    //
+    // Node insertion order matters here because `acyclic`'s DFS-based
+    // feedback-arc-set walks `g.nodes()` in insertion order. Different DFS
+    // start orders produce different reversed edges, which then assign
+    // different ranks. For a cluster self-loop `C1 -> C1` with helpers `h1`
+    // and `h2`, inserting `h1`, `h2` before `C1` causes DFS from `h1` to
+    // discover the back-edge `C1 -> h1` first → FAS reverses C1->h1, placing
+    // C1 at the highest rank (helpers to its left in LR layout). This matches
+    // upstream's helper-LEFT-of-cluster geometry. With the previous order
+    // (sub-iso first, helpers later), DFS reversed `h2 -> C1` instead, placing
+    // helpers to the right of the cluster.
+    //
+    // Empirically, upstream's behaviour is mismatched between LR and TB
+    // inner layouts: for a TB inner (where outer was LR or RL), upstream
+    // keeps the cluster at rank 0 with helpers below. So we only flip the
+    // insertion order when the inner is LR.
+    let mut pre_added_helper_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    if matches!(inner_rankdir, RankDir::LR) {
+        for edge in &data.edges {
+            let rewritten_src = match edge_source(edge) {
+                Some(s) => s,
+                None => continue,
+            };
+            let rewritten_dst = match edge_target(edge) {
+                Some(s) => s,
+                None => continue,
+            };
+            let src = edge
+                .extra
+                .get("orig_start")
+                .map(|s| s.as_str())
+                .filter(|id| sub_isolated.contains_key(*id))
+                .unwrap_or(rewritten_src);
+            let dst = edge
+                .extra
+                .get("orig_end")
+                .map(|s| s.as_str())
+                .filter(|id| sub_isolated.contains_key(*id))
+                .unwrap_or(rewritten_dst);
+            if src != dst {
+                continue;
+            }
+            if !sub_isolated.contains_key(src) {
+                continue;
+            }
+            let sid1 = format!("{src}---{src}---1");
+            let sid2 = format!("{src}---{src}---2");
+            let helper = || NodeLabel {
+                width: 0.1,
+                height: 0.1,
+                label: Some(String::new()),
+                padding: 0.0,
+                shape: Some("labelRect".to_string()),
+                ..NodeLabel::default()
+            };
+            g.set_node(sid1.clone(), Some(helper()));
+            g.set_node(sid2.clone(), Some(helper()));
+            g.set_parent(&sid1, Some(cluster_id));
+            g.set_parent(&sid2, Some(cluster_id));
+            // Mark helpers as pre-added so the renderer can emit them before
+            // the sub-iso inner root (matching upstream's DOM order).
+            pre_added_helper_ids.insert(sid1);
+            pre_added_helper_ids.insert(sid2);
+        }
     }
 
     // Add isolated sub-clusters as opaque leaf nodes with the bounding-box
@@ -2300,20 +2451,23 @@ fn layout_isolated_cluster(
     }
     // Sub-isolated clusters: under jsdom their inner root `<g>`'s
     // translate is ignored, so all descendant intrinsic boxes appear
-    // at their LOCAL coordinates. The sub-isolated cluster rect at
-    // (8, 8) overlaps with the parent rect at (8, 8) so it doesn't
-    // extend max_right/max_bottom beyond the parent rect. Only the
-    // sub-isolated cluster's child node half-extents matter: they
-    // contribute (-nw/2, -nh/2) to min_left/min_top and (nw/2, nh/2)
-    // to max_right_node / max_bottom.  Previously we used
-    // bbox_w/2 and bbox_h/2 which overestimated because bbox includes
-    // the (8,8)-offset rect that overlaps with the parent.
+    // at their LOCAL coordinates as recorded in the sub-isolated
+    // cluster's own bbox extents (bbox_min_x..bbox_max_x).  Track
+    // these extents so they can union with the parent's bbox below.
+    // Treating sub-iso as a leaf with width=bbox_w would falsely
+    // place it at (-bbox_w/2, +bbox_w/2) — a sub-iso bbox is not
+    // centred at the origin (deepest leaves give negative coords,
+    // cluster rect gives [+8, +8+cw] positive coords).
+    let mut sub_iso_min_x: f64 = f64::INFINITY;
+    let mut sub_iso_max_x: f64 = f64::NEG_INFINITY;
+    let mut sub_iso_min_y: f64 = f64::INFINITY;
+    let mut sub_iso_max_y: f64 = f64::NEG_INFINITY;
     for cid in &sub_isolated_sorted_ids {
         let sub_inner = &sub_isolated[*cid];
-        for (_child_id, &(_cx, _cy, cw, ch)) in &sub_inner.child_positions {
-            max_half_sym_w = max_half_sym_w.max(cw / 2.0);
-            max_half_node_h = max_half_node_h.max(ch / 2.0);
-        }
+        sub_iso_min_x = sub_iso_min_x.min(sub_inner.bbox_min_x);
+        sub_iso_max_x = sub_iso_max_x.max(sub_inner.bbox_max_x);
+        sub_iso_min_y = sub_iso_min_y.min(sub_inner.bbox_min_y);
+        sub_iso_max_y = sub_iso_max_y.max(sub_inner.bbox_max_y);
     }
     // Non-isolated cluster children are rendered as <g class="cluster">
     // elements inside the inner SVG with absolute-positioned rects
@@ -2339,26 +2493,33 @@ fn layout_isolated_cluster(
     }
     let max_right_node = max_half_sym_w.max(max_full_asym_w);
     // Union of cluster rect {rect_x, rect_y, rect_w, rect_h},
-    // label {0, 0, lw, lh}, leaf node rects {-hw, hw}, and non-isolated
-    // cluster rects (absolute).
+    // label {0, 0, lw, lh}, leaf node rects {-hw, hw}, non-isolated
+    // cluster rects (absolute), and sub-isolated cluster bbox extents.
     let max_right = (rect_x + rect_w)
         .max(max_right_node)
         .max(label_w)
-        .max(cluster_child_max_x);
+        .max(cluster_child_max_x)
+        .max(sub_iso_max_x);
     let min_left = rect_x
         .min(0.0_f64)
         .min(-max_half_sym_w)
-        .min(cluster_child_min_x);
+        .min(cluster_child_min_x)
+        .min(sub_iso_min_x);
     let max_bottom = (rect_y + rect_h)
         .max(max_half_node_h)
-        .max(cluster_child_max_y);
+        .max(cluster_child_max_y)
+        .max(sub_iso_max_y);
     let min_top = rect_y
         .min(0.0_f64)
         .min(-max_half_node_h)
-        .min(cluster_child_min_y);
+        .min(cluster_child_min_y)
+        .min(sub_iso_min_y);
     let mut bbox_width = max_right - min_left;
     let mut bbox_height = max_bottom - min_top;
-
+    let mut bbox_min_x = min_left;
+    let mut bbox_max_x = max_right;
+    let mut bbox_min_y = min_top;
+    let mut bbox_max_y = max_bottom;
     // Read back inner-pass edge routing.  Every edge whose endpoints are both
     // inside this cluster (excluding self-edges, which are expanded into
     // helper-node chains by `expand_self_edge` and rerouted at render time)
@@ -2392,6 +2553,18 @@ fn layout_isolated_cluster(
     }
     let mut self_loop_helpers = collect_self_loop_helpers(&g);
     let mut self_loop_segments = collect_self_loop_segments(data, &g);
+    // Tag pre-added helpers (those for sub-isolated cluster self-loops added
+    // before the sub-cluster placeholder) so the renderer can emit them
+    // BEFORE the corresponding sub-iso inner root, matching upstream's DOM
+    // order. See `pre_added_helper_ids` insertion above.
+    if !pre_added_helper_ids.is_empty() {
+        for h in self_loop_helpers.iter_mut() {
+            if pre_added_helper_ids.contains(&h.id) {
+                h.extra
+                    .insert("pre_added_for_sub_iso".to_string(), "1".to_string());
+            }
+        }
+    }
 
     // ── Upstream-alignment post-process: 5×5 swap fix ────────────────────
     //
@@ -2475,6 +2648,10 @@ fn layout_isolated_cluster(
         inner_y += dy;
         bbox_width += dw;
         bbox_height += dh;
+        bbox_min_x += dx;
+        bbox_max_x += dx + dw;
+        bbox_min_y += dy;
+        bbox_max_y += dy + dh;
         for v in child_positions.values_mut() {
             v.0 += dx;
             v.1 += dy;
@@ -2537,6 +2714,10 @@ fn layout_isolated_cluster(
         inner_y,
         bbox_width,
         bbox_height,
+        bbox_min_x,
+        bbox_max_x,
+        bbox_min_y,
+        bbox_max_y,
         child_positions,
         inner_edges,
         self_loop_helpers,
@@ -3133,14 +3314,43 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     {
         fn gather_inner_self_loops(
             inner: &InnerLayout,
+            cluster_id: &str,
             helpers: &mut Vec<Node>,
             segments: &mut Vec<Edge>,
         ) {
-            helpers.extend(inner.self_loop_helpers.iter().cloned());
-            segments.extend(inner.self_loop_segments.iter().cloned());
-            for sub in inner.sub_isolated.values() {
-                gather_inner_self_loops(sub, helpers, segments);
+            for mut h in inner.self_loop_helpers.iter().cloned() {
+                h.extra
+                    .insert("isolated_cluster_owner".to_string(), cluster_id.to_string());
+                helpers.push(h);
             }
+            for mut e in inner.self_loop_segments.iter().cloned() {
+                e.extra
+                    .insert("isolated_cluster_owner".to_string(), cluster_id.to_string());
+                segments.push(e);
+            }
+            for (sub_id, sub) in &inner.sub_isolated {
+                gather_inner_self_loops(sub, sub_id, helpers, segments);
+            }
+        }
+        let mut inner_helpers: Vec<Node> = Vec::new();
+        let mut inner_segments: Vec<Edge> = Vec::new();
+        for (cid, inner) in &isolated_layouts {
+            gather_inner_self_loops(inner, cid, &mut inner_helpers, &mut inner_segments);
+        }
+        if !inner_helpers.is_empty() {
+            log::debug!(
+                "dagre_bridge: exposing {} inner self-loop helper node(s)",
+                inner_helpers.len()
+            );
+            all_nodes.extend(inner_helpers);
+        }
+        if !inner_segments.is_empty() {
+            log::debug!(
+                "dagre_bridge: exposing {} inner cyclic-special sub-edge(s)",
+                inner_segments.len()
+            );
+            let refined = routing::refine_edges(&all_nodes, &inner_segments);
+            all_edges.extend(refined);
         }
     }
     {

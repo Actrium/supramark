@@ -1064,7 +1064,8 @@ fn ingest_state_decl(diagram: &mut StateDiagram, decl: &str, parent: Option<Stri
                     .trim();
                 // Strip trailing ':' from the id (happens when `as S1: desc`
                 // is parsed by split_whitespace — the `: desc` is not separated).
-                let (id, _maybe_desc) = if let Some((tok, desc_rest)) = split_once_colon(raw_token) {
+                let (id, _maybe_desc) = if let Some((tok, desc_rest)) = split_once_colon(raw_token)
+                {
                     // e.g. raw_token = "S1:" — colon is a suffix with no desc text here.
                     // The actual description is in `after_as` after the id+colon.
                     let _ = desc_rest; // empty or irrelevant

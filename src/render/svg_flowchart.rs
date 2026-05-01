@@ -1549,9 +1549,7 @@ fn render_cluster(
     svg_id: &str,
     html_labels: bool,
 ) -> String {
-    use crate::render::foreign_object::{
-        measure_html_markup_label, HtmlLabelFont,
-    };
+    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
 
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
@@ -2206,12 +2204,39 @@ fn render_isolated_cluster_inner_root(
     out.push_str(unified_shell::close_layer());
 
     // Inner <g class="nodes">:
-    // 1. Isolated sub-clusters as nested inner roots.
-    // 2. Direct leaf nodes.
+    // Upstream's recursiveRender processes nodes via Promise.all(graph.nodes().map(...)).
+    // Self-loop helpers from this cluster's inner dagre pass appear after
+    // all sub-isolated inner roots and leaf nodes in the <g class="nodes">
+    // section, following the sortNodesByHierarchy DFS traversal order where
+    // helpers (added after original nodes during self-edge expansion) sort
+    // to the end.
     out.push_str(&unified_shell::open_layer("nodes"));
 
-    // Render isolated sub-clusters (those whose parent is cnode.id and
-    // that are in isolated_cluster_ids).
+    // Render self-loop helpers that were pre-added before sub-iso placeholders
+    // in this cluster's inner dagre. Upstream's `expandSelfEdge` runs before
+    // `extractor` splits the graph, so for LR-inner clusters helper nodes for
+    // sub-cluster self-loops are inserted into the inner dagre BEFORE the
+    // sub-cluster placeholder. Mirror that DOM order here.
+    for n in &l.nodes {
+        if n.is_group {
+            continue;
+        }
+        if n.extra.get("synthetic").map(|s| s.as_str()) != Some("cyclic_helper") {
+            continue;
+        }
+        if n.extra.get("isolated_cluster_owner").map(|s| s.as_str()) != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if n.extra.get("pre_added_for_sub_iso").map(|s| s.as_str()) != Some("1") {
+            continue;
+        }
+        if n.parent_id.as_deref() != Some(cnode.id.as_str()) {
+            continue;
+        }
+        out.push_str(&render_helper_node(n, theme));
+    }
+
+    // Render isolated sub-clusters as nested inner root groups.
     for n in &l.nodes {
         if !n.is_group {
             continue;
@@ -2232,25 +2257,19 @@ fn render_isolated_cluster_inner_root(
         ));
     }
 
-    // Render leaf nodes in upstream recursiveRender hierarchy order:
-    // non-isolated child clusters are walked before direct leaf members, then
-    // synthetic/helper leftovers fall back to JS object-key order.
+    // Render leaf nodes (non-helper) in DFS traversal order.
     let inner_node_indices = isolated_inner_leaf_node_order(&cnode.id, d, l);
     for &idx in &inner_node_indices {
         let n = &l.nodes[idx];
         if n.is_group {
             continue;
         }
-        // Only direct children of this cluster, or children of non-isolated sub-clusters.
-        // We emit nodes whose parent is in the subtree of this cluster but NOT
-        // in any isolated sub-cluster.
+        if n.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_helper") {
+            continue;
+        }
         if !is_descendant_of(&n.id, &cnode.id, l) {
             continue;
         }
-        // Skip if the node is inside an isolated sub-cluster of cnode
-        // (those are handled recursively in sub-cluster's inner root).
-        // Note: cnode.id itself is in isolated_cluster_ids, so we must
-        // exclude it from the "sub-isolated" check.
         let in_sub_isolated = is_in_isolated_sub_cluster_of(&n.id, &cnode.id, l);
         if in_sub_isolated {
             continue;
@@ -2277,10 +2296,51 @@ fn render_isolated_cluster_inner_root(
             }
         }
     }
+
+    // Render self-loop helpers whose isolated_cluster_owner matches this
+    // cluster. These appear after all inner roots and leaf nodes, matching
+    // upstream's sortNodesByHierarchy DFS order where helpers sort last.
+    // Cluster-owner helpers were already emitted above (before sub-iso inner
+    // roots) — skip them here.
+    for n in &l.nodes {
+        if n.is_group {
+            continue;
+        }
+        if n.extra.get("synthetic").map(|s| s.as_str()) != Some("cyclic_helper") {
+            continue;
+        }
+        if n.extra.get("isolated_cluster_owner").map(|s| s.as_str()) != Some(cnode.id.as_str()) {
+            continue;
+        }
+        if !is_descendant_of(&n.id, &cnode.id, l) {
+            continue;
+        }
+        let in_sub_isolated = is_in_isolated_sub_cluster_of(&n.id, &cnode.id, l);
+        if in_sub_isolated {
+            continue;
+        }
+        // Skip helpers that we already emitted before sub-iso (pre-added).
+        if n.extra.get("pre_added_for_sub_iso").map(|s| s.as_str()) == Some("1") {
+            continue;
+        }
+        out.push_str(&render_helper_node(n, theme));
+    }
+
     out.push_str(unified_shell::close_layer());
 
     out.push_str("</g>"); // close inner root
     out
+}
+
+fn render_helper_node(node: &UNode, theme: &ThemeVariables) -> String {
+    let shape_id = node
+        .shape
+        .clone()
+        .unwrap_or_else(|| "labelRect".to_string());
+    match crate::render::shapes::draw(&shape_id, node, theme) {
+        Ok(svg) => svg,
+        Err(_) => String::new(),
+    }
 }
 
 /// Return true if `node_id`'s parent is `cluster_id`.
