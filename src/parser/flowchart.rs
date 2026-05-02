@@ -1017,18 +1017,20 @@ impl<'a> LineParser<'a> {
             if cur_tail.is_empty() {
                 break;
             }
-            let (id, shape_opt, label_opt, class_suffix, consumed, had_shape_data) =
+            let (id, shape_opt, label_opt, class_suffix, consumed, had_shape_data, shape_data_val) =
                 parse_one_vertex(cur_tail)?;
             pos += consumed;
             self.ensure_vertex(&id);
-            // Apply shape / label
-            if shape_opt.is_some() || label_opt.is_some() {
+            if shape_opt.is_some() || label_opt.is_some() || shape_data_val.is_some() {
                 if let Some(v) = self.diag.find_vertex_mut(&id) {
                     if let Some(sh) = shape_opt {
                         v.shape = Some(sh);
                     }
                     if let Some(lbl) = label_opt {
                         v.label = Some(lbl);
+                    }
+                    if let Some(sd) = shape_data_val {
+                        v.shape_data = Some(sd);
                     }
                 }
             }
@@ -1831,6 +1833,7 @@ fn parse_one_vertex(
     Option<String>,
     usize,
     bool,
+    Option<String>,
 )> {
     // Read id up to a shape-starter / whitespace / `&` / link-starter.
     let bytes = s.as_bytes();
@@ -1993,19 +1996,25 @@ fn parse_one_vertex(
     let mut shape = shape;
     let mut label = label;
     let mut had_shape_data = false;
+    let mut shape_data_val: Option<String> = None;
     let remainder = if let Some(after) = remainder.strip_prefix("@{") {
         if let Some(end) = after.find('}') {
             had_shape_data = true;
             let data = &after[..end];
-            let (lbl, shp) = parse_node_shape_data(data);
+            let (lbl, shp, ico) = parse_node_shape_data(data);
             if let Some(l) = lbl {
                 label = Some(Label::markdown(l));
             }
             if let Some(s_kind) = shp {
                 shape = Some(s_kind);
-            } else if shape.is_none() {
-                // `@{...}` alone (no `[...]` etc.) defaults to a plain rect
-                // with whatever `label:` value we extracted.
+            }
+            if let Some(icon_val) = ico {
+                shape_data_val = Some(icon_val);
+                if shape.is_none() {
+                    shape = Some("icon".to_string());
+                }
+            }
+            if shape.is_none() {
                 shape = Some("rect".to_string());
             }
             &after[end + 1..]
@@ -2017,7 +2026,7 @@ fn parse_one_vertex(
     };
 
     let consumed = s.len() - remainder.len();
-    Some((id, shape, label, class_suffix, consumed, had_shape_data))
+    Some((id, shape, label, class_suffix, consumed, had_shape_data, shape_data_val))
 }
 
 fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
@@ -2079,21 +2088,19 @@ fn take_until_quote_aware<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str
 /// Parse the body of `@{ key: value, ... }` shape-data blocks. Only the
 /// `label` and `shape` keys are honoured; values may be quoted (`"..."`)
 /// or bare. Returns `(label, shape)`.
-fn parse_node_shape_data(body: &str) -> (Option<String>, Option<String>) {
+fn parse_node_shape_data(body: &str) -> (Option<String>, Option<String>, Option<String>) {
     let mut label: Option<String> = None;
     let mut shape: Option<String> = None;
+    let mut icon: Option<String> = None;
     let mut rest = body.trim();
     while !rest.is_empty() {
-        // Read key up to ':'
         let colon = match rest.find(':') {
             Some(i) => i,
             None => break,
         };
         let key = rest[..colon].trim().to_string();
         rest = rest[colon + 1..].trim_start();
-        // Read value: quoted or bare (until ',' or end).
         let (value, after) = if let Some(stripped) = rest.strip_prefix('"') {
-            // Find matching quote, treating `\"` as escape.
             let bytes = stripped.as_bytes();
             let mut j = 0;
             while j < bytes.len() {
@@ -2120,13 +2127,13 @@ fn parse_node_shape_data(body: &str) -> (Option<String>, Option<String>) {
         match key.as_str() {
             "label" => label = Some(value),
             "shape" => shape = Some(value),
+            "icon" => icon = Some(value),
             _ => {}
         }
-        // Skip past optional comma + whitespace.
         let after = after.trim_start();
         rest = after.strip_prefix(',').unwrap_or(after).trim_start();
     }
-    (label, shape)
+    (label, shape, icon)
 }
 
 /// Renumber auto-generated subgraph IDs (matching `subGraph\d+`) to match

@@ -730,6 +730,55 @@ fn compute_viewbox(
                         &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, ry, w, h,
                     );
                 }
+"icon" => {
+                    expand(
+                        &mut min_x,
+                        &mut min_y,
+                        &mut max_x,
+                        &mut max_y,
+                        -w / 2.0,
+                        -h / 2.0,
+                        w,
+                        h,
+                    );
+                    let label_text = n.label.as_deref().unwrap_or("");
+                    if label_text.is_empty() {
+                        let (_, lh) = measure_html_markup_label("", &font, 200.0, true);
+                        expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, 0.0, lh);
+                    } else {
+                        let is_markdown = n.label_type.as_deref() == Some("markdown");
+                        let label_escaped = if is_markdown {
+                            crate::render::foreign_object::markdown_label_to_html(label_text)
+                        } else {
+                            crate::render::foreign_object::string_label_to_html(label_text)
+                        };
+                        let processed = crate::render::foreign_object::replace_fa_icons(&label_escaped);
+                        let node_bold = n
+                            .css_styles
+                            .as_deref()
+                            .map(node_styles_have_bold)
+                            .unwrap_or(false);
+                        let label_font = if node_bold {
+                            let mut f = font.clone();
+                            f.bold = Some(true);
+                            f
+                        } else {
+                            font.clone()
+                        };
+                        let (lw, lh) = measure_html_markup_label(&processed, &label_font, 200.0, true);
+                        expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
+                    }
+                    expand(
+                        &mut min_x,
+                        &mut min_y,
+                        &mut max_x,
+                        &mut max_y,
+                        0.0,
+                        0.0,
+                        80.0,
+                        80.0,
+                    );
+                }
                 _ => {
                     // rect/round/stadium/etc.: rect x=-w/2, y=-h/2
                     expand(

@@ -927,7 +927,11 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         let is_bold = styles_have_bold(&merged_styles);
         let font_size_px = styles_font_size_px(&merged_styles);
         let (w, h) = measure_vertex_box(v, is_bold, font_size_px);
-        let label_text = display_label(v);
+        let label_text = if shape_id == "icon" && v.label.is_none() {
+            String::new()
+        } else {
+            display_label(v)
+        };
         let mut node = unified::Node::default();
         node.id = v.id.clone();
         node.dom_id = Some(flowchart_dom_id(&v.id, v.order));
@@ -937,6 +941,9 @@ fn build_layout_data(d: &FlowchartDiagram) -> LayoutData {
         node.width = Some(w);
         node.height = Some(h);
         node.padding = Some(FLOWCHART_PADDING);
+        if shape_id == "icon" {
+            node.icon = v.shape_data.clone();
+        }
         node.look = Some("classic".into());
         node.parent_id = parent_of.get(&v.id).cloned();
         // CSS classes — upstream: `'default ' + vertex.classes.join(' ')`.
@@ -1080,6 +1087,7 @@ fn canon_shape(s: &str) -> &'static str {
         "inv_trapezoid" | "invertedTrapezoid" => "inv_trapezoid",
         "odd" => "rect_left_inv_arrow",
         "note" => "note",
+        "icon" => "icon",
         _ => "rect",
     }
 }
@@ -1359,6 +1367,36 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
             return (w_inner + h_inner / 4.0, h_inner);
         }
         "round" | "rounded" => (p * 2.0, p * 2.0),
+        "icon" => {
+            let has_label = v.label.is_some();
+            let is_markdown = v
+                .label
+                .as_ref()
+                .map(|l| l.kind == LabelKind::Markdown)
+                .unwrap_or(false);
+            let label_text = if has_label {
+                let raw = display_label(v);
+                if is_markdown {
+                    strip_markdown_for_measure(&raw)
+                } else {
+                    raw
+                }
+            } else {
+                String::new()
+            };
+            let (tw_icon, th_icon) = if has_label && !label_text.is_empty() {
+                measure_text_with_size(&label_text, is_bold, font_size_px)
+            } else {
+                let fs = font_size_px.unwrap_or(LABEL_FONT_SIZE);
+                let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, fs, false, false);
+                (0.0, lh)
+            };
+            let icon_size = 48.0;
+            let gap = if has_label { 8.0 } else { 0.0 };
+            let total_w = if tw_icon > icon_size { tw_icon } else { icon_size };
+            let total_h = icon_size + gap + th_icon;
+            return (total_w, total_h);
+        }
         _ => (p * 4.0, p * 2.0), // rect / squareRect: labelPaddingX = p*2, ×2 sides = p*4
     };
     (tw + pad_x, th + pad_y)

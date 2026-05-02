@@ -56,6 +56,7 @@ pub mod ellipse;
 pub mod erbox;
 pub mod fork_join;
 pub mod hexagon;
+pub mod icon;
 pub mod inv_trapezoid;
 pub mod label_rect;
 pub mod lean_left;
@@ -129,6 +130,7 @@ pub fn draw(shape_id: &str, node: &Node, theme: &ThemeVariables) -> Result<Strin
         "ellipse" => ellipse::draw(node, theme),
         "circle" | "circ" => circle::draw(node, theme),
         "doublecircle" | "doubleCircle" => doublecircle::draw(node, theme),
+        "icon" => icon::draw(node, theme),
 
         // Subroutine / note.
         "subroutine" => subroutine::draw(node, theme),
@@ -170,7 +172,6 @@ pub fn draw(shape_id: &str, node: &Node, theme: &ThemeVariables) -> Result<Strin
         | "flippedTriangle"
         | "halfRoundedRectangle"
         | "hourglass"
-        | "icon"
         | "iconCircle"
         | "iconRounded"
         | "iconSquare"
