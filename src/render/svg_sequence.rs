@@ -99,6 +99,36 @@ struct NoteRender {
     idx: usize,
 }
 
+#[derive(Debug, Clone)]
+struct ControlBlock {
+    kind: ControlBlockKind,
+    left_x: f64,
+    right_x: f64,
+    top_y: f64,
+    bottom_y: f64,
+    label: String,
+    branches: Vec<ControlBranch>,
+    idx: usize,
+    fill: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlBlockKind {
+    Loop,
+    Alt,
+    Opt,
+    Par,
+    Critical,
+    Break,
+    Rect,
+}
+
+#[derive(Debug, Clone)]
+struct ControlBranch {
+    label: String,
+    separator_y: Option<f64>,
+}
+
 const FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 const ACTOR_FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 
@@ -163,9 +193,14 @@ pub fn render(
                     && n.placement.is_some()
                     && !n.text.contains('\n')
             }
-            // Autonumber occupies an item-id slot and toggles per-message
-            // sequence-number rendering — supported below.
             DiagramItem::Autonumber { .. } => true,
+            DiagramItem::Loop { .. }
+            | DiagramItem::Alt { .. }
+            | DiagramItem::Opt { .. }
+            | DiagramItem::Par { .. }
+            | DiagramItem::Critical { .. }
+            | DiagramItem::Break { .. }
+            | DiagramItem::Rect { .. } => true,
             _ => false,
         })
     }
@@ -470,6 +505,11 @@ pub fn render(
     // when placed `left of` / `right of` the leftmost / rightmost actor.
     let mut bounds_startx: f64 = 0.0;
     let mut bounds_stopx: f64 = actors.last().map(|a| a.x + a.width).unwrap_or(0.0);
+    let mut control_blocks: Vec<ControlBlock> = Vec::new();
+    let min_cx: f64 = actors.iter().map(|a| a.x + a.width / 2.0).fold(f64::INFINITY, f64::min);
+    let max_cx: f64 = actors.iter().map(|a| a.x + a.width / 2.0).fold(f64::NEG_INFINITY, f64::max);
+    let ctrl_left_x = min_cx - 11.0;
+    let ctrl_right_x = max_cx + 11.0;
     // `msg_id_counter` mirrors upstream's `messages.length` at the time
     // each event is pushed — both real messages AND synthetic
     // `centralConnection` / `centralConnectionReverse` signals consume
@@ -650,6 +690,17 @@ pub fn render(
             if note_x + note_w > bounds_stopx {
                 bounds_stopx = note_x + note_w;
             }
+            continue;
+        }
+        if let Some(mut cb) = process_control_block(
+            item, d, &actors, cfg, id, line_height, actor_margin, box_margin,
+            default_actor_w, ctrl_left_x, ctrl_right_x,
+            &mut vertical, &mut auto_seq_index, &mut auto_seq_step, &mut auto_visible,
+            &mut bounds_startx, &mut bounds_stopx, &mut msg_id_counter,
+            &mut messages, &mut notes, &mut control_blocks, idx,
+        ) {
+            cb.idx = msg_id_counter;
+            control_blocks.push(cb);
             continue;
         }
         let m = match item {
@@ -1111,6 +1162,10 @@ pub fn render(
     // that were appended during the message loop.
     for n in &notes {
         emit_note(&mut out, n);
+    }
+
+    for cb in &control_blocks {
+        emit_control_block(&mut out, cb);
     }
 
     // Top bodies, declaration order, only for Actor-type actors.
@@ -2105,3 +2160,376 @@ fn placeholder(d: &SequenceDiagram, id: &str) -> String {
     )
 }
 
+
+
+fn emit_control_block(out: &mut String, cb: &ControlBlock) {
+    if matches!(cb.kind, ControlBlockKind::Rect) {
+        out.push_str("<rect x=\"");
+        push_num(out, cb.left_x);
+        out.push_str("\" y=\"");
+        push_num(out, cb.top_y);
+        out.push_str("\" fill=\"");
+        out.push_str(&xml_escape(cb.fill.as_deref().unwrap_or("transparent")));
+        out.push_str("\" width=\"");
+        push_num(out, cb.right_x - cb.left_x);
+        out.push_str("\" height=\"");
+        push_num(out, cb.bottom_y - cb.top_y);
+        out.push_str("\" class=\"rect\"></rect>");
+        return;
+    }
+    let keyword = match cb.kind {
+        ControlBlockKind::Loop => "loop",
+        ControlBlockKind::Alt => "alt",
+        ControlBlockKind::Opt => "opt",
+        ControlBlockKind::Par => "par",
+        ControlBlockKind::Critical => "critical",
+        ControlBlockKind::Break => "break",
+        ControlBlockKind::Rect => unreachable!(),
+    };
+    out.push_str("<g data-et=\"control-structure\" data-id=\"i");
+    out.push_str(&cb.idx.to_string());
+    out.push_str("\"><line x1=\"");
+    push_num(out, cb.left_x);
+    out.push_str("\" y1=\"");
+    push_num(out, cb.top_y);
+    out.push_str("\" x2=\"");
+    push_num(out, cb.right_x);
+    out.push_str("\" y2=\"");
+    push_num(out, cb.top_y);
+    out.push_str("\" class=\"loopLine\"></line><line x1=\"");
+    push_num(out, cb.right_x);
+    out.push_str("\" y1=\"");
+    push_num(out, cb.top_y);
+    out.push_str("\" x2=\"");
+    push_num(out, cb.right_x);
+    out.push_str("\" y2=\"");
+    push_num(out, cb.bottom_y);
+    out.push_str("\" class=\"loopLine\"></line><line x1=\"");
+    push_num(out, cb.left_x);
+    out.push_str("\" y1=\"");
+    push_num(out, cb.bottom_y);
+    out.push_str("\" x2=\"");
+    push_num(out, cb.right_x);
+    out.push_str("\" y2=\"");
+    push_num(out, cb.bottom_y);
+    out.push_str("\" class=\"loopLine\"></line><line x1=\"");
+    push_num(out, cb.left_x);
+    out.push_str("\" y1=\"");
+    push_num(out, cb.top_y);
+    out.push_str("\" x2=\"");
+    push_num(out, cb.left_x);
+    out.push_str("\" y2=\"");
+    push_num(out, cb.bottom_y);
+    out.push_str("\" class=\"loopLine\"></line>");
+    for branch in &cb.branches {
+        if let Some(sep_y) = branch.separator_y {
+            out.push_str("<line x1=\"");
+            push_num(out, cb.left_x);
+            out.push_str("\" y1=\"");
+            push_num(out, sep_y);
+            out.push_str("\" x2=\"");
+            push_num(out, cb.right_x);
+            out.push_str("\" y2=\"");
+            push_num(out, sep_y);
+            out.push_str("\" class=\"loopLine\" style=\"stroke-dasharray: 3, 3;\"></line>");
+        }
+    }
+    out.push_str("<polygon points=\"");
+    push_num(out, cb.left_x);
+    out.push_str(",");
+    push_num(out, cb.top_y);
+    out.push_str(" ");
+    push_num(out, cb.left_x + 50.0);
+    out.push_str(",");
+    push_num(out, cb.top_y);
+    out.push_str(" ");
+    push_num(out, cb.left_x + 50.0);
+    out.push_str(",");
+    push_num(out, cb.top_y + 13.0);
+    out.push_str(" ");
+    push_num(out, cb.left_x + 41.6);
+    out.push_str(",");
+    push_num(out, cb.top_y + 20.0);
+    out.push_str(" ");
+    push_num(out, cb.left_x);
+    out.push_str(",");
+    push_num(out, cb.top_y + 20.0);
+    out.push_str("\" class=\"labelBox\"></polygon><text x=\"");
+    push_num(out, cb.left_x + 25.0);
+    out.push_str("\" y=\"");
+    push_num(out, cb.top_y + 13.0);
+    out.push_str("\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: &quot;trebuchet ms&quot;, verdana, arial; font-size: 16px; font-weight: 400;\" class=\"labelText\">");
+    out.push_str(keyword);
+    out.push_str("</text>");
+    for (bi, branch) in cb.branches.iter().enumerate() {
+        if bi == 0 && !branch.label.is_empty() {
+            let text_x = (cb.left_x + 50.0 + cb.right_x) / 2.0;
+            out.push_str("<text x=\"");
+            push_num(out, text_x);
+            out.push_str("\" y=\"");
+            push_num(out, cb.top_y + 18.0);
+            out.push_str("\" text-anchor=\"middle\" style=\"font-family: &quot;trebuchet ms&quot;, verdana, arial; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"");
+            push_num(out, text_x);
+            out.push_str("\">[");
+            out.push_str(&xml_escape(&branch.label));
+            out.push_str("]</tspan></text>");
+        } else if bi > 0 {
+            if let Some(sep_y) = branch.separator_y {
+                if !branch.label.is_empty() {
+                    let text_x = (cb.left_x + cb.right_x) / 2.0;
+                    out.push_str("<text x=\"");
+                    push_num(out, text_x);
+                    out.push_str("\" y=\"");
+                    push_num(out, sep_y + 18.0);
+                    out.push_str("\" text-anchor=\"middle\" style=\"font-family: &quot;trebuchet ms&quot;, verdana, arial; font-size: 16px; font-weight: 400;\" class=\"loopText\">[");
+                    out.push_str(&xml_escape(&branch.label));
+                    out.push_str("]</text>");
+                }
+            }
+        }
+    }
+    out.push_str("</g>");
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_control_block(
+    item: &DiagramItem,
+    d: &SequenceDiagram,
+    actors: &[ActorRender],
+    cfg: &crate::model::sequence::SequenceConfig,
+    id: &str,
+    line_height: f64,
+    actor_margin: f64,
+    box_margin: f64,
+    default_actor_w: f64,
+    ctrl_left_x: f64,
+    ctrl_right_x: f64,
+    vertical: &mut f64,
+    auto_seq_index: &mut i64,
+    auto_seq_step: &mut i64,
+    auto_visible: &mut bool,
+    bounds_startx: &mut f64,
+    bounds_stopx: &mut f64,
+    msg_id_counter: &mut usize,
+    messages: &mut Vec<MsgRender>,
+    notes: &mut Vec<NoteRender>,
+    control_blocks: &mut Vec<ControlBlock>,
+    idx: usize,
+) -> Option<ControlBlock> {
+    let kind: ControlBlockKind;
+    let label: String;
+    let branch_data: Vec<(String, Vec<DiagramItem>)>;
+    let fill: Option<String>;
+    match item {
+        DiagramItem::Loop { label: l, items } => {
+            kind = ControlBlockKind::Loop;
+            label = l.clone();
+            branch_data = vec![(l.clone(), items.clone())];
+            fill = None;
+        }
+        DiagramItem::Opt { label: l, items } => {
+            kind = ControlBlockKind::Opt;
+            label = l.clone();
+            branch_data = vec![(l.clone(), items.clone())];
+            fill = None;
+        }
+        DiagramItem::Break { label: l, items } => {
+            kind = ControlBlockKind::Break;
+            label = l.clone();
+            branch_data = vec![(l.clone(), items.clone())];
+            fill = None;
+        }
+        DiagramItem::Alt { branches } => {
+            kind = ControlBlockKind::Alt;
+            label = branches.first().map(|b| b.label.clone()).unwrap_or_default();
+            branch_data = branches.iter().map(|b| (b.label.clone(), b.items.clone())).collect();
+            fill = None;
+        }
+        DiagramItem::Par { branches } => {
+            kind = ControlBlockKind::Par;
+            label = branches.first().map(|b| b.label.clone()).unwrap_or_default();
+            branch_data = branches.iter().map(|b| (b.label.clone(), b.items.clone())).collect();
+            fill = None;
+        }
+        DiagramItem::Critical { branches } => {
+            kind = ControlBlockKind::Critical;
+            label = branches.first().map(|b| b.label.clone()).unwrap_or_default();
+            branch_data = branches.iter().map(|b| (b.label.clone(), b.items.clone())).collect();
+            fill = None;
+        }
+        DiagramItem::Rect { fill: f, items } => {
+            kind = ControlBlockKind::Rect;
+            label = String::new();
+            branch_data = vec![(String::new(), items.clone())];
+            fill = Some(f.clone());
+        }
+        _ => return None,
+    }
+    let message_margin = cfg.message_margin;
+    let box_text_margin = cfg.box_text_margin;
+    if matches!(kind, ControlBlockKind::Rect) {
+        let rect_y = *vertical + box_margin;
+        for (_, items) in &branch_data {
+            walk_items_vert_inner(d, items, actors, cfg, id, line_height, actor_margin, box_margin, default_actor_w, ctrl_left_x, ctrl_right_x, vertical, auto_seq_index, auto_seq_step, auto_visible, bounds_startx, bounds_stopx, msg_id_counter, messages, notes, control_blocks);
+        }
+        let rect_bottom_y = *vertical + box_margin;
+        *vertical = rect_bottom_y;
+        Some(ControlBlock { kind, left_x: ctrl_left_x - 10.0, right_x: ctrl_right_x + 10.0, top_y: rect_y, bottom_y: rect_bottom_y, label, branches: Vec::new(), idx, fill })
+    } else {
+        let top_y = *vertical + box_margin;
+        *vertical = top_y;
+        *vertical += message_margin;
+        let mut cb_branches: Vec<ControlBranch> = Vec::new();
+        for (bi, (branch_label, items)) in branch_data.iter().enumerate() {
+            if bi > 0 {
+                let sep_y = *vertical + box_margin + box_text_margin;
+                cb_branches.push(ControlBranch { label: branch_label.clone(), separator_y: Some(sep_y) });
+                *vertical = sep_y;
+                if !branch_label.is_empty() { *vertical += message_margin - box_text_margin; } else { *vertical += box_margin; }
+            } else {
+                cb_branches.push(ControlBranch { label: branch_label.clone(), separator_y: None });
+            }
+            walk_items_vert_inner(d, items, actors, cfg, id, line_height, actor_margin, box_margin, default_actor_w, ctrl_left_x, ctrl_right_x, vertical, auto_seq_index, auto_seq_step, auto_visible, bounds_startx, bounds_stopx, msg_id_counter, messages, notes, control_blocks);
+        }
+        let bottom_y = *vertical + box_margin;
+        *vertical = bottom_y;
+        Some(ControlBlock { kind, left_x: ctrl_left_x, right_x: ctrl_right_x, top_y, bottom_y, label, branches: cb_branches, idx, fill: None })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_items_vert_inner(
+    d: &SequenceDiagram,
+    items: &[DiagramItem],
+    actors: &[ActorRender],
+    cfg: &crate::model::sequence::SequenceConfig,
+    id: &str,
+    line_height: f64,
+    actor_margin: f64,
+    box_margin: f64,
+    default_actor_w: f64,
+    ctrl_left_x: f64,
+    ctrl_right_x: f64,
+    vertical: &mut f64,
+    auto_seq_index: &mut i64,
+    auto_seq_step: &mut i64,
+    auto_visible: &mut bool,
+    bounds_startx: &mut f64,
+    bounds_stopx: &mut f64,
+    msg_id_counter: &mut usize,
+    messages: &mut Vec<MsgRender>,
+    notes: &mut Vec<NoteRender>,
+    control_blocks: &mut Vec<ControlBlock>,
+) {
+    for item in items {
+        let idx = *msg_id_counter;
+        *msg_id_counter += 1;
+        if let DiagramItem::Message(m) = item {
+            if let Some(cc) = m.central_connection {
+                *msg_id_counter += match cc { CentralConnection::AtTo | CentralConnection::AtFrom => 1, CentralConnection::Dual => 2 };
+            }
+        }
+        if let DiagramItem::Autonumber { start, step, visible } = item {
+            if let Some(s) = start { *auto_seq_index = *s; }
+            if let Some(s) = step { *auto_seq_step = *s; }
+            *auto_visible = *visible;
+            continue;
+        }
+        if let DiagramItem::Note(note) = item {
+            let placement = note.placement.expect("gated");
+            let actor_id = &note.placement_actors[0];
+            let actor_idx = d.actors.iter().position(|a| &a.id == actor_id).unwrap_or(0);
+            let from_actor = &actors[actor_idx];
+            let should_wrap = note.wrap && !note.text.is_empty();
+            let intermediate_text = if should_wrap { wrap_label(&note.text, cfg.width, "trebuchet ms", cfg.message_font_size as f64) } else { note.text.clone() };
+            let intermediate_lines = split_br(&intermediate_text);
+            let mut text_w = 0.0_f64;
+            for line in &intermediate_lines {
+                let resolved = resolve_hash_entities_for_measure(line);
+                let w = crate::font_metrics::text_width(&resolved, "trebuchet ms", cfg.message_font_size as f64, false, false).round();
+                if w > text_w { text_w = w; }
+            }
+            let (note_w, note_x) = match placement {
+                NotePlacement::RightOf => (if should_wrap { cfg.width.max(text_w) } else { from_actor.width.max(text_w + 2.0 * cfg.note_margin) }, from_actor.x + (from_actor.width + actor_margin) / 2.0),
+                NotePlacement::LeftOf => { let w = if should_wrap { cfg.width.max(text_w + 2.0 * cfg.note_margin) } else { from_actor.width.max(text_w + 2.0 * cfg.note_margin) }; (w, from_actor.x - w + (from_actor.width - actor_margin) / 2.0) }
+                NotePlacement::Over => { let w = if should_wrap { cfg.width.max(from_actor.width) } else { from_actor.width.max(cfg.width).max(text_w + 2.0 * cfg.note_margin) }; (w, from_actor.x + (from_actor.width - w) / 2.0) }
+            };
+            let note_lines: Vec<String> = if should_wrap {
+                let final_text = wrap_label(&note.text, note_w - 2.0 * cfg.wrap_padding, "trebuchet ms", cfg.message_font_size as f64);
+                split_br(&final_text).iter().map(|s| s.to_string()).collect()
+            } else { intermediate_lines.iter().map(|s| s.to_string()).collect() };
+            *vertical += box_margin;
+            let starty_for_note = *vertical;
+            let lh_unrounded = crate::font_metrics::line_height("trebuchet ms", cfg.message_font_size as f64, false, false);
+            let text_h = (lh_unrounded * (note_lines.len() as f64)).round();
+            let note_h = text_h + 2.0 * cfg.note_margin;
+            *vertical += note_h;
+            let text_x = round_js(note_x + note_w / 2.0);
+            let text_y_first = round_js(starty_for_note + cfg.note_margin / 2.0);
+            notes.push(NoteRender { lines: note_lines.iter().map(|s| s.to_string()).collect(), rect_x: note_x, rect_y: starty_for_note, rect_w: note_w, rect_h: note_h, text_x, text_y_first, line_step: lh_unrounded, idx });
+            if note_x < *bounds_startx { *bounds_startx = note_x; }
+            if note_x + note_w > *bounds_stopx { *bounds_stopx = note_x + note_w; }
+            continue;
+        }
+        if let Some(cb) = process_control_block(item, d, actors, cfg, id, line_height, actor_margin, box_margin, default_actor_w, ctrl_left_x, ctrl_right_x, vertical, auto_seq_index, auto_seq_step, auto_visible, bounds_startx, bounds_stopx, msg_id_counter, messages, notes, control_blocks, idx) {
+            control_blocks.push(cb);
+            continue;
+        }
+        let m = match item { DiagramItem::Message(m) => m, _ => continue };
+        let starty_for_msg = *vertical;
+        *vertical += 10.0;
+        *vertical += line_height;
+        let is_self = m.from == m.to;
+        let from_actor = actors.iter().find(|a| a.id == m.from);
+        let to_actor = actors.iter().find(|a| a.id == m.to);
+        let (Some(fa), Some(ta)) = (from_actor, to_actor) else { continue };
+        let bounded_width = ((fa.x + fa.width / 2.0) - (ta.x + fa.width / 2.0)).abs();
+        let final_msg_text = if m.wrap { let max_w = (bounded_width + 2.0 * cfg.wrap_padding).max(cfg.width); wrap_label(&m.text, max_w, "sans-serif", cfg.message_font_size as f64) } else { m.text.clone() };
+        let msg_lines = split_br(&final_msg_text);
+        let n_lines = msg_lines.len() as f64;
+        let text_dims_height = line_height * n_lines;
+        let from_left = fa.x + fa.width / 2.0 - 1.0;
+        let from_right = fa.x + fa.width / 2.0 + 1.0;
+        let to_left = ta.x + ta.width / 2.0 - 1.0;
+        let to_right = ta.x + ta.width / 2.0 + 1.0;
+        let is_arrow_to_right = from_left <= to_left;
+        let mut startx = if is_arrow_to_right { from_right } else { from_left };
+        let mut stopx = if is_arrow_to_right { to_left } else { to_right };
+        if is_self { stopx = startx; }
+        if matches!(m.central_connection, Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual)) { startx += 4.0; if matches!(m.arrow, Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted)) && !is_arrow_to_right { startx -= 6.0; } }
+        let has_arrowhead = matches!(m.arrow, Some(ArrowType::SolidArrow) | Some(ArrowType::DottedArrow));
+        let has_crosshead = matches!(m.arrow, Some(ArrowType::SolidCross) | Some(ArrowType::DottedCross));
+        let has_pointhead = matches!(m.arrow, Some(ArrowType::SolidPoint) | Some(ArrowType::DottedPoint));
+        let is_bidir = matches!(m.arrow, Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted));
+        if !is_self {
+            if m.activate { if is_arrow_to_right { stopx -= 4.0; } else { stopx += 4.0; } }
+            if has_arrowhead || has_crosshead || has_pointhead || is_bidir { if is_arrow_to_right { stopx -= 3.0; } else { stopx += 3.0; } }
+            if is_bidir { if is_arrow_to_right { startx += 3.0; } else { startx -= 3.0; } }
+        }
+        let mut total_offset = (text_dims_height - 10.0) + box_margin;
+        let line_start_y = *vertical + total_offset;
+        if is_self { total_offset += 30.0; }
+        *vertical += total_offset;
+        let text_x = round_js((startx + stopx) / 2.0);
+        let lh_unrounded = crate::font_metrics::line_height("sans-serif", cfg.message_font_size as f64, false, false);
+        let text_y_first = round_js(starty_for_msg + 10.0 + 5.0);
+        let line_step = lh_unrounded;
+        let seq_index = if *auto_visible { Some(*auto_seq_index) } else { None };
+        let fa_cx = fa.x + fa.width / 2.0;
+        let ta_cx = ta.x + ta.width / 2.0;
+        let from_bounds = (fa_cx - 1.0).min(ta_cx - 1.0);
+        let to_bounds = (fa_cx + 1.0).max(ta_cx + 1.0);
+        let seq_x = if is_arrow_to_right { from_bounds + 1.0 } else { to_bounds - 1.0 };
+        let has_central_conn = m.central_connection.is_some();
+        let is_dual_or_reverse_cc = matches!(m.central_connection, Some(CentralConnection::Dual) | Some(CentralConnection::AtFrom));
+        let self_startx = startx;
+        let self_line_start_x = if is_self && seq_index.is_some() && is_bidir { startx + 10.0 } else if is_self { startx } else { 0.0 };
+        let line_x1 = if is_self { if seq_index.is_some() { if is_bidir { startx - 6.0 } else { startx + 6.0 } } else { startx } } else if seq_index.is_some() { if is_bidir { if is_arrow_to_right { startx + 12.0 } else { let mut x = startx - 6.0; if has_central_conn { x -= 5.0; } if is_dual_or_reverse_cc { x -= 7.5; } x } } else { startx + 6.0 } } else { startx };
+        let line_x2 = stopx;
+        if seq_index.is_some() { *auto_seq_index += *auto_seq_step; }
+        let mut circle_from_cx = fa_cx;
+        let circle_to_cx = ta_cx;
+        if seq_index.is_some() { const CIRCLE_OFFSET: f64 = 16.5; let base = if is_arrow_to_right { CIRCLE_OFFSET } else { -CIRCLE_OFFSET }; match m.central_connection { Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual) => { circle_from_cx += base; } _ => {} } }
+        messages.push(MsgRender { is_self, from: m.from.clone(), to: m.to.clone(), lines: msg_lines.iter().map(|s| s.to_string()).collect(), arrow: m.arrow.unwrap_or(ArrowType::SolidArrow), line_start_y, text_x, text_y_first, line_step, line_x1, line_x2, self_startx, self_line_start_x, idx, seq_index, seq_x, central_connection: m.central_connection, from_cx: circle_from_cx, to_cx: circle_to_cx });
+    }
+}
