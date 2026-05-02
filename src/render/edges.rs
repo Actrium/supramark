@@ -1500,12 +1500,7 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
 /// on that offset everywhere `intersect.polygon` is used; non-axis-aligned
 /// shapes (stadium, hexagon, …) keep the offset, while diamond / question
 /// shapes subtract `0.5` from `x` and `y` afterwards to cancel it.
-fn intersect_line_upstream(
-    p1: Point,
-    p2: Point,
-    q1: Point,
-    q2: Point,
-) -> Option<Point> {
+fn intersect_line_upstream(p1: Point, p2: Point, q1: Point, q2: Point) -> Option<Point> {
     let a1 = p2.y - p1.y;
     let b1 = p1.x - p2.x;
     let c1 = p2.x * p1.y - p1.x * p2.y;
@@ -1612,7 +1607,9 @@ fn intersect_polygon_upstream(
             let qdx = q.x - target.x;
             let qdy = q.y - target.y;
             let dist_q = (qdx * qdx + qdy * qdy).sqrt();
-            dist_p.partial_cmp(&dist_q).unwrap_or(std::cmp::Ordering::Equal)
+            dist_p
+                .partial_cmp(&dist_q)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
     intersections[0]
@@ -1707,13 +1704,7 @@ fn rect_left_inv_arrow_polygon_local(w: f64, h: f64) -> Vec<(f64, f64)> {
     let x = -w / 2.0;
     let y = -h / 2.0;
     let notch = y / 2.0; // negative
-    vec![
-        (x + notch, y),
-        (x, 0.0),
-        (x + notch, -y),
-        (-x, -y),
-        (-x, y),
-    ]
+    vec![(x + notch, y), (x, 0.0), (x + notch, -y), (-x, -y), (-x, y)]
 }
 
 /// Local-coordinate hexagon vertices. Mirrors upstream `hexagon.ts`'s

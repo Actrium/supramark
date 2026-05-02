@@ -277,14 +277,8 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                 let correction = 2.0 * radius * (1.0 - half_step.cos());
                 let w_analytical = w + correction;
                 let mut verts: Vec<(f64, f64)> = Vec::with_capacity(102);
-                verts.push((
-                    cx + (-w_analytical / 2.0 + radius),
-                    cy + (-h / 2.0),
-                ));
-                verts.push((
-                    cx + (w_analytical / 2.0 - radius),
-                    cy + (-h / 2.0),
-                ));
+                verts.push((cx + (-w_analytical / 2.0 + radius), cy + (-h / 2.0)));
+                verts.push((cx + (w_analytical / 2.0 - radius), cy + (-h / 2.0)));
                 let arc1_cx = -w_analytical / 2.0 + radius;
                 let start1 = std::f64::consts::PI / 2.0;
                 let end1 = std::f64::consts::PI * 3.0 / 2.0;
