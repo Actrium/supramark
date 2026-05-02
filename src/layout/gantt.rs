@@ -859,8 +859,14 @@ fn d3_tick_step_year(start: f64, stop: f64, count: f64) -> u32 {
         return 1;
     }
     let power = step.log10().floor();
+    // d3-array uses these specific floating-point thresholds (matching
+    // sqrt(50), sqrt(10), sqrt(2)). Clippy's "use std::f64::consts" hint
+    // doesn't apply since the *exact* d3 source uses these literals.
+    #[allow(clippy::approx_constant)]
     let e10 = 7.0710678118654755_f64;
+    #[allow(clippy::approx_constant)]
     let e5 = 3.1622776601683795_f64;
+    #[allow(clippy::approx_constant)]
     let e2 = 1.4142135623730951_f64;
     let error = step / 10f64.powf(power);
     let factor: f64 = if error >= e10 {
