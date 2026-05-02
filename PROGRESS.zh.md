@@ -224,3 +224,12 @@
 - **gantt** 骨架已有，需完善 renderer（chrono 依赖、43+10 fixtures）
 - **mindmap**（tidy-tree layout，23+2 fixtures）
 - **sequence** / **c4** / **gitGraph** / **venn**（合计 ~310 fixtures）
+
+## Wave 8 进展（4 路并行）
+
+净增 +6，1145 → 1151/1151 byte-exact。
+
+- **W8-A sequence probe-driven +1**：cypress/sequence/72（multi-line actor description via byTspan dy 步进）。groundwork：`Actor.wrap` 字段 + `wrap:`/`nowrap:` 前缀剥离。**关键洞察**：probe 后发现剩余 114 个 sequence fixture 都需要 heavier features，最小 diff_at 也 ≥114px，单 feature 不够：theme/popup link/external-service-actor/central-arrow `()->>()` 解析/self-reference activation/wrap 配置/font-metrics #lt;-#gt; 校准。
+- **W8-B ishikawa demos/04 byte-exact**：look=handDrawn 端到端 wiring 完成。新模块 `svg_ishikawa_hand_drawn.rs` (480 LOC) 镜像上游 rough.js 调用顺序（head→pairs→deferred spine→arrow markers→label boxes）。rough.rs 三处扩展：Q→C 路径转换、`points_on_path`（cubic flattening + RDP simplify）、`omit_dash_attrs` flag。所有 6 步 wiring 步骤全部到位。
+- **W8-C venn +4**（cypress/02/03/15 + demos/02）：根因不是 libm/ULP，而是 `greedyLayout` 应过滤到 `length === 2` pair-only（上游 layout.js:921）。3-circle 对称输入下，full augmented set 给出非零 triple-intersection 干扰打破对称 tie，导致简形从镜像侧起步偏离 2.6e-4。`fsqrt`/`facos`/`fatan2` 已经把 transcendentals 校准到 fdlibm。
+- **W8-D mindmap cose-bilkent groundwork 0 unlock as expected**：`src/layout/cose_bilkent.rs` 660 LOC 核心数据结构（PointD/RectangleD/LayoutQuality/CoSEConstants/RandomSeed/IGeometry/LNode/LEdge/LGraph/LGraphManager/SimulationState/单步 simulation_step）。**未集成**到 main（mindmap.rs 三方合并冲突 + 0-unlock 不急），保留在 `tmp-w8d` 分支等 W9-C 干净接力。
