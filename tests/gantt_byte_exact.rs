@@ -117,18 +117,7 @@ fn cypress_39() {
         "ref-ext-fixtures-cypress-gantt-39",
     );
 }
-// cypress_40: contains malformed date `202-12-01` (3-digit year)
-// which upstream's `new Date()` fallback parses as year 202 AD; our
-// lenient parser rejects it.
-#[test]
-#[ignore = "3-digit-year date `202-12-01` parses differently than V8"]
-fn cypress_40() {
-    assert_fixture(
-        "tests/ext_fixtures/cypress/gantt/40.mmd",
-        "tests/reference/ext_fixtures/cypress/gantt/40.svg",
-        "ref-ext-fixtures-cypress-gantt-40",
-    );
-}
+cypress!(cypress_40, "40");
 cypress!(cypress_41, "41");
 cypress!(cypress_42, "42");
 cypress!(cypress_43, "43");
