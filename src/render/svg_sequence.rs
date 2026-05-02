@@ -1518,6 +1518,7 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         ArrowType::DottedArrow
             | ArrowType::DottedLine
             | ArrowType::DottedCross
+            | ArrowType::DottedPoint
             | ArrowType::BiDotted
     );
     // `has_arrowhead`: upstream attaches `marker-end="...arrowhead"` for
