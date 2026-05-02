@@ -79,6 +79,15 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     };
     let label_translate_y = fmt_num((ICON_SIZE + gap - lh) / 2.0);
 
+    // Body wrap: upstream `createText` (used by `labelHelper`) routes through
+    // `addHtmlLabel`, which always wraps the rendered HTML in `<p>…</p>` when
+    // the label is non-empty. Empty labels produce `<span …></span>` with no
+    // inner body — matching cypress/116 and cypress/117 (no-label fixtures).
+    let inner_html = if has_label {
+        format!("<p>{}</p>", for_measure)
+    } else {
+        String::new()
+    };
     out.push_str(&format!(
         r#"<g class="label" style="" transform="translate({ltx},{lty})"><rect></rect><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="nodeLabel {md_cls}">{label_html}</span></div></foreignObject></g>"#,
         ltx = label_translate_x,
@@ -90,7 +99,7 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         } else {
             ""
         },
-        label_html = if has_label { &for_measure } else { "" },
+        label_html = inner_html,
     ));
 
     let bw_half = fmt_num(bounding_w / 2.0);

@@ -3490,7 +3490,33 @@ fn reclip_polygon_intersect_endpoints(nodes: &[Node], edges: &mut [Edge]) {
 }
 
 fn shape_uses_polygon_intersect(shape: Option<&str>) -> bool {
-    matches!(shape, Some("subroutine" | "choice" | "diamond"))
+    matches!(shape, Some("subroutine" | "choice" | "diamond" | "icon"))
+}
+
+/// Re-measure a node label's foreignObject width as upstream does in
+/// `labelHelper` (used to obtain `bbox.width` for the icon-shape
+/// `node.intersect` polygon). Mirrors the rendered HTML pipeline:
+///   stringLabelToHtml → replace_fa_icons → measure_html_markup_label.
+/// Returns 0.0 if the node has no label text.
+fn icon_label_width(node: &Node) -> f64 {
+    use crate::render::foreign_object::{
+        markdown_label_to_html, measure_html_markup_label, replace_fa_icons,
+        string_label_to_html, HtmlLabelFont,
+    };
+    let label = match node.label.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => return 0.0,
+    };
+    let is_markdown = node.label_type.as_deref() == Some("markdown");
+    let escaped = if is_markdown {
+        markdown_label_to_html(label)
+    } else {
+        string_label_to_html(label)
+    };
+    let processed = replace_fa_icons(&escaped);
+    let font = HtmlLabelFont::default();
+    let (lw, _lh) = measure_html_markup_label(&processed, &font, 200.0, true);
+    lw
 }
 
 /// Compute the upstream `intersect.polygon` hit for a node + probe
@@ -3530,6 +3556,40 @@ fn polygon_intersect_for_node(
                 (s / 2.0, 0.0),
                 (0.0, -s / 2.0),
                 (-s / 2.0, 0.0),
+            ]
+        }
+        "icon" => {
+            // Upstream icon.ts: when `node.label` is empty the renderer
+            // installs `intersect.rect` instead of the polygon — so dagre's
+            // default rect clip is already correct, return None to keep it.
+            let has_label = node.label.as_deref().is_some_and(|s| !s.is_empty());
+            if !has_label {
+                return None;
+            }
+            // Polygon mirrors upstream icon.ts (label exists, !topLabel):
+            //   width = height = iconSize = 48 (NOT node.width/height)
+            //   nodeHeight = node.height (= 48 + bbox.height + 8)
+            //   bbox.width = label width (re-measure to mirror labelHelper)
+            // Local coords are centered on the node origin so
+            // upstream_polygon_intersect's `left = cx - w/2 - min_x` resolves
+            // to `cx` (and likewise for `top`/`cy`) when we pass the node's
+            // outer width/height.
+            //
+            // NOTE: point 5 reproduces upstream's `bbox.width / 2 / 2` typo
+            // (bw/4 instead of bw/2) — preserved verbatim to match the
+            // rendered intersect coordinates byte-for-byte.
+            let icon_size = 48.0_f64;
+            let bw = icon_label_width(node);
+            let n_h = h;
+            vec![
+                (-icon_size / 2.0, -n_h / 2.0),
+                (icon_size / 2.0, -n_h / 2.0),
+                (icon_size / 2.0, -n_h / 2.0 + icon_size),
+                (bw / 2.0, -n_h / 2.0 + icon_size),
+                (bw / 4.0, n_h / 2.0),
+                (-bw / 2.0, n_h / 2.0),
+                (-bw / 2.0, -n_h / 2.0 + icon_size),
+                (-icon_size / 2.0, -n_h / 2.0 + icon_size),
             ]
         }
         _ => return None,
