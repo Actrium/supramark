@@ -673,19 +673,26 @@ impl<'a> LineParser<'a> {
     }
 
     fn parse_class_def(&mut self, rest: &str) {
-        // `classDef name style1,style2`
-        let (name, styles) = split_once_ws(rest);
+        // `classDef name1,name2 style1,style2`
+        // Upstream allows comma-separated class names sharing the same styles.
+        let (names, styles) = split_once_ws(rest);
         let styles: Vec<String> = styles
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let def = ClassDef {
-            name: name.to_string(),
-            styles,
-            text_styles: Vec::new(),
-        };
-        self.diag.class_defs.push(def);
+        for name in names.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let def = ClassDef {
+                name: name.to_string(),
+                styles: styles.clone(),
+                text_styles: Vec::new(),
+            };
+            self.diag.class_defs.push(def);
+        }
     }
 
     fn parse_class_stmt(&mut self, rest: &str) {
@@ -1681,12 +1688,28 @@ fn classify_arrow(arrow: &str) -> Option<(EdgeStroke, usize, ArrowType, ArrowTyp
     if span_bytes.is_empty() {
         return None;
     }
-    let stroke = if span.contains('.') {
-        EdgeStroke::Dotted
-    } else if span_bytes[0] == b'=' {
+    let stroke = if span_bytes[0] == b'=' {
         EdgeStroke::Thick
+    } else if span_bytes[0] == b'-' && span_bytes.len() > 1 && span_bytes[1] == b'.' {
+        EdgeStroke::Dotted
+    } else if span_bytes[0] == b'.' {
+        EdgeStroke::Dotted
     } else if span_bytes[0] == b'-' {
-        EdgeStroke::Normal
+        let mut is_dotted = false;
+        for &b in span_bytes {
+            if b == b'.' {
+                is_dotted = true;
+                break;
+            }
+            if b != b'-' && b != b'.' {
+                break;
+            }
+        }
+        if is_dotted {
+            EdgeStroke::Dotted
+        } else {
+            EdgeStroke::Normal
+        }
     } else {
         return None;
     };
@@ -2363,6 +2386,33 @@ mod tests {
         let b = d.find_vertex("B").unwrap();
         assert_eq!(b.link.as_deref(), Some("https://example.com"));
         assert_eq!(b.tooltip.as_deref(), Some("link tip"));
+    }
+
+    #[test]
+    fn class_def_comma_separated_names() {
+        let src = "flowchart TD\nA-->B\nclassDef red,blue fill:#f00,stroke:#000\nclass A red\nclass B blue\n";
+        let d = parse(src).unwrap();
+        let a = d.find_vertex("A").unwrap();
+        assert!(a.classes.contains(&"red".to_string()));
+        let b = d.find_vertex("B").unwrap();
+        assert!(b.classes.contains(&"blue".to_string()));
+        let red_cd = d.class_defs.iter().find(|cd| cd.name == "red").unwrap();
+        assert_eq!(red_cd.styles, vec!["fill:#f00", "stroke:#000"]);
+        let blue_cd = d.class_defs.iter().find(|cd| cd.name == "blue").unwrap();
+        assert_eq!(blue_cd.styles, vec!["fill:#f00", "stroke:#000"]);
+    }
+
+    #[test]
+    fn thick_arrow_with_embedded_label() {
+        let src = "flowchart TD\nC == Choice 1.2 ==> E\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.edges.len(), 1);
+        let e = &d.edges[0];
+        assert_eq!(e.start, "C");
+        assert_eq!(e.end, "E");
+        let label = e.label.as_ref().map(|l| l.text.as_str()).unwrap_or("");
+        assert_eq!(label, "Choice 1.2");
+        assert_eq!(e.stroke, EdgeStroke::Thick);
     }
 
     #[test]
