@@ -439,6 +439,52 @@ impl RoughGenerator {
             sets,
         }
     }
+
+    /// `rc.ellipse(x, y, width, height, options)` — port of upstream's
+    /// `RoughGenerator.ellipse`. Generates an ellipse centred at
+    /// `(x, y)` with the given width/height. Pattern fills (`hachure`)
+    /// are not implemented; only `solid` fills go through.
+    pub fn ellipse(&mut self, x: f64, y: f64, w: f64, h: f64, o: &RoughOptions) -> Drawable {
+        let mut rng = self.make_random(o);
+        let mut sets = Vec::with_capacity(2);
+        let params = generate_ellipse_params(w, h, o, &mut rng);
+        let response = ellipse_with_params(x, y, o, &params, &mut rng);
+        if o.fill.is_some() {
+            if o.fill_style == "solid" {
+                // Re-run ellipseWithParams to mimic upstream's
+                // `ellipseWithParams(...).opset` call (the JS reads
+                // opset off a *fresh* call — fresh RNG pulls). The
+                // opset's type gets relabeled "fillPath".
+                let fresh = ellipse_with_params(x, y, o, &params, &mut rng);
+                let mut shape = fresh.opset;
+                shape.op_type = OpSetType::FillPath;
+                sets.push(shape);
+            }
+            // Pattern fill (`hachure`/etc.) on ellipses is not implemented.
+        }
+        if o.stroke != "none" {
+            sets.push(response.opset);
+        }
+        if let Some(fb) = rng.fallback {
+            self.fallback = fb;
+        }
+        Drawable {
+            shape: "ellipse",
+            sets,
+        }
+    }
+
+    /// `rc.circle(x, y, diameter, options)` — convenience wrapper
+    /// around [`ellipse`]. Marks the resulting drawable with
+    /// `shape = "circle"` so [`to_paths`] emits the right
+    /// `fill-rule` semantics.
+    ///
+    /// [`ellipse`]: RoughGenerator::ellipse
+    pub fn circle(&mut self, x: f64, y: f64, diameter: f64, o: &RoughOptions) -> Drawable {
+        let mut d = self.ellipse(x, y, diameter, diameter, o);
+        d.shape = "circle";
+        d
+    }
 }
 
 /// Filter ops: keep first op, drop subsequent `Move` ops. Mirrors
@@ -1040,6 +1086,299 @@ fn offset(min_v: f64, max_v: f64, o: &RoughOptions, rg: f64, rng: &mut RoughRand
 /// `_offsetOpt(x, ops, rg) = _offset(-x, x, ops, rg)`.
 fn offset_opt(x: f64, o: &RoughOptions, rg: f64, rng: &mut RoughRandom) -> f64 {
     offset(-x, x, o, rg, rng)
+}
+
+// ── Ellipse helpers (`generateEllipseParams` / `ellipseWithParams` /
+//                    `_computeEllipsePoints` / `_curve`) ────────────────
+
+/// Pre-computed ellipse parameters: angular increment between the
+/// sampled points, and the (possibly jittered) effective radii.
+#[derive(Debug, Clone, Copy)]
+struct EllipseParams {
+    increment: f64,
+    rx: f64,
+    ry: f64,
+}
+
+/// Wrapper around the OpSet returned by `ellipse_with_params` —
+/// matches upstream's `EllipseResponse` so future ports of `_curve`
+/// fill paths can attach a `corePoints` slice without breaking
+/// callers.
+struct EllipseResponse {
+    opset: OpSet,
+}
+
+/// Two RNG pulls happen here (in order: rx-jitter, then ry-jitter),
+/// driving the `_offsetOpt(rx * curveFitRandomness, o)` and the
+/// symmetric `ry` adjustment.
+fn generate_ellipse_params(
+    width: f64,
+    height: f64,
+    o: &RoughOptions,
+    rng: &mut RoughRandom,
+) -> EllipseParams {
+    let psq = (std::f64::consts::PI
+        * 2.0
+        * (((width / 2.0).powi(2) + (height / 2.0).powi(2)) / 2.0).sqrt())
+    .sqrt();
+    let step_count = (o.curve_step_count)
+        .max((o.curve_step_count / (200.0_f64).sqrt()) * psq)
+        .ceil();
+    let increment = (std::f64::consts::PI * 2.0) / step_count;
+    let mut rx = (width / 2.0).abs();
+    let mut ry = (height / 2.0).abs();
+    let curve_fit_randomness = 1.0 - o.curve_fitting;
+    rx += offset_opt(rx * curve_fit_randomness, o, 1.0, rng);
+    ry += offset_opt(ry * curve_fit_randomness, o, 1.0, rng);
+    EllipseParams { increment, rx, ry }
+}
+
+fn ellipse_with_params(
+    x: f64,
+    y: f64,
+    o: &RoughOptions,
+    p: &EllipseParams,
+    rng: &mut RoughRandom,
+) -> EllipseResponse {
+    // Two RNG pulls fold into the inner `offset(0.4, 1, o)` ⇒ then the
+    // outer `offset(0.1, that, o)` which is `increment * offset(...)`.
+    // Critically, JS evaluates the *inner* `_offset(0.4, 1, o)` argument
+    // FIRST (innermost call), pulling RNG once, then the outer call
+    // pulls once. So the order is: `inner` → `outer` → many `_offsetOpt`
+    // pulls inside `_computeEllipsePoints`.
+    let inner = offset(0.4, 1.0, o, 1.0, rng);
+    let scaled = p.increment * offset(0.1, inner, o, 1.0, rng);
+    let ap1 = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.0, scaled, o, rng);
+    let mut o1 = curve_inner(&ap1, None, o);
+    if !o.disable_multi_stroke && o.roughness != 0.0 {
+        let ap2 = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.5, 0.0, o, rng);
+        let o2 = curve_inner(&ap2, None, o);
+        o1.extend(o2);
+    }
+    EllipseResponse {
+        opset: OpSet {
+            op_type: OpSetType::Path,
+            ops: o1,
+        },
+    }
+}
+
+/// `_computeEllipsePoints` — non-coreOnly branch (mermaid never sets
+/// roughness=0 for handDrawn). The corePoints array is unused by the
+/// outline path so we don't bother building it.
+#[allow(clippy::too_many_arguments)]
+fn compute_ellipse_points(
+    increment: f64,
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+    offset_mul: f64,
+    overlap: f64,
+    o: &RoughOptions,
+    rng: &mut RoughRandom,
+) -> Vec<(f64, f64)> {
+    if o.roughness == 0.0 {
+        // coreOnly branch — mermaid's handDrawn path never reaches
+        // this, but include it for completeness so downstream callers
+        // can rely on the contract.
+        let mut all = Vec::new();
+        let inc = increment / 4.0;
+        all.push((cx + rx * (-inc).cos(), cy + ry * (-inc).sin()));
+        let mut angle = 0.0;
+        while angle <= std::f64::consts::PI * 2.0 {
+            all.push((cx + rx * angle.cos(), cy + ry * angle.sin()));
+            angle += inc;
+        }
+        all.push((cx + rx * 0.0_f64.cos(), cy + ry * 0.0_f64.sin()));
+        all.push((cx + rx * inc.cos(), cy + ry * inc.sin()));
+        return all;
+    }
+    let mut all_points = Vec::with_capacity(20);
+    // RNG pull #1: radOffset.
+    let rad_offset = offset_opt(0.5, o, 1.0, rng) - std::f64::consts::PI / 2.0;
+    // First push: the "before-start" point. Two RNG pulls (offset_opt
+    // for x and y).
+    let r_x0 = offset_opt(offset_mul, o, 1.0, rng);
+    let r_y0 = offset_opt(offset_mul, o, 1.0, rng);
+    all_points.push((
+        r_x0 + cx + 0.9 * rx * (rad_offset - increment).cos(),
+        r_y0 + cy + 0.9 * ry * (rad_offset - increment).sin(),
+    ));
+    let end_angle = std::f64::consts::PI * 2.0 + rad_offset - 0.01;
+    let mut angle = rad_offset;
+    while angle < end_angle {
+        let r_x = offset_opt(offset_mul, o, 1.0, rng);
+        let r_y = offset_opt(offset_mul, o, 1.0, rng);
+        all_points.push((r_x + cx + rx * angle.cos(), r_y + cy + ry * angle.sin()));
+        angle += increment;
+    }
+    // Three trailing closure points.
+    let r_x1 = offset_opt(offset_mul, o, 1.0, rng);
+    let r_y1 = offset_opt(offset_mul, o, 1.0, rng);
+    all_points.push((
+        r_x1 + cx + rx * (rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5).cos(),
+        r_y1 + cy + ry * (rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5).sin(),
+    ));
+    let r_x2 = offset_opt(offset_mul, o, 1.0, rng);
+    let r_y2 = offset_opt(offset_mul, o, 1.0, rng);
+    all_points.push((
+        r_x2 + cx + 0.98 * rx * (rad_offset + overlap).cos(),
+        r_y2 + cy + 0.98 * ry * (rad_offset + overlap).sin(),
+    ));
+    let r_x3 = offset_opt(offset_mul, o, 1.0, rng);
+    let r_y3 = offset_opt(offset_mul, o, 1.0, rng);
+    all_points.push((
+        r_x3 + cx + 0.9 * rx * (rad_offset + overlap * 0.5).cos(),
+        r_y3 + cy + 0.9 * ry * (rad_offset + overlap * 0.5).sin(),
+    ));
+    all_points
+}
+
+/// `_curve` (Catmull-Rom → cubic Bezier).
+///
+/// Upstream uses curveTightness=0 by default, so `s = 1 - 0 = 1`. The
+/// algorithm walks 4-point windows along the input list, deriving each
+/// cubic bezier's two interior control points from neighbour offsets
+/// scaled by `s/6`. No RNG pulls here — pure geometry.
+fn curve_inner(
+    points: &[(f64, f64)],
+    close_point: Option<(f64, f64)>,
+    o: &RoughOptions,
+) -> Vec<Op> {
+    let len = points.len();
+    let mut ops = Vec::new();
+    if len > 3 {
+        let s = 1.0 - o.curve_tightness;
+        ops.push(Op::Move(points[1].0, points[1].1));
+        let mut i = 1;
+        while (i + 2) < len {
+            let p_im1 = points[i - 1];
+            let p_i = points[i];
+            let p_ip1 = points[i + 1];
+            let p_ip2 = points[i + 2];
+            let b1x = p_i.0 + (s * p_ip1.0 - s * p_im1.0) / 6.0;
+            let b1y = p_i.1 + (s * p_ip1.1 - s * p_im1.1) / 6.0;
+            let b2x = p_ip1.0 + (s * p_i.0 - s * p_ip2.0) / 6.0;
+            let b2y = p_ip1.1 + (s * p_i.1 - s * p_ip2.1) / 6.0;
+            ops.push(Op::BCurveTo(b1x, b1y, b2x, b2y, p_ip1.0, p_ip1.1));
+            i += 1;
+        }
+        if let Some((cx, cy)) = close_point {
+            // Note: this branch consumes 2 RNG pulls upstream; we don't
+            // exercise it from the ellipse path so we leave it as a
+            // direct line-to without a random offset (mermaid's
+            // ellipse never passes a closePoint).
+            ops.push(Op::LineTo(cx, cy));
+        }
+    } else if len == 3 {
+        ops.push(Op::Move(points[1].0, points[1].1));
+        ops.push(Op::BCurveTo(
+            points[1].0,
+            points[1].1,
+            points[2].0,
+            points[2].1,
+            points[2].0,
+            points[2].1,
+        ));
+    } else if len == 2 {
+        // upstream: `_line(...)` with overlay=true. Ellipse path doesn't
+        // pass len==2, so we leave this empty for now.
+    }
+    ops
+}
+
+/// Return the union axis-aligned bounding box of every operation in
+/// `sets`. Cubic Bezier curves are evaluated point-wise (16 samples
+/// per segment) — sufficient for sub-pixel agreement with the SVG
+/// `getBBox` mermaid uses post-jitter for `applyPaddedViewBox`.
+///
+/// Returns `(xmin, ymin, xmax, ymax)` or `None` if the input has no
+/// drawable ops.
+pub fn bbox_of_sets(sets: &[OpSet]) -> Option<(f64, f64, f64, f64)> {
+    let mut have = false;
+    let mut xmin = f64::INFINITY;
+    let mut ymin = f64::INFINITY;
+    let mut xmax = f64::NEG_INFINITY;
+    let mut ymax = f64::NEG_INFINITY;
+
+    for set in sets {
+        let mut current: Option<(f64, f64)> = None;
+        for op in &set.ops {
+            match *op {
+                Op::Move(x, y) => {
+                    have = true;
+                    if x < xmin {
+                        xmin = x;
+                    }
+                    if y < ymin {
+                        ymin = y;
+                    }
+                    if x > xmax {
+                        xmax = x;
+                    }
+                    if y > ymax {
+                        ymax = y;
+                    }
+                    current = Some((x, y));
+                }
+                Op::LineTo(x, y) => {
+                    have = true;
+                    if x < xmin {
+                        xmin = x;
+                    }
+                    if y < ymin {
+                        ymin = y;
+                    }
+                    if x > xmax {
+                        xmax = x;
+                    }
+                    if y > ymax {
+                        ymax = y;
+                    }
+                    current = Some((x, y));
+                }
+                Op::BCurveTo(c1x, c1y, c2x, c2y, ex, ey) => {
+                    have = true;
+                    let (sx, sy) = current.unwrap_or((c1x, c1y));
+                    // Sample the cubic bezier — 16 segments per curve
+                    // gives sub-pixel accuracy for the curvatures
+                    // mermaid produces. Endpoint t=0 and t=1 are
+                    // included so the end vertex is captured exactly.
+                    for k in 0..=16 {
+                        let t = k as f64 / 16.0;
+                        let mt = 1.0 - t;
+                        let bx = mt * mt * mt * sx
+                            + 3.0 * mt * mt * t * c1x
+                            + 3.0 * mt * t * t * c2x
+                            + t * t * t * ex;
+                        let by = mt * mt * mt * sy
+                            + 3.0 * mt * mt * t * c1y
+                            + 3.0 * mt * t * t * c2y
+                            + t * t * t * ey;
+                        if bx < xmin {
+                            xmin = bx;
+                        }
+                        if by < ymin {
+                            ymin = by;
+                        }
+                        if bx > xmax {
+                            xmax = bx;
+                        }
+                        if by > ymax {
+                            ymax = by;
+                        }
+                    }
+                    current = Some((ex, ey));
+                }
+            }
+        }
+    }
+    if have {
+        Some((xmin, ymin, xmax, ymax))
+    } else {
+        None
+    }
 }
 
 // ── Hachure fill (scan-line) ─────────────────────────────────────────
@@ -2133,5 +2472,49 @@ mod tests {
         assert_eq!(d.sets.len(), 2);
         assert_eq!(d.sets[0].op_type, OpSetType::FillSketch);
         assert_eq!(d.sets[1].op_type, OpSetType::Path);
+    }
+
+    // ── Ellipse / circle byte-exact (validated against Node 20 + roughjs@4.6) ──
+
+    #[test]
+    fn circle_seed_2_default_byte_exact() {
+        let mut o = RoughOptions::default();
+        o.seed = 2;
+        let mut rc = RoughGenerator::new();
+        let d = rc.circle(100.0, 200.0, 40.0, &o);
+        assert_eq!(d.shape, "circle");
+        assert_eq!(d.sets.len(), 1);
+        let want = "M100.09679836443644 179.93285833854728 C103.880271233494 179.4864195486164, 109.1581153066544 181.5367411018535, 112.15462361544918 184.35487900393508 C115.15113192424397 187.17301690601667, 117.35381075839551 192.72271131641068, 118.07584821720513 196.8416857510368 C118.79788567601476 200.96066018566293, 118.44133322956382 205.55395993417605, 116.48684836830694 209.06872561169186 C114.53236350705005 212.58349128920767, 110.02134165699351 216.53122766442846, 106.34893904966383 217.93027981613167 C102.67653644233414 219.3293319678349, 98.30930343533973 218.81638992900918, 94.45243272432879 217.46303852191113 C90.59556201331785 216.10968711481308, 85.32684163048704 213.33132314479815, 83.20771478359819 209.81017137354343 C81.08858793670935 206.2890196022887, 81.00517206501512 200.49320716061692, 81.73767164299568 196.33612789438274 C82.47017122097624 192.17904862814856, 84.21670264425127 187.5950202337945, 87.60271225148153 184.86769577613828 C90.9887218587118 182.14037131848207, 99.42181005163819 180.52077900473557, 102.05372928637728 179.97218114844551 C104.68564852111636 179.42358329215546, 103.37722201449374 181.23669509848148, 103.39422765991606 181.5761086383979 M103.13106776505347 180.75471489700578 C106.83826916276865 181.0347216596498, 111.6829353648455 183.8861799386937, 114.19810741777064 186.98051933607653 C116.71327947069578 190.07485873345937, 118.32258758346697 195.26448396892965, 118.22210008260427 199.32075128130285 C118.12161258174157 203.37701859367604, 116.19366797279633 208.09348253878866, 113.59518241259443 211.3181232103157 C110.99669685239252 214.54276388184272, 106.70856480951876 217.91690281108728, 102.63118672139281 218.668595310465 C98.55380863326685 219.42028780984273, 92.32234506797357 217.88711421925532, 89.13091388383867 215.82827820658198 C85.93948269970377 213.76944219390865, 84.4270503804196 210.11105278888795, 83.48259961658346 206.31557923442492 C82.53814885274731 202.5201056799619, 82.03569019556213 197.10326396713708, 83.46420930082178 193.05543687980378 C84.89272840608143 189.00760979247048, 88.61743969981103 183.82416907502633, 92.05371424814136 182.02861671042513 C95.48998879647169 180.23306434582392, 102.00619770375964 182.25618105605645, 104.08185659080381 182.2821226921966 C106.15751547784798 182.30806432833674, 104.5035119206667 182.26994174278707, 104.50766757040638 182.184266527266";
+        assert_eq!(ops_to_path(&d.sets[0]), want);
+    }
+
+    #[test]
+    fn bbox_of_sets_rectangle_no_jitter() {
+        let mut o = RoughOptions::default();
+        o.seed = 1;
+        o.roughness = 0.0; // no jitter — exact corners
+        o.preserve_vertices = true;
+        let mut rc = RoughGenerator::new();
+        let d = rc.rectangle(-5.0, -3.0, 10.0, 6.0, &o);
+        let bb = bbox_of_sets(&d.sets).expect("non-empty");
+        assert!((bb.0 - -5.0).abs() < 1e-9, "xmin {}", bb.0);
+        assert!((bb.1 - -3.0).abs() < 1e-9, "ymin {}", bb.1);
+        assert!((bb.2 - 5.0).abs() < 1e-9, "xmax {}", bb.2);
+        assert!((bb.3 - 3.0).abs() < 1e-9, "ymax {}", bb.3);
+    }
+
+    #[test]
+    fn bbox_of_sets_circle_seed1_within_bounds() {
+        let mut o = RoughOptions::default();
+        o.seed = 1;
+        let mut rc = RoughGenerator::new();
+        let d = rc.circle(0.0, 0.0, 200.0, &o);
+        let bb = bbox_of_sets(&d.sets).expect("non-empty");
+        // Sanity: the roughened circle's bbox is within ~15px of the
+        // ideal [-100, 100]. Track mermaid's applyPaddedViewBox post-jitter.
+        assert!(bb.0 < -90.0 && bb.0 > -115.0, "xmin {}", bb.0);
+        assert!(bb.1 < -90.0 && bb.1 > -115.0, "ymin {}", bb.1);
+        assert!(bb.2 > 90.0 && bb.2 < 115.0, "xmax {}", bb.2);
+        assert!(bb.3 > 90.0 && bb.3 < 115.0, "ymax {}", bb.3);
     }
 }
