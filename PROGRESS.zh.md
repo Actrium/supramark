@@ -233,3 +233,14 @@
 - **W8-B ishikawa demos/04 byte-exact**：look=handDrawn 端到端 wiring 完成。新模块 `svg_ishikawa_hand_drawn.rs` (480 LOC) 镜像上游 rough.js 调用顺序（head→pairs→deferred spine→arrow markers→label boxes）。rough.rs 三处扩展：Q→C 路径转换、`points_on_path`（cubic flattening + RDP simplify）、`omit_dash_attrs` flag。所有 6 步 wiring 步骤全部到位。
 - **W8-C venn +4**（cypress/02/03/15 + demos/02）：根因不是 libm/ULP，而是 `greedyLayout` 应过滤到 `length === 2` pair-only（上游 layout.js:921）。3-circle 对称输入下，full augmented set 给出非零 triple-intersection 干扰打破对称 tie，导致简形从镜像侧起步偏离 2.6e-4。`fsqrt`/`facos`/`fatan2` 已经把 transcendentals 校准到 fdlibm。
 - **W8-D mindmap cose-bilkent groundwork 0 unlock as expected**：`src/layout/cose_bilkent.rs` 660 LOC 核心数据结构（PointD/RectangleD/LayoutQuality/CoSEConstants/RandomSeed/IGeometry/LNode/LEdge/LGraph/LGraphManager/SimulationState/单步 simulation_step）。**未集成**到 main（mindmap.rs 三方合并冲突 + 0-unlock 不急），保留在 `tmp-w8d` 分支等 W9-C 干净接力。
+
+## Wave 9 进展（4 路并行）
+
+净增 +10，1151 → 1161/1161 byte-exact。150 fixture 仍在 known_ignored。
+
+- **W9-A sequence theme propagation +2**：cypress/sequence/32 (theme=base) + cypress/sequence/113 (theme=dark)。`SEQUENCE_STYLE` 常量改为 `build_style(id, theme)` 函数，`useGradient` flag 驱动 `[data-look="neo"]` rules 用 gradient 而非裸 nodeBorder hex。剩余 38 个 ignored sequence fixture 都需非 theme 特性。
+- **W9-B flowchart "stadium" +7**（cypress 90/91/223/224 + demos 34/35/63）：known_ignored 注释误导（不是 rough.js 问题），实际是 (1) diamond polygon 缺 `style="stroke;fill"` 属性（upstream `question.ts` 镜像 `nodeStyles`）+ (2) edge label position 漏算 `pointsHasChanged` 检测 → `calcLabelPosition` recompute（`label_coordinate_in_d` + `build_rendered_d_for_label_check`）。
+- **W9-C cose-bilkent 0 unlock**：W8-D groundwork 干净集成 + 扩展到 1313 LOC（runSpringEmbedder 完整循环 + getIntersection2 + Mulberry32 PRNG + position_nodes_randomly + 12 个新单测）。仍未 byte-exact 因 renderer 拒绝多节点 + 缺 reduceTrees/growTree + FR-grid bucket repulsion + Coarsening 多级缩放。
+- **W9-D state +1**（demos/07）：`build_graph_filtered_ex` 边分区漏分类 isolated/nested-iso cluster id 上的 no-op rewrite 边，导致 dagre 收到与 upstream 不同的 binding order，First 子节点错列 → 7.17px 宽度差。`iso_desc_for_outer` 参数补齐分类范围。class/221 早已修复（不需触动）。
+
+664 lib tests pass（W9-C 新增 12 单测）。
