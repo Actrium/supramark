@@ -1,15 +1,16 @@
 # 阶段进展
 
-截至 2026-05-03，Wave 13 完结，Wave 14 推进中。
+截至 2026-05-03，Wave 14 完结。
 
-**当前指标：1204 / 1328 byte-exact（约 90.7%）**。
+**当前指标：1206 / 1328 byte-exact（约 90.81%）**。
 
-- 1204 = Wave 13 新增 +4（cypress/flowchart/118 icon polygon +1，cypress/sequence/52 + demos/sequence/03 encodeEntities +2，demos/venn/10 dual-layout padding=8 +1）
+- 1206 = Wave 14 新增 +2（demos/venn/12 v8_trig +1，demos/venn/11 cross-hatch +1）
 - 1328 = sweep_all 处理的 fixture 总数（剔除 ELK opt-in 后的全集）
-- 差额 124 = sequence ~88 + mindmap 18 + KaTeX 6 + handDrawn venn 2 (11/12) + gantt timezone 4 + demos/class/08 1 + constrainedMDS 1 + stadium rough 1 + ELK 1 + misc ~2
+- 差额 122 = sequence ~88 + mindmap 18 + KaTeX 6 + venn 04 (constrainedMDS) 1 + gantt timezone 4 + demos/class/08 1 + stadium rough 1 + ELK 1 + misc ~2
 - ELK fixtures 仍由 `is_elk()` 程序性过滤，不再走 known_ignored
+- venn handDrawn 全收（demos/venn 11/12，仅剩 04 constrainedMDS V8 PRNG 环境性阻塞）
 
-旧记录（按时间倒序）：1099 → 1135 → 1136 (W6) → 1145 (W7) → 1151 (W8) → 1161 (W9) → 1179 (W10) → 1184 (W11) → 1200 (W12) → 1204 (W13)。
+旧记录（按时间倒序）：1099 → 1135 → 1136 (W6) → 1145 (W7) → 1151 (W8) → 1161 (W9) → 1179 (W10) → 1184 (W11) → 1200 (W12) → 1204 (W13) → 1206 (W14)。
 
 ## known_ignored 清空（2026-05-02）
 
@@ -276,6 +277,26 @@
 43. **encodeEntities 占位符度量** —— 上游用 U+FB02/U+00B0/U+00B6/U+00DF 5 个 BMP 字符夹住 entity 名做占位符，所有度量函数（`calculateTextDimensions` / canvas / getBBox）量的是占位符串，只有最终 SVG 输出阶段 `decodeEntities` 还原回 `&entity;`。byte-exact 需在度量阶段保留占位符形态。
 44. **sub-agent worktree base drift** —— `Agent({ isolation: "worktree" })` 创建的 worktree 不保证从 `main` 起步；可能落在历史中任意可达 commit（疑似与 .git/worktrees 状态共享或 harness 内部 cache）。**所有 agent prompt 必须 PREFLIGHT 强制 reset 到当前 main**。
 
+## Wave 14 进展（venn 收尾）
+
+净增 +2，1204 → 1206 byte-exact。venn handDrawn 三件套全收（demos/venn 10/11/12 全部 byte-exact），demos/venn 仅剩 04 constrainedMDS V8 PRNG 阻塞。
+
+- **W14-A venn/11 干净 bail（情报）**：揭示 venn/11 是两个独立问题叠加 ——（1）`compute_ellipse_points` 用 native `f64::cos/sin` 与 V8 1-ULP 漂移；（2）缺 customFill cross-hatch 路径发射（含 arcToCubicCurves port + cross-hatch fill 模式 + svg_venn intersection 分支）。把活分成 W14-B + W14-C。
+- **W14-B v8_trig 替换 +1**（demos/venn/12）：`compute_ellipse_points` 12 处 `.cos()`/`.sin()` 改用 `crate::math::v8_trig::{cos, sin}`（项目已存在的 fdlibm 端口）。venn/12 立即对齐（W13-B 报告其纯 ULP 噪声，验证）。`rot_cs` 暂未触动（彼时已对齐），所有 rough-driven bucket（cypress/venn 16/16, ishikawa 13+5）零回归。commit `ced76b8`。
+- **W14-C venn/11 cross-hatch +1**（demos/venn/11）：3 件齐发 + bonus 1 件：
+  1. **arcToCubicCurves port**（rough.rs +130 LOC）—— `path-data-parser/lib/normalize.js:86-219` 直译。`'A'`/`'a'` 终于在 `path_absolutize` + `path_normalize` 中正确分解为 cubic curves，让 `points_on_path` 不再丢弃 venn intersection 的 `M r r 0 0 1 …` arc 数据。
+  2. **cross-hatch fill in `RoughGenerator::path`** —— `o.fill_style == "cross-hatch"` 时跑两次 hachure（angle, angle+90），ops concat 进单个 `OpSet { FillSketch }`。新增 `hachure_lines_mut` / `polygon_hachure_lines_mut` 让 polygon list 在两次 pass 间原地变换（镜像 JS 的 rotate-and-rotate-back drift）。
+  3. **svg_venn intersection branch** —— `d.hand_drawn && custom_fill.is_some()` 时构造 `RoughOptions { roughness: 0.7, seed, fill: Some(transparentize(custom_fill, 0.3)), fill_style: "cross-hatch", fill_weight: 2.0, hachure_gap: 6.0, hachure_angle: 60.0, stroke: "none", … }`，调 `rc.path(area.path, &o)`，发射 `<g>{rough_paths}</g><text>`（不再发原始 `<path>`）。
+  4. **bonus: `rot_cs` swap 到 `v8_trig`** —— 三件齐发后还差 1 ULP 在 byte 59292（cross-hatch pass 2 起点）。`f64::sin(π/180·240) = -0.8660254037844384` vs V8 `-0.8660254037844385`。`rot_cs` 改用 `v8_trig::cos/sin` 后闭合最后 1 byte。
+
+  commit `d6f5c2b`（cherry-pick of `c8f7df9`）。零回归。
+
+### Wave 14 关键技术发现
+
+45. **`f64::cos/sin` vs V8 fdlibm 1-ULP 漂移** —— glibc libm 与 V8/Node 的三角函数在某些角度差 1 ULP。任何 byte-exact rough.js path 都必须走 `v8_trig`，包括 `compute_ellipse_points`（W14-B）和 `rot_cs`（W14-C bonus，cross-hatch 第二 pass 用）。
+46. **arcToCubicCurves（path-data-parser 134 LOC）** —— SVG `'A'`/`'a'` 在 `path_normalize` 必须分解为多段 cubic（每 90° 弧一段，按 `large_arc`/`sweep_flag` 校正起止角）。否则 `points_on_path` 无法 flatten arc，下游 hachure 拿不到合法 polygon。
+47. **cross-hatch in-place mutation** —— rough.js cross-hatch = 两遍 hachure (θ, θ+90)。两遍间 polygon 必须 rotate 然后 rotate back（不是各自独立 rotate），否则第二 pass 的 scan-line 起点漂移。port 时务必用 `_mut` 变体保留这个副作用。
+
 ## 各 diagram 当前 byte-exact 状态（2026-05-03 sweep_all 实测）
 
 | Diagram | 方式 | cypress | demos | 阻塞 |
@@ -301,41 +322,38 @@
 | state | dagre + state shape | 72/72 | 10/10 | — |
 | gitGraph | bespoke commits + branches + parallelCommits + multi-line | 105/105 | 24/24 | — |
 | gantt | d3-time tick + Sunday-aligned + REVERSE/HIGHLIGHT + tickInterval | 41/43 | 8/10 | V8 `new Date()` 时区 quirk × 4（环境性） |
-| venn | Nelder-Mead simplex + V8 hypot + theme + handDrawn dual-layout | 16/16 | 9/12 | constrainedMDS × 1, handDrawn × 2 (11 customFill, 12 ULP) |
+| venn | Nelder-Mead simplex + V8 hypot + theme + handDrawn dual-layout + arc/cross-hatch | 16/16 | 11/12 | constrainedMDS × 1（V8 PRNG state）|
 | sequence | scaffold + self-ref + point arrows + encodeEntities placeholder 度量 | **52/140** | **5/10** | loop/alt/par/rect/critical/break × 24, activation, actor type variants, note over multi, wrap, font metrics |
 | mindmap | 单节点 fast path + 多节点骨架 | **6/23** | **1/2** | cose-bilkent reduceTrees / FR-grid / Coarsening / curveBasis edge / Base64 data-points |
-| **总计** | — | 1007 / 1126 | 197 / 202 | sweep_all 1204 / 1328 |
+| **总计** | — | 1007 / 1126 | 199 / 202 | sweep_all 1206 / 1328 |
 
-注：上表数据来自 `cargo run --bin sweep_all`（2026-05-03 W13 完结），cypress 1007/1126 + demos 197/202 = 1204/1328。
+注：上表数据来自 `cargo run --bin sweep_all`（2026-05-03 W14 完结），cypress 1007/1126 + demos 199/202 = 1206/1328。
 
-## 下一步（2026-05-03 W13 后重排）
+## 下一步（2026-05-03 W14 后重排）
 
-124 项暴露失败按攻关性价比排序：
-
-### 极高性价比（1-2 commit 可解锁）
-
-1. **demos/venn/11 customFill cross-hatch** —— W13-B 报告剩余 venn 阻塞之一。Wave 14-A 推进中。
-2. **demos/venn/04 constrainedMDS** —— 4 sets × 6 pairwise 触发，依赖 V8 PRNG 状态。
+122 项暴露失败按攻关性价比排序：
 
 ### 高性价比（需要某个模块就位）
 
-3. **sequence font-metrics 校准（Trebuchet MS 16pt）** —— W13-E 确认是全局阻塞，影响多数剩余 sequence fixture。改一处可能多解锁；但风险触及 layout/svgDraw 的所有 width 路径，需要先建一套 dimensions 探针对照上游。
-4. **sequence wrap: prefix on actor description**（cypress/sequence 87/88）—— W13-C 提到，依赖 wrap 配置渲染。
-5. **sequence theme: 'base' init**（cypress/sequence 29/30/33-51 / 74）—— W9-A `build_style(id, theme)` 已铺，差 theme=base 路径与 actor `<g>` defs。
+1. **sequence font-metrics 校准（Trebuchet MS 16pt）** —— W13-E 确认是全局阻塞，影响多数剩余 sequence fixture。改一处可能多解锁；但风险触及 layout/svgDraw 的所有 width 路径，需要先建一套 dimensions 探针对照上游。
+2. **sequence wrap: prefix on actor description**（cypress/sequence 87/88）—— W13-C 提到，依赖 wrap 配置渲染。
+3. **sequence theme: 'base' init**（cypress/sequence 29/30/33-51 / 74）—— W9-A `build_style(id, theme)` 已铺，差 theme=base 路径与 actor `<g>` defs。
 
 ### 中性价比（需多日、多 wave）
 
-6. **sequence loop/alt/par block rendering** —— W13-C 确认 24 fixture 全是 25-73 KB diff 的 feature 端口，单 session 不可行。
-7. **sequence actor type variants** —— W13-D 确认需同时实现 6 套几何 + lifecycle，多 session feature 端口。
-8. **sequence activation rendering** —— ~20 fixture，需 lifecycle bar + 端点偏移。
-9. **mindmap cose-bilkent 五大件** —— 18 fixture，~3000 LOC 物理引擎。
-10. **KaTeX × 6** —— 独立 Phase。
+4. **sequence loop/alt/par block rendering** —— W13-C 确认 24 fixture 全是 25-73 KB diff 的 feature 端口，单 session 不可行。
+5. **sequence actor type variants** —— W13-D 确认需同时实现 6 套几何 + lifecycle，多 session feature 端口。
+6. **sequence activation rendering** —— ~20 fixture，需 lifecycle bar + 端点偏移。
+7. **mindmap cose-bilkent 五大件** —— 18 fixture，~3000 LOC 物理引擎。
+8. **KaTeX × 6** —— 独立 Phase。
 
 ### 环境性 / 不修复
 
-- **gantt timezone × 4** —— V8 quirk。
+- **gantt timezone × 4** —— V8 `new Date()` quirk。
 - **demos/class/08** —— 上游 fixture 与 jison 自相矛盾。
-- **demos/venn/12 ULP** —— libm vs fdlibm 0–1 ULP 噪声，需移植 fdlibm。
+- **demos/venn/04** —— constrainedMDS 依赖 V8 PRNG 状态。
+- **demos/flowchart/65 stadium rough** —— `look: handDrawn` stadium，与 KaTeX 解耦后单独 phase。
+- **ELK × 1** —— 程序性过滤。
 8. **Icon shapes × 1** —— 独立 Phase。
 
 ### 环境性 / 不修复
