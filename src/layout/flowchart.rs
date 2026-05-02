@@ -1675,6 +1675,12 @@ fn build_edge<'a>(
         ue.interpolate = Some(curve_override.clone());
         ue.curve = Some(curve_override.clone());
     }
+    // `@{ animation: slow|fast }` propagates to the unified edge so the
+    // renderer can append the matching `edge-animation-{slow,fast}` CSS
+    // class to the `<path>` element. Cypress fixtures 113 / 237.
+    if let Some(anim) = &e.animation {
+        ue.animation = Some(anim.clone());
+    }
     // dagre needs edge label dimensions to reserve space between ranks;
     // labelpos="c" centres the label on the spline (upstream flowchart default).
     ue.labelpos = Some("c".into());

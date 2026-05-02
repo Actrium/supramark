@@ -3134,13 +3134,20 @@ fn render_edge_path(
     // trailing ` edge-thickness-normal edge-pattern-solid flowchart-link`
     // suffix is appended only when the edge is actually rendered as a
     // flowchart link.
-    let class_attr = if thickness == "invisible" {
+    let mut class_attr = if thickness == "invisible" {
         format!(" edge-thickness-{thickness} edge-pattern-{pattern}")
     } else {
         format!(
             " edge-thickness-{thickness} edge-pattern-{pattern} edge-thickness-normal edge-pattern-solid flowchart-link"
         )
     };
+    // Per-edge `@{ animation: slow|fast }` metadata appends the matching
+    // upstream CSS class so the dashed-line dance kicks in. The CSS rule
+    // body lives in the per-id `<style>` block emitted at SVG-open time.
+    // Cypress fixtures 113 / 237.
+    if let Some(anim) = e.animation.as_deref() {
+        class_attr.push_str(&format!(" edge-animation-{}", anim));
+    }
 
     // Edge style emission mirrors upstream's `pathStyle` formula in
     // `rendering-elements/edges.js`. Extracted to `compute_edge_path_style`

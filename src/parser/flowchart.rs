@@ -442,9 +442,10 @@ impl<'a> LineParser<'a> {
         if !is_edge_id {
             return false;
         }
-        // Parse metadata body and extract `curve:` if present.
+        // Parse metadata body and extract `curve:` / `animation:` if present.
         let body = &rest[..close];
         let curve = parse_edge_meta_curve(body);
+        let animation = parse_edge_meta_animation(body);
         if let Some(curve_type) = curve {
             let curve_type = curve_type.to_string();
             for e in &mut self.diag.edges {
@@ -458,6 +459,24 @@ impl<'a> LineParser<'a> {
                 let idx = edge_id_matches_synthetic_index(id, &self.diag.edges);
                 if let Some(i) = idx {
                     self.diag.edges[i].curve = Some(curve_type_clone);
+                }
+            }
+        }
+        if let Some(anim) = animation {
+            let anim = anim.to_string();
+            // First try matching by explicit edge id (assigned via `@-->`).
+            let mut applied = false;
+            for e in &mut self.diag.edges {
+                if e.id.as_deref() == Some(id) {
+                    e.animation = Some(anim.clone());
+                    applied = true;
+                    break;
+                }
+            }
+            // Fall back to the synthetic `L_<start>_<end>_<n>` form.
+            if !applied {
+                if let Some(i) = edge_id_matches_synthetic_index(id, &self.diag.edges) {
+                    self.diag.edges[i].animation = Some(anim);
                 }
             }
         }
@@ -936,6 +955,7 @@ impl<'a> LineParser<'a> {
                                 index: idx,
                                 classes: Vec::new(),
                                 curve: None,
+                                animation: None,
                                 scope: self.current_subgraph.last().cloned(),
                             };
                             self.diag.edges.push(edge);
@@ -1077,6 +1097,22 @@ fn parse_edge_meta_curve(body: &str) -> Option<&str> {
         if let Some(val) = part.strip_prefix("curve:") {
             let val = val.trim().trim_matches('"').trim_matches('\'');
             if !val.is_empty() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
+/// Extract the `animation:` value from an `@{ ... }` body. Recognises the
+/// upstream-supported tokens `slow` / `fast` (any other value is dropped to
+/// match upstream `edgeMetaSchema`).
+fn parse_edge_meta_animation(body: &str) -> Option<&str> {
+    for part in body.split(',') {
+        let part = part.trim();
+        if let Some(val) = part.strip_prefix("animation:") {
+            let val = val.trim().trim_matches('"').trim_matches('\'');
+            if val == "slow" || val == "fast" {
                 return Some(val);
             }
         }
