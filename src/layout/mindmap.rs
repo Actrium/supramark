@@ -16,6 +16,7 @@
 
 use crate::error::Result;
 use crate::font_metrics::{line_height, text_width};
+use crate::layout::cose_bilkent;
 use crate::model::mindmap::{MindmapDiagram, MindmapNode, MindmapNodeType, NodeId};
 use crate::theme::ThemeVariables;
 
@@ -100,8 +101,39 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         });
     }
 
-    // Multi-node fallback: positions are zeroed; the renderer detects
-    // this by reporting `Unsupported` for now.
+    // Multi-node fallback: build the input rectangles and edge list
+    // and hand them to the cose_bilkent groundwork. The function is
+    // currently a no-op (returns `Unsupported`) but the call site
+    // exercises every type and function the future simulation port
+    // will need. Positions stay zeroed so the renderer keeps reporting
+    // `Unsupported` for these fixtures (they live in known_ignored).
+    let cose_nodes: Vec<(NodeId, cose_bilkent::RectangleD)> = positioned
+        .iter()
+        .map(|n| {
+            (
+                n.id,
+                cose_bilkent::RectangleD::new(0.0, 0.0, n.shape_w.max(40.0), n.shape_h.max(40.0)),
+            )
+        })
+        .collect();
+    let cose_edges: Vec<(usize, usize)> = d
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| n.parent.map(|p| (p, i)))
+        .collect();
+    let outcome = cose_bilkent::run_layout(&cose_nodes, &cose_edges, 0x1234_5678);
+    if let cose_bilkent::LayoutOutcome::Ok(positions) = outcome {
+        // Future-proof wiring: when run_layout starts returning real
+        // coordinates, splice them into `positioned`.
+        for (id, (x, y)) in positions {
+            if let Some(n) = positioned.iter_mut().find(|n| n.id == id) {
+                n.x = x;
+                n.y = y;
+            }
+        }
+    }
+
     Ok(MindmapLayout {
         nodes: positioned,
         content_bbox: BBox::default(),

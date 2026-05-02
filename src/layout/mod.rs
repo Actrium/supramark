@@ -45,6 +45,7 @@ pub enum DiagramLayout {
 pub mod block;
 pub mod c4;
 pub mod class;
+pub mod cose_bilkent;
 pub mod er;
 pub mod flowchart;
 pub mod ishikawa;
