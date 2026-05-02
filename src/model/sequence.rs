@@ -89,6 +89,19 @@ pub enum ArrowType {
     BiDotted,
 }
 
+/// Central-connection marker style. Mirrors upstream's
+/// `LINETYPE.CENTRAL_CONNECTION{,_REVERSE,_DUAL}`. Set by the
+/// `()` token next to one or both actors in a message line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CentralConnection {
+    /// `actor signal '()' actor` — circle drawn at destination.
+    AtTo,
+    /// `actor '()' signal actor` — circle drawn at source.
+    AtFrom,
+    /// `actor '()' signal '()' actor` — circles at both ends.
+    Dual,
+}
+
 /// One message between two actors.
 #[derive(Debug, Clone, Default)]
 pub struct Message {
@@ -102,6 +115,9 @@ pub struct Message {
     pub deactivate: bool,
     /// Set by `wrap:` prefix on the message text.
     pub wrap: bool,
+    /// `()` central-connection marker (visualised as small circles
+    /// at one or both ends of the message line).
+    pub central_connection: Option<CentralConnection>,
 }
 
 /// Note placement relative to its anchor actor(s).

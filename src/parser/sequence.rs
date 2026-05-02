@@ -19,8 +19,8 @@
 
 use crate::error::{MermaidError, Result};
 use crate::model::sequence::{
-    Actor, ActorBox, ActorType, AltBranch, ArrowType, DiagramItem, Message, Note, NotePlacement,
-    ParBranch, SequenceDiagram,
+    Actor, ActorBox, ActorType, AltBranch, ArrowType, CentralConnection, DiagramItem, Message,
+    Note, NotePlacement, ParBranch, SequenceDiagram,
 };
 
 enum Frame {
@@ -679,16 +679,51 @@ fn parse_message_line(s: &str) -> Option<Message> {
         }
     }
     let (arr_start, arr_end, kind) = found?;
-    let from = s[..arr_start]
+    // Central-connection `()` markers can appear:
+    //   actor ()->>actor          → AtFrom (circle at source)
+    //   actor ->>()actor          → AtTo (circle at destination)
+    //   actor ()->>()actor        → Dual (circles at both ends)
+    // Mirrors the jison productions:
+    //   actor signaltype '()' actor
+    //   actor '()' signaltype actor
+    //   actor '()' signaltype '()' actor
+    let from_raw = s[..arr_start].trim_end();
+    let after = &s[arr_end..];
+    let (cc_from, from_no_cc) = match from_raw.strip_suffix("()") {
+        Some(rest) => (true, rest.trim_end()),
+        None => (false, from_raw),
+    };
+    let (cc_to, after_no_cc) = match after.trim_start().strip_prefix("()") {
+        Some(rest) => (true, rest),
+        None => (false, after),
+    };
+    let central_connection = match (cc_from, cc_to) {
+        (true, true) => Some(CentralConnection::Dual),
+        (true, false) => Some(CentralConnection::AtFrom),
+        (false, true) => Some(CentralConnection::AtTo),
+        (false, false) => None,
+    };
+    let from = from_no_cc
         .trim()
         .trim_end_matches('+')
         .trim()
         .to_string();
-    let after = &s[arr_end..];
-    let (activate, deactivate, after) = strip_activation(after);
-    let colon = after.find(':')?;
-    let to = after[..colon].trim().to_string();
-    let text_raw = after[colon + 1..].trim_start();
+    let (mut activate, deactivate, after2) = strip_activation(after_no_cc);
+    // Mirror upstream jison: central-connection AtTo (`signal '()' actor`)
+    // and Dual (`'()' signal '()'`) both emit `activate: true` on the
+    // addMessage record (sequenceDiagram.jison:340-352). AtFrom
+    // (`'()' signal`) emits `activate: false`. The activate flag drives a
+    // 4-pixel shorten of the destination end of the arrow line in
+    // upstream `buildMessageModel` (`stopx += activationWidth/2 - 1`).
+    if matches!(
+        central_connection,
+        Some(CentralConnection::AtTo) | Some(CentralConnection::Dual)
+    ) {
+        activate = true;
+    }
+    let colon = after2.find(':')?;
+    let to = after2[..colon].trim().to_string();
+    let text_raw = after2[colon + 1..].trim_start();
     let (wrap, text) = strip_wrap_prefix(text_raw);
     if from.is_empty() || to.is_empty() {
         return None;
@@ -701,6 +736,7 @@ fn parse_message_line(s: &str) -> Option<Message> {
         activate,
         deactivate,
         wrap,
+        central_connection,
     })
 }
 

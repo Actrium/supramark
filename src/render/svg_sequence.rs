@@ -10,7 +10,9 @@
 
 use crate::error::Result;
 use crate::layout::sequence::SequenceLayout;
-use crate::model::sequence::{ActorType, ArrowType, DiagramItem, NotePlacement, SequenceDiagram};
+use crate::model::sequence::{
+    ActorType, ArrowType, CentralConnection, DiagramItem, NotePlacement, SequenceDiagram,
+};
 use crate::render::svg_sequence_consts as consts;
 use crate::theme::ThemeVariables;
 
@@ -63,6 +65,15 @@ struct MsgRender {
     /// Autonumber marker / text X. Mirrors upstream's
     /// `autonumberX = isLeftToRight ? fromBounds + 1 : toBounds - 1`.
     seq_x: f64,
+    /// Central-connection `()` marker — emits one or two `<circle>`
+    /// elements after the `<line>`. Coordinates are the lifeline
+    /// centres of source / destination actors (no autonumber offset
+    /// for the no-autonumber subset).
+    central_connection: Option<CentralConnection>,
+    /// Cached lifeline centre X of source actor (for circle placement).
+    from_cx: f64,
+    /// Cached lifeline centre X of destination actor (for circle placement).
+    to_cx: f64,
 }
 
 /// Per-note geometry collected during the layout pass.
@@ -117,8 +128,14 @@ pub fn render(
         items.iter().all(|it| match it {
             DiagramItem::Message(m) => {
                 // Reject implicit `+` / `-` activations — full activation
-                // rendering is not yet ported.
-                if m.activate || m.deactivate {
+                // rendering is not yet ported. Central-connection auto-
+                // activate (`AtTo`/`Dual` set `activate=true` in the parser)
+                // is fine: the renderer applies the upstream stopx shorten
+                // without drawing an actual activation rect.
+                if m.deactivate {
+                    return false;
+                }
+                if m.activate && m.central_connection.is_none() {
                     return false;
                 }
                 matches!(
@@ -442,7 +459,23 @@ pub fn render(
     // when placed `left of` / `right of` the leftmost / rightmost actor.
     let mut bounds_startx: f64 = 0.0;
     let mut bounds_stopx: f64 = actors.last().map(|a| a.x + a.width).unwrap_or(0.0);
-    for (idx, item) in d.items.iter().enumerate() {
+    // `msg_id_counter` mirrors upstream's `messages.length` at the time
+    // each event is pushed — both real messages AND synthetic
+    // `centralConnection` / `centralConnectionReverse` signals consume
+    // one slot. So a message with `Dual` is followed by +2 synthetic
+    // events, advancing the counter by 3 total per Dual addMessage.
+    let mut msg_id_counter: usize = 0;
+    for (_orig_idx, item) in d.items.iter().enumerate() {
+        let idx = msg_id_counter;
+        msg_id_counter += 1;
+        if let DiagramItem::Message(m) = item {
+            if let Some(cc) = m.central_connection {
+                msg_id_counter += match cc {
+                    CentralConnection::AtTo | CentralConnection::AtFrom => 1,
+                    CentralConnection::Dual => 2,
+                };
+            }
+        }
         // Autonumber: update running counters/visibility, no SVG output
         // of its own — it occupies an item-id slot but doesn't draw.
         if let DiagramItem::Autonumber { start, step, visible } = item {
@@ -663,6 +696,35 @@ pub fn render(
             from_left
         };
         let mut stopx = if is_arrow_to_right { to_left } else { to_right };
+        // Central-connection startx adjustment. Mirrors upstream
+        // `calculateCentralConnectionOffset` (sequenceRenderer.ts:1768).
+        // Upstream adds an absolute (direction-independent) `+= 4` to
+        // startx for REVERSE (`'()' signal`, our `AtFrom`) and DUAL
+        // (`'()' signal '()'`). Bidirectional sub-offset is `-6` only
+        // when RTL (isArrowToRight=false): for LTR bidir+central it is 0.
+        if matches!(
+            m.central_connection,
+            Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual)
+        ) {
+            startx += 4.0;
+            if matches!(m.arrow, Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted))
+                && !is_arrow_to_right
+            {
+                startx -= 6.0;
+            }
+        }
+        // `msg.activate && !isArrowToActivation` → stopx shifts by
+        // `activationWidth/2 - 1` = 4 toward source (mirrors
+        // sequenceRenderer.ts:1922-1924). For the no-activation-rect
+        // central-connection path, `isArrowToActivation = false`
+        // (toLeft - toRight = 2, not >2), so the adjustment fires.
+        if m.activate {
+            if is_arrow_to_right {
+                stopx -= 4.0;
+            } else {
+                stopx += 4.0;
+            }
+        }
         // Filled-arrow variants (`->>`, `-->>`): upstream
         // `adjustLoopHeightForWrap` shortens stopx by 3 toward source so
         // the line ends at the arrowhead base. Open variants (`->`,
@@ -781,6 +843,9 @@ pub fn render(
             idx,
             seq_index,
             seq_x,
+            central_connection: m.central_connection,
+            from_cx: fa_cx,
+            to_cx: ta_cx,
         });
         // (height/stopy bookkeeping not needed since we only use vertical)
     }
@@ -904,6 +969,28 @@ pub fn render(
     out.push_str(&consts::DEF_SOLID_BOTTOM.replace("__ID__", id));
     out.push_str(&consts::DEF_STICK_TOP.replace("__ID__", id));
     out.push_str(&consts::DEF_STICK_BOTTOM.replace("__ID__", id));
+
+    // Central-connection activation anchors. Mirrors upstream's
+    // `bounds.newActivation(...)` → `svgDraw.anchorElement(diagram)` →
+    // `elem.append('g')` for each CENTRAL_CONNECTION /
+    // CENTRAL_CONNECTION_REVERSE / CENTRAL_CONNECTION_DUAL — these
+    // produce empty `<g></g>` placeholders right after `</defs>`,
+    // before the message text/line/circle groups.
+    //   AtTo (`actor signal '()' actor`)         → 1 anchor (at `to`)
+    //   AtFrom (`actor '()' signal actor`)       → 1 anchor (at `from`)
+    //   Dual (`actor '()' signal '()' actor`)    → 2 anchors
+    // Per the jison grammar @ sequenceDiagram.jison:340-352.
+    for m in &messages {
+        if let Some(cc) = m.central_connection {
+            let n = match cc {
+                CentralConnection::AtTo | CentralConnection::AtFrom => 1,
+                CentralConnection::Dual => 2,
+            };
+            for _ in 0..n {
+                out.push_str("<g></g>");
+            }
+        }
+    }
 
     // ── Stickman body groups (Actor type only) ──────────────────────
     //
@@ -1448,6 +1535,33 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         out.push_str("\">");
     }
     out.push_str("</line>");
+
+    // Central-connection `()` circles. Mirrors upstream
+    // `sequenceRenderer.ts:329-372`:
+    //   <g><circle cx=fromCx cy=lineY r=5 width=10 height=10/>
+    //      <circle cx=toCx ... /></g>
+    // Emitted after the message line. Coordinates are the lifeline
+    // centres at message Y. (No autonumber offset implemented in this
+    // pass — the no-autonumber subset is the byte-exact target.)
+    if let Some(cc) = m.central_connection {
+        out.push_str("<g>");
+        let emit_circle = |out: &mut String, cx: f64, cy: f64| {
+            out.push_str("<circle cx=\"");
+            push_num(out, cx);
+            out.push_str("\" cy=\"");
+            push_num(out, cy);
+            out.push_str("\" r=\"5\" width=\"10\" height=\"10\"></circle>");
+        };
+        match cc {
+            CentralConnection::AtTo => emit_circle(out, m.to_cx, m.line_start_y),
+            CentralConnection::AtFrom => emit_circle(out, m.from_cx, m.line_start_y),
+            CentralConnection::Dual => {
+                emit_circle(out, m.from_cx, m.line_start_y);
+                emit_circle(out, m.to_cx, m.line_start_y);
+            }
+        }
+        out.push_str("</g>");
+    }
 
     // Autonumber sequence-number marker line + text. Mirrors upstream
     // `sequenceRenderer.ts:712-729`:
