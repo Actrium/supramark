@@ -139,6 +139,8 @@ pub fn parse(source: &str) -> Result<IshikawaDiagram> {
         meta: Default::default(),
         root,
         diagram_padding,
+        look: None,
+        hand_drawn_seed: None,
     })
 }
 

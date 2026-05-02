@@ -123,7 +123,18 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
             render::svg_treemap::render(&d, &l, &effective_theme, id)
         }
         detect::DiagramKind::Ishikawa => {
-            let d = parser::ishikawa::parse(source)?;
+            let mut d = parser::ishikawa::parse(source)?;
+            // Plumb look + handDrawnSeed from the resolved config stack
+            // (default ← site ← frontmatter ← %%{init}%%) so the renderer
+            // can dispatch the handDrawn variant deterministically.
+            d.look = pre.config.look.clone();
+            d.hand_drawn_seed = pre
+                .config
+                .extras
+                .get("handDrawnSeed")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .or(Some(0));
             let l = layout::ishikawa::layout(&d, &theme)?;
             render::svg_ishikawa::render(&d, &l, &theme, id)
         }
@@ -156,8 +167,7 @@ fn convert_with_id_inner(source: &str, id: &str) -> Result<String, MermaidError>
                 .as_deref()
                 .or(pre.config.theme.as_deref())
                 .unwrap_or("default");
-            let theme_recomputes_inv =
-                matches!(resolved_theme_name, "base" | "neutral");
+            let theme_recomputes_inv = matches!(resolved_theme_name, "base" | "neutral");
             for (i, v) in d.theme_overrides.c_scale.iter().enumerate() {
                 if let Some(s) = v {
                     match i {

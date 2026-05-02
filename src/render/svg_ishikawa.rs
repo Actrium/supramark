@@ -1,16 +1,19 @@
 //! Ishikawa (fishbone) SVG renderer.
 //!
 //! Produces byte-identical output to upstream mermaid@11.14.0 for every
-//! fixture in `tests/ext_fixtures/{cypress,demos}/ishikawa`.
-//!
-//! Scope: non-hand-drawn look only. The `handDrawn` variant routes
-//! through rough.js (imprecise Catmull-Rom sampling with seeded
-//! randomness); matching it byte-for-byte is a separate milestone.
+//! fixture in `tests/ext_fixtures/{cypress,demos}/ishikawa`. The
+//! `handDrawn` look (`%%{init: { 'look': 'handDrawn' } }%%`) routes
+//! through the [`hand_drawn`] sub-module, which mirrors upstream's
+//! rough.js call sequence so the LCG state advances bit-for-bit
+//! identically.
 
 use crate::error::Result;
 use crate::layout::ishikawa::{Branch, IshikawaLayout, Pair, SubBranch};
 use crate::model::ishikawa::IshikawaDiagram;
 use crate::theme::ThemeVariables;
+
+#[path = "svg_ishikawa_hand_drawn.rs"]
+mod hand_drawn;
 
 pub fn render(
     d: &IshikawaDiagram,
@@ -18,6 +21,9 @@ pub fn render(
     theme: &ThemeVariables,
     id: &str,
 ) -> Result<String> {
+    if matches!(d.look.as_deref(), Some("handDrawn")) {
+        return hand_drawn::render(d, l, theme, id);
+    }
     let _ = d; // the diagram model is fully digested by the layout.
     let mut out = String::with_capacity(8192);
 
@@ -194,7 +200,7 @@ fn render_sub(out: &mut String, sb: &SubBranch, marker: &str) {
 
 // ── Style block ────────────────────────────────────────────────────
 
-fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
+pub(super) fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     // This is the boilerplate CSS mermaid injects before the per-diagram
     // rules from `ishikawaStyles.ts`. Output must be byte-identical to
     // the upstream pipeline — whitespace, attribute order, trailing
@@ -450,7 +456,7 @@ fn compact_font_family(s: &str) -> String {
 /// Format a floating-point value for an SVG attribute using JS's
 /// `Number.prototype.toString()` rules. (Identical algorithm to the
 /// radar renderer's `js_num`.)
-fn js_num(v: f64) -> String {
+pub(super) fn js_num(v: f64) -> String {
     if v == 0.0 {
         return "0".to_string();
     }
@@ -473,7 +479,7 @@ fn js_num(v: f64) -> String {
     }
 }
 
-fn html_escape(s: &str) -> String {
+pub(super) fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -500,7 +506,16 @@ mod tests {
         let pre = preprocess(source).expect("preprocess");
         let theme_name = pre.config.theme.as_deref().unwrap_or("default");
         let theme = get_theme(theme_name);
-        let diagram = parser_mod::parse(source).expect("parse");
+        let mut diagram = parser_mod::parse(source).expect("parse");
+        // Plumb look + handDrawnSeed (mirrors lib.rs::convert_with_id).
+        diagram.look = pre.config.look.clone();
+        diagram.hand_drawn_seed = pre
+            .config
+            .extras
+            .get("handDrawnSeed")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32)
+            .or(Some(0));
         let lay = layout_mod::layout(&diagram, &theme).expect("layout");
         render(&diagram, &lay, &theme, id).expect("render")
     }
@@ -568,6 +583,6 @@ mod tests {
     ishikawa_fixture_test!(demos_ishikawa_01, "demos", "01");
     ishikawa_fixture_test!(demos_ishikawa_02, "demos", "02");
     ishikawa_fixture_test!(demos_ishikawa_03, "demos", "03");
-    // demos 04 is handDrawn — rough.js output is out of scope.
+    ishikawa_fixture_test!(demos_ishikawa_04, "demos", "04");
     ishikawa_fixture_test!(demos_ishikawa_05, "demos", "05");
 }

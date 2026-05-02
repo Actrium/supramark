@@ -173,6 +173,12 @@ pub struct RoughOptions {
     /// `stroke-dasharray="a b"` on the stroke path.
     pub fill_line_dash: Vec<f64>,
     pub stroke_line_dash: Vec<f64>,
+    /// Mirror upstream rough.js semantics: when `true`, omit the
+    /// `stroke-dasharray` attribute entirely (the JS `if (o.strokeLineDash)`
+    /// falsy branch). Existing call sites left this implicitly `false`
+    /// so the legacy "0 0" attribute keeps appearing on stadium / er /
+    /// requirement outputs that mirror upstream's explicit `[0, 0]`.
+    pub omit_dash_attrs: bool,
 }
 
 impl Default for RoughOptions {
@@ -202,6 +208,7 @@ impl Default for RoughOptions {
             fill: None,
             fill_line_dash: Vec::new(),
             stroke_line_dash: Vec::new(),
+            omit_dash_attrs: false,
         }
     }
 }
@@ -399,29 +406,48 @@ impl RoughGenerator {
         };
         let has_stroke = o.stroke != "none";
 
-        // Stroke pass first — same as upstream. Even if hasStroke is
-        // false, the RNG is still advanced by upstream because
-        // `shape = svgPath(d, o)` runs unconditionally before the
-        // hasFill / hasStroke checks.
+        // Upstream calls `pointsOnPath(d, 1, distance)` ALWAYS — before
+        // hasFill / hasStroke / fillStyle are inspected. The result is
+        // used by both the solid-fill multi-set branch and the
+        // pattern-fill (hachure) branch. Even when `simplification` is
+        // unset (mermaid never sets it), the call runs; we mirror that
+        // ordering so RNG state is unaffected (no RNG draws happen
+        // inside pointsOnPath).
+        let simplification = 0.0_f64; // mermaid never sets `simplification`.
+        let distance = if simplification > 0.0 {
+            4.0 - 4.0 * simplification
+        } else {
+            (1.0 + o.roughness) / 2.0
+        };
+        let polys = points_on_path(d, 1.0, distance);
+
+        // Stroke pass first — `shape = svgPath(d, o)` runs unconditionally.
         let stroke_ops = svg_path_ops(&segs, o, &mut rng);
 
-        // Fill pass — fillShape uses {disableMultiStroke: true,
-        // roughness: o.roughness ? o.roughness + fill_shape_roughness_gain : 0}.
         if has_fill {
-            let mut fill_opts = o.clone();
-            fill_opts.disable_multi_stroke = true;
-            fill_opts.roughness = if o.roughness != 0.0 {
-                o.roughness + o.fill_shape_roughness_gain
+            if o.fill_style == "solid" {
+                if polys.len() == 1 {
+                    let mut fill_opts = o.clone();
+                    fill_opts.disable_multi_stroke = true;
+                    fill_opts.roughness = if o.roughness != 0.0 {
+                        o.roughness + o.fill_shape_roughness_gain
+                    } else {
+                        0.0
+                    };
+                    let fill_ops = svg_path_ops(&segs, &fill_opts, &mut rng);
+                    let merged = merged_shape(fill_ops);
+                    sets.push(OpSet {
+                        op_type: OpSetType::FillPath,
+                        ops: merged,
+                    });
+                } else {
+                    sets.push(solid_fill_polygon(&polys, o, &mut rng));
+                }
             } else {
-                0.0
-            };
-            let fill_ops = svg_path_ops(&segs, &fill_opts, &mut rng);
-            // _mergedShape: keep first op, drop subsequent moves.
-            let merged = merged_shape(fill_ops);
-            sets.push(OpSet {
-                op_type: OpSetType::FillPath,
-                ops: merged,
-            });
+                // Pattern (hachure) fill — scan the union of polygons.
+                let lines = polygon_hachure_lines(&polys, o, &mut rng);
+                sets.push(hachure_fill_sketch(&lines, o, &mut rng));
+            }
         }
 
         if has_stroke {
@@ -557,7 +583,10 @@ fn path_parse(d: &str) -> Vec<RawSeg> {
             i += 1;
             continue;
         }
-        if let Ok(v) = std::str::from_utf8(&bytes[start..i]).unwrap().parse::<f64>() {
+        if let Ok(v) = std::str::from_utf8(&bytes[start..i])
+            .unwrap()
+            .parse::<f64>()
+        {
             tokens.push(('#', Some(v)));
         }
     }
@@ -692,6 +721,24 @@ fn path_absolutize(segs: &[RawSeg]) -> Vec<RawSeg> {
                 cy = data[5];
                 out.push(RawSeg { key: 'C', data });
             }
+            'Q' => {
+                out.push(seg.clone());
+                cx = seg.data[2];
+                cy = seg.data[3];
+            }
+            'q' => {
+                let mut data = seg.data.clone();
+                for (i, v) in data.iter_mut().enumerate() {
+                    if i % 2 == 0 {
+                        *v += cx;
+                    } else {
+                        *v += cy;
+                    }
+                }
+                cx = data[2];
+                cy = data[3];
+                out.push(RawSeg { key: 'Q', data });
+            }
             'Z' | 'z' => {
                 out.push(RawSeg {
                     key: 'Z',
@@ -712,6 +759,8 @@ fn path_absolutize(segs: &[RawSeg]) -> Vec<RawSeg> {
 
 fn path_normalize(segs: &[RawSeg]) -> Vec<RawSeg> {
     // For our M/L/H/V/Z subset, normalize collapses H and V into L.
+    // Q is also supported here — converted to a cubic via the same
+    // midpoint approximation used by upstream `path-data-parser`.
     let mut out: Vec<RawSeg> = Vec::with_capacity(segs.len());
     let mut cx = 0.0_f64;
     let mut cy = 0.0_f64;
@@ -750,6 +799,24 @@ fn path_normalize(segs: &[RawSeg]) -> Vec<RawSeg> {
                 cx = seg.data[4];
                 cy = seg.data[5];
             }
+            'Q' => {
+                // Quadratic → cubic: midpoint approximation per
+                // path-data-parser/normalize.js. data = [x1, y1, x, y].
+                let x1 = seg.data[0];
+                let y1 = seg.data[1];
+                let x = seg.data[2];
+                let y = seg.data[3];
+                let cx1 = cx + 2.0 * (x1 - cx) / 3.0;
+                let cy1 = cy + 2.0 * (y1 - cy) / 3.0;
+                let cx2 = x + 2.0 * (x1 - x) / 3.0;
+                let cy2 = y + 2.0 * (y1 - y) / 3.0;
+                out.push(RawSeg {
+                    key: 'C',
+                    data: vec![cx1, cy1, cx2, cy2, x, y],
+                });
+                cx = x;
+                cy = y;
+            }
             'Z' => {
                 out.push(seg.clone());
                 cx = subx;
@@ -776,7 +843,13 @@ fn svg_path_ops(segs: &[RawSeg], o: &RoughOptions, rng: &mut RoughRandom) -> Vec
             }
             'L' => {
                 ops.extend(double_line(
-                    current.0, current.1, seg.data[0], seg.data[1], o, false, rng,
+                    current.0,
+                    current.1,
+                    seg.data[0],
+                    seg.data[1],
+                    o,
+                    false,
+                    rng,
                 ));
                 current = (seg.data[0], seg.data[1]);
             }
@@ -1624,10 +1697,7 @@ fn straight_hachure_lines(
             while i + 1 < active_edges.len() {
                 let ce = active_edges[i].edge;
                 let ne = active_edges[i + 1].edge;
-                lines.push([
-                    [ce.x.round(), y],
-                    [ne.x.round(), y],
-                ]);
+                lines.push([[ce.x.round(), y], [ne.x.round(), y]]);
                 i += 2;
             }
         }
@@ -1765,6 +1835,223 @@ fn solid_fill_points(polys: &[&[(f64, f64)]], o: &RoughOptions, rng: &mut RoughR
     }
 }
 
+// ── `pointsOnPath` — flatten a path's curves to polylines for hachure ─
+
+/// Port of `points-on-curve::flatness` — squared maximum control-point
+/// excursion. Used as the cubic-subdivision termination criterion.
+fn bezier_flatness(p1: [f64; 2], p2: [f64; 2], p3: [f64; 2], p4: [f64; 2]) -> f64 {
+    let mut ux = 3.0 * p2[0] - 2.0 * p1[0] - p4[0];
+    ux *= ux;
+    let mut uy = 3.0 * p2[1] - 2.0 * p1[1] - p4[1];
+    uy *= uy;
+    let mut vx = 3.0 * p3[0] - 2.0 * p4[0] - p1[0];
+    vx *= vx;
+    let mut vy = 3.0 * p3[1] - 2.0 * p4[1] - p1[1];
+    vy *= vy;
+    if ux < vx {
+        ux = vx;
+    }
+    if uy < vy {
+        uy = vy;
+    }
+    ux + uy
+}
+
+fn lerp_pt(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+/// Recursively subdivide a cubic Bézier until each segment's flatness
+/// is below `tolerance`. Mirrors `getPointsOnBezierCurveWithSplitting`.
+fn pts_on_bezier_split(
+    p1: [f64; 2],
+    p2: [f64; 2],
+    p3: [f64; 2],
+    p4: [f64; 2],
+    tolerance: f64,
+    out: &mut Vec<[f64; 2]>,
+) {
+    if bezier_flatness(p1, p2, p3, p4) < tolerance {
+        if let Some(last) = out.last() {
+            let dx = last[0] - p1[0];
+            let dy = last[1] - p1[1];
+            let d2 = dx * dx + dy * dy;
+            if d2 > 1.0 {
+                out.push(p1);
+            }
+        } else {
+            out.push(p1);
+        }
+        out.push(p4);
+    } else {
+        let t = 0.5;
+        let q1 = lerp_pt(p1, p2, t);
+        let q2 = lerp_pt(p2, p3, t);
+        let q3 = lerp_pt(p3, p4, t);
+        let r1 = lerp_pt(q1, q2, t);
+        let r2 = lerp_pt(q2, q3, t);
+        let red = lerp_pt(r1, r2, t);
+        pts_on_bezier_split(p1, q1, r1, red, tolerance, out);
+        pts_on_bezier_split(red, r2, q3, p4, tolerance, out);
+    }
+}
+
+fn distance_sq(p: [f64; 2], q: [f64; 2]) -> f64 {
+    let dx = p[0] - q[0];
+    let dy = p[1] - q[1];
+    dx * dx + dy * dy
+}
+
+fn distance_to_segment_sq(p: [f64; 2], v: [f64; 2], w: [f64; 2]) -> f64 {
+    let l2 = distance_sq(v, w);
+    if l2 == 0.0 {
+        return distance_sq(p, v);
+    }
+    let mut t = ((p[0] - v[0]) * (w[0] - v[0]) + (p[1] - v[1]) * (w[1] - v[1])) / l2;
+    if t < 0.0 {
+        t = 0.0;
+    }
+    if t > 1.0 {
+        t = 1.0;
+    }
+    distance_sq(p, lerp_pt(v, w, t))
+}
+
+/// Ramer-Douglas-Peucker — port of `points-on-curve::simplifyPoints`.
+fn simplify_points_rec(
+    points: &[[f64; 2]],
+    start: usize,
+    end: usize,
+    epsilon: f64,
+    out: &mut Vec<[f64; 2]>,
+) {
+    if end <= start + 1 {
+        return;
+    }
+    let s = points[start];
+    let e = points[end - 1];
+    let mut max_dist_sq = 0.0_f64;
+    let mut max_idx = start + 1;
+    for i in (start + 1)..(end - 1) {
+        let d = distance_to_segment_sq(points[i], s, e);
+        if d > max_dist_sq {
+            max_dist_sq = d;
+            max_idx = i;
+        }
+    }
+    if max_dist_sq.sqrt() > epsilon {
+        simplify_points_rec(points, start, max_idx + 1, epsilon, out);
+        simplify_points_rec(points, max_idx, end, epsilon, out);
+    } else {
+        if out.is_empty() {
+            out.push(s);
+        }
+        out.push(e);
+    }
+}
+
+fn simplify_polyline(points: &[[f64; 2]], distance: f64) -> Vec<[f64; 2]> {
+    let mut out = Vec::new();
+    if !points.is_empty() {
+        simplify_points_rec(points, 0, points.len(), distance, &mut out);
+    }
+    out
+}
+
+/// Port of `points-on-path::pointsOnPath`. Walks an SVG path string and
+/// returns one `Vec<[f64; 2]>` per `M…[Z]` sub-path, with curves flattened
+/// to polylines and the result simplified by Douglas-Peucker at `distance`.
+///
+/// `tolerance` controls the cubic-flatness termination (rough.js uses 1).
+/// `distance` controls RDP simplification — `0.0` skips simplification.
+pub fn points_on_path(d: &str, tolerance: f64, distance: f64) -> Vec<Vec<[f64; 2]>> {
+    let segs = path_normalize(&path_absolutize(&path_parse(d)));
+    let mut sets: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut current: Vec<[f64; 2]> = Vec::new();
+    let mut start: [f64; 2] = [0.0, 0.0];
+    // pendingCurve accumulates points-of-cubic-segment runs so adjacent
+    // C ops chain through `pointsOnBezierCurves`.
+    let mut pending: Vec<[f64; 2]> = Vec::new();
+
+    let flush_curve = |pending: &mut Vec<[f64; 2]>, current: &mut Vec<[f64; 2]>| {
+        if pending.len() >= 4 {
+            let n_segments = (pending.len() - 1) / 3;
+            for i in 0..n_segments {
+                let off = i * 3;
+                pts_on_bezier_split(
+                    pending[off],
+                    pending[off + 1],
+                    pending[off + 2],
+                    pending[off + 3],
+                    tolerance,
+                    current,
+                );
+            }
+        }
+        pending.clear();
+    };
+
+    let flush_points = |pending: &mut Vec<[f64; 2]>,
+                        current: &mut Vec<[f64; 2]>,
+                        sets: &mut Vec<Vec<[f64; 2]>>| {
+        flush_curve(pending, current);
+        if !current.is_empty() {
+            sets.push(std::mem::take(current));
+        }
+    };
+
+    for seg in &segs {
+        match seg.key {
+            'M' => {
+                let mut pending2 = std::mem::take(&mut pending);
+                let mut current2 = std::mem::take(&mut current);
+                flush_points(&mut pending2, &mut current2, &mut sets);
+                pending = pending2;
+                current = current2;
+                start = [seg.data[0], seg.data[1]];
+                current.push(start);
+            }
+            'L' => {
+                flush_curve(&mut pending, &mut current);
+                current.push([seg.data[0], seg.data[1]]);
+            }
+            'C' => {
+                if pending.is_empty() {
+                    let last = if let Some(p) = current.last() {
+                        *p
+                    } else {
+                        start
+                    };
+                    pending.push(last);
+                }
+                pending.push([seg.data[0], seg.data[1]]);
+                pending.push([seg.data[2], seg.data[3]]);
+                pending.push([seg.data[4], seg.data[5]]);
+            }
+            'Z' => {
+                flush_curve(&mut pending, &mut current);
+                current.push(start);
+            }
+            _ => {}
+        }
+    }
+    let mut pending2 = std::mem::take(&mut pending);
+    let mut current2 = std::mem::take(&mut current);
+    flush_points(&mut pending2, &mut current2, &mut sets);
+
+    if distance == 0.0 {
+        return sets;
+    }
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::with_capacity(sets.len());
+    for set in sets {
+        let simp = simplify_polyline(&set, distance);
+        if !simp.is_empty() {
+            out.push(simp);
+        }
+    }
+    out
+}
+
 // ── `opsToPath` — turn a sequence of ops into a `d` attribute ─────────
 
 /// Render a single [`OpSet`]'s ops to the SVG `d` attribute string —
@@ -1838,6 +2125,22 @@ pub struct PathOut {
 pub fn to_paths(d: &Drawable, o: &RoughOptions) -> Vec<PathOut> {
     let emit_fill_rule = d.shape == "polygon" || d.shape == "curve";
     let mut out = Vec::with_capacity(d.sets.len());
+    // Upstream rough.js semantics: `if (o.strokeLineDash)` is falsy when
+    // the option is absent (`undefined`). We treat `None` here to mean
+    // "absent" and `Some(vec)` (including empty) to mean "explicitly
+    // set" — matching `[0, 0]` style call sites that exercise the
+    // attribute path. The plain default `RoughOptions { ..default() }`
+    // leaves both as empty `Vec` → backward-compatible "0 0" output.
+    let stroke_dash_attr = if o.omit_dash_attrs {
+        None
+    } else {
+        stroke_dash_for_emit(&o.stroke_line_dash)
+    };
+    let fill_dash_attr = if o.omit_dash_attrs {
+        None
+    } else {
+        stroke_dash_for_emit(&o.fill_line_dash)
+    };
     for set in &d.sets {
         match set.op_type {
             OpSetType::Path => {
@@ -1847,7 +2150,7 @@ pub fn to_paths(d: &Drawable, o: &RoughOptions) -> Vec<PathOut> {
                     stroke_width: o.stroke_width,
                     fill: "none".into(),
                     fill_rule_evenodd: false,
-                    stroke_dasharray: Some(dasharray_str(&o.stroke_line_dash)),
+                    stroke_dasharray: stroke_dash_attr.clone(),
                 });
             }
             OpSetType::FillPath => {
@@ -1861,7 +2164,6 @@ pub fn to_paths(d: &Drawable, o: &RoughOptions) -> Vec<PathOut> {
                 });
             }
             OpSetType::FillSketch => {
-                // Only reached for hachure (out of scope for MVP).
                 let fweight = if o.fill_weight < 0.0 {
                     o.stroke_width / 2.0
                 } else {
@@ -1873,12 +2175,22 @@ pub fn to_paths(d: &Drawable, o: &RoughOptions) -> Vec<PathOut> {
                     stroke_width: fweight,
                     fill: "none".into(),
                     fill_rule_evenodd: false,
-                    stroke_dasharray: Some(dasharray_str(&o.fill_line_dash)),
+                    stroke_dasharray: fill_dash_attr.clone(),
                 });
             }
         }
     }
     out
+}
+
+/// Decide whether to emit the `stroke-dasharray` attribute. This
+/// function is the contract between `RoughOptions::*_line_dash` and the
+/// SVG output. Call-sites that previously relied on the implicit
+/// `"0 0"` for an empty Vec keep working; the new
+/// [`RoughOptions::omit_dash_attrs`] flag opts out (mirroring upstream's
+/// `if (o.strokeLineDash)` falsy-undefined branch).
+fn stroke_dash_for_emit(vals: &[f64]) -> Option<String> {
+    Some(dasharray_str(vals))
 }
 
 fn dasharray_str(vals: &[f64]) -> String {
@@ -2385,21 +2697,62 @@ mod tests {
     #[test]
     fn hachure_box_centered_angle_49() {
         // 60×20 box centred at origin, gap=5, angle=49 (= -41+90).
-        let polys = vec![vec![[-30.0, -10.0], [30.0, -10.0], [30.0, 10.0], [-30.0, 10.0]]];
+        let polys = vec![vec![
+            [-30.0, -10.0],
+            [30.0, -10.0],
+            [30.0, 10.0],
+            [-30.0, 10.0],
+        ]];
         let got = hachure_lines(&polys, 5.0, 49.0, 1.0);
         let want: Vec<[[f64; 2]; 2]> = vec![
-            [[-29.911645205994922, -10.101640563649964], [-29.911645205994922, -10.101640563649964]],
-            [[-30.074451478824106, -2.293087937360795], [-23.513861188919034, -9.840183739588515]],
-            [[-30.23725775165329, 5.515464688928372], [-16.460018142852636, -10.33343649574984]],
-            [[-27.77582790852044, 10.305178994326454], [-10.062234125776747, -10.071979671688391]],
-            [[-21.378043891444555, 10.566635818387901], [-3.664450108700858, -9.810522847626943]],
-            [[-14.980259874368665, 10.82809264244935], [3.3893929373655385, -10.303775603788267]],
-            [[-7.926416828302268, 10.334839886288027], [9.787176954441428, -10.042318779726818]],
-            [[-1.5286328112263794, 10.596296710349474], [16.184960971517317, -9.780861955665369]],
-            [[4.86915120584951, 10.857753534410923], [23.238804017583714, -10.274114711826694]],
-            [[11.922994251915906, 10.3645007782496], [29.636588034659603, -10.012657887765243]],
-            [[18.320778268991795, 10.625957602311047], [30.785899819811434, -3.7135244219216226]],
-            [[24.718562286067684, 10.887414426372494], [30.623093546982247, 4.095028204367548]],
+            [
+                [-29.911645205994922, -10.101640563649964],
+                [-29.911645205994922, -10.101640563649964],
+            ],
+            [
+                [-30.074451478824106, -2.293087937360795],
+                [-23.513861188919034, -9.840183739588515],
+            ],
+            [
+                [-30.23725775165329, 5.515464688928372],
+                [-16.460018142852636, -10.33343649574984],
+            ],
+            [
+                [-27.77582790852044, 10.305178994326454],
+                [-10.062234125776747, -10.071979671688391],
+            ],
+            [
+                [-21.378043891444555, 10.566635818387901],
+                [-3.664450108700858, -9.810522847626943],
+            ],
+            [
+                [-14.980259874368665, 10.82809264244935],
+                [3.3893929373655385, -10.303775603788267],
+            ],
+            [
+                [-7.926416828302268, 10.334839886288027],
+                [9.787176954441428, -10.042318779726818],
+            ],
+            [
+                [-1.5286328112263794, 10.596296710349474],
+                [16.184960971517317, -9.780861955665369],
+            ],
+            [
+                [4.86915120584951, 10.857753534410923],
+                [23.238804017583714, -10.274114711826694],
+            ],
+            [
+                [11.922994251915906, 10.3645007782496],
+                [29.636588034659603, -10.012657887765243],
+            ],
+            [
+                [18.320778268991795, 10.625957602311047],
+                [30.785899819811434, -3.7135244219216226],
+            ],
+            [
+                [24.718562286067684, 10.887414426372494],
+                [30.623093546982247, 4.095028204367548],
+            ],
         ];
         assert!(approx_lines_eq(&got, &want, 1e-12), "got = {got:?}");
     }

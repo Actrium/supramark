@@ -30,4 +30,11 @@ pub struct IshikawaDiagram {
     /// Diagram padding (from frontmatter `config.ishikawa.diagramPadding`).
     /// Upstream default is 20.
     pub diagram_padding: f64,
+    /// Visual look — `Some("handDrawn")` triggers the rough.js path.
+    /// `None` / any other value renders as crisp SVG primitives.
+    pub look: Option<String>,
+    /// Seed for the rough.js LCG when `look == "handDrawn"`. Defaults
+    /// to upstream's `mermaid.initialize({ handDrawnSeed: 1 })` value
+    /// when the configuration omits a seed.
+    pub hand_drawn_seed: Option<i32>,
 }
