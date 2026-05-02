@@ -407,6 +407,26 @@ fn build_graph_filtered_ex<'a>(
         .as_deref()
         .map(|t| t.starts_with("state"))
         .unwrap_or(false);
+    // Set of all cluster (is_group) ids in the source data — used for the
+    // partition logic. Upstream `adjustClustersAndEdges` removes-and-readds
+    // every edge whose v or w is a cluster (regardless of whether the
+    // resulting rewrite is a no-op). We mirror that by classifying any
+    // edge with a cluster endpoint as "rewritten" so it lands at the end
+    // of the post-partition order.
+    let mut all_cluster_ids: std::collections::HashSet<&str> = data
+        .nodes
+        .iter()
+        .filter(|n| n.is_group)
+        .map(|n| n.id.as_str())
+        .collect();
+    // Isolated clusters enter the outer dagre as leaves (is_group=false) but
+    // upstream still treats edges with these endpoints as "cluster edges"
+    // for the adjustClustersAndEdges remove-and-readd loop, since they were
+    // clusters at the time of the rewrite. Include them in the cluster-id
+    // set so the partition logic mirrors that behaviour.
+    for cid in isolated_cluster_ids.iter() {
+        all_cluster_ids.insert(*cid);
+    }
     let edge_order: Vec<usize> = if do_partition {
         // Stable-partition: anchor-rewritten edges come last.
         let mut non_rewritten: Vec<usize> = Vec::new();
@@ -452,7 +472,15 @@ fn build_graph_filtered_ex<'a>(
             if excluded.contains(dagre_src) || excluded.contains(dagre_dst) {
                 continue;
             }
-            if dagre_src != effective_src || dagre_dst != effective_dst {
+            // Upstream removes-and-readds an edge whenever either ORIGINAL
+            // endpoint is a cluster, even if the resulting rewrite is a
+            // no-op (e.g. an edge whose endpoint is an isolated cluster
+            // gets re-inserted at the end of the edge list). Classify
+            // such edges as rewritten too, so they sit at the tail and
+            // dagre's pre-rank ordering matches upstream's binding.
+            let touches_cluster = all_cluster_ids.contains(effective_src)
+                || all_cluster_ids.contains(effective_dst);
+            if touches_cluster || dagre_src != effective_src || dagre_dst != effective_dst {
                 rewritten.push(idx);
             } else {
                 non_rewritten.push(idx);
@@ -3042,7 +3070,22 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     let excluded_refs: std::collections::HashSet<&str> =
         excluded_node_ids.iter().map(|s| s.as_str()).collect();
     let outer_cluster_anchors = build_cluster_anchors(&outer_data, &excluded_refs);
-    let mut g = build_graph_filtered(&outer_data, &excluded_refs);
+    // Pass iso-cluster descendants so build_graph_filtered_ex can recognise
+    // the (now-leaf) iso clusters as cluster endpoints when partitioning the
+    // edge order — upstream's adjustClustersAndEdges pushes any edge whose
+    // endpoint is a cluster to the tail, even when the cluster is otherwise
+    // "isolated".
+    let mut iso_desc_for_outer: std::collections::HashMap<
+        String,
+        std::collections::HashSet<String>,
+    > = std::collections::HashMap::new();
+    for (cid, _il) in &isolated_layouts {
+        iso_desc_for_outer.insert(cid.clone(), all_descendants(cid, data));
+    }
+    for (cid, _il) in &nested_isolated_layouts {
+        iso_desc_for_outer.insert(cid.clone(), all_descendants(cid, data));
+    }
+    let mut g = build_graph_filtered_ex(&outer_data, &excluded_refs, &iso_desc_for_outer);
     let opts = build_layout_options(&outer_data);
     dagre::layout(&mut g, Some(opts));
 
