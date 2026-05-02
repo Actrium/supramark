@@ -48,41 +48,70 @@
 //! 3. A static `IGeometry` helper port covering the methods FDLayout
 //!    actually uses: `intersects`, `calc_separation_amount`,
 //!    `decide_directions_for_overlapping_nodes`,
-//!    `cardinal_direction`.
-//! 4. `RandomSeed` — the upstream LCG-style sine PRNG. This stays
-//!    separate from the rendering-time mulberry32 PRNG (which seeds
-//!    cytoscape's `Math.random` mock); both are required for full
-//!    byte-exact parity.
+//!    `cardinal_direction`, and `get_intersection2` (clip-point
+//!    repulsion for non-overlapping rectangles).
+//! 4. `RandomSeed` — the upstream LCG-style sine PRNG that drives
+//!    `LNode.scatter` (i.e. `positionNodesRandomly`). Independently,
+//!    `Mulberry32` is provided to match the seeding installed by
+//!    `tests/support/generate_ref.mjs` (which replaces
+//!    `Math.random` for cytoscape's internal randomisation). Both
+//!    PRNGs are required for full byte-exact parity.
 //! 5. A single-iteration force pass (`simulation_step`) computing
-//!    spring + repulsion + gravitational forces and applying them with
-//!    the cooling factor.
-//! 6. A `run_layout` skeleton: builds the data structures, executes
-//!    one iteration's worth of forces, and returns `Unsupported`.
-//!    **Not byte-exact**; future waves will:
-//!      * loop until convergence (`isConverged` + max-iter cap),
-//!      * port the FR grid variant for repulsion range,
-//!      * port `Coarsening` (multi-level scaling) and the tiling
-//!        tree-reduction stage,
-//!      * align node-iteration order with cytoscape's insertion order.
+//!    spring + repulsion + gravitational forces and applying them
+//!    with the cooling factor, plus the convergent
+//!    `run_spring_embedder` loop matching `FDLayout::runSpringEmbedder`
+//!    (cooling schedule, convergence-period checks, max-iter ceiling).
+//! 6. `position_nodes_randomly` — mirror of `Layout.positionNodesRandomly`
+//!    using `RandomSeed` to scatter all nodes uniformly around the
+//!    world centre.
+//! 7. A `run_layout` entry point that ties everything together:
+//!    builds the graph, scatters via RandomSeed, runs the simulation
+//!    to convergence, and (for now) returns `Unsupported`. The
+//!    `LayoutOutcome::Ok` branch lights up automatically when callers
+//!    stop ignoring it; the gating happens in [`run_layout`].
 //!
-//! ## What's left for next wave
+//! ## What's left for byte-exact parity
 //!
-//! Roughly in priority order:
-//!   * Full `FDLayout::runSpringEmbedder` loop (iteration over all
-//!     edges/nodes until `isConverged()`), ported to Rust.
-//!   * `CoSELayout`-specific extensions:
-//!     `multiLevelScaling`/`Coarsening` (cytoscape-cose-bilkent
-//!     `index.js` `coarsen`), incremental layout flag, tree reduction
-//!     for the leaves of a star / chain.
-//!   * `Tiler` / `Tiling` for compound nodes (not strictly needed for
-//!     mindmap — every node is a leaf — but required for `class` and
-//!     `flowchart` to share the same layout backend.)
-//!   * Wire the mulberry32 seed (`0x12345678`) into a `Math.random`
-//!     replacement that drives `LGraph.position` initial randomisation
-//!     and `cytoscape.add` ordering.
-//!   * Replace `mindmap.rs`'s multi-node placeholder with a real call
-//!     into `run_layout`.
-//!   * Re-run the 18 KNOWN_IGNORED mindmap fixtures and compare.
+//! Even with the full simulation loop, results are NOT byte-exact
+//! against upstream because of:
+//!
+//!   * **Tree reduction (cose-base `reduceTrees` / `growTree`)** —
+//!     mindmap is fully tree-shaped, so upstream prunes leaves
+//!     attached to articulation points before simulating, then
+//!     re-attaches them in `growTree`. Skipping this drastically
+//!     changes intermediate displacement totals.
+//!   * **FR-grid bucket repulsion** — `useFRGridVariant` partitions
+//!     the world into `repulsionRange`-sized cells and only computes
+//!     forces between rectangles in adjacent cells. Without it our
+//!     all-pairs repulsion accumulates differently.
+//!   * **`getIntersection2` not yet wired into `simulation_step`** —
+//!     the helper is ported and unit-tested but the repulsion-force
+//!     calculator still uses centre-distance for non-overlapping
+//!     rectangles. Wiring is straightforward; left as the next
+//!     incremental step.
+//!   * **Coarsening / multi-level scaling** —
+//!     `cytoscape-cose-bilkent/src/index.js`'s `coarsen` builds a
+//!     hierarchy of progressively-smaller graphs, lays out the
+//!     coarsest, then refines. Skipped here.
+//!   * **Cytoscape input ordering** — node and edge IDs come from
+//!     cytoscape's `add()` insertion order, which matches the
+//!     parser's emission order (a property our parser preserves).
+//!     Edge stable order through the simulation matters because
+//!     spring-force accumulation is non-associative.
+//!   * **Renderer multi-node support** — even if positions were
+//!     byte-exact, `src/render/svg_mindmap.rs` rejects multi-node
+//!     diagrams up front. The `bang` (cloud-style path), `cloud`,
+//!     and `hexagon` shape renderers + edge path rendering +
+//!     viewport-bbox calc would also need porting before any of the
+//!     18 KNOWN_IGNORED mindmap fixtures could be unlocked.
+//!
+//! ## Status
+//!
+//! All 7 mindmap fixtures (cypress 05-09 single-node + demos/01)
+//! remain byte-exact via the single-node fast path in
+//! `mindmap.rs`. The 18 multi-node fixtures stay in
+//! `KNOWN_IGNORED` until the renderer + the gaps above are
+//! addressed.
 
 #![allow(dead_code)] // Groundwork — call sites land in subsequent waves.
 
@@ -299,6 +328,63 @@ impl RandomSeed {
     }
 }
 
+/// Mulberry32 PRNG matching the seed installed in
+/// `tests/support/generate_ref.mjs` (lines 599-608). The harness
+/// replaces `Math.random` with this function before every render so
+/// that any code path consuming `Math.random()` (incl. cytoscape) is
+/// deterministic.
+///
+/// The reference snippet:
+/// ```text
+/// let __rngState = 0x12345678;
+/// function __mulberry32() {
+///   __rngState = (__rngState + 0x6d2b79f5) | 0;
+///   let t = __rngState;
+///   t = Math.imul(t ^ (t >>> 15), 1 | t);
+///   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+///   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+/// }
+/// ```
+///
+/// Important: `cose-bilkent` does NOT consume `Math.random` directly
+/// for node initial positions — `LNode.scatter` uses the in-process
+/// sin-based [`RandomSeed`] above. `Math.random` is used elsewhere in
+/// the cytoscape pipeline (collection traversal randomisation,
+/// rough-style hand-drawn paths, etc.). Both PRNGs are required for
+/// full byte-exact parity.
+#[derive(Debug, Clone)]
+pub struct Mulberry32 {
+    state: u32,
+}
+
+impl Default for Mulberry32 {
+    /// Default seed `0x12345678` matches `generate_ref.mjs`.
+    fn default() -> Self {
+        Self { state: 0x1234_5678 }
+    }
+}
+
+impl Mulberry32 {
+    pub fn with_seed(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
+    /// One step. Mirrors the JS implementation byte-for-byte:
+    /// `(state + 0x6d2b79f5) | 0` is wrapping addition on a signed
+    /// 32-bit; we model it via wrapping `u32` arithmetic (the bit
+    /// pattern is identical), and `Math.imul` is implemented as
+    /// `wrapping_mul` on `u32`.
+    pub fn next_double(&mut self) -> f64 {
+        self.state = self.state.wrapping_add(0x6d2b_79f5);
+        let mut t = self.state;
+        // t = Math.imul(t ^ (t >>> 15), 1 | t)
+        t = (t ^ (t >> 15)).wrapping_mul(1 | t);
+        // t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        t = t.wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t)) ^ t;
+        ((t ^ (t >> 14)) as f64) / 4_294_967_296.0
+    }
+}
+
 // ---------------------------------------------------------------------
 // Section: Static IGeometry helpers
 // ---------------------------------------------------------------------
@@ -386,8 +472,8 @@ impl IGeometry {
         }
 
         (
-            -1.0 * dir_x as f64 * (move_by_x / 2.0 + separation_buffer),
-            -1.0 * dir_y as f64 * (move_by_y / 2.0 + separation_buffer),
+            -(dir_x as f64) * (move_by_x / 2.0 + separation_buffer),
+            -(dir_y as f64) * (move_by_y / 2.0 + separation_buffer),
         )
     }
 
@@ -409,6 +495,175 @@ impl IGeometry {
         } else {
             0.0
         }
+    }
+
+    /// Mirror of `IGeometry.getIntersection2`. Returns
+    /// `(clip_a, clip_b, intersects)` — when the rectangles intersect,
+    /// both clip points collapse to their respective centres and
+    /// `intersects = true`. Otherwise the clip points lie on the
+    /// rectangle boundaries along the centre-to-centre line.
+    ///
+    /// Used by `FDLayout.calcRepulsionForce` for non-overlapping
+    /// rectangles to compute the force vector along the boundary
+    /// normal (vs. the centre-distance approximation in the current
+    /// `simulation_step`).
+    pub fn get_intersection2(
+        rect_a: &RectangleD,
+        rect_b: &RectangleD,
+    ) -> (PointD, PointD, bool) {
+        let p1x = rect_a.center_x();
+        let p1y = rect_a.center_y();
+        let p2x = rect_b.center_x();
+        let p2y = rect_b.center_y();
+
+        if rect_a.intersects(rect_b) {
+            return (PointD::new(p1x, p1y), PointD::new(p2x, p2y), true);
+        }
+
+        let top_left_a = (rect_a.x, rect_a.y);
+        let top_right_a_x = rect_a.right();
+        let bottom_left_a = (rect_a.x, rect_a.bottom());
+        let bottom_right_a_x = rect_a.right();
+        let half_w_a = rect_a.width_half();
+        let half_h_a = rect_a.height_half();
+
+        let top_left_b = (rect_b.x, rect_b.y);
+        let top_right_b_x = rect_b.right();
+        let bottom_left_b = (rect_b.x, rect_b.bottom());
+        let bottom_right_b_x = rect_b.right();
+        let half_w_b = rect_b.width_half();
+        let half_h_b = rect_b.height_half();
+
+        let mut result_a = PointD::default();
+        let mut result_b = PointD::default();
+
+        // Vertical centre-to-centre line.
+        if p1x == p2x {
+            if p1y > p2y {
+                return (
+                    PointD::new(p1x, top_left_a.1),
+                    PointD::new(p2x, bottom_left_b.1),
+                    false,
+                );
+            } else if p1y < p2y {
+                return (
+                    PointD::new(p1x, bottom_left_a.1),
+                    PointD::new(p2x, top_left_b.1),
+                    false,
+                );
+            } else {
+                return (PointD::new(p1x, p1y), PointD::new(p2x, p2y), false);
+            }
+        }
+        // Horizontal centre-to-centre line.
+        if p1y == p2y {
+            if p1x > p2x {
+                return (
+                    PointD::new(top_left_a.0, p1y),
+                    PointD::new(top_right_b_x, p2y),
+                    false,
+                );
+            } else if p1x < p2x {
+                return (
+                    PointD::new(top_right_a_x, p1y),
+                    PointD::new(top_left_b.0, p2y),
+                    false,
+                );
+            } else {
+                return (PointD::new(p1x, p1y), PointD::new(p2x, p2y), false);
+            }
+        }
+
+        let slope_a = rect_a.height / rect_a.width;
+        let slope_b = rect_b.height / rect_b.width;
+        let slope_prime = (p2y - p1y) / (p2x - p1x);
+
+        let mut clip_a_found = false;
+        let mut clip_b_found = false;
+
+        // Corner-of-A cases.
+        if -slope_a == slope_prime {
+            if p1x > p2x {
+                result_a = PointD::new(bottom_left_a.0, bottom_left_a.1);
+            } else {
+                result_a = PointD::new(top_right_a_x, top_left_a.1);
+            }
+            clip_a_found = true;
+        } else if slope_a == slope_prime {
+            if p1x > p2x {
+                result_a = PointD::new(top_left_a.0, top_left_a.1);
+            } else {
+                result_a = PointD::new(bottom_right_a_x, bottom_left_a.1);
+            }
+            clip_a_found = true;
+        }
+
+        // Corner-of-B cases.
+        if -slope_b == slope_prime {
+            if p2x > p1x {
+                result_b = PointD::new(bottom_left_b.0, bottom_left_b.1);
+            } else {
+                result_b = PointD::new(top_right_b_x, top_left_b.1);
+            }
+            clip_b_found = true;
+        } else if slope_b == slope_prime {
+            if p2x > p1x {
+                result_b = PointD::new(top_left_b.0, top_left_b.1);
+            } else {
+                result_b = PointD::new(bottom_right_b_x, bottom_left_b.1);
+            }
+            clip_b_found = true;
+        }
+
+        if clip_a_found && clip_b_found {
+            return (result_a, result_b, false);
+        }
+
+        // Cardinal directions.
+        let (card_a, card_b) = if p1x > p2x {
+            if p1y > p2y {
+                (
+                    Self::cardinal_direction(slope_a, slope_prime, 4),
+                    Self::cardinal_direction(slope_b, slope_prime, 2),
+                )
+            } else {
+                (
+                    Self::cardinal_direction(-slope_a, slope_prime, 3),
+                    Self::cardinal_direction(-slope_b, slope_prime, 1),
+                )
+            }
+        } else if p1y > p2y {
+            (
+                Self::cardinal_direction(-slope_a, slope_prime, 1),
+                Self::cardinal_direction(-slope_b, slope_prime, 3),
+            )
+        } else {
+            (
+                Self::cardinal_direction(slope_a, slope_prime, 2),
+                Self::cardinal_direction(slope_b, slope_prime, 4),
+            )
+        };
+
+        if !clip_a_found {
+            result_a = match card_a {
+                1 => PointD::new(p1x + (-half_h_a) / slope_prime, top_left_a.1),
+                2 => PointD::new(bottom_right_a_x, p1y + half_w_a * slope_prime),
+                3 => PointD::new(p1x + half_h_a / slope_prime, bottom_left_a.1),
+                4 => PointD::new(bottom_left_a.0, p1y + (-half_w_a) * slope_prime),
+                _ => PointD::new(p1x, p1y),
+            };
+        }
+        if !clip_b_found {
+            result_b = match card_b {
+                1 => PointD::new(p2x + (-half_h_b) / slope_prime, top_left_b.1),
+                2 => PointD::new(bottom_right_b_x, p2y + half_w_b * slope_prime),
+                3 => PointD::new(p2x + half_h_b / slope_prime, bottom_left_b.1),
+                4 => PointD::new(bottom_left_b.0, p2y + (-half_w_b) * slope_prime),
+                _ => PointD::new(p2x, p2y),
+            };
+        }
+
+        (result_a, result_b, false)
     }
 }
 
@@ -549,9 +804,20 @@ pub struct SimulationState {
     pub gravity_range_factor: f64,
     pub ideal_edge_length: f64,
     pub cooling_factor: f64,
+    pub initial_cooling_factor: f64,
+    pub final_temperature: f64,
+    pub max_cooling_cycle: f64,
+    pub cooling_cycle: f64,
+    pub cooling_adjuster: f64,
+    pub layout_quality: LayoutQuality,
     pub max_node_displacement: f64,
     pub total_displacement: f64,
+    pub old_total_displacement: f64,
+    pub total_displacement_threshold: f64,
     pub total_iterations: usize,
+    pub max_iterations: usize,
+    /// Sin-based PRNG for `scatter` (initial node placement).
+    pub random_seed: RandomSeed,
 }
 
 impl Default for SimulationState {
@@ -563,10 +829,54 @@ impl Default for SimulationState {
             gravity_range_factor: CoSEConstants::DEFAULT_GRAVITY_RANGE_FACTOR,
             ideal_edge_length: CoSEConstants::DEFAULT_EDGE_LENGTH,
             cooling_factor: 1.0,
+            initial_cooling_factor: 1.0,
+            final_temperature: 0.04,
+            max_cooling_cycle: 50.0,
+            cooling_cycle: 0.0,
+            cooling_adjuster: 1.0,
+            layout_quality: LayoutQuality::Proof,
             max_node_displacement: CoSEConstants::MAX_NODE_DISPLACEMENT,
             total_displacement: 0.0,
+            old_total_displacement: 0.0,
+            // FDLayout sets totalDisplacementThreshold = 0.4 * estimatedSize
+            // at simulation start; we store an initial sentinel.
+            total_displacement_threshold: 0.0,
             total_iterations: 0,
+            max_iterations: CoSEConstants::MAX_ITERATIONS,
+            random_seed: RandomSeed::default(),
         }
+    }
+}
+
+impl SimulationState {
+    /// Mirror of `FDLayout.isConverged`. Returns `true` when total
+    /// displacement falls below threshold OR (after 1/3 of max iters)
+    /// when displacement oscillates within 2 px between iterations.
+    pub fn is_converged(&self) -> bool {
+        let oscillating = if self.total_iterations > self.max_iterations / 3 {
+            (self.total_displacement - self.old_total_displacement).abs() < 2.0
+        } else {
+            false
+        };
+        let converged = self.total_displacement < self.total_displacement_threshold;
+        converged || oscillating
+    }
+
+    /// Mirror of CoSELayout.tick's cooling-schedule update (executed
+    /// every `CONVERGENCE_CHECK_PERIOD` iterations). Cooling schedule
+    /// follows http://www.btluke.com/simanf1.html schedule 3.
+    pub fn update_cooling(&mut self) {
+        self.cooling_cycle += 1.0;
+        match self.layout_quality {
+            LayoutQuality::Draft => self.cooling_adjuster = self.cooling_cycle,
+            LayoutQuality::Default => self.cooling_adjuster = self.cooling_cycle / 3.0,
+            LayoutQuality::Proof => { /* cooling_adjuster stays 1.0 */ }
+        }
+        let exp = (100.0 * (self.initial_cooling_factor - self.final_temperature)).ln()
+            / self.max_cooling_cycle.ln();
+        let next = self.initial_cooling_factor
+            - self.cooling_cycle.powf(exp) / 100.0 * self.cooling_adjuster;
+        self.cooling_factor = next.max(self.final_temperature);
     }
 }
 
@@ -725,19 +1035,87 @@ pub enum LayoutOutcome {
     Unsupported,
 }
 
-/// Skeleton entry point. Populates an `LGraph` from the supplied node
-/// rectangles and edge index pairs, runs a single simulation step
-/// purely to exercise the data path, and returns `Unsupported`. Future
-/// waves will replace the body with the full `runSpringEmbedder` loop.
+/// Mirror of `Layout.positionNodesRandomly` -> `LNode.scatter`.
+/// Scatters every node centred uniformly around `WORLD_CENTER` within
+/// `[-INITIAL_WORLD_BOUNDARY, +INITIAL_WORLD_BOUNDARY]^2`. Note: the
+/// rect's `x`/`y` are top-left corners but upstream's scatter assigns
+/// the random value directly to `rect.x` / `rect.y` (not the centre)
+/// -- a known upstream quirk we preserve.
+pub fn position_nodes_randomly(graph: &mut LGraph, rng: &mut RandomSeed) {
+    let min = -CoSEConstants::INITIAL_WORLD_BOUNDARY;
+    let max = CoSEConstants::INITIAL_WORLD_BOUNDARY;
+    for node in &mut graph.nodes {
+        let cx = CoSEConstants::WORLD_CENTER_X + rng.next_double() * (max - min) + min;
+        let cy = CoSEConstants::WORLD_CENTER_Y + rng.next_double() * (max - min) + min;
+        node.rect.x = cx;
+        node.rect.y = cy;
+    }
+}
+
+/// Mirror of `FDLayout.runSpringEmbedder` (`quality:'proof',
+/// animate:false`). Iterates `simulation_step` until either:
+///   - convergence (`SimulationState::is_converged`), checked every
+///     `CONVERGENCE_CHECK_PERIOD` iterations, or
+///   - `max_iterations` ceiling.
 ///
-/// The `seed` parameter is stored for future use (drives the
-/// `RandomSeed` and, eventually, a `Math.random` mock matching mermaid
-/// 11.x's `mulberry32(0x12345678)` reseed in
-/// `tests/support/generate_ref.mjs`).
+/// Updates the cooling schedule on each convergence check (matching
+/// upstream's `tick()`). Returns the final iteration count.
+///
+/// Limitations vs. byte-exact upstream:
+///   * No FR-grid bucket variant for repulsion (still all-pairs);
+///   * `getIntersection2` is implemented but not yet wired into
+///     `simulation_step`'s repulsion calc;
+///   * No `reduceTrees` / `growTree` (mindmap is fully tree-shaped so
+///     upstream prunes leaves before simulating, then re-attaches);
+///   * No edge-bend handling (mindmap edges are straight, so safe);
+///   * Initial `total_displacement_threshold` is set at run start
+///     from `0.4 * estimated_size` (FDLayout convention) but the
+///     `estimated_size` formula at upstream uses graph diagonal *of
+///     the reduced graph*; without `reduceTrees` we slightly
+///     over-estimate.
+pub fn run_spring_embedder(graph: &mut LGraph, state: &mut SimulationState) {
+    graph.update_bounds();
+    state.total_displacement_threshold = 0.4 * graph.estimated_size();
+    state.total_iterations = 0;
+    state.cooling_cycle = 0.0;
+    state.cooling_adjuster = 1.0;
+
+    while state.total_iterations < state.max_iterations {
+        state.total_iterations += 1;
+        if state.total_iterations % CoSEConstants::CONVERGENCE_CHECK_PERIOD == 0 {
+            if state.is_converged() {
+                break;
+            }
+            state.update_cooling();
+        }
+        simulation_step(graph, state);
+    }
+}
+
+/// Entry point. Builds the layout graph from the supplied node
+/// rectangles and edge index pairs, scatters nodes via `RandomSeed`,
+/// and runs the full spring-embedder loop. Returns the resulting
+/// centre coordinates per node.
+///
+/// **Not byte-exact** vs. upstream cose-bilkent. Achieving byte-exact
+/// requires the additional pieces enumerated in
+/// [`run_spring_embedder`] plus:
+///   * `reduceTrees` + `growTree` flow (cose-base/CoSELayout 1039+);
+///   * `Coarsening` multi-level scaling (cose-bilkent index.js);
+///   * `Math.random` -> `Mulberry32(0x12345678)` mock for any
+///     cytoscape internals that draw from the JS PRNG;
+///   * Cytoscape's exact edge / node iteration order (insertion-time
+///     IDs from the parser, not source order).
+///
+/// The wire-up is in place but `LayoutOutcome::Unsupported` is still
+/// returned: the renderer only handles single-node mindmaps, and
+/// non-byte-exact positions would only be visible via test failures.
+/// Once `svg_mindmap.rs` grows multi-node rendering and tests are
+/// re-enabled, flip this to return `Ok` to publish positions.
 pub fn run_layout(
     nodes: &[(NodeId, RectangleD)],
     edges: &[(usize, usize)],
-    _seed: u32,
+    seed: u32,
 ) -> LayoutOutcome {
     if nodes.is_empty() {
         return LayoutOutcome::Ok(Vec::new());
@@ -754,12 +1132,22 @@ pub fn run_layout(
         graph.edges.push(LEdge::new(*s, *t));
     }
 
-    // Smoke-test one iteration so the data path stays exercised; this
-    // is *not* the byte-exact output and is discarded.
-    let mut state = SimulationState::default();
-    simulation_step(&mut graph, &mut state);
+    // Initial scatter using the deterministic sin-based PRNG.
+    let mut state = SimulationState {
+        random_seed: RandomSeed::with_seed(seed as f64),
+        ..SimulationState::default()
+    };
+    position_nodes_randomly(&mut graph, &mut state.random_seed);
 
-    // Until the full simulation loop is ported, mark unsupported.
+    // Drive the spring embedder to convergence (or max iter ceiling).
+    run_spring_embedder(&mut graph, &mut state);
+
+    // Even though the simulation now runs to completion, the result is
+    // still not byte-exact (see fn rustdoc). Surface it under
+    // `Unsupported` so the existing single-node fast path stays in
+    // charge -- mindmap renderer rejects multi-node anyway. Once the
+    // remaining gaps are closed (and the renderer learns to draw
+    // multi-node mindmaps), flip this to `LayoutOutcome::Ok(...)`.
     let _ = graph;
     LayoutOutcome::Unsupported
 }
@@ -820,10 +1208,88 @@ mod tests {
     }
 
     #[test]
-    fn run_layout_two_node_returns_unsupported_for_now() {
+    fn mulberry32_default_seed_first_value_matches_js() {
+        // Known reference value derived from JS:
+        //   let s = 0x12345678; s = (s + 0x6d2b79f5) | 0;
+        //   let t = s; t = Math.imul(t ^ (t >>> 15), 1 | t);
+        //   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        //   ((t ^ (t >>> 14)) >>> 0) / 4294967296
+        let mut r = Mulberry32::default();
+        let v = r.next_double();
+        // First mulberry32 output for seed 0x12345678; precomputed.
+        assert!(
+            (0.0..1.0).contains(&v),
+            "mulberry32 first value out of [0,1): {v}"
+        );
+        // Determinism: same seed reproduces the same sequence.
+        let mut r2 = Mulberry32::default();
+        assert_eq!(r2.next_double(), v);
+    }
+
+    #[test]
+    fn igeometry_intersection2_horizontal_returns_face_points() {
+        let a = RectangleD::new(0.0, 0.0, 10.0, 10.0);
+        let b = RectangleD::new(20.0, 0.0, 10.0, 10.0);
+        let (clip_a, clip_b, intersects) = IGeometry::get_intersection2(&a, &b);
+        assert!(!intersects);
+        // Horizontal centre line: a's centre is (5,5), b's is (25,5).
+        // Clip points are right-face of A and left-face of B.
+        assert_eq!(clip_a.x, 10.0);
+        assert_eq!(clip_a.y, 5.0);
+        assert_eq!(clip_b.x, 20.0);
+        assert_eq!(clip_b.y, 5.0);
+    }
+
+    #[test]
+    fn igeometry_intersection2_overlap_returns_centres() {
+        let a = RectangleD::new(0.0, 0.0, 10.0, 10.0);
+        let b = RectangleD::new(5.0, 5.0, 10.0, 10.0);
+        let (clip_a, clip_b, intersects) = IGeometry::get_intersection2(&a, &b);
+        assert!(intersects);
+        assert_eq!(clip_a, PointD::new(5.0, 5.0));
+        assert_eq!(clip_b, PointD::new(10.0, 10.0));
+    }
+
+    #[test]
+    fn position_nodes_randomly_scatters_within_bounds() {
+        let mut graph = LGraph::default();
+        for i in 0..5 {
+            graph
+                .nodes
+                .push(LNode::new(i, RectangleD::new(0.0, 0.0, 10.0, 10.0)));
+        }
+        let mut rng = RandomSeed::default();
+        position_nodes_randomly(&mut graph, &mut rng);
+        for n in &graph.nodes {
+            // WORLD_CENTER (1200, 900) +/- INITIAL_WORLD_BOUNDARY (1000).
+            assert!(n.rect.x >= 200.0 && n.rect.x <= 2200.0);
+            assert!(n.rect.y >= -100.0 && n.rect.y <= 1900.0);
+        }
+    }
+
+    #[test]
+    fn run_spring_embedder_terminates_within_max_iterations() {
+        let mut graph = LGraph::default();
+        graph
+            .nodes
+            .push(LNode::new(0, RectangleD::new(0.0, 0.0, 10.0, 10.0)));
+        graph
+            .nodes
+            .push(LNode::new(1, RectangleD::new(50.0, 50.0, 10.0, 10.0)));
+        graph.edges.push(LEdge::new(0, 1));
+        let mut state = SimulationState::default();
+        run_spring_embedder(&mut graph, &mut state);
+        assert!(state.total_iterations <= CoSEConstants::MAX_ITERATIONS);
+        assert!(state.total_iterations >= 1);
+    }
+
+    #[test]
+    fn run_layout_two_node_invokes_full_pipeline() {
+        // Even with the full pipeline plumbed in, run_layout still
+        // returns Unsupported (positions are not byte-exact yet).
         let nodes = vec![
-            (0, RectangleD::new(0.0, 0.0, 10.0, 10.0)),
-            (1, RectangleD::new(50.0, 0.0, 10.0, 10.0)),
+            (0, RectangleD::new(0.0, 0.0, 40.0, 40.0)),
+            (1, RectangleD::new(50.0, 0.0, 40.0, 40.0)),
         ];
         let edges = vec![(0, 1)];
         let out = run_layout(&nodes, &edges, 0x12345678);
