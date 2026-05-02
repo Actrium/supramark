@@ -19,13 +19,8 @@ ext_fixtures/demos/flowchart/44.mmd	KaTeX math rendering ($$...$$); byte-exact p
 ext_fixtures/demos/flowchart/45.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.
 ext_fixtures/demos/flowchart/46.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.
 ext_fixtures/demos/flowchart/47.mmd	KaTeX math rendering ($$...$$); byte-exact parity requires porting KaTeX renderer output.
-ext_fixtures/cypress/flowchart/105.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/cypress/flowchart/144.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/cypress/flowchart/239.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/demos/flowchart/38.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/demos/flowchart/39.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/demos/flowchart/40.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
-ext_fixtures/demos/flowchart/41.mmd	Asymmetric `>...]` shape (rect_left_inv_arrow) renders as rough-js `<path>` family in upstream regardless of look; byte-exact parity requires porting rough.js path emission for that shape.
+ext_fixtures/cypress/flowchart/144.mmd	Doublecircle missing `style` attribute on outer `<g>`/inner `<circle>` when node carries inline styles; rect_left_inv_arrow part now byte-exact, blocked on doublecircle style threading.
+ext_fixtures/demos/flowchart/41.mmd	Doublecircle missing `style` attribute on outer `<g>`/inner `<circle>` when node carries inline styles; rect_left_inv_arrow part now byte-exact, blocked on doublecircle style threading.
 ext_fixtures/demos/flowchart/65.mmd	Stadium + thick arrows + linkStyle/classDef uses roughjs rendering; byte-exact parity requires porting roughjs rendering algorithm.
 ext_fixtures/demos/venn/03.mmd	`theme: 'dark'` style block + 3-circle symmetric Nelder-Mead divergence.
 ext_fixtures/demos/venn/04.mmd	4 sets × 6 pairwise overlaps = 10 areas — triggers constrainedMDS layout which uses Math.random for initial guess; not reproducible without the V8 PRNG state.

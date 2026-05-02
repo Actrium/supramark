@@ -381,7 +381,7 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
 /// `svg_flowchart`'s markdown branch (e.g. the diamond polygon) still
 /// produce byte-exact output.
 pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, &[])
+    shape_label_block_inner(escaped_label, font, 0.0, 0.0, &[])
 }
 
 /// Variant of [`shape_label_block`] that threads the node's inline
@@ -396,7 +396,7 @@ pub fn shape_label_block_with_styles(
     font: &HtmlLabelFont<'_>,
     css_styles: &[String],
 ) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, css_styles)
+    shape_label_block_inner(escaped_label, font, 0.0, 0.0, css_styles)
 }
 
 /// Variant of [`shape_label_block`] that adds a vertical offset to the outer
@@ -408,7 +408,7 @@ pub fn shape_label_block_with_y_offset(
     font: &HtmlLabelFont<'_>,
     y_offset: f64,
 ) -> String {
-    shape_label_block_inner(escaped_label, font, y_offset, &[])
+    shape_label_block_inner(escaped_label, font, 0.0, y_offset, &[])
 }
 
 /// Combined `with_y_offset` + `with_styles` variant.
@@ -418,12 +418,28 @@ pub fn shape_label_block_with_y_offset_and_styles(
     y_offset: f64,
     css_styles: &[String],
 ) -> String {
-    shape_label_block_inner(escaped_label, font, y_offset, css_styles)
+    shape_label_block_inner(escaped_label, font, 0.0, y_offset, css_styles)
+}
+
+/// Variant of [`shape_label_block`] that adds an arbitrary x/y offset
+/// to the outer `<g class="label">` transform. Used by shapes whose
+/// upstream rendering shifts the label horizontally too — e.g.
+/// `rectLeftInvArrow` where the wrapping group is translated by
+/// `-notch/2` and the label by the same amount on top of `-bbox.width/2`.
+pub fn shape_label_block_with_xy_offset_and_styles(
+    escaped_label: &str,
+    font: &HtmlLabelFont<'_>,
+    x_offset: f64,
+    y_offset: f64,
+    css_styles: &[String],
+) -> String {
+    shape_label_block_inner(escaped_label, font, x_offset, y_offset, css_styles)
 }
 
 fn shape_label_block_inner(
     escaped_label: &str,
     font: &HtmlLabelFont<'_>,
+    x_offset: f64,
     y_offset: f64,
     css_styles: &[String],
 ) -> String {
@@ -464,6 +480,7 @@ fn shape_label_block_inner(
         mut base: LabelOpts<'a>,
         w: f64,
         h: f64,
+        x_offset: f64,
         y_offset: f64,
         lbl_style: &'a str,
         div_prefix: &'a str,
@@ -475,10 +492,10 @@ fn shape_label_block_inner(
         if !div_prefix.is_empty() {
             base.div_style_prefix = Some(div_prefix);
         }
-        if y_offset != 0.0 {
+        if x_offset != 0.0 || y_offset != 0.0 {
             base.group_transform = Some(format!(
                 "translate({}, {})",
-                fmt_num(-w / 2.0),
+                fmt_num(-w / 2.0 + x_offset),
                 fmt_num(-h / 2.0 + y_offset)
             ));
         }
@@ -500,7 +517,7 @@ fn shape_label_block_inner(
             extra_span_classes: "markdown-node-label",
             ..LabelOpts::default()
         };
-        let opts = apply_style_overrides(base, w, h, y_offset, &lbl_style, &div_prefix);
+        let opts = apply_style_overrides(base, w, h, x_offset, y_offset, &lbl_style, &div_prefix);
         return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with embedded `<br>` family tags must be re-emitted
@@ -517,7 +534,15 @@ fn shape_label_block_inner(
     if has_escaped_br(&processed) {
         let html = restore_escaped_br(&processed);
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        let opts = apply_style_overrides(LabelOpts::default(), w, h, y_offset, &lbl_style, &div_prefix);
+        let opts = apply_style_overrides(
+            LabelOpts::default(),
+            w,
+            h,
+            x_offset,
+            y_offset,
+            &lbl_style,
+            &div_prefix,
+        );
         return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with a literal `\n` need the same `<br/>` rewrite
@@ -532,7 +557,15 @@ fn shape_label_block_inner(
     if processed.contains('\n') {
         let html: String = processed.split('\n').collect::<Vec<&str>>().join("<br/>");
         let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        let opts = apply_style_overrides(LabelOpts::default(), w, h, y_offset, &lbl_style, &div_prefix);
+        let opts = apply_style_overrides(
+            LabelOpts::default(),
+            w,
+            h,
+            x_offset,
+            y_offset,
+            &lbl_style,
+            &div_prefix,
+        );
         return render_node_label(&html, w, h, &opts);
     }
     // After `replace_fa_icons`, FA references like `fa:fa-code` become
@@ -543,11 +576,27 @@ fn shape_label_block_inner(
     // tags via the textContent rule.
     if processed.contains("<i ") {
         let (w, h) = measure_html_markup_label(&processed, font, 200.0, true);
-        let opts = apply_style_overrides(LabelOpts::default(), w, h, y_offset, &lbl_style, &div_prefix);
+        let opts = apply_style_overrides(
+            LabelOpts::default(),
+            w,
+            h,
+            x_offset,
+            y_offset,
+            &lbl_style,
+            &div_prefix,
+        );
         return render_node_label(&processed, w, h, &opts);
     }
     let (w, h) = measure_html_label(&processed, font, 200.0, true);
-    let opts = apply_style_overrides(LabelOpts::default(), w, h, y_offset, &lbl_style, &div_prefix);
+    let opts = apply_style_overrides(
+        LabelOpts::default(),
+        w,
+        h,
+        x_offset,
+        y_offset,
+        &lbl_style,
+        &div_prefix,
+    );
     render_node_label(&processed, w, h, &opts)
 }
 
