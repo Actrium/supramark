@@ -849,6 +849,38 @@ fn anchor_for_iso_weekday(target_dow: u32) -> f64 {
     (offset_days as f64) * day_ms
 }
 
+/// Mimic d3-array `tickIncrement(start, stop, count)` — returns the
+/// integer step used in `i1, i2, inc`. Positive meaning multiply, negative
+/// meaning divide; we always return the absolute "multiply" form for
+/// year-step usage (1, 2, 5, 10, 20, 50, 100, ...).
+fn d3_tick_step_year(start: f64, stop: f64, count: f64) -> u32 {
+    let step = (stop - start) / count.max(0.0);
+    if step <= 0.0 || !step.is_finite() {
+        return 1;
+    }
+    let power = step.log10().floor();
+    let e10 = 7.0710678118654755_f64;
+    let e5 = 3.1622776601683795_f64;
+    let e2 = 1.4142135623730951_f64;
+    let error = step / 10f64.powf(power);
+    let factor: f64 = if error >= e10 {
+        10.0
+    } else if error >= e5 {
+        5.0
+    } else if error >= e2 {
+        2.0
+    } else {
+        1.0
+    };
+    let inc = 10f64.powf(power) * factor;
+    let inc = if inc.is_finite() && inc >= 1.0 {
+        inc.round() as u32
+    } else {
+        1
+    };
+    inc.max(1)
+}
+
 fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &str) -> Vec<AxisTick> {
     if !min_ms.is_finite() || !max_ms.is_finite() || max_ms <= min_ms {
         return Vec::new();
@@ -898,6 +930,15 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
             break;
         }
     }
+    // d3's path for span much larger than 1 year: derive a multi-year
+    // step via tickStep(start/y, stop/y, count). This corresponds to
+    // `if (i === tickIntervals.length) return year.every(tickStep(...))`.
+    let year_ms = 365.25 * 86_400_000.0; // d3 durationYear
+    let multi_year_step: u32 = if idx == candidates.len() {
+        d3_tick_step_year(min_ms / year_ms, max_ms / year_ms, target)
+    } else {
+        1
+    };
     // Pick whichever of [idx-1] or [idx] is closer to target_step
     // (geometric mean rule: idx if target_step / step[idx-1] >
     // step[idx] / target_step).
@@ -1029,11 +1070,20 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
             v
         }
         "y" => {
+            // d3's `year.every(N)` filters to years that are integer
+            // multiples of N (anchored at year 0). For N>1 this means
+            // ticks at 1000, 2000, 3000, … (or 5, 10, 100 etc).
+            let step = multi_year_step.max(1) as i32;
             let (y0, _, _, _, _, _, _) = ms_to_date(min_ms);
             let mut y = y0;
-            // round up
-            if date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
-                y += 1;
+            // Align up to next multiple of step.
+            let rem = y.rem_euclid(step);
+            if rem != 0 {
+                y += step - rem;
+            }
+            // If aligned start is still < min_ms, advance another step.
+            while date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
+                y += step;
             }
             let mut v = Vec::new();
             loop {
@@ -1042,7 +1092,7 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
                     break;
                 }
                 v.push(t);
-                y += 1;
+                y += step;
             }
             v
         }

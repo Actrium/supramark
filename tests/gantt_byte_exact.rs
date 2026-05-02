@@ -60,6 +60,19 @@ cypress!(cypress_01, "01");
 cypress!(cypress_02, "02");
 cypress!(cypress_03, "03");
 cypress!(cypress_04, "04");
+// cypress_05: tick offset by 1 px between Rust f64 / V8 Number. The
+// fixture has malformed task ids (`:ps`) that upstream's `new Date()`
+// fallback resolves to a slightly different timestamp than our lenient
+// parser, shifting the tick mid-axis.
+#[test]
+#[ignore = "fallback-Date parsing diverges from V8 on malformed ids"]
+fn cypress_05() {
+    assert_fixture(
+        "tests/ext_fixtures/cypress/gantt/05.mmd",
+        "tests/reference/ext_fixtures/cypress/gantt/05.svg",
+        "ref-ext-fixtures-cypress-gantt-05",
+    );
+}
 cypress!(cypress_06, "06");
 cypress!(cypress_07, "07");
 cypress!(cypress_08, "08");
@@ -78,6 +91,7 @@ cypress!(cypress_20, "20");
 cypress!(cypress_21, "21");
 cypress!(cypress_22, "22");
 cypress!(cypress_23, "23");
+cypress!(cypress_24, "24");
 cypress!(cypress_25, "25");
 cypress!(cypress_26, "26");
 cypress!(cypress_27, "27");
@@ -92,6 +106,29 @@ cypress!(cypress_35, "35");
 cypress!(cypress_36, "36");
 cypress!(cypress_37, "37");
 cypress!(cypress_38, "38");
+// cypress_39: %s timeFormat (Unix epoch seconds) is timezone-sensitive
+// in d3-time-format; the reference assumes a non-UTC TZ.
+#[test]
+#[ignore = "%s timeFormat depends on local timezone (non-UTC reference)"]
+fn cypress_39() {
+    assert_fixture(
+        "tests/ext_fixtures/cypress/gantt/39.mmd",
+        "tests/reference/ext_fixtures/cypress/gantt/39.svg",
+        "ref-ext-fixtures-cypress-gantt-39",
+    );
+}
+// cypress_40: contains malformed date `202-12-01` (3-digit year)
+// which upstream's `new Date()` fallback parses as year 202 AD; our
+// lenient parser rejects it.
+#[test]
+#[ignore = "3-digit-year date `202-12-01` parses differently than V8"]
+fn cypress_40() {
+    assert_fixture(
+        "tests/ext_fixtures/cypress/gantt/40.mmd",
+        "tests/reference/ext_fixtures/cypress/gantt/40.svg",
+        "ref-ext-fixtures-cypress-gantt-40",
+    );
+}
 cypress!(cypress_41, "41");
 cypress!(cypress_42, "42");
 cypress!(cypress_43, "43");
@@ -101,6 +138,27 @@ demos!(demos_02, "02");
 demos!(demos_03, "03");
 demos!(demos_04, "04");
 demos!(demos_05, "05");
+// demos_06 / demos_07: dateFormat=`Z` (timezone offset) and an unusual
+// date string `08-08-09-01:00` that V8's `new Date()` fallback massages
+// into a parsable timestamp; we don't try to mimic that.
+#[test]
+#[ignore = "dateFormat=Z + non-ISO date string"]
+fn demos_06() {
+    assert_fixture(
+        "tests/ext_fixtures/demos/gantt/06.mmd",
+        "tests/reference/ext_fixtures/demos/gantt/06.svg",
+        "ref-ext-fixtures-demos-gantt-06",
+    );
+}
+#[test]
+#[ignore = "dateFormat=Z + non-ISO date string"]
+fn demos_07() {
+    assert_fixture(
+        "tests/ext_fixtures/demos/gantt/07.mmd",
+        "tests/reference/ext_fixtures/demos/gantt/07.svg",
+        "ref-ext-fixtures-demos-gantt-07",
+    );
+}
 demos!(demos_08, "08");
 demos!(demos_09, "09");
 demos!(demos_10, "10");
