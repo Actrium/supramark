@@ -3,7 +3,7 @@
 //! Outer + inner concentric circles; gap is `5` (classic look) or
 //! `12` (`neo` look). Inner radius = outer − gap.
 
-use super::types::{fmt_num, get_node_classes, xml_escape};
+use super::types::{build_inline_style, fmt_num, get_node_classes, xml_escape, xml_escape_label};
 use crate::error::Result;
 use crate::layout::unified::types::Node;
 use crate::theme::ThemeVariables;
@@ -27,6 +27,9 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         _ => String::new(),
     };
 
+    let css_styles = node.css_styles.as_deref().unwrap_or(&[]);
+    let container_style = build_inline_style(css_styles);
+
     let mut out = String::new();
     out.push_str(&format!(
         r#"<g class="{classes}" id="{id}"{data_look} transform="translate({tx}, {ty})">"#,
@@ -36,20 +39,38 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         tx = fmt_num(tx),
         ty = fmt_num(ty),
     ));
-    out.push_str(r#"<g class="basic label-container" style="">"#);
     out.push_str(&format!(
-        r#"<circle class="outer-circle" style="" r="{r}" cx="0" cy="0"/>"#,
+        r#"<g class="basic label-container" style="{container_style}">"#,
+        container_style = container_style,
+    ));
+    out.push_str(&format!(
+        r#"<circle class="outer-circle" style="{container_style}" r="{r}" cx="0" cy="0"></circle>"#,
+        container_style = container_style,
         r = fmt_num(outer),
     ));
     out.push_str(&format!(
-        r#"<circle class="inner-circle" style="" r="{r}" cx="0" cy="0"/>"#,
+        r#"<circle class="inner-circle" style="{container_style}" r="{r}" cx="0" cy="0"></circle>"#,
+        container_style = container_style,
         r = fmt_num(inner),
     ));
     out.push_str("</g>");
     if !label.is_empty() {
-        out.push_str(&format!(
-            r#"<g class="label" transform="translate(0, 0)"><text>{l}</text></g>"#,
-            l = xml_escape(&label),
+        out.push_str(
+            &crate::render::foreign_object::shape_label_block_with_styles(
+                &xml_escape_label(&label),
+                &crate::render::foreign_object::HtmlLabelFont::default(),
+                css_styles,
+            ),
+        );
+    } else {
+        let font = crate::render::foreign_object::HtmlLabelFont::default();
+        let (w, h) = crate::render::foreign_object::measure_html_label("", &font, 200.0, true);
+        let opts = crate::render::foreign_object::LabelOpts {
+            wrap_in_p: false,
+            ..crate::render::foreign_object::LabelOpts::default()
+        };
+        out.push_str(&crate::render::foreign_object::render_node_label(
+            "", w, h, &opts,
         ));
     }
     out.push_str("</g>");
