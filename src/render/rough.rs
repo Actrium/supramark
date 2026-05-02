@@ -1236,17 +1236,20 @@ fn compute_ellipse_points(
     o: &RoughOptions,
     rng: &mut RoughRandom,
 ) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
+    // Trig calls here drive ellipse path coordinates; route through the
+    // V8 fdlibm port so circle/ellipse outlines match Node 1 ULP-exact.
+    use crate::math::v8_trig::{cos, sin};
     if o.roughness == 0.0 {
         let mut all = Vec::new();
         let inc = increment / 4.0;
-        all.push((cx + rx * (-inc).cos(), cy + ry * (-inc).sin()));
+        all.push((cx + rx * cos(-inc), cy + ry * sin(-inc)));
         let mut angle = 0.0;
         while angle <= std::f64::consts::PI * 2.0 {
-            all.push((cx + rx * angle.cos(), cy + ry * angle.sin()));
+            all.push((cx + rx * cos(angle), cy + ry * sin(angle)));
             angle += inc;
         }
-        all.push((cx + rx * 0.0_f64.cos(), cy + ry * 0.0_f64.sin()));
-        all.push((cx + rx * inc.cos(), cy + ry * inc.sin()));
+        all.push((cx + rx * cos(0.0_f64), cy + ry * sin(0.0_f64)));
+        all.push((cx + rx * cos(inc), cy + ry * sin(inc)));
         return (all.clone(), all);
     }
     let mut all_points = Vec::with_capacity(20);
@@ -1255,15 +1258,15 @@ fn compute_ellipse_points(
     let r_x0 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y0 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
-        r_x0 + cx + 0.9 * rx * (rad_offset - increment).cos(),
-        r_y0 + cy + 0.9 * ry * (rad_offset - increment).sin(),
+        r_x0 + cx + 0.9 * rx * cos(rad_offset - increment),
+        r_y0 + cy + 0.9 * ry * sin(rad_offset - increment),
     ));
     let end_angle = std::f64::consts::PI * 2.0 + rad_offset - 0.01;
     let mut angle = rad_offset;
     while angle < end_angle {
         let r_x = offset_opt(offset_mul, o, 1.0, rng);
         let r_y = offset_opt(offset_mul, o, 1.0, rng);
-        let pt = (r_x + cx + rx * angle.cos(), r_y + cy + ry * angle.sin());
+        let pt = (r_x + cx + rx * cos(angle), r_y + cy + ry * sin(angle));
         all_points.push(pt);
         core_points.push(pt);
         angle += increment;
@@ -1271,20 +1274,20 @@ fn compute_ellipse_points(
     let r_x1 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y1 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
-        r_x1 + cx + rx * (rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5).cos(),
-        r_y1 + cy + ry * (rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5).sin(),
+        r_x1 + cx + rx * cos(rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5),
+        r_y1 + cy + ry * sin(rad_offset + std::f64::consts::PI * 2.0 + overlap * 0.5),
     ));
     let r_x2 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y2 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
-        r_x2 + cx + 0.98 * rx * (rad_offset + overlap).cos(),
-        r_y2 + cy + 0.98 * ry * (rad_offset + overlap).sin(),
+        r_x2 + cx + 0.98 * rx * cos(rad_offset + overlap),
+        r_y2 + cy + 0.98 * ry * sin(rad_offset + overlap),
     ));
     let r_x3 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y3 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
-        r_x3 + cx + 0.9 * rx * (rad_offset + overlap * 0.5).cos(),
-        r_y3 + cy + 0.9 * ry * (rad_offset + overlap * 0.5).sin(),
+        r_x3 + cx + 0.9 * rx * cos(rad_offset + overlap * 0.5),
+        r_y3 + cy + 0.9 * ry * sin(rad_offset + overlap * 0.5),
     ));
     (all_points, core_points)
 }
