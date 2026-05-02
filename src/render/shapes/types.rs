@@ -452,14 +452,50 @@ fn normalise_css_decl(s: &str) -> Option<(String, String)> {
     Some((key, value))
 }
 
+/// Deduplicate a list of `(key, value)` CSS declarations using the same
+/// semantics as upstream's `styles2Map` (a JavaScript `Map`):
+///   - The first time a key is seen, it claims a slot in the result.
+///   - Each later entry with the same key updates the value in that slot
+///     in place, leaving the slot's position unchanged.
+///
+/// This mirrors `Map.set(k, v)` which preserves the original insertion
+/// order on update. It's the dedup that lets upstream emit a single
+/// `color: red !important` even when both `linkStyle default color:Sienna`
+/// and `linkStyle 0 color:red` are active on the same edge.
+fn dedup_css_decls_last_wins(parts: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut order: Vec<String> = Vec::with_capacity(parts.len());
+    let mut map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::with_capacity(parts.len());
+    for (k, v) in parts {
+        if !map.contains_key(&k) {
+            order.push(k.clone());
+        }
+        map.insert(k, v);
+    }
+    order
+        .into_iter()
+        .map(|k| {
+            let v = map.remove(&k).unwrap_or_default();
+            (k, v)
+        })
+        .collect()
+}
+
 /// Build node shape inline `style` attribute from a list of CSS declarations.
 /// Filters out label-specific keys (color, font-*, text-*, …) and normalises
 /// each entry as `key:value !important`, joined with `;`.
+///
+/// Mirrors upstream's `styles2String` which routes the style list through
+/// `styles2Map` (a JS `Map`) — duplicate keys keep their first-seen position
+/// but adopt the last-wins value.
 pub fn build_inline_style(styles: &[String]) -> String {
-    let parts: Vec<String> = styles
+    let collected: Vec<(String, String)> = styles
         .iter()
         .filter_map(|s| normalise_css_decl(s))
         .filter(|(key, _)| !is_label_style_key(key))
+        .collect();
+    let parts: Vec<String> = dedup_css_decls_last_wins(collected)
+        .into_iter()
         .map(|(k, v)| format!("{}:{} !important", k, v))
         .collect();
     parts.join(";")
@@ -468,11 +504,17 @@ pub fn build_inline_style(styles: &[String]) -> String {
 /// Build label group `style` attribute from a list of CSS declarations.
 /// Keeps only label-specific keys and normalises as `key:value !important`,
 /// joined with `;`. Returns an empty string when none are present.
+///
+/// Mirrors upstream's `styles2String` `labelStyles` channel, including the
+/// dedup-by-key semantics of `styles2Map`.
 pub fn build_label_style(styles: &[String]) -> String {
-    let parts: Vec<String> = styles
+    let collected: Vec<(String, String)> = styles
         .iter()
         .filter_map(|s| normalise_css_decl(s))
         .filter(|(key, _)| is_label_style_key(key))
+        .collect();
+    let parts: Vec<String> = dedup_css_decls_last_wins(collected)
+        .into_iter()
         .map(|(k, v)| format!("{}:{} !important", k, v))
         .collect();
     parts.join(";")
@@ -483,11 +525,19 @@ pub fn build_label_style(styles: &[String]) -> String {
 /// from the node's label styles. The browser converts hex → rgb.
 ///
 /// Output format: `"color: rgb(255,255,255) !important; "` (trailing space).
+///
+/// Includes the same `styles2Map` dedup-by-key semantics as `build_label_style`
+/// so a `linkStyle default color:Sienna` immediately followed by
+/// `linkStyle 0 color:red` collapses to a single `color: red !important;`
+/// in the rendered `<div>` style attribute.
 pub fn build_div_style_prefix(styles: &[String]) -> String {
-    let parts: Vec<String> = styles
+    let collected: Vec<(String, String)> = styles
         .iter()
         .filter_map(|s| normalise_css_decl(s))
         .filter(|(key, _)| is_label_style_key(key))
+        .collect();
+    let parts: Vec<String> = dedup_css_decls_last_wins(collected)
+        .into_iter()
         .map(|(k, v)| {
             // For color properties, convert hex to rgb.
             let converted = if k == "color" {
