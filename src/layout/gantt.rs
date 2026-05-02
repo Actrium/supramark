@@ -104,7 +104,7 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
     };
 
     // Resolve tasks (date / duration / after / until).
-    let mut resolved = resolve_tasks(d);
+    let resolved = resolve_tasks(d);
 
     // Categories use insertion order — upstream computes them BEFORE
     // sorting `taskArray.sort(taskCompare)`.
@@ -115,72 +115,56 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
         }
     }
 
-    // Compact mode rewrites every task's `order` to a row index that
-    // collapses non-overlapping tasks of the same section onto the same
-    // row. Mirrors upstream `getMaxIntersections`. We capture the
-    // per-category row count as the running height — used both for the
-    // total chart height and for `category_heights` (consumed by section
-    // labels).
-    let compact = d.display_mode.as_deref() == Some("compact");
-
-    let mut category_heights: Vec<(String, i32)> = Vec::new();
-    if compact {
-        let mut intersections = 0i32;
-        for cat in &categories {
-            // Indices in `resolved` of tasks belonging to this category.
-            let mut idxs: Vec<usize> = resolved
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| &t.section_name == cat)
-                .map(|(i, _)| i)
-                .collect();
-            // Sort by (startTime, order) — `order` here is the input
-            // index, which is what we want for the tie-break.
-            idxs.sort_by(|&a, &b| {
-                let ta = &resolved[a];
-                let tb = &resolved[b];
-                ta.start_ms
-                    .partial_cmp(&tb.start_ms)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| ta.order.cmp(&tb.order))
-            });
-            // Greedy first-fit row assignment.
-            let mut timeline: Vec<f64> = vec![f64::NEG_INFINITY; idxs.len()];
-            let mut max_intersections: i32 = 0;
-            for &i in &idxs {
-                for j in 0..timeline.len() {
-                    if resolved[i].start_ms >= timeline[j] {
-                        timeline[j] = resolved[i].end_ms;
-                        resolved[i].order = (j as i32 + intersections) as usize;
-                        if (j as i32) > max_intersections {
-                            max_intersections = j as i32;
-                        }
-                        break;
-                    }
-                }
-            }
-            let category_height = max_intersections + 1;
-            intersections += category_height;
-            category_heights.push((cat.clone(), category_height));
-        }
-    } else {
-        for cat in &categories {
-            let count = resolved.iter().filter(|t| &t.section_name == cat).count() as i32;
-            category_heights.push((cat.clone(), count));
-        }
-    }
-
     // Sort by start time (stable) for rendering — upstream calls
     // `taskArray.sort(taskCompare)` which only compares startTime.
     let mut tasks = resolved;
     tasks.sort_by(|a, b| a.start_ms.partial_cmp(&b.start_ms).unwrap_or(std::cmp::Ordering::Equal));
 
-    let h = if compact {
-        let total_rows: i32 = category_heights.iter().map(|(_, n)| *n).sum();
-        2 * TOP_PADDING + total_rows * (BAR_HEIGHT + BAR_GAP)
+    // Compute category heights and total height.
+    let compact = matches!(d.display_mode.as_deref(), Some(s) if s.eq_ignore_ascii_case("compact"));
+    let mut category_heights: Vec<(String, i32)> = Vec::new();
+    let h: i32;
+    if compact {
+        // displayMode: compact — pack tasks per-section into rows so that
+        // non-overlapping tasks share the same vertical slot. Mirrors
+        // upstream `ganttRenderer.draw()` lines 1862-1884.
+        //
+        // The packing uses encounter-order of sections (NOT insertion);
+        // upstream iterates `Object.keys(categoryElements)` which in
+        // modern JS preserves insertion order — i.e. the order of first
+        // task seen per section in `taskArray` (post-sort).
+        let mut section_order: Vec<String> = Vec::new();
+        let mut section_task_indices: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+        for (i, t) in tasks.iter().enumerate() {
+            if !section_task_indices.contains_key(&t.section_name) {
+                section_order.push(t.section_name.clone());
+            }
+            section_task_indices
+                .entry(t.section_name.clone())
+                .or_default()
+                .push(i);
+        }
+        let mut intersections: i32 = 0;
+        for cat in &section_order {
+            let task_indices = section_task_indices.get(cat).cloned().unwrap_or_default();
+            // Run getMaxIntersections to pack tasks; mutates t.order in place.
+            let max_j = compact_pack(&task_indices, intersections, &mut tasks);
+            let category_height = max_j + 1;
+            category_heights.push((cat.clone(), category_height));
+            intersections += category_height;
+        }
+        // Sections that exist but had zero tasks: still record height 0.
+        // (Upstream's `categoryHeights` only contains sections that have
+        // at least one task; preserve that behaviour.)
+        let total_rows: i32 = category_heights.iter().map(|(_, h)| *h).sum();
+        h = 2 * TOP_PADDING + total_rows * (BAR_HEIGHT + BAR_GAP);
     } else {
-        2 * TOP_PADDING + (tasks.len() as i32) * (BAR_HEIGHT + BAR_GAP)
-    };
+        for cat in &categories {
+            let count = tasks.iter().filter(|t| &t.section_name == cat).count() as i32;
+            category_heights.push((cat.clone(), count));
+        }
+        h = 2 * TOP_PADDING + (tasks.len() as i32) * (BAR_HEIGHT + BAR_GAP);
+    }
 
     // Time domain.
     let (min_ms, max_ms) = if tasks.is_empty() {
@@ -243,6 +227,50 @@ pub fn layout(d: &GanttDiagram, _theme: &ThemeVariables) -> Result<GanttLayout> 
     layout.today_marker = today_marker;
 
     Ok(layout)
+}
+
+/// Pack a section's tasks into the minimum number of rows so non-overlapping
+/// tasks share a row. Mirrors upstream `getMaxIntersections`. Returns the
+/// largest `j` (0-based row index) used; the section therefore consumes
+/// `j+1` rows. As a side-effect, `tasks[idx].order` is set to `j + offset`
+/// for each task in `task_indices`.
+fn compact_pack(
+    task_indices: &[usize],
+    offset: i32,
+    tasks: &mut [ResolvedTask],
+) -> i32 {
+    if task_indices.is_empty() {
+        return 0;
+    }
+    // Capture (start, original_order, idx) so we can sort while keeping
+    // a back-reference to the task we mutate.
+    let mut items: Vec<(f64, usize, usize)> = task_indices
+        .iter()
+        .map(|&i| (tasks[i].start_ms, tasks[i].order, i))
+        .collect();
+    // Sort by (startTime, original_order) — matches upstream's
+    // `(a,b) => a.startTime - b.startTime || a.order - b.order`.
+    items.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+    });
+    // Timeline of `endTime` per row, length = number of tasks (upper bound).
+    let mut timeline: Vec<f64> = vec![f64::NEG_INFINITY; items.len()];
+    let mut max_j = 0i32;
+    for (start, _orig_order, idx) in items {
+        for (j, slot) in timeline.iter_mut().enumerate() {
+            if start >= *slot {
+                *slot = tasks[idx].end_ms;
+                tasks[idx].order = (j as i32 + offset) as usize;
+                if j as i32 > max_j {
+                    max_j = j as i32;
+                }
+                break;
+            }
+        }
+    }
+    max_j
 }
 
 // ── Time scale ───────────────────────────────────────────────────────
@@ -318,16 +346,6 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
             return Some((n - 1.0) * 86_400_000.0);
         }
     }
-    // Time-of-day formats (no calendar date) — used by gantt charts that
-    // only care about hh:mm:ss within a single day. We anchor to
-    // 1970-01-01 so the resulting ms value is the time-of-day.
-    if fmt == "HH:mm:ss" || fmt == "HH:mm" || fmt == "H:mm:ss" || fmt == "H:mm" {
-        let parts: Vec<&str> = s.split(':').collect();
-        let h: u32 = parts.first().and_then(|x| x.parse().ok())?;
-        let mi: u32 = parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0);
-        let se: u32 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
-        return Some((h as f64) * 3_600_000.0 + (mi as f64) * 60_000.0 + (se as f64) * 1000.0);
-    }
 
     // Strict `YYYY-MM-DD` (10 chars, hyphens at positions 4 and 7).
     // Strict mode failure falls through to the lenient `new Date(str)`
@@ -349,6 +367,20 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
         // Parse trailing time HH:mm:ss / HH:mm if present.
         let (h, mi, se) = parse_time_suffix(&s[10..]);
         return Some(date + (h as f64) * 3_600_000.0 + (mi as f64) * 60_000.0 + (se as f64) * 1000.0);
+    }
+
+    // Time-only formats. dayjs anchors them on "today" but for byte-exact
+    // rendering we only need consistent relative offsets — anchor on
+    // 1970-01-01 (epoch midnight) instead. The chart shows hours/minutes
+    // anyway, never the year.
+    if fmt == "HH:mm:ss" || fmt == "HH:mm" || fmt == "H:mm:ss" || fmt == "H:mm" {
+        let parts: Vec<&str> = s.split(':').collect();
+        let h: u32 = parts.first().and_then(|x| x.parse().ok())?;
+        let mi: u32 = parts.get(1).and_then(|x| x.parse().ok())?;
+        let se: u32 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
+        return Some(
+            (h as f64) * 3_600_000.0 + (mi as f64) * 60_000.0 + (se as f64) * 1000.0,
+        );
     }
 
     // Some common compounds with time component.
@@ -817,40 +849,6 @@ fn anchor_for_iso_weekday(target_dow: u32) -> f64 {
     (offset_days as f64) * day_ms
 }
 
-/// d3-array `tickStep(start, stop, count)` — returns the increment used by
-/// d3 to step between ticks for a linear domain. Used by d3-time when the
-/// year candidate is the only viable bucket (very long domain spans).
-fn year_tick_step(start: f64, stop: f64, count: f64) -> f64 {
-    let reverse = stop < start;
-    let (a, b) = if reverse { (stop, start) } else { (start, stop) };
-    let inc = tick_increment(a, b, count);
-    let signed = if reverse { -1.0 } else { 1.0 };
-    signed * if inc < 0.0 { 1.0 / -inc } else { inc }
-}
-
-fn tick_increment(start: f64, stop: f64, count: f64) -> f64 {
-    let step = (stop - start) / count.max(0.0);
-    let power = step.log10().floor();
-    let error = step / 10f64.powf(power);
-    let e10 = 50f64.sqrt();
-    let e5 = 10f64.sqrt();
-    let e2 = 2f64.sqrt();
-    let factor = if error >= e10 {
-        10.0
-    } else if error >= e5 {
-        5.0
-    } else if error >= e2 {
-        2.0
-    } else {
-        1.0
-    };
-    if power < 0.0 {
-        -10f64.powf(-power) / factor
-    } else {
-        10f64.powf(power) * factor
-    }
-}
-
 fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &str) -> Vec<AxisTick> {
     if !min_ms.is_finite() || !max_ms.is_finite() || max_ms <= min_ms {
         return Vec::new();
@@ -1031,30 +1029,11 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
             v
         }
         "y" => {
-            // d3-time `year.every(k)` — k comes from `tickStep(start_year,
-            // stop_year, count)` when the requested target is larger than
-            // the largest fixed candidate (1 year). For shorter spans k=1.
-            // We mirror d3's behaviour: pick `k` as the year multiplier
-            // computed from d3-array's `tickSpec` over fractional years.
-            let duration_year_ms = 86_400_000.0 * 365.0;
-            let start_year_f = min_ms / duration_year_ms;
-            let stop_year_f = max_ms / duration_year_ms;
-            let count = 10.0;
-            let k = year_tick_step(start_year_f, stop_year_f, count).max(1.0) as i32;
-            let k = k.max(1) as i32;
-
             let (y0, _, _, _, _, _, _) = ms_to_date(min_ms);
-            // Align first candidate year to a multiple of k (relative to 0).
             let mut y = y0;
-            // round up to next k-aligned year >= min.
-            // d3 `timeYear.every(k)` produces years where (year % k == 0).
-            let rem = ((y as i64) % (k as i64) + k as i64) % k as i64;
-            if rem != 0 {
-                y += (k - rem as i32) as i32;
-            }
-            // If the resulting Jan 1 is still before min_ms, advance one k step.
-            while y as i32 != 0 && date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
-                y += k;
+            // round up
+            if date_to_ms(y, 1, 1, 0, 0, 0, 0) < min_ms {
+                y += 1;
             }
             let mut v = Vec::new();
             loop {
@@ -1063,7 +1042,7 @@ fn generate_ticks(min_ms: f64, max_ms: f64, axis_format: &str, _date_format: &st
                     break;
                 }
                 v.push(t);
-                y += k;
+                y += 1;
             }
             v
         }
