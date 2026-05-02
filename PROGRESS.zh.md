@@ -244,3 +244,12 @@
 - **W9-D state +1**（demos/07）：`build_graph_filtered_ex` 边分区漏分类 isolated/nested-iso cluster id 上的 no-op rewrite 边，导致 dagre 收到与 upstream 不同的 binding order，First 子节点错列 → 7.17px 宽度差。`iso_desc_for_outer` 参数补齐分类范围。class/221 早已修复（不需触动）。
 
 664 lib tests pass（W9-C 新增 12 单测）。
+
+## Wave 10 进展（4 路并行）
+
+净增 +18，1161 → 1179/1179 byte-exact。132 fixture 仍在 known_ignored。664 lib tests pass。
+
+- **W10-A retry sequence +3**：cypress/sequence/21/31/47。central-connection markers `()->>()` 三处微妙差错：startx offset 符号（`-6` 不是 `+6`）、autonumber circle offset `CIRCLE_OFFSET=16.5` for AtFrom/Dual、autonumber+bidir+RTL line.x1 修正（额外 `-5` for any central-conn + `-7.5` for DUAL/REVERSE）。原版 W10-A 30min 卡死被 watchdog 重启，retry 60min 内 3 commit 收工。
+- **W10-B flowchart asymmetric +5**：cypress 105/239 + demos 38/39/40。upstream `rectLeftInvArrow.ts` 即使 `look !== 'handDrawn'` 也走 `rc.path(pathData, options)` 双 `<path>` 输出，不走 analytical polygon。复刻 rough.path emission + outer-path `<g>` wrapper + label `dx` offset。剩 144/41 卡 doublecircle style threading defect。
+- **W10-C venn foreignObject +7**：cypress 06/10/11/13/16 + demos 06/07。3 根因：(1) **dual padding** —— upstream `vennRenderer` 用 visible padding=15 算可见圆，再用 `config.padding=8` 跑第二次 `scale_solution` + `compute_text_centres` 给 foreignObject 文本节点定位；(2) V8 `Math.hypot` vs libm `hypot` 1-ULP 差异，三相交 inner_radius 偏移 3 ULP；用 V8 双参公式 `max * sqrt(1 + (min/max)²)` 重写；(3) hex `#rrggbb` → CSSOM `rgb(r,g,b)` 序列化（jsdom 行为）。
+- **W10-D gantt residuals +4**：cypress/gantt 27/24/40 + demos/10。`displayMode: compact` + `HH:mm:ss`/`HH:mm` 时间格式；d3-array `tickSpec` 完整 `sqrt(50)/sqrt(10)/sqrt(2)` 阈值 + 多年 stride 锚定到 N 整数倍；3 位年份 `202-12-01` lenient parse 正常解到 202 AD。剩 4 个时区敏感 fixture 留 `#[ignore]`（DST 边界 / `new Date("0")` / 非 ISO `08-08-09-01:00` 后退路径）。
