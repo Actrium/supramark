@@ -18,7 +18,6 @@
 use crate::error::Result;
 use crate::layout::venn::VennLayout;
 use crate::model::venn::VennDiagram;
-use crate::render::rough::{path_out_to_svg, to_paths, RoughGenerator, RoughOptions};
 use crate::theme::ThemeVariables;
 
 pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str) -> Result<String> {
@@ -124,136 +123,44 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
                     }
                 });
 
-            if d.hand_drawn {
-                let hsl_stroke_color = color_to_hsl_str(&stroke_color);
-                let hsla_fill_color = color_to_hsla_str(&base_color, 0.3);
-                let hsl_text_color = if dark_bg {
-                    crate::theme::color::lighten(&base_color, 30.0)
-                } else {
-                    crate::theme::color::darken(&base_color, 30.0)
-                };
-
-                let circle_data = &area.circles;
-                let (cx, cy, radius) = if circle_data.is_empty() {
-                    (area.text_x as f64, area.text_y as f64, 100.0)
-                } else {
-                    (circle_data[0].x, circle_data[0].y, circle_data[0].radius)
-                };
-                let diameter = radius * 2.0;
-
-                let seed: i32 = d.hand_drawn_seed.unwrap_or(0) as i32;
-
-                let mut rc = RoughGenerator::new();
-                let mut o = RoughOptions {
-                    roughness: 0.7,
-                    seed,
-                    fill: Some(hsla_fill_color),
-                    fill_style: "hachure".into(),
-                    fill_weight: 2.0,
-                    stroke: hsl_stroke_color,
-                    stroke_width: 2.5,
-                    ..RoughOptions::default()
-                };
-                o.fill_line_dash = Vec::new();
-                o.stroke_line_dash = Vec::new();
-                o.omit_dash_attrs = true;
-
-                let drawable = rc.circle(cx, cy, diameter, &o);
-                let paths = to_paths(&drawable, &o);
-
-                out.push_str(&format!(
-                    r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><g>"#,
-                    i = i % 8,
-                    sets = area.sets.join("_"),
-                ));
-                for p in &paths {
-                    out.push_str(&path_out_to_svg(p));
-                }
-                out.push_str(&format!(
-                    r#"</g><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
-                    tx = area.text_x,
-                    ty = area.text_y,
-                    tfill = hsl_text_color,
-                    fs = num(48.0 * scale),
-                    label = escape_text(&area.render_label),
-                ));
-            } else {
-                out.push_str(&format!(
-                    r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><path style="fill-opacity: {op}; fill: {fill}; stroke: {stroke}; stroke-width: {sw}; stroke-opacity: 0.95;" d="{d}"></path><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
-                    i = i % 8,
-                    sets = area.sets.join("_"),
-                    op = fill_opacity,
-                    fill = base_color,
-                    stroke = stroke_color,
-                    sw = stroke_width,
-                    d = area.path,
-                    tx = area.text_x,
-                    ty = area.text_y,
-                    tfill = text_color,
-                    fs = num(48.0 * scale),
-                    label = escape_text(&area.render_label),
-                ));
-            }
+            out.push_str(&format!(
+                r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><path style="fill-opacity: {op}; fill: {fill}; stroke: {stroke}; stroke-width: {sw}; stroke-opacity: 0.95;" d="{d}"></path><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
+                i = i % 8,
+                sets = area.sets.join("_"),
+                op = fill_opacity,
+                fill = base_color,
+                stroke = stroke_color,
+                sw = stroke_width,
+                d = area.path,
+                tx = area.text_x,
+                ty = area.text_y,
+                tfill = text_color,
+                fs = num(48.0 * scale), // upstream: `${48 * scale}px`
+                label = escape_text(&area.render_label),
+            ));
         } else {
             // venn-intersection
             let custom_fill = custom_style.and_then(|m| m.get("fill")).cloned();
             let fill_opacity = if custom_fill.is_some() { "1" } else { "0" };
-            let fill_value = custom_fill.clone().unwrap_or_else(|| "transparent".into());
+            let fill_value = custom_fill.unwrap_or_else(|| "transparent".into());
             let text_color = custom_style
                 .and_then(|m| m.get("color"))
                 .cloned()
                 .unwrap_or_else(|| l.set_text_color.clone());
             let label_text = area.label.clone().unwrap_or_default();
 
-            if d.hand_drawn && custom_fill.is_some() {
-                let custom_fill_color = custom_fill.unwrap();
-                let hsla_fill_color = color_to_hsla_str(&custom_fill_color, 0.7);
-                let hsl_stroke_color = color_to_hsl_str(&custom_fill_color);
-
-                let circle_data = &area.circles;
-                let (cx, cy, radius) = if circle_data.is_empty() {
-                    (area.text_x as f64, area.text_y as f64, 100.0)
-                } else {
-                    (circle_data[0].x, circle_data[0].y, circle_data[0].radius)
-                };
-                let diameter = radius * 2.0;
-
-                let seed: i32 = d.hand_drawn_seed.unwrap_or(0) as i32;
-
-                let mut rc = RoughGenerator::new();
-                let mut o = RoughOptions {
-                    roughness: 0.7,
-                    seed,
-                    fill: Some(hsla_fill_color),
-                    fill_style: "hachure".into(),
-                    fill_weight: 2.0,
-                    stroke: hsl_stroke_color,
-                    stroke_width: 2.5,
-                    ..RoughOptions::default()
-                };
-                o.fill_line_dash = Vec::new();
-                o.stroke_line_dash = Vec::new();
-                o.omit_dash_attrs = true;
-
-                let drawable = rc.circle(cx, cy, diameter, &o);
-                let paths = to_paths(&drawable, &o);
-
-                out.push_str(&format!(
-                    r#"<g class="venn-area venn-intersection" data-venn-sets="{sets}"><g>"#,
-                    sets = area.sets.join("_"),
-                ));
-                for p in &paths {
-                    out.push_str(&path_out_to_svg(p));
-                }
-                out.push_str(&format!(
-                    r#"</g><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
-                    tx = area.text_x,
-                    ty = area.text_y,
-                    tfill = text_color,
-                    fs = num(48.0 * scale),
+            out.push_str(&format!(
+                r#"<g class="venn-area venn-intersection" data-venn-sets="{sets}"><path style="fill-opacity: {op}; fill: {fill};" d="{d}"></path><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
+                sets = area.sets.join("_"),
+                op = fill_opacity,
+                fill = fill_value,
+                d = area.path,
+                tx = area.text_x,
+                ty = area.text_y,
+                tfill = text_color,
+                fs = num(48.0 * scale),
                 label = escape_text(&label_text),
             ));
-            }
         }
     }
 
@@ -716,25 +623,6 @@ fn escape_text(s: &str) -> String {
         }
     }
     out
-}
-
-fn color_to_hsl_str(color: &str) -> String {
-    let Some(mut ch) = crate::theme::color::parse(color) else {
-        return color.to_string();
-    };
-    let l = ch.get_l();
-    ch.set_l(l);
-    crate::theme::color::stringify(&mut ch)
-}
-
-fn color_to_hsla_str(color: &str, alpha: f64) -> String {
-    let Some(mut ch) = crate::theme::color::parse(color) else {
-        return color.to_string();
-    };
-    let l = ch.get_l();
-    ch.set_l(l);
-    ch.set_a(alpha);
-    crate::theme::color::stringify(&mut ch)
 }
 
 /// stylis minification: drop the single ASCII space immediately after
