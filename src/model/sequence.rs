@@ -57,6 +57,11 @@ pub struct Actor {
     pub created: bool,
     /// Was this actor `destroy`ed mid-diagram? Affects lifeline length.
     pub destroyed: bool,
+    /// `wrap:` prefix on the description — when true, the renderer pre-
+    /// wraps the description text via `wrap_label` before measuring.
+    /// Mirrors upstream `addActor`'s `description.wrap` field, fed by
+    /// `parseMessage`'s `extractWrap`.
+    pub wrap: bool,
 }
 
 /// Arrow-token classification — matches upstream's `LINETYPE`

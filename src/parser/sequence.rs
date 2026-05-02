@@ -545,6 +545,11 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
             }
         }
     }
+    // Strip `wrap:` / `nowrap:` prefix from the description, mirroring
+    // upstream `parseMessage` -> `extractWrap`. The description label
+    // shown in the actor box never includes the literal prefix.
+    let (wrap, descr_clean) = strip_wrap_prefix(&descr);
+    let descr = descr_clean.trim().to_string();
     Actor {
         id,
         description: descr,
@@ -552,6 +557,7 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
         box_index,
         created: false,
         destroyed: false,
+        wrap,
     }
 }
 
@@ -646,6 +652,7 @@ fn strip_wrap_prefix(s: &str) -> (bool, &str) {
         (false, s)
     }
 }
+
 
 fn parse_message_line(s: &str) -> Option<Message> {
     static ARROWS: &[(&str, ArrowType)] = &[
