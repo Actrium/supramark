@@ -88,7 +88,7 @@ const ACTOR_FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 pub fn render(
     d: &SequenceDiagram,
     _l: &SequenceLayout,
-    _theme: &Theme,
+    theme: &Theme,
     id: &str,
 ) -> Result<String> {
     // ── Eligibility gate ────────────────────────────────────────────
@@ -886,9 +886,10 @@ pub fn render(
         }
     }
 
-    // Style + empty <g> placeholder.
+    // Style + empty <g> placeholder. Theme-driven rebuild matches
+    // upstream `getStyles()` once cssMin collapses whitespace.
     out.push_str("<style>");
-    out.push_str(&consts::SEQUENCE_STYLE.replace("__ID__", id));
+    out.push_str(&consts::build_style(id, theme));
     out.push_str("</style><g></g>");
 
     // 11 defs in fixed upstream order.
