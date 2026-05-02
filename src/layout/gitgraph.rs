@@ -124,7 +124,17 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     let rotate_term = if d.config.rotate_commit_label { 40.0 } else { 0.0 };
     for (idx, &orig_idx) in order.iter().enumerate() {
         let b = &d.branches[orig_idx];
-        let lw = font_metrics::text_width(&b.name, FONT_FAMILY, LABEL_SIZE, false, false);
+        // Multi-line branch names are emitted as one `<tspan>` per line
+        // by upstream `drawText`. The bbox shim then measures the parent
+        // `<text>` element's *concatenated* `textContent` (DOM concatenates
+        // descendant text nodes; `\n` is not preserved between siblings),
+        // so for width we feed the joined-no-newline form.
+        let measured_name: String = if b.name.contains('\n') {
+            b.name.replace('\n', "")
+        } else {
+            b.name.clone()
+        };
+        let lw = font_metrics::text_width(&measured_name, FONT_FAMILY, LABEL_SIZE, false, false);
         branch_positions.push(BranchPosition {
             name: b.name.clone(),
             pos,

@@ -126,7 +126,8 @@ pub fn parse(source: &str) -> Result<GitGraphDiagram> {
     let mut prng = GitGraphPrng::new();
 
     let mut header_seen = false;
-    for raw_line in body.lines() {
+    let logical_lines = split_logical_lines(&body);
+    for raw_line in logical_lines.iter() {
         let line = raw_line.trim();
         if line.is_empty() {
             continue;
@@ -525,6 +526,55 @@ fn scan_value(block: &str, key: &str) -> Option<String> {
     }
 }
 
+/// Split the body into logical statements. Mirrors how upstream's jison
+/// grammar joins string literals across newlines: a `"` started on one
+/// line continues until the matching close-quote, even when the literal
+/// contains embedded `\n`. Single-line statements pass through verbatim;
+/// only quote-bracketing logic is applied.
+fn split_logical_lines(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut in_quote = false;
+    for raw in body.lines() {
+        if in_quote {
+            // We are mid-string — preserve the embedded newline literally
+            // so downstream consumers (branch label rendering, bbox) can
+            // emit a multi-tspan layout matching upstream's `drawText`.
+            buf.push('\n');
+            buf.push_str(raw);
+            // Walk this line's characters to track when the quote closes.
+            for c in raw.chars() {
+                if c == '"' {
+                    in_quote = !in_quote;
+                }
+            }
+            if !in_quote {
+                out.push(std::mem::take(&mut buf));
+            }
+            continue;
+        }
+        // Fresh line. Walk its characters to find unmatched quotes.
+        let mut local_in_quote = false;
+        for c in raw.chars() {
+            if c == '"' {
+                local_in_quote = !local_in_quote;
+            }
+        }
+        if local_in_quote {
+            in_quote = true;
+            buf.push_str(raw);
+        } else {
+            out.push(raw.to_string());
+        }
+    }
+    // Flush any unterminated string buffer (defensive — upstream would
+    // also emit a parse error here, but we keep it lenient).
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    out
+}
+
 fn strip_keyword<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
     if let Some(rest) = s.strip_prefix(kw) {
         if rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':') {
@@ -534,12 +584,27 @@ fn strip_keyword<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
     None
 }
 
+/// Parse a leading identifier or quoted string. Quoted forms support
+/// embedded newlines (multi-line branch names like
+/// `branch "Feature A\n(ongoing)"`); the embedded `\n` is preserved in
+/// the returned name so the renderer can emit one `<tspan>` per row.
 fn parse_ident(s: &str) -> String {
-    s.trim()
-        .split_whitespace()
+    let s = s.trim_start();
+    if let Some(after_quote) = s.strip_prefix('"') {
+        if let Some(end) = after_quote.find('"') {
+            return after_quote[..end].to_string();
+        }
+        return after_quote.to_string();
+    }
+    if let Some(after_quote) = s.strip_prefix('\'') {
+        if let Some(end) = after_quote.find('\'') {
+            return after_quote[..end].to_string();
+        }
+        return after_quote.to_string();
+    }
+    s.split_whitespace()
         .next()
         .unwrap_or("")
-        .trim_matches(|c: char| c == '"' || c == '\'')
         .to_string()
 }
 

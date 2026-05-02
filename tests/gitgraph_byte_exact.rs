@@ -712,7 +712,10 @@ fn cypress_104() {
     assert_byte_exact("ext_fixtures/cypress/gitGraph/104");
 }
 
-// 105 — multi-line quoted branch name, listed in known_ignored.txt.
+#[test]
+fn cypress_105_multiline_branch() {
+    assert_byte_exact("ext_fixtures/cypress/gitGraph/105");
+}
 
 #[test]
 fn demo_01() {

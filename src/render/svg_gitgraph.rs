@@ -98,11 +98,11 @@ pub fn render(
                 h = fmt_num(bkg_h),
             ));
             out.push_str(&format!(
-                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text><tspan xml:space="preserve" dy="1em" x="0" class="row">{name}</tspan></text></g></g>"#,
+                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text>{tspans}</text></g></g>"#,
                 idx = cidx,
                 tx = fmt_num(label_translate_x),
                 ty = fmt_num(label_translate_y),
-                name = escape_text(&bp.name),
+                tspans = render_branch_tspans(&bp.name),
             ));
         } else {
             let bkg_x = -bbox_w - 4.0 - rotate_pad;
@@ -132,11 +132,11 @@ pub fn render(
                 ty = fmt_num(bkg_translate_y),
             ));
             out.push_str(&format!(
-                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text><tspan xml:space="preserve" dy="1em" x="0" class="row">{name}</tspan></text></g></g>"#,
+                r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text>{tspans}</text></g></g>"#,
                 idx = cidx,
                 tx = fmt_num(label_translate_x),
                 ty = fmt_num(label_translate_y),
-                name = escape_text(&bp.name),
+                tspans = render_branch_tspans(&bp.name),
             ));
         }
     }
@@ -908,6 +908,23 @@ fn build_arrow_path(
 /// Format a number the way d3/jsdom does in mermaid output:
 ///   - integral values render without a decimal point ("0", "150").
 ///   - fractional values keep their full precision so the bytes match.
+/// Render a branch name as one `<tspan>` per logical line. Mirrors
+/// upstream `drawText`'s split on `\\n|\n|<br/>` — embedded `\n`
+/// characters in the parsed name produce multi-row labels (cypress
+/// fixture 105: `branch "Feature A\n(ongoing)"`). Each row is
+/// `dy="1em" x="0"` so successive rows stack vertically with the same
+/// left edge.
+fn render_branch_tspans(name: &str) -> String {
+    let mut out = String::new();
+    for row in name.split('\n') {
+        out.push_str(&format!(
+            r#"<tspan xml:space="preserve" dy="1em" x="0" class="row">{}</tspan>"#,
+            escape_text(row.trim())
+        ));
+    }
+    out
+}
+
 fn fmt_num(v: f64) -> String {
     if v.fract() == 0.0 && v.is_finite() {
         format!("{}", v as i64)
