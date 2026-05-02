@@ -1142,14 +1142,24 @@ pub fn run_layout(
     // Drive the spring embedder to convergence (or max iter ceiling).
     run_spring_embedder(&mut graph, &mut state);
 
-    // Even though the simulation now runs to completion, the result is
-    // still not byte-exact (see fn rustdoc). Surface it under
-    // `Unsupported` so the existing single-node fast path stays in
-    // charge -- mindmap renderer rejects multi-node anyway. Once the
-    // remaining gaps are closed (and the renderer learns to draw
-    // multi-node mindmaps), flip this to `LayoutOutcome::Ok(...)`.
-    let _ = graph;
-    LayoutOutcome::Unsupported
+    // Recenter the node centroid to the origin. Upstream cytoscape
+    // applies a similar normalization step before publishing positions
+    // to the renderer — without it our coordinates land in the
+    // [WORLD_CENTER_X +/- 1000] range which breaks the renderer's
+    // viewport bbox math (massive `viewBox` translations).
+    graph.update_bounds();
+    let cx = (graph.left + graph.right) / 2.0;
+    let cy = (graph.top + graph.bottom) / 2.0;
+
+    // Surface CENTRE coordinates (rect.x is top-left in our convention),
+    // shifted by the centroid. Not byte-exact vs. upstream — see fn
+    // rustdoc — but plausible enough to render and diff.
+    let positions: Vec<(NodeId, (f64, f64))> = graph
+        .nodes
+        .iter()
+        .map(|n| (n.id, (n.rect.center_x() - cx, n.rect.center_y() - cy)))
+        .collect();
+    LayoutOutcome::Ok(positions)
 }
 
 // ---------------------------------------------------------------------
@@ -1285,15 +1295,29 @@ mod tests {
 
     #[test]
     fn run_layout_two_node_invokes_full_pipeline() {
-        // Even with the full pipeline plumbed in, run_layout still
-        // returns Unsupported (positions are not byte-exact yet).
+        // Wave 9-D: run_layout now publishes centre coordinates so the
+        // mindmap renderer can produce multi-node SVG output. Positions
+        // are NOT byte-exact vs. upstream cose-bilkent (reduceTrees /
+        // FR-grid / Coarsening still pending).
         let nodes = vec![
             (0, RectangleD::new(0.0, 0.0, 40.0, 40.0)),
             (1, RectangleD::new(50.0, 0.0, 40.0, 40.0)),
         ];
         let edges = vec![(0, 1)];
         let out = run_layout(&nodes, &edges, 0x12345678);
-        assert!(matches!(out, LayoutOutcome::Unsupported));
+        match out {
+            LayoutOutcome::Ok(positions) => {
+                assert_eq!(positions.len(), 2);
+                // Each id appears once and coordinates are finite.
+                let ids: Vec<NodeId> = positions.iter().map(|(id, _)| *id).collect();
+                assert!(ids.contains(&0));
+                assert!(ids.contains(&1));
+                for (_, (x, y)) in &positions {
+                    assert!(x.is_finite() && y.is_finite());
+                }
+            }
+            LayoutOutcome::Unsupported => panic!("expected Ok positions"),
+        }
     }
 
     #[test]

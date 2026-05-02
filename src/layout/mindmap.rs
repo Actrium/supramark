@@ -102,11 +102,10 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
     }
 
     // Multi-node fallback: build the input rectangles and edge list
-    // and hand them to the cose_bilkent groundwork. The function is
-    // currently a no-op (returns `Unsupported`) but the call site
-    // exercises every type and function the future simulation port
-    // will need. Positions stay zeroed so the renderer keeps reporting
-    // `Unsupported` for these fixtures (they live in known_ignored).
+    // and hand them to the cose_bilkent simulation. NOT byte-exact yet
+    // (reduceTrees / FR-grid / Coarsening pieces still missing), but
+    // produces plausible centre coordinates so the renderer can emit a
+    // visible diagram for diagnostics.
     let cose_nodes: Vec<(NodeId, cose_bilkent::RectangleD)> = positioned
         .iter()
         .map(|n| {
@@ -124,8 +123,6 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         .collect();
     let outcome = cose_bilkent::run_layout(&cose_nodes, &cose_edges, 0x1234_5678);
     if let cose_bilkent::LayoutOutcome::Ok(positions) = outcome {
-        // Future-proof wiring: when run_layout starts returning real
-        // coordinates, splice them into `positioned`.
         for (id, (x, y)) in positions {
             if let Some(n) = positioned.iter_mut().find(|n| n.id == id) {
                 n.x = x;
@@ -134,9 +131,35 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         }
     }
 
+    // Aggregate content bbox in node-local space, then translate it via
+    // each node's centre. Upstream `setupViewPortForSVG` wraps the
+    // entire `<g>` with no transform (mindmap renders absolute coords),
+    // so the bbox is the union of every node's translated local bbox.
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for n in &positioned {
+        let lb = local_bbox(n);
+        min_x = min_x.min(n.x + lb.x);
+        min_y = min_y.min(n.y + lb.y);
+        max_x = max_x.max(n.x + lb.x + lb.w);
+        max_y = max_y.max(n.y + lb.y + lb.h);
+    }
+    let content_bbox = if min_x.is_finite() {
+        BBox {
+            x: min_x,
+            y: min_y,
+            w: max_x - min_x,
+            h: max_y - min_y,
+        }
+    } else {
+        BBox::default()
+    };
+
     Ok(MindmapLayout {
         nodes: positioned,
-        content_bbox: BBox::default(),
+        content_bbox,
     })
 }
 

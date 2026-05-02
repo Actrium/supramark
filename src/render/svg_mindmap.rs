@@ -24,25 +24,50 @@ pub fn render(
             "mindmap: empty diagram".into(),
         ));
     }
-    if d.nodes.len() != 1 {
-        return Err(MermaidError::Unsupported(
-            "mindmap: multi-node layout (cose-bilkent / tidy-tree) not yet ported".into(),
-        ));
+    if d.nodes.len() == 1 {
+        // Single-node fast path: byte-exact for cypress 05/06/07/08/09.
+        return match d.nodes[0].node_type {
+            MindmapNodeType::Default => render_single(d, l, theme, id, ShapeKind::Default),
+            MindmapNodeType::Rect => render_single(d, l, theme, id, ShapeKind::Rect),
+            other => Err(MermaidError::Unsupported(format!(
+                "mindmap: node shape {:?} not yet supported",
+                other
+            ))),
+        };
     }
-    match d.nodes[0].node_type {
-        MindmapNodeType::Default => render_single(d, l, theme, id, ShapeKind::Default),
-        MindmapNodeType::Rect => render_single(d, l, theme, id, ShapeKind::Rect),
-        other => Err(MermaidError::Unsupported(format!(
-            "mindmap: node shape {:?} not yet supported",
-            other
-        ))),
-    }
+
+    // Multi-node groundwork: scaffolding output covering Default, Rect,
+    // Bang, Cloud, Hexagon shapes + parent-child edges. Positions are
+    // produced by the cose-bilkent simulation port (NOT byte-exact yet
+    // -- see src/layout/cose_bilkent.rs::run_layout). The render path
+    // exists so cose-bilkent gaps can be diagnosed via diff against
+    // upstream reference SVGs.
+    render_multi(d, l, theme, id)
 }
 
 #[derive(Debug, Clone, Copy)]
 enum ShapeKind {
     Default,
     Rect,
+    Bang,
+    Cloud,
+    Hexagon,
+    Circle,
+    RoundedRect,
+}
+
+impl ShapeKind {
+    fn from_node_type(t: MindmapNodeType) -> Self {
+        match t {
+            MindmapNodeType::Default => ShapeKind::Default,
+            MindmapNodeType::Rect => ShapeKind::Rect,
+            MindmapNodeType::Bang => ShapeKind::Bang,
+            MindmapNodeType::Cloud => ShapeKind::Cloud,
+            MindmapNodeType::Hexagon => ShapeKind::Hexagon,
+            MindmapNodeType::Circle => ShapeKind::Circle,
+            MindmapNodeType::RoundedRect => ShapeKind::RoundedRect,
+        }
+    }
 }
 
 fn render_single(
@@ -144,6 +169,10 @@ fn render_single(
                 h = fmt_num(n.shape_h),
             ));
         }
+        // Single-node fast path is only ever called with Default / Rect
+        // (caller in `render` enforces this). Multi-node shapes route
+        // through `render_multi` -> `emit_shape_body`.
+        _ => unreachable!("render_single called with unexpected shape: {:?}", shape),
     }
 
     // <g class="label"> wrapping the foreignObject. When the node has
@@ -178,6 +207,263 @@ fn render_single(
 
     out.push_str("</svg>");
     Ok(out)
+}
+
+/// Multi-node mindmap renderer (scaffolding, NOT byte-exact yet).
+///
+/// Drives the same overall pipeline as `render_single` but iterates
+/// over every node in `l.nodes`, emits parent->child edges as straight
+/// `<path d="M...L...">` lines, and selects per-node shape geometry
+/// from the parser's `MindmapNodeType`. Section CSS classes follow the
+/// upstream convention: root gets `section-root section--1`, every
+/// other node gets `section-{idx}` with `idx = layout::section`.
+///
+/// Known divergences from upstream byte-output (deliberate, until the
+/// cose-bilkent + tidy-tree ports stabilise):
+///   * positions come from the in-tree cose-bilkent simulation which
+///     still lacks `reduceTrees` / FR-grid / Coarsening — coords drift;
+///   * bang / cloud paths use simplified single-arc bodies, not the
+///     12-arc `bangShape` / `cloudShape` formulas;
+///   * `data-points` Base64 metadata on edges is omitted;
+///   * `transform` on inner `<path>` (path-relative offset emitted by
+///     `nodeHelper`) uses centre-origin rather than upper-left origin.
+fn render_multi(
+    d: &MindmapDiagram,
+    l: &MindmapLayout,
+    theme: &ThemeVariables,
+    id: &str,
+) -> Result<String> {
+    let bbox = l.content_bbox;
+    let vb_x = bbox.x - VIEWPORT_PADDING;
+    let vb_y = bbox.y - VIEWPORT_PADDING;
+    let vb_w = bbox.w + 2.0 * VIEWPORT_PADDING;
+    let vb_h = bbox.h + 2.0 * VIEWPORT_PADDING;
+
+    let mut out = String::with_capacity(64 * 1024);
+
+    out.push_str(&format!(
+        r#"<svg id="{id}" width="100%" xmlns="http://www.w3.org/2000/svg" class="mindmapDiagram" style="max-width: {mw}px;" viewBox="{vbx} {vby} {vbw} {vbh}" role="graphics-document document" aria-roledescription="mindmap">"#,
+        id = id,
+        mw = fmt_num(vb_w),
+        vbx = fmt_num(vb_x),
+        vby = fmt_num(vb_y),
+        vbw = fmt_num(vb_w),
+        vbh = fmt_num(vb_h),
+    ));
+
+    out.push_str(&build_style_block(id, theme));
+
+    out.push_str("<g>");
+    out.push_str(&build_markers(id));
+    out.push_str(r#"<g class="subgraphs"></g>"#);
+
+    // ─── Edges (parent -> child straight lines).
+    out.push_str(r#"<g class="edgePaths">"#);
+    for (i, node) in d.nodes.iter().enumerate() {
+        let Some(parent) = node.parent else { continue };
+        let p = &l.nodes[parent];
+        let c = &l.nodes[i];
+        let section = l.nodes[i].section;
+        let edge_id = format!("{id}-edge_{}_{}", parent, i);
+        out.push_str(&format!(
+            r#"<path d="M{px},{py}L{cx},{cy}" id="{eid}" class=" edge-thickness-normal edge-pattern-solid edge section-edge-{sec} edge-depth-1" style="undefined;;;undefined" data-edge="true" data-et="edge" data-id="edge_{ps}_{cs}" data-look="classic"></path>"#,
+            px = fmt_num(p.x),
+            py = fmt_num(p.y),
+            cx = fmt_num(c.x),
+            cy = fmt_num(c.y),
+            eid = edge_id,
+            sec = section,
+            ps = parent,
+            cs = i,
+        ));
+    }
+    out.push_str("</g>");
+
+    // ─── Edge labels (mindmap doesn't carry text on edges; emit empty
+    //     stubs to mirror upstream's structural placeholders).
+    out.push_str(r#"<g class="edgeLabels">"#);
+    for (i, node) in d.nodes.iter().enumerate() {
+        let Some(parent) = node.parent else { continue };
+        out.push_str(&format!(
+            r#"<g class="edgeLabel"><g class="label" data-id="edge_{p}_{c}" transform="translate(0, -8.1484375)"><foreignObject width="0" height="16.296875"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="edgeLabel "></span></div></foreignObject></g></g>"#,
+            p = parent,
+            c = i,
+        ));
+    }
+    out.push_str("</g>");
+
+    // ─── Nodes.
+    out.push_str(r#"<g class="nodes">"#);
+    for (i, src) in d.nodes.iter().enumerate() {
+        let n = &l.nodes[i];
+        let kind = ShapeKind::from_node_type(src.node_type);
+        let section = n.section;
+        let section_class = if src.is_root {
+            "section-root section--1".to_string()
+        } else {
+            format!("section-{}", section)
+        };
+        let dom_id = format!("{id}-node_{}", src.id);
+        out.push_str(&format!(
+            r#"<g class="node mindmap-node {sc} " id="{ndom}" data-look="classic" transform="translate({tx}, {ty})">"#,
+            sc = section_class,
+            ndom = dom_id,
+            tx = fmt_num(n.x),
+            ty = fmt_num(n.y),
+        ));
+
+        emit_shape_body(&mut out, kind, n, &dom_id);
+
+        let has_icon = src.icon.is_some();
+        let label_bkg_attr = if has_icon { r#" class="labelBkg""# } else { "" };
+        out.push_str(&format!(
+            r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
+            tx = fmt_num(-n.bbox_w / 2.0),
+            ty = fmt_num(-n.bbox_h / 2.0),
+            w = fmt_num(n.bbox_w),
+            h = fmt_num(n.bbox_h),
+            bkg = label_bkg_attr,
+            text = html_escape(&src.descr),
+        ));
+
+        out.push_str("</g>");
+    }
+    out.push_str("</g></g>");
+
+    out.push_str(&format!(
+        "<defs><filter id=\"{id}-drop-shadow\" height=\"130%\" width=\"130%\"><feDropShadow dx=\"4\" dy=\"4\" stdDeviation=\"0\" flood-opacity=\"0.06\" flood-color=\"#000000\"></feDropShadow></filter></defs>",
+    ));
+    out.push_str(&format!(
+        "<defs><filter id=\"{id}-drop-shadow-small\" height=\"150%\" width=\"150%\"><feDropShadow dx=\"2\" dy=\"2\" stdDeviation=\"0\" flood-opacity=\"0.06\" flood-color=\"#000000\"></feDropShadow></filter></defs>",
+    ));
+
+    out.push_str("</svg>");
+    Ok(out)
+}
+
+/// Emit the per-shape body (`<path>`, `<rect>`, `<polygon>`, `<circle>`)
+/// for a single mindmap node. Centred on the node's local origin.
+///
+/// **Scaffolding only**: bang / cloud / hexagon use simplified geometry
+/// that approximates upstream's path data without matching it byte for
+/// byte. Sufficient for the renderer to produce non-empty SVG so the
+/// layout pipeline can be diagnosed end-to-end.
+fn emit_shape_body(out: &mut String, kind: ShapeKind, n: &PositionedNode, dom_id: &str) {
+    let half_w = n.shape_w / 2.0;
+    let half_h = n.shape_h / 2.0;
+    match kind {
+        ShapeKind::Default => {
+            let inner_w = n.shape_w - 10.0;
+            let inner_h = n.shape_h - 10.0;
+            out.push_str(&format!(
+                r#"<path id="{ndom}" class="node-bkg node-0" style="" d="
+    M{nx} {hh}
+    v{nih}
+    q0,-5 5,-5
+    h{iw}
+    q5,0 5,5
+    v{ih}
+    q0,5 -5,5
+    h{niw}
+    q-5,0 -5,-5
+    Z
+  "></path>"#,
+                ndom = dom_id,
+                nx = fmt_num(-half_w),
+                hh = fmt_num(half_h - 5.0),
+                nih = fmt_num(-inner_h),
+                iw = fmt_num(inner_w),
+                ih = fmt_num(inner_h),
+                niw = fmt_num(-inner_w),
+            ));
+            out.push_str(&format!(
+                r#"<line class="node-line-" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"></line>"#,
+                x1 = fmt_num(-half_w),
+                y1 = fmt_num(half_h),
+                x2 = fmt_num(half_w),
+                y2 = fmt_num(half_h),
+            ));
+        }
+        ShapeKind::Rect => {
+            out.push_str(&format!(
+                r#"<rect class="basic label-container" style="" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
+                x = fmt_num(-half_w),
+                y = fmt_num(-half_h),
+                w = fmt_num(n.shape_w),
+                h = fmt_num(n.shape_h),
+            ));
+        }
+        ShapeKind::Circle => {
+            // squareCircle: r = max(half_w, half_h).
+            let r = half_w.max(half_h);
+            out.push_str(&format!(
+                r#"<circle class="basic label-container" style="" r="{r}" cx="0" cy="0"></circle>"#,
+                r = fmt_num(r),
+            ));
+        }
+        ShapeKind::RoundedRect => {
+            // Stadium / pill stand-in via a rounded rectangle.
+            out.push_str(&format!(
+                r#"<rect class="basic label-container" style="" x="{x}" y="{y}" width="{w}" height="{h}" rx="5" ry="5"></rect>"#,
+                x = fmt_num(-half_w),
+                y = fmt_num(-half_h),
+                w = fmt_num(n.shape_w),
+                h = fmt_num(n.shape_h),
+            ));
+        }
+        ShapeKind::Hexagon => {
+            // Simplified flat-top hexagon outline.
+            let f = half_h / (3.0_f64.sqrt());
+            let m = f / 2.0;
+            let points = [
+                (-half_w + m, -half_h),
+                (half_w - m, -half_h),
+                (half_w, 0.0),
+                (half_w - m, half_h),
+                (-half_w + m, half_h),
+                (-half_w, 0.0),
+            ];
+            let pts = points
+                .iter()
+                .map(|(x, y)| format!("{},{}", fmt_num(*x), fmt_num(*y)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!(
+                r#"<polygon class="basic label-container" style="" points="{p}"></polygon>"#,
+                p = pts,
+            ));
+        }
+        ShapeKind::Bang => {
+            // Simplified bang / explosion stand-in (rounded rect) until
+            // the 12-arc `bangShape` formula is ported.
+            let inner_w = n.shape_w - 10.0;
+            let inner_h = n.shape_h - 10.0;
+            out.push_str(&format!(
+                r#"<path class="basic label-container" style="" d="M{nx} {hh}v{nih}q0,-5 5,-5h{iw}q5,0 5,5v{ih}q0,5 -5,5h{niw}q-5,0 -5,-5Z"></path>"#,
+                nx = fmt_num(-half_w),
+                hh = fmt_num(half_h - 5.0),
+                nih = fmt_num(-inner_h),
+                iw = fmt_num(inner_w),
+                ih = fmt_num(inner_h),
+                niw = fmt_num(-inner_w),
+            ));
+        }
+        ShapeKind::Cloud => {
+            // Simplified cloud stand-in (rounded rect) until the
+            // upstream `cloudShape` 9-arc formula is ported.
+            let inner_w = n.shape_w - 10.0;
+            let inner_h = n.shape_h - 10.0;
+            out.push_str(&format!(
+                r#"<path class="basic label-container" style="" d="M{nx} {hh}v{nih}q0,-5 5,-5h{iw}q5,0 5,5v{ih}q0,5 -5,5h{niw}q-5,0 -5,-5Z"></path>"#,
+                nx = fmt_num(-half_w),
+                hh = fmt_num(half_h - 5.0),
+                nih = fmt_num(-inner_h),
+                iw = fmt_num(inner_w),
+                ih = fmt_num(inner_h),
+                niw = fmt_num(-inner_w),
+            ));
+        }
+    }
 }
 
 /// Emit the four `<marker>` definitions + opening element wrapper that
