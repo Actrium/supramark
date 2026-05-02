@@ -1813,14 +1813,80 @@ fn round_js(v: f64) -> f64 {
     (v + 0.5).floor()
 }
 
+/// Try to consume a mermaid `#name;` entity placeholder starting at byte
+/// `i` of `bytes`. Returns Some((output_str, end_index_exclusive)) when
+/// recognized, where `output_str` is the `&name;` (or `&#NNN;`) replacement.
+///
+/// Mirrors upstream `encodeEntities` (in `utils.ts`) followed by
+/// `decodeEntities` (in `mermaidAPI.ts`): `#word;` round-trips to `&word;`
+/// in the rendered SVG. Numeric `#NNN;` becomes `&#NNN;`.
+fn try_consume_hash_entity(bytes: &[u8], i: usize) -> Option<(String, usize)> {
+    if bytes.get(i)? != &b'#' {
+        return None;
+    }
+    let start = i + 1;
+    let mut end = start;
+    while end < bytes.len() && bytes[end] != b';' {
+        // Stop early on whitespace / `<>&#` — the regex in upstream is
+        // `#\w+;`, so we restrict to ASCII word chars (alnum + `_`).
+        let b = bytes[end];
+        if !b.is_ascii_alphanumeric() && b != b'_' {
+            return None;
+        }
+        end += 1;
+    }
+    if end >= bytes.len() || end == start {
+        return None;
+    }
+    let name = std::str::from_utf8(&bytes[start..end]).ok()?;
+    let is_num = name.bytes().all(|b| b.is_ascii_digit());
+    let replacement = if is_num {
+        format!("&#{};", name)
+    } else {
+        format!("&{};", name)
+    };
+    Some((replacement, end + 1))
+}
+
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            _ => out.push(c),
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'&' => {
+                out.push_str("&amp;");
+                i += 1;
+            }
+            b'<' => {
+                out.push_str("&lt;");
+                i += 1;
+            }
+            b'>' => {
+                out.push_str("&gt;");
+                i += 1;
+            }
+            b'#' => {
+                if let Some((rep, next)) = try_consume_hash_entity(bytes, i) {
+                    out.push_str(&rep);
+                    i = next;
+                } else {
+                    out.push('#');
+                    i += 1;
+                }
+            }
+            _ if b < 0x80 => {
+                out.push(b as char);
+                i += 1;
+            }
+            _ => {
+                // Multi-byte UTF-8: copy through to maintain validity.
+                let ch_len = utf8_char_len(b);
+                let ch_end = (i + ch_len).min(bytes.len());
+                out.push_str(&s[i..ch_end]);
+                i = ch_end;
+            }
         }
     }
     out
@@ -1828,16 +1894,65 @@ fn xml_escape(s: &str) -> String {
 
 fn attr_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'&' => {
+                out.push_str("&amp;");
+                i += 1;
+            }
+            b'<' => {
+                out.push_str("&lt;");
+                i += 1;
+            }
+            b'>' => {
+                out.push_str("&gt;");
+                i += 1;
+            }
+            b'"' => {
+                out.push_str("&quot;");
+                i += 1;
+            }
+            b'#' => {
+                if let Some((rep, next)) = try_consume_hash_entity(bytes, i) {
+                    out.push_str(&rep);
+                    i = next;
+                } else {
+                    out.push('#');
+                    i += 1;
+                }
+            }
+            _ if b < 0x80 => {
+                out.push(b as char);
+                i += 1;
+            }
+            _ => {
+                let ch_len = utf8_char_len(b);
+                let ch_end = (i + ch_len).min(bytes.len());
+                out.push_str(&s[i..ch_end]);
+                i = ch_end;
+            }
         }
     }
     out
+}
+
+/// UTF-8 leading-byte → byte length lookup. Defaults to 1 for invalid
+/// leads so we always make forward progress.
+fn utf8_char_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xC0 {
+        1 // continuation byte (shouldn't happen at boundary)
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    }
 }
 
 /// Fallback placeholder for fixtures we can't render byte-exactly. Used
