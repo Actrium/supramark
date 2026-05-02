@@ -776,6 +776,23 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
 
         let mut best_loss = 1e50_f64;
         let mut best_pt = points[0];
+        // Upstream `greedyLayout` mutates `areas` to pair-only at the very
+        // top of the function (`areas = areas.filter(a => a.sets.length === 2)`),
+        // so the loss probe at each candidate position only counts pairwise
+        // intersection mismatches. Three-or-more set areas are NEVER included.
+        //
+        // Without this filter, three-circle layouts that are symmetric in y
+        // (the AB axis lies on y=0 by construction) develop a tie-break
+        // disagreement: the mirror-image candidates `(x, +h)` and `(x, -h)`
+        // have identical pairwise loss but slightly different triple-area
+        // contributions, so the FIRST candidate to win the tie depends on
+        // ULP-level differences in `intersectionArea` for the triple. JS
+        // never sees that contribution → both mirrors tie at e-20 → the
+        // first candidate (-h) wins; the unfiltered Rust version saw it →
+        // the second candidate (+h) wins → the simplex starts on the
+        // mirror side and converges to the mirrored solution, which then
+        // breaks byte-exact parity for every coordinate downstream.
+        let pair_areas: Vec<&Area> = areas.iter().filter(|a| a.sets.len() == 2).collect();
         for p in &points {
             {
                 let cur = output.get_mut(&setid).unwrap();
@@ -783,7 +800,13 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
                 cur.y = p.1;
             }
             let snapshot: BTreeMap<String, Circle> = output.iter().map(|(k, v)| (k.clone(), *v)).collect();
-            let l = loss_function_areas(&snapshot, areas);
+            let mut l = 0.0_f64;
+            for a in &pair_areas {
+                let lc = &snapshot[&a.sets[0]];
+                let rc = &snapshot[&a.sets[1]];
+                let overlap = circle_overlap(lc.radius, rc.radius, distance(lc, rc));
+                l += a.weight * (overlap - a.size).powi(2);
+            }
             if l < best_loss {
                 best_loss = l;
                 best_pt = *p;
