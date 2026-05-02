@@ -152,6 +152,8 @@ pub fn render(
                         | Some(ArrowType::DottedLine)
                         | Some(ArrowType::SolidCross)
                         | Some(ArrowType::DottedCross)
+                        | Some(ArrowType::SolidPoint)
+                        | Some(ArrowType::DottedPoint)
                         | Some(ArrowType::BiSolid)
                         | Some(ArrowType::BiDotted)
                 )
@@ -210,9 +212,10 @@ pub fn render(
             let lines = split_br(&a.description);
             let mut tw_max = 0.0_f64;
             for line in &lines {
+                let resolved = resolve_hash_entities_for_measure(line);
                 let w = crate::font_metrics::text_width(
-                    line,
-                    "\"Open Sans\", sans-serif",
+                    &resolved,
+                    "\"trebuchet ms\", verdana, arial",
                     16.0,
                     false,
                     false,
@@ -274,8 +277,9 @@ pub fn render(
                 let lines = split_br(&measured);
                 let mut msg_text_width = 0.0_f64;
                 for line in &lines {
+                    let resolved = resolve_hash_entities_for_measure(line);
                     let w = crate::font_metrics::text_width(
-                        line,
+                        &resolved,
                         "sans-serif",
                         cfg.message_font_size as f64,
                         false,
@@ -358,8 +362,9 @@ pub fn render(
                 let lines = split_br(&measured_text);
                 let mut text_w = 0.0_f64;
                 for line in &lines {
+                    let resolved = resolve_hash_entities_for_measure(line);
                     let w = crate::font_metrics::text_width(
-                        line,
+                        &resolved,
                         "trebuchet ms",
                         cfg.message_font_size as f64,
                         false,
@@ -519,8 +524,9 @@ pub fn render(
             let intermediate_lines = split_br(&intermediate_text);
             let mut text_w = 0.0_f64;
             for line in &intermediate_lines {
+                let resolved = resolve_hash_entities_for_measure(line);
                 let w = crate::font_metrics::text_width(
-                    line,
+                    &resolved,
                     "trebuchet ms",
                     cfg.message_font_size as f64,
                     false,
@@ -728,6 +734,10 @@ pub fn render(
             m.arrow,
             Some(ArrowType::SolidCross) | Some(ArrowType::DottedCross)
         );
+        let has_pointhead = matches!(
+            m.arrow,
+            Some(ArrowType::SolidPoint) | Some(ArrowType::DottedPoint)
+        );
         let is_bidir = matches!(
             m.arrow,
             Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted)
@@ -740,7 +750,7 @@ pub fn render(
                     stopx += 4.0;
                 }
             }
-            if has_arrowhead || has_crosshead || is_bidir {
+            if has_arrowhead || has_crosshead || has_pointhead || is_bidir {
                 if is_arrow_to_right {
                     stopx -= 3.0;
                 } else {
@@ -766,8 +776,9 @@ pub fn render(
         if is_self {
             let mut msg_text_width = 0.0_f64;
             for line in &msg_lines {
+                let resolved = resolve_hash_entities_for_measure(line);
                 let w = crate::font_metrics::text_width(
-                    line,
+                    &resolved,
                     "sans-serif",
                     cfg.message_font_size as f64,
                     false,
@@ -1524,6 +1535,10 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         m.arrow,
         ArrowType::SolidCross | ArrowType::DottedCross
     );
+    let has_pointhead = matches!(
+        m.arrow,
+        ArrowType::SolidPoint | ArrowType::DottedPoint
+    );
     // Bidirectional arrows (`<<->>`, `<<-->>`) carry arrowheads on both
     // ends → both `marker-start` AND `marker-end="...arrowhead"`.
     let is_bidir = matches!(m.arrow, ArrowType::BiSolid | ArrowType::BiDotted);
@@ -1603,6 +1618,10 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
             out.push_str("\" marker-end=\"url(#");
             out.push_str(id);
             out.push_str("-crosshead)");
+        } else if has_pointhead {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str("-filled-head)");
         }
         if m.seq_index.is_some() {
             out.push_str("\" x1=\"");
@@ -1663,6 +1682,10 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         out.push_str("\" marker-end=\"url(#");
         out.push_str(id);
         out.push_str("-crosshead)\">");
+    } else if has_pointhead {
+        out.push_str("\" marker-end=\"url(#");
+        out.push_str(id);
+        out.push_str("-filled-head)\">");
     } else {
         out.push_str("\">");
     }
@@ -1879,6 +1902,29 @@ fn split_br(s: &str) -> Vec<&str> {
         i += 1;
     }
     out.push(&s[start..]);
+    out
+}
+
+fn resolve_hash_entities_for_measure(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'#' {
+            if let Some((rep, next)) = try_consume_hash_entity(bytes, i) {
+                match rep.as_str() {
+                    "&lt;" => out.push('<'),
+                    "&gt;" => out.push('>'),
+                    "&amp;" => out.push('&'),
+                    other => out.push_str(other),
+                }
+                i = next;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
     out
 }
 
