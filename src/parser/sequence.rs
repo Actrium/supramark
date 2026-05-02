@@ -162,11 +162,31 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             continue;
         }
 
-        // autonumber [start [step]] | autonumber off — tolerate, no-op.
+        // autonumber [start [step]] | autonumber off
         if line == "autonumber"
             || line.starts_with("autonumber ")
             || line.starts_with("autonumber\t")
         {
+            let rest = if line == "autonumber" {
+                ""
+            } else {
+                line[10..].trim()
+            };
+            let (start, step, visible) = if rest.is_empty() {
+                (None, None, true)
+            } else if rest == "off" {
+                (None, None, false)
+            } else {
+                let mut parts = rest.split_whitespace();
+                let start = parts.next().and_then(|s| s.parse::<i64>().ok());
+                let step = parts.next().and_then(|s| s.parse::<i64>().ok());
+                (start, step, true)
+            };
+            push_item(
+                &mut d.items,
+                &mut stack,
+                DiagramItem::Autonumber { start, step, visible },
+            );
             continue;
         }
 

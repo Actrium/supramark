@@ -54,6 +54,15 @@ struct MsgRender {
     /// 0-based message index — upstream uses `i0`, `i1`, … as the
     /// `data-id` value.
     idx: usize,
+    /// When `Some`, autonumber was active when this message was emitted;
+    /// the value is the rendered sequence number. The renderer emits a
+    /// zero-length marker line + `<text class="sequenceNumber">` after
+    /// the message line, and shifts `line_x1` by `+SEQUENCE_NUMBER_RADIUS`
+    /// (= 6) per upstream `sequenceRenderer.ts:646`.
+    seq_index: Option<i64>,
+    /// Autonumber marker / text X. Mirrors upstream's
+    /// `autonumberX = isLeftToRight ? fromBounds + 1 : toBounds - 1`.
+    seq_x: f64,
 }
 
 /// Per-note geometry collected during the layout pass.
@@ -106,18 +115,28 @@ pub fn render(
     //     no wrap. Matches upstream `drawNote` for the simplest path.
     fn only_supported_items(items: &[DiagramItem]) -> bool {
         items.iter().all(|it| match it {
-            DiagramItem::Message(m) => matches!(
-                m.arrow,
-                Some(ArrowType::SolidArrow)
-                    | Some(ArrowType::DottedArrow)
-                    | Some(ArrowType::SolidLine)
-                    | Some(ArrowType::DottedLine)
-            ),
+            DiagramItem::Message(m) => {
+                // Reject implicit `+` / `-` activations — full activation
+                // rendering is not yet ported.
+                if m.activate || m.deactivate {
+                    return false;
+                }
+                matches!(
+                    m.arrow,
+                    Some(ArrowType::SolidArrow)
+                        | Some(ArrowType::DottedArrow)
+                        | Some(ArrowType::SolidLine)
+                        | Some(ArrowType::DottedLine)
+                )
+            }
             DiagramItem::Note(n) => {
                 n.placement_actors.len() == 1
                     && n.placement.is_some()
                     && !n.text.contains('\n')
             }
+            // Autonumber occupies an item-id slot and toggles per-message
+            // sequence-number rendering — supported below.
+            DiagramItem::Autonumber { .. } => true,
             _ => false,
         })
     }
@@ -397,12 +416,31 @@ pub fn render(
 
     let mut messages: Vec<MsgRender> = Vec::new();
     let mut notes: Vec<NoteRender> = Vec::new();
+    // Autonumber state — mirrors upstream's `sequenceIndex`,
+    // `sequenceIndexStep`, `db.showSequenceNumbers()` running tally.
+    // Each `Autonumber` item updates these in declaration order; the
+    // current values are stamped onto every subsequent message.
+    let mut auto_seq_index: i64 = 1;
+    let mut auto_seq_step: i64 = 1;
+    let mut auto_visible: bool = false;
     // Track min/max x extents so we can compute the SVG viewBox after
     // all notes are placed. Notes can extend BEYOND the actor lifelines
     // when placed `left of` / `right of` the leftmost / rightmost actor.
     let mut bounds_startx: f64 = 0.0;
     let mut bounds_stopx: f64 = actors.last().map(|a| a.x + a.width).unwrap_or(0.0);
     for (idx, item) in d.items.iter().enumerate() {
+        // Autonumber: update running counters/visibility, no SVG output
+        // of its own — it occupies an item-id slot but doesn't draw.
+        if let DiagramItem::Autonumber { start, step, visible } = item {
+            if let Some(s) = start {
+                auto_seq_index = *s;
+            }
+            if let Some(s) = step {
+                auto_seq_step = *s;
+            }
+            auto_visible = *visible;
+            continue;
+        }
         if let DiagramItem::Note(note) = item {
             let placement = note.placement.expect("gated");
             let actor_id = &note.placement_actors[0];
@@ -648,8 +686,34 @@ pub fn render(
         let text_y_first = round_js(starty_for_msg + 10.0 + 5.0);
         let line_step = lh_unrounded;
 
-        let line_x1 = startx;
+        // Autonumber-active line.x1 shift: upstream
+        // `if (sequenceVisible) { line.attr('x1', startx + 6); }` for
+        // the standard (non-bidirectional, non-reverse) arrow path.
+        let seq_index = if auto_visible {
+            Some(auto_seq_index)
+        } else {
+            None
+        };
+        // autonumberX = isLeftToRight ? fromBounds + 1 : toBounds - 1
+        // where fromBounds = min over all four actor edges, toBounds = max.
+        let fa_cx = fa.x + fa.width / 2.0;
+        let ta_cx = ta.x + ta.width / 2.0;
+        let from_bounds = (fa_cx - 1.0).min(ta_cx - 1.0);
+        let to_bounds = (fa_cx + 1.0).max(ta_cx + 1.0);
+        let seq_x = if is_arrow_to_right {
+            from_bounds + 1.0
+        } else {
+            to_bounds - 1.0
+        };
+        let line_x1 = if seq_index.is_some() {
+            startx + 6.0
+        } else {
+            startx
+        };
         let line_x2 = stopx;
+        if seq_index.is_some() {
+            auto_seq_index += auto_seq_step;
+        }
 
         messages.push(MsgRender {
             from: m.from.clone(),
@@ -663,6 +727,8 @@ pub fn render(
             line_x1,
             line_x2,
             idx,
+            seq_index,
+            seq_x,
         });
         // (height/stopy bookkeeping not needed since we only use vertical)
     }
@@ -1291,6 +1357,35 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         out.push_str("\">");
     }
     out.push_str("</line>");
+
+    // Autonumber sequence-number marker line + text. Mirrors upstream
+    // `sequenceRenderer.ts:712-729`:
+    //   <line x1=seqX y1=lineY x2=seqX y2=lineY stroke-width=0
+    //         marker-start="url(#…-sequencenumber)"></line>
+    //   <text x=seqX y=lineY+4 font-family="sans-serif" font-size="12px"
+    //         text-anchor="middle" class="sequenceNumber">N</text>
+    if let Some(seq) = m.seq_index {
+        out.push_str("<line x1=\"");
+        push_num(out, m.seq_x);
+        out.push_str("\" y1=\"");
+        push_num(out, m.line_start_y);
+        out.push_str("\" x2=\"");
+        push_num(out, m.seq_x);
+        out.push_str("\" y2=\"");
+        push_num(out, m.line_start_y);
+        out.push_str("\" stroke-width=\"0\" marker-start=\"url(#");
+        out.push_str(id);
+        out.push_str("-sequencenumber)\"></line>");
+        out.push_str("<text x=\"");
+        push_num(out, m.seq_x);
+        out.push_str("\" y=\"");
+        push_num(out, m.line_start_y + 4.0);
+        out.push_str(
+            "\" font-family=\"sans-serif\" font-size=\"12px\" text-anchor=\"middle\" class=\"sequenceNumber\">",
+        );
+        out.push_str(&seq.to_string());
+        out.push_str("</text>");
+    }
 }
 
 /// Compute the bbox.height of a single line in the messageFont. Upstream's

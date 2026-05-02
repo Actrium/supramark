@@ -111,6 +111,8 @@ fn walk_items(items: &[DiagramItem], out: &mut Vec<MessageRow>, y: &mut f64, ste
             | DiagramItem::Destroy(_) => {
                 *y += step;
             }
+            // Autonumber is a state-update statement — no own visual row.
+            DiagramItem::Autonumber { .. } => {}
         }
     }
 }

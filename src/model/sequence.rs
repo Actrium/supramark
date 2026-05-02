@@ -184,6 +184,15 @@ pub enum DiagramItem {
     Create(Actor),
     /// `destroy <actor>`
     Destroy(String),
+    /// `autonumber` / `autonumber <start>` / `autonumber <start> <step>`
+    /// / `autonumber off`. Mirrors upstream `LINETYPE.AUTONUMBER` —
+    /// each occurrence consumes one item-id slot and (de)activates
+    /// numeric prefixes on subsequent message lines.
+    Autonumber {
+        start: Option<i64>,
+        step: Option<i64>,
+        visible: bool,
+    },
 }
 
 /// Per-diagram config consumed from `%%{init}%%` / frontmatter.
