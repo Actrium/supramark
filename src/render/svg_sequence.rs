@@ -829,6 +829,32 @@ pub fn render(
             auto_seq_index += auto_seq_step;
         }
 
+        // Central-connection circle offset when autonumber is on.
+        // Mirrors upstream `drawCentralConnection`
+        // (sequenceRenderer.ts:329-372): with autonumber visible, the
+        // CIRCLE offset 16.5 shifts whichever endpoint is the source
+        // for non-reverse arrows. AtTo: no shift; AtFrom: fromCenter
+        // shifts by ±16.5 (LTR=+, RTL=-); Dual: fromCenter only.
+        // `isReverse` here = top/bottom-reverse arrow types
+        // (`/|-`, `//-`, `\\-`, etc.) — none of which are emitted from
+        // the current parser, so isReverse is treated as false.
+        let mut circle_from_cx = fa_cx;
+        let circle_to_cx = ta_cx;
+        if seq_index.is_some() {
+            const CIRCLE_OFFSET: f64 = 16.5;
+            let base = if is_arrow_to_right {
+                CIRCLE_OFFSET
+            } else {
+                -CIRCLE_OFFSET
+            };
+            match m.central_connection {
+                Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual) => {
+                    circle_from_cx += base;
+                }
+                _ => {}
+            }
+        }
+
         messages.push(MsgRender {
             from: m.from.clone(),
             to: m.to.clone(),
@@ -844,8 +870,8 @@ pub fn render(
             seq_index,
             seq_x,
             central_connection: m.central_connection,
-            from_cx: fa_cx,
-            to_cx: ta_cx,
+            from_cx: circle_from_cx,
+            to_cx: circle_to_cx,
         });
         // (height/stopy bookkeeping not needed since we only use vertical)
     }
