@@ -313,6 +313,44 @@ fn fix_polygon_edge_endpoints(edges: &mut [unified::Edge], nodes: &[unified::Nod
                     adjustment: (0.0, 0.0),
                 }
             }
+            // Upstream rectLeftInvArrow.ts (asymmetric / `>text]` syntax):
+            // raw local points (line 45043-45049):
+            //   { x: x + notch, y },  { x, y: 0 },  { x + notch, -y },
+            //   { -x, -y },           { -x, y }
+            // where x = -w_inner/2, y = -h/2, notch = y/2 = -h/4.
+            // The polygon is then translated by `(-notch/2, 0) = (h/8, 0)`
+            // visually, but the `points` array fed to `intersect_default.polygon`
+            // is the UNTRANSLATED list.
+            //
+            // We don't have `w_inner` directly here — `n.width` is the
+            // visual width set by `updateNodeBounds(node, polygon)` which
+            // reads the **post-translate** bbox: visual = w_inner + h/4.
+            // So recover `w_inner = n.width - h/4` and emit the polygon
+            // in the same world frame upstream's `intersectPolygon`
+            // produces (after its `left/top` shift).
+            //
+            // Effect: end-cap world coords:
+            //   notch tip:    (cx - w_inner/2 - h/8, cy ± h/2)
+            //   body left:    (cx - w_inner/2 + h/8, cy)
+            //   body right:   (cx + w_inner/2 + h/8, cy ± h/2)
+            "rect_left_inv_arrow" | "odd" | "asymmetric" => {
+                let w_inner = (w - h / 4.0).max(0.0);
+                let half_w = w_inner / 2.0;
+                let half_h = h / 2.0;
+                let dx = h / 8.0;
+                PolygonInfo {
+                    vertices: vec![
+                        (cx - half_w - dx, cy - half_h),
+                        (cx - half_w + dx, cy),
+                        (cx - half_w - dx, cy + half_h),
+                        (cx + half_w + dx, cy + half_h),
+                        (cx + half_w + dx, cy - half_h),
+                    ],
+                    cx,
+                    cy,
+                    adjustment: (0.0, 0.0),
+                }
+            }
             // Upstream hexagon.ts: m = h/f (f=4 for default look), w_total = w + 2m
             // local points: [(m, 0), (w-m, 0), (w, -h/2), (w-m, -h), (m, -h), (0, -h/2)]
             // intersectPolygon: minX=0, minY=-h → left = cx - w/2, top = cy + h/2.
@@ -1309,6 +1347,22 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
             let h_inner = th + p * 2.0;
             let w_inner = tw + p * 2.0;
             return (w_inner + h_inner, h_inner);
+        }
+        // Upstream rectLeftInvArrow.ts (asymmetric / `>text]` syntax):
+        //   labelPaddingX = labelPaddingY = nodePadding (default look)
+        //   w = bbox.width  + labelPaddingX  → tw + p
+        //   h = bbox.height + labelPaddingY  → th + p
+        //   notch = -h/4 (used for the left-pointing arrow tip)
+        // The polygon spans [-w/2 - h/4, w/2] horizontally; after the
+        // shape's own translate(-notch/2, 0) = translate(h/8, 0) the
+        // visual bbox spans [-w/2 - h/8, w/2 + h/8] (width = w + h/4).
+        // updateNodeBounds reads that visual bbox, so dagre sees:
+        //   node.width  = w + h/4
+        //   node.height = h
+        "rect_left_inv_arrow" | "odd" | "asymmetric" => {
+            let h_inner = th + p;
+            let w_inner = tw + p;
+            return (w_inner + h_inner / 4.0, h_inner);
         }
         "round" | "rounded" => (p * 2.0, p * 2.0),
         _ => (p * 4.0, p * 2.0), // rect / squareRect: labelPaddingX = p*2, ×2 sides = p*4

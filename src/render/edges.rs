@@ -1409,13 +1409,8 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
             let delta = std::f64::consts::PI / (2.0 * 49.0);
             let correction = 2.0 * radius * (1.0 - delta.cos());
             let w_analytical = w + correction;
-            let poly = stadium_polygon(cx, cy, w_analytical, h);
-            if let Some((x, y)) = ray_polygon_intersection(centre, dir, &poly) {
-                return Point {
-                    x: x as f64,
-                    y: y as f64,
-                };
-            }
+            let poly_local = stadium_polygon_local(w_analytical, h);
+            return intersect_polygon_upstream(cx, cy, w, h, &poly_local, probe);
         }
         "circle" | "ellipse" | "doublecircle" | "stateStart" | "state_start" | "start"
         | "stateEnd" | "state_end" | "end" => {
@@ -1438,13 +1433,20 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
             }
         }
         "hexagon" | "hex" => {
-            let poly = hexagon_polygon(cx, cy, w, h);
-            if let Some((x, y)) = ray_polygon_intersection(centre, dir, &poly) {
-                return Point {
-                    x: x as f64,
-                    y: y as f64,
-                };
-            }
+            let poly_local = hexagon_polygon_local(w, h);
+            return intersect_polygon_upstream(cx, cy, w, h, &poly_local, probe);
+        }
+        // Asymmetric / `>text]` flag shape. Upstream `rectLeftInvArrow.ts`
+        // builds a 5-vertex polygon (rectangle with a left-pointing notch)
+        // and routes intersection through `intersect_default.polygon`, so
+        // the result inherits the `±0.5` offset from `intersectLine`.
+        // `node.width` here is the visual (post-translate) bbox width
+        // `w_inner + h/4`; we recover `w_inner = node.width - h/4` and
+        // emit local polygon vertices in upstream's pre-translate frame.
+        "rect_left_inv_arrow" | "odd" | "asymmetric" => {
+            let w_inner = w - h / 4.0;
+            let poly_local = rect_left_inv_arrow_polygon_local(w_inner, h);
+            return intersect_polygon_upstream(cx, cy, w, h, &poly_local, probe);
         }
         "cylinder" | "cyl" => {
             // Upstream cylinder.ts intersect: start with rect intersection
@@ -1487,6 +1489,133 @@ fn intersect_node_boundary(node: &Node, probe: Point) -> Point {
     // Fallback — use rect intersection if the shape-specific math
     // didn't return (e.g. probe on the shape boundary).
     intersection_rect_aabb(cx, cy, w, h, probe)
+}
+
+/// Port of upstream `intersect/intersect-line.js` `intersectLine(p1, p2, q1, q2)`.
+///
+/// Returns the intersection point of segment `p1→p2` with segment `q1→q2`,
+/// or `None` if they do not cross. Matches the JS implementation byte-for-byte
+/// — note the deliberate `±|denom/2|` offset baked into the result, which
+/// shifts every intersection by ±0.5 in each axis. Upstream rendering relies
+/// on that offset everywhere `intersect.polygon` is used; non-axis-aligned
+/// shapes (stadium, hexagon, …) keep the offset, while diamond / question
+/// shapes subtract `0.5` from `x` and `y` afterwards to cancel it.
+fn intersect_line_upstream(
+    p1: Point,
+    p2: Point,
+    q1: Point,
+    q2: Point,
+) -> Option<Point> {
+    let a1 = p2.y - p1.y;
+    let b1 = p1.x - p2.x;
+    let c1 = p2.x * p1.y - p1.x * p2.y;
+    let r3 = a1 * q1.x + b1 * q1.y + c1;
+    let r4 = a1 * q2.x + b1 * q2.y + c1;
+    if r3 != 0.0 && r4 != 0.0 && (r3 * r4 > 0.0) {
+        return None;
+    }
+    let a2 = q2.y - q1.y;
+    let b2 = q1.x - q2.x;
+    let c2 = q2.x * q1.y - q1.x * q2.y;
+    let r1 = a2 * p1.x + b2 * p1.y + c2;
+    let r2 = a2 * p2.x + b2 * p2.y + c2;
+    let epsilon = 1e-6;
+    if r1.abs() < epsilon && r2.abs() < epsilon && (r1 * r2 > 0.0) {
+        return None;
+    }
+    let denom = a1 * b2 - a2 * b1;
+    if denom == 0.0 {
+        return None;
+    }
+    let offset = (denom / 2.0).abs();
+    let mut num = b1 * c2 - b2 * c1;
+    let x = if num < 0.0 {
+        (num - offset) / denom
+    } else {
+        (num + offset) / denom
+    };
+    num = a2 * c1 - a1 * c2;
+    let y = if num < 0.0 {
+        (num - offset) / denom
+    } else {
+        (num + offset) / denom
+    };
+    Some(Point { x, y })
+}
+
+/// Port of upstream `intersect/intersect-polygon.js` `intersectPolygon(node, polyPoints, point)`.
+///
+/// `polyPoints` are the polygon's vertices as upstream stores them — typically
+/// in **local** coordinates, not yet placed at the node centre. The function
+/// internally re-shifts the polygon so its bounding box top-left lands at
+/// `(node.x - node.width/2, node.y - node.height/2)`, which is upstream's way
+/// of letting shape code provide raw polygon outlines while the renderer
+/// supplies the (possibly already-fit) `node.width` / `node.height`.
+///
+/// The intersection points are produced by [`intersect_line_upstream`], so
+/// the result inherits the `±0.5` offset that upstream's geometry encodes.
+///
+/// Returns `point` itself when no edge of the polygon is crossed by the
+/// segment from the node centre to the target point — same fallback as JS.
+fn intersect_polygon_upstream(
+    node_x: f64,
+    node_y: f64,
+    node_w: f64,
+    node_h: f64,
+    poly: &[(f64, f64)],
+    target: Point,
+) -> Point {
+    if poly.is_empty() {
+        return target;
+    }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    for &(px, py) in poly {
+        if px < min_x {
+            min_x = px;
+        }
+        if py < min_y {
+            min_y = py;
+        }
+    }
+    let left = node_x - node_w / 2.0 - min_x;
+    let top = node_y - node_h / 2.0 - min_y;
+    let centre = Point {
+        x: node_x,
+        y: node_y,
+    };
+    let n = poly.len();
+    let mut intersections: Vec<Point> = Vec::with_capacity(2);
+    for i in 0..n {
+        let (p1x, p1y) = poly[i];
+        let (p2x, p2y) = poly[(i + 1) % n];
+        let q1 = Point {
+            x: left + p1x,
+            y: top + p1y,
+        };
+        let q2 = Point {
+            x: left + p2x,
+            y: top + p2y,
+        };
+        if let Some(hit) = intersect_line_upstream(centre, target, q1, q2) {
+            intersections.push(hit);
+        }
+    }
+    if intersections.is_empty() {
+        return target;
+    }
+    if intersections.len() > 1 {
+        intersections.sort_by(|p, q| {
+            let pdx = p.x - target.x;
+            let pdy = p.y - target.y;
+            let dist_p = (pdx * pdx + pdy * pdy).sqrt();
+            let qdx = q.x - target.x;
+            let qdy = q.y - target.y;
+            let dist_q = (qdx * qdx + qdy * qdy).sqrt();
+            dist_p.partial_cmp(&dist_q).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    intersections[0]
 }
 
 /// Closed-form ray-to-AABB intersection from the node centre.
@@ -1536,6 +1665,81 @@ fn intersection_rect_aabb(cx: f64, cy: f64, w: f64, h: f64, probe: Point) -> Poi
 /// `{x: -(cx + r*cos(angle)), y: -(cy + r*sin(angle))}` — note the
 /// negation. The polygon is centred on the node centre (cx, cy) so we
 /// add (cx, cy) when emitting the polygon for intersection.
+/// Same as [`stadium_polygon`], but returns vertices in upstream's
+/// local-coordinate frame (no `(cx, cy)` translation). Suitable for
+/// feeding to [`intersect_polygon_upstream`], which re-shifts the
+/// polygon to the node centre internally.
+fn stadium_polygon_local(w: f64, h: f64) -> Vec<(f64, f64)> {
+    let radius = h / 2.0;
+    let mut pts: Vec<(f64, f64)> = Vec::with_capacity(102);
+    pts.push((-w / 2.0 + radius, -h / 2.0));
+    pts.push((w / 2.0 - radius, -h / 2.0));
+    let arc1_cx = -w / 2.0 + radius;
+    let n: usize = 50;
+    let start1 = std::f64::consts::PI / 2.0; // 90°
+    let end1 = std::f64::consts::PI * 3.0 / 2.0; // 270°
+    let step1 = (end1 - start1) / (n as f64 - 1.0);
+    for i in 0..n {
+        let angle = start1 + i as f64 * step1;
+        let xr = arc1_cx + radius * angle.cos();
+        let yr = radius * angle.sin();
+        pts.push((-xr, -yr));
+    }
+    pts.push((w / 2.0 - radius, h / 2.0));
+    let arc2_cx = w / 2.0 - radius;
+    let start2 = std::f64::consts::PI * 3.0 / 2.0; // 270°
+    let end2 = std::f64::consts::PI * 5.0 / 2.0; // 450°
+    let step2 = (end2 - start2) / (n as f64 - 1.0);
+    for i in 0..n {
+        let angle = start2 + i as f64 * step2;
+        let xr = arc2_cx + radius * angle.cos();
+        let yr = radius * angle.sin();
+        pts.push((-xr, -yr));
+    }
+    pts
+}
+
+/// Local-coordinate vertices for the asymmetric / flag shape.
+/// Matches upstream `rectLeftInvArrow.ts`'s `points` array prior to
+/// the visual `translate(-notch/2, 0)`. `w` here is the inner pre-
+/// translate width (`bbox.width + nodePadding`), `h` is the height.
+fn rect_left_inv_arrow_polygon_local(w: f64, h: f64) -> Vec<(f64, f64)> {
+    let x = -w / 2.0;
+    let y = -h / 2.0;
+    let notch = y / 2.0; // negative
+    vec![
+        (x + notch, y),
+        (x, 0.0),
+        (x + notch, -y),
+        (-x, -y),
+        (-x, y),
+    ]
+}
+
+/// Local-coordinate hexagon vertices. Mirrors upstream `hexagon.ts`'s
+/// `points` array prior to the visual translate.
+fn hexagon_polygon_local(w: f64, h: f64) -> Vec<(f64, f64)> {
+    // Upstream points (lines 43515-43522):
+    //   { x: m,        y: 0 },
+    //   { x: w - m,    y: 0 },
+    //   { x: w,        y: -h/2 },
+    //   { x: w - m,    y: -h },
+    //   { x: m,        y: -h },
+    //   { x: 0,        y: -h/2 }
+    // where m = h/4 (default look). The polygon spans [0, w] horizontally
+    // and [-h, 0] vertically, so its bbox-shift in `intersect_polygon_upstream`
+    // re-centres it on the node.
+    let m = h / 4.0;
+    vec![
+        (m, 0.0),
+        (w - m, 0.0),
+        (w, -h / 2.0),
+        (w - m, -h),
+        (m, -h),
+        (0.0, -h / 2.0),
+    ]
+}
+
 fn stadium_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {
     let radius = h / 2.0;
     let mut pts: Vec<(f32, f32)> = Vec::with_capacity(102);
