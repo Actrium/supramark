@@ -1,8 +1,26 @@
 # 阶段进展
 
-截至 Wave 9 起步（W6 +1 净，关键发现：mindmap 全靠 cose-bilkent，flowchart linkStyle 残余依赖 third-class bug 链）。
+截至 Wave 7 收尾。
 
-最新：1135 → **1136/1136 byte-exact**。
+**最新：1135 → 1136 (Wave 6) → 1145/1145 byte-exact (Wave 7, +9)**。
+
+## Wave 7 进展（4 路并行）
+
+- **W7-A retry +5（W7-A 原版被 watchdog 重启，retry 4 个 commit 直接落 main）**：
+  - autonumber 渲染 +2
+  - cross-arrow `-x`/`--x` → demos/sequence/06,09 +2
+  - bidirectional `<<->>` → cypress/69 + demos/10 +2
+  - bidir+autonumber line shift（startx+12）→ cypress/120 +1
+- **W7-B +2**：edge.animation 字段 + group_style threading；113/237 unlock
+  - Bug B（group_style threading）：circle/cylinder/diamond/ellipse/label_rect/stadium 全部走 `shape_label_block_with_styles` 变体，把 node css_styles 接入 LabelOpts；font-size 因 post-process 二次度量被排除以避免冲突
+  - Bug C（edge.animation 字段）：parser → model → layout(`UEdge::animation`) → render(`edge-animation-{slow|fast}` class)
+  - Bug A（edge-label x drift）诊断但未修：实际是 stadium intersection 模型差（rounded-rect vs ellipse），且原 fixtures 还被 rough.js stadium 阻塞
+- **W7-C 0 unlock**：ellipse/circle/bbox_of_sets 基础设施 +383 行落地。澄清：真正的 handDrawn 是 `demos/ishikawa/04`，不是 cypress/04。剩余 6 步 wiring 已细化记入 known_ignored
+- **W7-D 0 unlock 但防御性硬化**：gitGraph 早就 103/105 cypress + 24/24 demos byte-exact，只是 test harness 只覆盖 7 个；扩到 128 个 named test，未来回归一秒发现
+
+### W7-A retry 关键洞察
+
+"纯 activation"在数据集中**没有任何 fixture 单独成立** —— 每一个用 `activate`/`deactivate` 或 `+`/`-` 的 fixture 都和 notes/loops/rects/init 至少一项捆绑。W7-A 原版花了 30min 试图实现 activation 渲染，0 unlock。retry 改用 probe-driven（按 diff_at 排序找最小差异 fixture），命中的全是被错误标 `[activation]` 的 misclassified fixture（cross-arrow / bidirectional 等）。**未来 sequence 推进必须 probe-driven，不能按 feature 标签分组**。
 
 > 本项目只维护中文版 PROGRESS。
 
