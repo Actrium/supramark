@@ -535,7 +535,7 @@ pub fn stringify(c: &mut Channels) -> String {
                     js_round_str(h),
                     js_round_str(s),
                     js_round_str(l),
-                    js_round_str(a)
+                    a
                 )
             } else {
                 format!(
@@ -674,6 +674,11 @@ pub fn is_dark(color: &str) -> bool {
 /// Khroma's `darken(color, n)` — `-n` on the L channel.
 pub fn darken(color: &str, amount: f64) -> String {
     adjust_channel(color, 'l', -amount)
+}
+
+/// Khroma's `transparentize(color, amount)` — `-amount` on the A channel.
+pub fn transparentize(color: &str, amount: f64) -> String {
+    adjust_channel(color, 'a', -amount)
 }
 
 /// Khroma's `adjust_channel(color, channel, delta)` — additive delta on

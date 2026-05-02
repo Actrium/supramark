@@ -466,10 +466,6 @@ impl RoughGenerator {
         }
     }
 
-    /// `rc.ellipse(x, y, width, height, options)` — port of upstream's
-    /// `RoughGenerator.ellipse`. Generates an ellipse centred at
-    /// `(x, y)` with the given width/height. Pattern fills (`hachure`)
-    /// are not implemented; only `solid` fills go through.
     pub fn ellipse(&mut self, x: f64, y: f64, w: f64, h: f64, o: &RoughOptions) -> Drawable {
         let mut rng = self.make_random(o);
         let mut sets = Vec::with_capacity(2);
@@ -477,16 +473,17 @@ impl RoughGenerator {
         let response = ellipse_with_params(x, y, o, &params, &mut rng);
         if o.fill.is_some() {
             if o.fill_style == "solid" {
-                // Re-run ellipseWithParams to mimic upstream's
-                // `ellipseWithParams(...).opset` call (the JS reads
-                // opset off a *fresh* call — fresh RNG pulls). The
-                // opset's type gets relabeled "fillPath".
                 let fresh = ellipse_with_params(x, y, o, &params, &mut rng);
                 let mut shape = fresh.opset;
                 shape.op_type = OpSetType::FillPath;
                 sets.push(shape);
+            } else {
+                let core = &response.estimated_points;
+                let core_arr: Vec<[f64; 2]> = core.iter().map(|(x, y)| [*x, *y]).collect();
+                let polys: Vec<Vec<[f64; 2]>> = vec![core_arr];
+                let lines = polygon_hachure_lines(&polys, o, &mut rng);
+                sets.push(hachure_fill_sketch(&lines, o, &mut rng));
             }
-            // Pattern fill (`hachure`/etc.) on ellipses is not implemented.
         }
         if o.stroke != "none" {
             sets.push(response.opset);
@@ -1173,12 +1170,9 @@ struct EllipseParams {
     ry: f64,
 }
 
-/// Wrapper around the OpSet returned by `ellipse_with_params` —
-/// matches upstream's `EllipseResponse` so future ports of `_curve`
-/// fill paths can attach a `corePoints` slice without breaking
-/// callers.
 struct EllipseResponse {
     opset: OpSet,
+    estimated_points: Vec<(f64, f64)>,
 }
 
 /// Two RNG pulls happen here (in order: rx-jitter, then ry-jitter),
@@ -1213,19 +1207,13 @@ fn ellipse_with_params(
     p: &EllipseParams,
     rng: &mut RoughRandom,
 ) -> EllipseResponse {
-    // Two RNG pulls fold into the inner `offset(0.4, 1, o)` ⇒ then the
-    // outer `offset(0.1, that, o)` which is `increment * offset(...)`.
-    // Critically, JS evaluates the *inner* `_offset(0.4, 1, o)` argument
-    // FIRST (innermost call), pulling RNG once, then the outer call
-    // pulls once. So the order is: `inner` → `outer` → many `_offsetOpt`
-    // pulls inside `_computeEllipsePoints`.
     let inner = offset(0.4, 1.0, o, 1.0, rng);
     let scaled = p.increment * offset(0.1, inner, o, 1.0, rng);
-    let ap1 = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.0, scaled, o, rng);
-    let mut o1 = curve_inner(&ap1, None, o);
+    let (ap1_all, ap1_core) = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.0, scaled, o, rng);
+    let mut o1 = curve_inner(&ap1_all, None, o);
     if !o.disable_multi_stroke && o.roughness != 0.0 {
-        let ap2 = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.5, 0.0, o, rng);
-        let o2 = curve_inner(&ap2, None, o);
+        let (ap2_all, _) = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.5, 0.0, o, rng);
+        let o2 = curve_inner(&ap2_all, None, o);
         o1.extend(o2);
     }
     EllipseResponse {
@@ -1233,13 +1221,10 @@ fn ellipse_with_params(
             op_type: OpSetType::Path,
             ops: o1,
         },
+        estimated_points: ap1_core,
     }
 }
 
-/// `_computeEllipsePoints` — non-coreOnly branch (mermaid never sets
-/// roughness=0 for handDrawn). The corePoints array is unused by the
-/// outline path so we don't bother building it.
-#[allow(clippy::too_many_arguments)]
 fn compute_ellipse_points(
     increment: f64,
     cx: f64,
@@ -1250,11 +1235,8 @@ fn compute_ellipse_points(
     overlap: f64,
     o: &RoughOptions,
     rng: &mut RoughRandom,
-) -> Vec<(f64, f64)> {
+) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
     if o.roughness == 0.0 {
-        // coreOnly branch — mermaid's handDrawn path never reaches
-        // this, but include it for completeness so downstream callers
-        // can rely on the contract.
         let mut all = Vec::new();
         let inc = increment / 4.0;
         all.push((cx + rx * (-inc).cos(), cy + ry * (-inc).sin()));
@@ -1265,13 +1247,11 @@ fn compute_ellipse_points(
         }
         all.push((cx + rx * 0.0_f64.cos(), cy + ry * 0.0_f64.sin()));
         all.push((cx + rx * inc.cos(), cy + ry * inc.sin()));
-        return all;
+        return (all.clone(), all);
     }
     let mut all_points = Vec::with_capacity(20);
-    // RNG pull #1: radOffset.
+    let mut core_points = Vec::with_capacity(20);
     let rad_offset = offset_opt(0.5, o, 1.0, rng) - std::f64::consts::PI / 2.0;
-    // First push: the "before-start" point. Two RNG pulls (offset_opt
-    // for x and y).
     let r_x0 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y0 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
@@ -1283,10 +1263,11 @@ fn compute_ellipse_points(
     while angle < end_angle {
         let r_x = offset_opt(offset_mul, o, 1.0, rng);
         let r_y = offset_opt(offset_mul, o, 1.0, rng);
-        all_points.push((r_x + cx + rx * angle.cos(), r_y + cy + ry * angle.sin()));
+        let pt = (r_x + cx + rx * angle.cos(), r_y + cy + ry * angle.sin());
+        all_points.push(pt);
+        core_points.push(pt);
         angle += increment;
     }
-    // Three trailing closure points.
     let r_x1 = offset_opt(offset_mul, o, 1.0, rng);
     let r_y1 = offset_opt(offset_mul, o, 1.0, rng);
     all_points.push((
@@ -1305,7 +1286,7 @@ fn compute_ellipse_points(
         r_x3 + cx + 0.9 * rx * (rad_offset + overlap * 0.5).cos(),
         r_y3 + cy + 0.9 * ry * (rad_offset + overlap * 0.5).sin(),
     ));
-    all_points
+    (all_points, core_points)
 }
 
 /// `_curve` (Catmull-Rom → cubic Bezier).

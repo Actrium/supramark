@@ -18,6 +18,7 @@
 use crate::error::Result;
 use crate::layout::venn::VennLayout;
 use crate::model::venn::VennDiagram;
+use crate::render::rough::{RoughGenerator, RoughOptions, to_paths};
 use crate::theme::ThemeVariables;
 
 pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str) -> Result<String> {
@@ -123,6 +124,45 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
                     }
                 });
 
+            if d.hand_drawn {
+                let fill_color_trans = crate::theme::color::transparentize(&base_color, 0.7);
+                let sw_val: f64 = stroke_width.parse().unwrap_or(5.0 * scale);
+                let mut rc = RoughGenerator::new();
+                let mut o = RoughOptions::default();
+                o.seed = d.hand_drawn_seed.unwrap_or(0) as i32;
+                o.roughness = 0.7;
+                o.fill = Some(fill_color_trans);
+                o.fill_style = "hachure".into();
+                o.fill_weight = 2.0;
+                o.hachure_gap = 8.0;
+                o.hachure_angle = -41.0 + (i as f64) * 60.0;
+                o.stroke = stroke_color.clone();
+                o.stroke_width = sw_val;
+                let c = area.circles[0];
+                let drawable = rc.circle(c.x, c.y, c.radius * 2.0, &o);
+                let paths = to_paths(&drawable, &o);
+                let mut paths_html = String::new();
+                for p in &paths {
+                    paths_html.push_str(&format!(
+                        r#"<path d="{d}" stroke="{s}" stroke-width="{sw}" fill="{f}"></path>"#,
+                        d = p.d,
+                        s = p.stroke,
+                        sw = crate::render::rough::fmt_num(p.stroke_width),
+                        f = p.fill,
+                    ));
+                }
+                out.push_str(&format!(
+                    r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><g>{paths_html}</g><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
+                    i = i % 8,
+                    sets = area.sets.join("_"),
+                    paths_html = paths_html,
+                    tx = area.text_x,
+                    ty = area.text_y,
+                    tfill = text_color,
+                    fs = num(48.0 * scale),
+                    label = escape_text(&area.render_label),
+                ));
+            } else {
             out.push_str(&format!(
                 r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><path style="fill-opacity: {op}; fill: {fill}; stroke: {stroke}; stroke-width: {sw}; stroke-opacity: 0.95;" d="{d}"></path><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
                 i = i % 8,
@@ -135,9 +175,10 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
                 tx = area.text_x,
                 ty = area.text_y,
                 tfill = text_color,
-                fs = num(48.0 * scale), // upstream: `${48 * scale}px`
+                fs = num(48.0 * scale),
                 label = escape_text(&area.render_label),
             ));
+            }
         } else {
             // venn-intersection
             let custom_fill = custom_style.and_then(|m| m.get("fill")).cloned();
