@@ -45,7 +45,7 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
     if let Some(title) = d.meta.title.as_deref() {
         let title_font_size = 32.0 * scale;
         let title_y = 32.0 * scale; // upstream: `'y', 32 * scale` then later transform; the SVG has y=16 here
-        // Upstream sets y=`32 * scale` but SVG shows y=16 for scale=0.5. 32*0.5=16. ✓
+                                    // Upstream sets y=`32 * scale` but SVG shows y=16 for scale=0.5. 32*0.5=16. ✓
         out.push_str(&format!(
             r#"<text class="venn-title" font-size="{fs}px" text-anchor="middle" dominant-baseline="middle" x="50%" y="{y}" style="fill: {fill};">{text}</text>"#,
             fs = num(title_font_size),
@@ -62,7 +62,10 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
     ));
 
     // Helper: build a styles_by_key (sets joined with `|`) from the diagram.
-    let mut style_by_key: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> = std::collections::BTreeMap::new();
+    let mut style_by_key: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, String>,
+    > = std::collections::BTreeMap::new();
     for s in &d.styles {
         let key = s.targets.join("|");
         let entry = style_by_key.entry(key).or_default();
@@ -74,7 +77,9 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
     // Walk circle areas first (single-set), then intersection areas (multi-set),
     // each in source order, assigning venn-set-N indices to circles.
     let mut single_index: usize = 0;
-    let dark_bg = false; // default theme background is light; dark-theme handling TODO if needed
+    // Mirror upstream `vennRenderer.ts` ln 121:
+    //   `const themeDark = isDark(themeVariables.background || "#f4f4f4");`
+    let dark_bg = crate::theme::color::is_dark(theme.background.as_deref().unwrap_or("#f4f4f4"));
 
     for area in &l.areas {
         let key_pipe = area.sets.join("|");
@@ -184,8 +189,10 @@ fn render_text_nodes(
     // order of the FIRST node in each group so the output matches upstream
     // (which uses `Map`'s iteration order).
     let mut order: Vec<String> = Vec::new();
-    let mut nodes_by_area: std::collections::BTreeMap<String, Vec<&crate::model::venn::VennTextNode>> =
-        std::collections::BTreeMap::new();
+    let mut nodes_by_area: std::collections::BTreeMap<
+        String,
+        Vec<&crate::model::venn::VennTextNode>,
+    > = std::collections::BTreeMap::new();
     for node in &d.text_nodes {
         let key = node.sets.join("|");
         if !nodes_by_area.contains_key(&key) {
@@ -285,18 +292,13 @@ fn render_text_nodes(
 
         let inner_width = (80.0 * scale).max(inner_radius * 2.0 * 0.95);
         let inner_height = (60.0 * scale).max(inner_radius * 2.0 * 0.95);
-        let has_label = area
-            .label
-            .as_ref()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false);
+        let has_label = area.label.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
         let label_offset_base = if has_label {
             (32.0 * scale).min(inner_radius * 0.25)
         } else {
             0.0
         };
-        let label_offset = label_offset_base
-            + if nodes.len() <= 2 { 30.0 * scale } else { 0.0 };
+        let label_offset = label_offset_base + if nodes.len() <= 2 { 30.0 * scale } else { 0.0 };
         let start_x = center_x - inner_width / 2.0;
         let start_y = center_y - inner_height / 2.0 + label_offset;
         let cols = ((nodes.len() as f64).sqrt().ceil() as usize).max(1);
@@ -370,67 +372,165 @@ fn render_text_nodes(
     out.push_str("</g>");
 }
 
-/// CSS style block — fixed shape with theme-derived colors.
+/// Build the venn `<style>` block, mirroring upstream's
+/// `getStyles(type, userStyles, options, svgId)` (`src/styles.ts`)
+/// concatenated with `diagrams/venn/styles.ts`. Theme-aware so that
+/// `theme: dark/forest/neutral` and `themeVariables` overrides flow into
+/// every CSS rule.
 fn style_block(id: &str, theme: &ThemeVariables) -> String {
-    let font_family_raw = theme
+    let ff_raw = theme
         .font_family
-        .clone()
-        .unwrap_or_else(|| "\"trebuchet ms\", verdana, arial, sans-serif".into());
-    let font_family = minify_font_family(&font_family_raw);
-    let font_size = theme.font_size.clone().unwrap_or_else(|| "16px".into());
-    let text_color = theme
-        .text_color
-        .clone()
-        .unwrap_or_else(|| "#333".into());
-    let title_color = theme.title_color.clone().unwrap_or_else(|| "#333".into());
+        .as_deref()
+        .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
+    let font_family = minify_font_family(ff_raw);
+    let font_size = theme.font_size.as_deref().unwrap_or("16px");
+    let text_color = theme.text_color.as_deref().unwrap_or("#333");
+    let title_color = theme.title_color.as_deref().unwrap_or("#333");
     let venn_title_color = theme
         .venn_title_text_color
-        .clone()
-        .unwrap_or_else(|| title_color.clone());
-    let venn_set_text_color = theme
-        .venn_set_text_color
-        .clone()
-        .unwrap_or_else(|| text_color.clone());
+        .as_deref()
+        .unwrap_or(title_color);
+    let venn_set_text_color = theme.venn_set_text_color.as_deref().unwrap_or(text_color);
+    let error_bkg = theme.error_bkg_color.as_deref().unwrap_or("#552222");
+    let error_text = theme.error_text_color.as_deref().unwrap_or("#552222");
+    let line_color = theme.line_color.as_deref().unwrap_or("#333333");
+    let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
+    let drop_shadow = theme
+        .drop_shadow
+        .as_deref()
+        .unwrap_or("drop-shadow(1px 2px 2px rgba(185, 185, 185, 1))");
+    // Upstream `getStyles()` substitutes `url(${svgId}-gradient)` for the
+    // `[data-look="neo"]` strokes when `theme.useGradient` is truthy
+    // (theme: base / dark / forest / neutral). Otherwise the raw
+    // nodeBorder hex flows through.
+    let use_gradient = theme.use_gradient.unwrap_or(false);
+    let neo_stroke: String = if use_gradient {
+        format!("url(#{id}-gradient)")
+    } else {
+        node_border.to_string()
+    };
 
-    format!(
-        "<style>#{id}{{font-family:{ff};font-size:{fs};fill:{tc};}}\
-@keyframes edge-animation-frame{{from{{stroke-dashoffset:0;}}}}\
-@keyframes dash{{to{{stroke-dashoffset:0;}}}}\
-#{id} .edge-animation-slow{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}}\
-#{id} .edge-animation-fast{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}}\
-#{id} .error-icon{{fill:#552222;}}\
-#{id} .error-text{{fill:#552222;stroke:#552222;}}\
-#{id} .edge-thickness-normal{{stroke-width:1px;}}\
-#{id} .edge-thickness-thick{{stroke-width:3.5px;}}\
-#{id} .edge-pattern-solid{{stroke-dasharray:0;}}\
-#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}\
-#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}\
-#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}\
-#{id} .marker{{fill:#333333;stroke:#333333;}}\
-#{id} .marker.cross{{stroke:#333333;}}\
-#{id} svg{{font-family:{ff};font-size:{fs};}}\
-#{id} p{{margin:0;}}\
-#{id} .venn-title{{font-size:32px;fill:{vtc};font-family:{ff};}}\
-#{id} .venn-circle text{{font-size:48px;font-family:{ff};}}\
-#{id} .venn-intersection text{{font-size:48px;fill:{vstc};font-family:{ff};}}\
-#{id} .venn-text-node{{font-family:{ff};color:{vstc};}}\
-#{id} .node .neo-node{{stroke:#9370DB;}}\
-#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}\
-#{id} [data-look=\"neo\"].node path{{stroke:#9370DB;stroke-width:1px;}}\
-#{id} [data-look=\"neo\"].node .outer-path{{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}\
-#{id} [data-look=\"neo\"].node .neo-line path{{stroke:#9370DB;filter:none;}}\
-#{id} [data-look=\"neo\"].node circle{{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}\
-#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}\
-#{id} [data-look=\"neo\"].icon-shape .icon{{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}\
-#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}}\
-#{id} :root{{--mermaid-font-family:{ff};}}</style>",
-        id = id,
+    let mut s = String::with_capacity(4 * 1024);
+    s.push_str("<style>");
+
+    s.push_str(&format!(
+        "#{id}{{font-family:{ff};font-size:{fs};fill:{tc};}}",
         ff = font_family,
         fs = font_size,
         tc = text_color,
+    ));
+    s.push_str("@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}");
+    s.push_str("@keyframes dash{to{stroke-dashoffset:0;}}");
+    s.push_str(&format!(
+        "#{id} .edge-animation-slow{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}}",
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-animation-fast{{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}}",
+    ));
+    s.push_str(&format!("#{id} .error-icon{{fill:{c};}}", c = error_bkg,));
+    s.push_str(&format!(
+        "#{id} .error-text{{fill:{c};stroke:{c};}}",
+        c = error_text,
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-normal{{stroke-width:1px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"
+    ));
+    s.push_str(&format!("#{id} .edge-pattern-solid{{stroke-dasharray:0;}}"));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}",
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .marker{{fill:{c};stroke:{c};}}",
+        c = line_color,
+    ));
+    s.push_str(&format!(
+        "#{id} .marker.cross{{stroke:{c};}}",
+        c = line_color,
+    ));
+    s.push_str(&format!(
+        "#{id} svg{{font-family:{ff};font-size:{fs};}}",
+        ff = font_family,
+        fs = font_size,
+    ));
+    s.push_str(&format!("#{id} p{{margin:0;}}"));
+
+    // ── Venn-specific styles (`diagrams/venn/styles.ts`).
+    s.push_str(&format!(
+        "#{id} .venn-title{{font-size:32px;fill:{vtc};font-family:{ff};}}",
         vtc = venn_title_color,
+        ff = font_family,
+    ));
+    s.push_str(&format!(
+        "#{id} .venn-circle text{{font-size:48px;font-family:{ff};}}",
+        ff = font_family,
+    ));
+    s.push_str(&format!(
+        "#{id} .venn-intersection text{{font-size:48px;fill:{vstc};font-family:{ff};}}",
         vstc = venn_set_text_color,
-    )
+        ff = font_family,
+    ));
+    s.push_str(&format!(
+        "#{id} .venn-text-node{{font-family:{ff};color:{vstc};}}",
+        ff = font_family,
+        vstc = venn_set_text_color,
+    ));
+
+    // ── Common postamble (shared `data-look="neo"` rules).
+    s.push_str(&format!(
+        "#{id} .node .neo-node{{stroke:{nb};}}",
+        nb = node_border,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:{ns};filter:{ds};}}",
+        ns = neo_stroke,
+        ds = drop_shadow,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node path{{stroke:{ns};stroke-width:1px;}}",
+        ns = neo_stroke,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node .outer-path{{filter:{ds};}}",
+        ds = drop_shadow,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node .neo-line path{{stroke:{nb};filter:none;}}",
+        nb = node_border,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node circle{{stroke:{ns};filter:{ds};}}",
+        ns = neo_stroke,
+        ds = drop_shadow,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}",
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].icon-shape .icon{{fill:{ns};filter:{ds};}}",
+        ns = neo_stroke,
+        ds = drop_shadow,
+    ));
+    s.push_str(&format!(
+        "#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:{ns};filter:{ds};}}",
+        ns = neo_stroke,
+        ds = drop_shadow,
+    ));
+    s.push_str(&format!(
+        "#{id} :root{{--mermaid-font-family:{ff};}}",
+        ff = font_family,
+    ));
+
+    s.push_str("</style>");
+    s
 }
 
 fn num(v: f64) -> String {
@@ -554,4 +654,3 @@ fn minify_font_family(s: &str) -> String {
     }
     out
 }
-

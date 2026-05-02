@@ -640,6 +640,37 @@ pub fn lighten(color: &str, amount: f64) -> String {
     adjust_channel(color, 'l', amount)
 }
 
+/// Khroma's `isDark(color)` — `luminance(color) < 0.5`.
+///
+/// Mirrors `khroma/dist/methods/luminance.js`:
+///   `luminance = 0.2126·toLinear(r) + 0.7152·toLinear(g) + 0.0722·toLinear(b)`
+/// where `toLinear(c)` is sRGB→linear gamma decoding (channels in 0..255).
+/// Named keywords other than `white` / `black` fall back to false (light)
+/// — the only Mermaid theme background that isn't hex / rgb / hsl is
+/// `default` / `forest`'s `"white"`.
+pub fn is_dark(color: &str) -> bool {
+    let s = color.trim();
+    let mut ch = match parse(s) {
+        Some(c) => c,
+        None => {
+            // Minimal keyword shim for the values shipped by built-in themes.
+            return matches!(s.to_ascii_lowercase().as_str(), "black");
+        }
+    };
+    let lin = |v: f64| -> f64 {
+        let n = v / 255.0;
+        if v > 0.03928 {
+            ((n + 0.055) / 1.055).powf(2.4)
+        } else {
+            n / 12.92
+        }
+    };
+    let lum = 0.2126 * lin(ch.get_r()) + 0.7152 * lin(ch.get_g()) + 0.0722 * lin(ch.get_b());
+    // Khroma rounds to 10 fractional digits before the < 0.5 compare.
+    let lum = (lum * 1e10).round() / 1e10;
+    lum < 0.5
+}
+
 /// Khroma's `darken(color, n)` — `-n` on the L channel.
 pub fn darken(color: &str, amount: f64) -> String {
     adjust_channel(color, 'l', -amount)

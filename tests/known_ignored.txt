@@ -22,10 +22,7 @@ ext_fixtures/demos/flowchart/47.mmd	KaTeX math rendering ($$...$$); byte-exact p
 ext_fixtures/cypress/flowchart/144.mmd	Doublecircle missing `style` attribute on outer `<g>`/inner `<circle>` when node carries inline styles; rect_left_inv_arrow part now byte-exact, blocked on doublecircle style threading.
 ext_fixtures/demos/flowchart/41.mmd	Doublecircle missing `style` attribute on outer `<g>`/inner `<circle>` when node carries inline styles; rect_left_inv_arrow part now byte-exact, blocked on doublecircle style threading.
 ext_fixtures/demos/flowchart/65.mmd	Stadium + thick arrows + linkStyle/classDef uses roughjs rendering; byte-exact parity requires porting roughjs rendering algorithm.
-ext_fixtures/demos/venn/03.mmd	`theme: 'dark'` style block + 3-circle symmetric Nelder-Mead divergence.
 ext_fixtures/demos/venn/04.mmd	4 sets × 6 pairwise overlaps = 10 areas — triggers constrainedMDS layout which uses Math.random for initial guess; not reproducible without the V8 PRNG state.
-ext_fixtures/demos/venn/08.mmd	`theme: 'forest'` style block + 3-circle symmetric Nelder-Mead divergence.
-ext_fixtures/demos/venn/09.mmd	`theme: 'neutral'` style block has different `.marker` / `.neo-*` rules; theme propagation incomplete.
 ext_fixtures/demos/venn/10.mmd	`look: handDrawn` uses roughjs.
 ext_fixtures/demos/venn/11.mmd	`look: handDrawn` uses roughjs + foreign-object text nodes.
 ext_fixtures/demos/venn/12.mmd	`look: handDrawn` + `theme: 'dark'`; uses roughjs.
