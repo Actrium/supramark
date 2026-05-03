@@ -124,10 +124,24 @@ struct LoopRender {
     /// loopWidth - 2*wrapPadding, textConf)`.
     title: String,
     /// Block keyword shown inside the labelBox — `loop`/`alt`/`opt`/etc.
-    /// For this iteration only `loop` is supported.
     keyword: &'static str,
     /// 0-based item index assigned at LOOP_END — feeds `data-id="iN"`.
     idx: usize,
+    /// Section dividers for `alt` blocks (one per `else` arm). Each
+    /// entry: `(divider_y, label_text, label_y, label_idx)`. `divider_y`
+    /// is the y-coordinate of the dashed `<line>` separating two arms;
+    /// `label_y` is where the bracketed `[label2]` text is centred (one
+    /// line below the divider). `label_idx` is the per-section item-id
+    /// slot consumed at that else boundary. Empty for non-alt blocks.
+    sections: Vec<LoopSection>,
+}
+
+#[derive(Debug, Clone)]
+struct LoopSection {
+    divider_y: f64,
+    label: String,
+    label_y: f64,
+    label_idx: usize,
 }
 
 const FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
@@ -223,20 +237,20 @@ pub fn render(
             // Autonumber occupies an item-id slot and toggles per-message
             // sequence-number rendering — supported below.
             DiagramItem::Autonumber { .. } => true,
-            // `loop <label> ... end` — single-section variant, no nested
-            // control-structures inside. Inner items must themselves be
-            // supported (recursive check). Mirrors upstream's
-            // `LOOP_START`/`LOOP_END` event pair around drawLoop.
-            DiagramItem::Loop { items, .. } => {
-                // Reject nested Loop / Alt / Par / Opt / Critical / Break /
-                // Rect — only flat Loop with Message / Note / Autonumber
-                // inside is byte-exact in this iteration.
-                items.iter().all(|inner| match inner {
-                    DiagramItem::Message(_)
-                    | DiagramItem::Note(_)
-                    | DiagramItem::Autonumber { .. } => true,
-                    _ => false,
-                }) && only_supported_items(items)
+            // `loop <label> ... end` / `opt <label> ... end` — single-
+            // section variants. Inner items can themselves be Message /
+            // Note / Autonumber / Loop / Opt / Alt (nesting allowed —
+            // recursive support check). Mirrors upstream's
+            // `LOOP_START`/`LOOP_END` (and `OPT_START`/`OPT_END`,
+            // `ALT_START`/`ALT_END`) event pairs around drawLoop.
+            DiagramItem::Loop { items, .. } | DiagramItem::Opt { items, .. } => {
+                only_supported_items(items)
+            }
+            // `alt <label> ... else <label2> ... end` — multi-section
+            // variant. Each branch may contain Message / Note /
+            // Autonumber / nested Loop / Opt / Alt.
+            DiagramItem::Alt { branches } => {
+                branches.iter().all(|b| only_supported_items(&b.items))
             }
             _ => false,
         })
@@ -617,11 +631,20 @@ pub fn render(
     let mut msg_id_counter: usize = 0;
 
     // Flatten d.items into a linear event stream. Each `Loop { items }`
-    // becomes `LoopStart(label) … <inner events> … LoopEnd`. This keeps
-    // the per-item layout body unchanged while still letting us track
-    // open-loop bounds via `active_loops`.
+    // becomes `LoopStart(keyword,label) … <inner events> … LoopEnd`.
+    // The same scaffold also serves `Opt` (keyword="opt") and `Alt`
+    // (where the parser flattens else-arms into AltSection events
+    // between Start and End). This keeps the per-item layout body
+    // unchanged while still letting us track open-loop bounds via
+    // `active_loops`.
     enum WalkEvent<'a> {
-        LoopStart(&'a str),
+        LoopStart {
+            keyword: &'static str,
+            label: &'a str,
+        },
+        // Marks the boundary between two `else` arms inside an Alt
+        // block. Carries the next arm's label.
+        AltSection(&'a str),
         LoopEnd,
         Item(&'a DiagramItem),
     }
@@ -629,8 +652,35 @@ pub fn render(
         for it in items {
             match it {
                 DiagramItem::Loop { label, items: inner } => {
-                    out.push(WalkEvent::LoopStart(label));
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "loop",
+                        label,
+                    });
                     flatten(inner, out);
+                    out.push(WalkEvent::LoopEnd);
+                }
+                DiagramItem::Opt { label, items: inner } => {
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "opt",
+                        label,
+                    });
+                    flatten(inner, out);
+                    out.push(WalkEvent::LoopEnd);
+                }
+                DiagramItem::Alt { branches } => {
+                    if branches.is_empty() {
+                        continue;
+                    }
+                    let first = &branches[0];
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "alt",
+                        label: &first.label,
+                    });
+                    flatten(&first.items, out);
+                    for arm in &branches[1..] {
+                        out.push(WalkEvent::AltSection(&arm.label));
+                        flatten(&arm.items, out);
+                    }
                     out.push(WalkEvent::LoopEnd);
                 }
                 _ => out.push(WalkEvent::Item(it)),
@@ -642,7 +692,7 @@ pub fn render(
 
     for event in events.into_iter() {
         let item = match event {
-            WalkEvent::LoopStart(label) => {
+            WalkEvent::LoopStart { keyword, label } => {
                 // LOOP_START → consume one idx slot, bumpVerticalPos(boxMargin),
                 // capture starty, then bump heightAdjust = postMargin +
                 // max(textHeight, labelBoxHeight). For the simple case the
@@ -679,10 +729,53 @@ pub fn render(
                     starty,
                     stopy: 0.0,
                     title: bracketed,
-                    keyword: "loop",
+                    keyword,
                     idx: 0, // assigned at LoopEnd
+                    sections: Vec::new(),
                 });
                 active_loops.push(li);
+                continue;
+            }
+            WalkEvent::AltSection(label) => {
+                // ALT_ELSE → adjustLoopHeightForWrap with
+                //   preMargin  = boxMargin + boxTextMargin (15)
+                //   postMargin = boxMargin                  (10)
+                // Steps:
+                //   1. bumpVerticalPos(preMargin)
+                //   2. addSectionToLoop  → divider_y = vertical
+                //   3. bumpVerticalPos(postMargin + totalOffset)
+                // (mermaid.js:138901 ALT_ELSE branch)
+                let li = *active_loops.last().expect("AltSection without start");
+                let pre_margin = box_margin + cfg.box_text_margin;
+                let post_margin = box_margin;
+                vertical += pre_margin;
+                let divider_y = vertical;
+                let bracketed = format!("[{}]", label);
+                let line_h_msg = crate::font_metrics::line_height(
+                    "sans-serif",
+                    cfg.message_font_size as f64,
+                    false,
+                    false,
+                )
+                .round();
+                let text_h = line_h_msg;
+                let total_offset = text_h.max(cfg.label_box_height);
+                let height_adjust = post_margin + total_offset;
+                // The section label is centred on the row that lies
+                // BETWEEN divider_y and divider_y + height_adjust. The
+                // y_input handed to drawText mirrors title's offset:
+                // upstream uses `y = divider_y + boxMargin + boxTextMargin`
+                // (the same offset as title above the labelBox row).
+                let label_y_input = divider_y + box_margin + cfg.box_text_margin;
+                vertical += height_adjust;
+                let label_idx = msg_id_counter;
+                msg_id_counter += 1;
+                loops[li].sections.push(LoopSection {
+                    divider_y,
+                    label: bracketed,
+                    label_y: label_y_input,
+                    label_idx,
+                });
                 continue;
             }
             WalkEvent::LoopEnd => {
@@ -2674,6 +2767,21 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
     draw_line(out, lr.stopx, lr.starty, lr.stopx, lr.stopy);
     draw_line(out, lr.startx, lr.stopy, lr.stopx, lr.stopy);
     draw_line(out, lr.startx, lr.starty, lr.startx, lr.stopy);
+    // Section dividers (alt/par/critical) — dashed horizontal lines
+    // between successive arms. Emitted BEFORE the labelBox polygon to
+    // match upstream draw order (mermaid.js drawLoop appends section
+    // lines into the same group right after the perimeter strokes).
+    for sec in &lr.sections {
+        out.push_str("<line x1=\"");
+        push_num(out, lr.startx);
+        out.push_str("\" y1=\"");
+        push_num(out, sec.divider_y);
+        out.push_str("\" x2=\"");
+        push_num(out, lr.stopx);
+        out.push_str("\" y2=\"");
+        push_num(out, sec.divider_y);
+        out.push_str("\" class=\"loopLine\" style=\"stroke-dasharray: 3, 3;\"></line>");
+    }
     // labelBox polygon (5 vertices). genPoints(x,y,w,h,cut=7).
     let lx = lr.startx;
     let ly = lr.starty;
@@ -2749,7 +2857,29 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
     push_num(out, title_x);
     out.push_str("\">");
     out.push_str(&xml_escape(&lr.title));
-    out.push_str("</tspan></text></g>");
+    out.push_str("</tspan></text>");
+    // Section labels (alt/par/critical) — bracketed text centred in
+    // each section's first row. NO `<tspan>` wrapper here, mirroring
+    // upstream which calls `drawText` without the `tspan: true` flag
+    // for section titles (mermaid.js drawLoop section title path).
+    for sec in &lr.sections {
+        let sec_x = (lr.startx + lr.stopx) / 2.0;
+        let sec_y = round_js(sec.label_y + 2.5);
+        out.push_str("<text x=\"");
+        push_num(out, sec_x);
+        out.push_str("\" y=\"");
+        push_num(out, sec_y);
+        out.push_str(
+            "\" text-anchor=\"middle\" style=\"font-family: ",
+        );
+        out.push_str(&attr_escape(FONT_FAMILY));
+        out.push_str(
+            "; font-size: 16px; font-weight: 400;\" class=\"loopText\">",
+        );
+        out.push_str(&xml_escape(&sec.label));
+        out.push_str("</text>");
+    }
+    out.push_str("</g>");
 }
 
 /// Emit one `<g data-et="note" data-id="iN">` containing a rounded
