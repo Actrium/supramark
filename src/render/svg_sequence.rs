@@ -1760,15 +1760,15 @@ pub fn render(
 
         // Central-connection circle offset when autonumber is on.
         // Mirrors upstream `drawCentralConnection`
-        // (sequenceRenderer.ts:329-372): with autonumber visible, the
-        // CIRCLE offset 16.5 shifts whichever endpoint is the source
-        // for non-reverse arrows. AtTo: no shift; AtFrom: fromCenter
-        // shifts by ±16.5 (LTR=+, RTL=-); Dual: fromCenter only.
-        // `isReverse` here = top/bottom-reverse arrow types
-        // (`/|-`, `//-`, `\\-`, etc.) — none of which are emitted from
-        // the current parser, so isReverse is treated as false.
+        // (sequenceRenderer.ts:329-372 / mermaid.js:138393-138445):
+        //   base = isLeftToRight ? +16.5 : -16.5
+        //   getCircleOffset(ltr, rev) = rev ? -base : base
+        //   AtTo  + reverse  : toCenter   += -base
+        //   AtFrom + !reverse: fromCenter += base
+        //   Dual  + reverse  : toCenter   += -base
+        //   Dual  + !reverse : fromCenter += base
         let mut circle_from_cx = fa_cx;
-        let circle_to_cx = ta_cx;
+        let mut circle_to_cx = ta_cx;
         if seq_index.is_some() {
             const CIRCLE_OFFSET: f64 = 16.5;
             let base = if is_arrow_to_right {
@@ -1777,10 +1777,24 @@ pub fn render(
                 -CIRCLE_OFFSET
             };
             match m.central_connection {
-                Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual) => {
-                    circle_from_cx += base;
+                Some(CentralConnection::AtTo) => {
+                    if is_reverse_arrow {
+                        circle_to_cx += -base;
+                    }
                 }
-                _ => {}
+                Some(CentralConnection::AtFrom) => {
+                    if !is_reverse_arrow {
+                        circle_from_cx += base;
+                    }
+                }
+                Some(CentralConnection::Dual) => {
+                    if is_reverse_arrow {
+                        circle_to_cx += -base;
+                    } else {
+                        circle_from_cx += base;
+                    }
+                }
+                None => {}
             }
         }
 
