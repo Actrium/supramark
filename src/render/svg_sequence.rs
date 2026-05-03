@@ -256,9 +256,17 @@ pub fn render(
                 )
             }
             DiagramItem::Note(n) => {
-                n.placement_actors.len() == 1
-                    && n.placement.is_some()
-                    && !n.text.contains('\n')
+                // Single-actor placements (left of / right of / over)
+                // and the 2-actor Over span (`Note over A,B`) — where
+                // upstream `buildNoteModel` `else` branch handles the
+                // cross-actor span as forceWidth = |fromCenter -
+                // toCenter| + actorMargin.
+                let actors_ok = match n.placement_actors.len() {
+                    1 => true,
+                    2 => matches!(n.placement, Some(NotePlacement::Over)),
+                    _ => false,
+                };
+                actors_ok && n.placement.is_some() && !n.text.contains('\n')
             }
             // Autonumber occupies an item-id slot and toggles per-message
             // sequence-number rendering — supported below.
@@ -508,6 +516,62 @@ pub fn render(
                     Some(p) => p,
                     None => continue,
                 };
+                // Single-actor placements operate on `actor_i`. The
+                // 2-actor Over span is handled in a dedicated branch
+                // below — upstream `getMaxMessageWidthPerActor` for
+                // OVER uses `actor = actors.get(msg.to)` and contributes
+                // `messageWidth/2` to `actor.prevActor` (= msg.from)
+                // and to `msg.from` again — both reduce to msg.from
+                // for the 2-actor case, so a single contribution
+                // suffices.
+                if note.placement_actors.len() == 2
+                    && matches!(placement, NotePlacement::Over)
+                {
+                    let from_id = &note.placement_actors[0];
+                    let to_id = &note.placement_actors[1];
+                    let (Some(&from_i), Some(&to_i)) = (
+                        actor_id_to_index.get(from_id.as_str()),
+                        actor_id_to_index.get(to_id.as_str()),
+                    ) else {
+                        continue;
+                    };
+                    // Wrap-aware text width.
+                    let measured_text = if note.wrap {
+                        wrap_label(
+                            &note.text,
+                            cfg.width - 2.0 * cfg.wrap_padding,
+                            "trebuchet ms",
+                            cfg.message_font_size as f64,
+                        )
+                    } else {
+                        note.text.clone()
+                    };
+                    let lines = split_br(&measured_text);
+                    let mut text_w = 0.0_f64;
+                    for line in &lines {
+                        let resolved = resolve_hash_entities_for_measure(line);
+                        let w = crate::font_metrics::text_width(
+                            &resolved,
+                            "trebuchet ms",
+                            cfg.message_font_size as f64,
+                            false,
+                            false,
+                        )
+                        .round();
+                        if w > text_w {
+                            text_w = w;
+                        }
+                    }
+                    let message_width = text_w + 2.0 * cfg.wrap_padding;
+                    let half = message_width / 2.0;
+                    // Both upstream branches converge to msg.from when
+                    // from !== to. Mirror that.
+                    let _ = to_i;
+                    if max_msg_width_per_actor[from_i] < half {
+                        max_msg_width_per_actor[from_i] = half;
+                    }
+                    continue;
+                }
                 if note.placement_actors.len() != 1 {
                     continue;
                 }
@@ -714,7 +778,14 @@ pub fn render(
     // entry with a rect. Mirrors upstream `svgDraw.anchorElement(diagram)`
     // which appends `elem.append('g')` for every push, regardless of
     // whether it ever gets a rect.
-    let mut activation_anchors: Vec<Option<ActivationRect>> = Vec::new();
+    //
+    // The first tuple field is the item-id slot the anchor was assigned
+    // to (the synthetic CC / CCR / activeStart event between two
+    // addMessage signals — see jison.331-355). Used to interleave
+    // anchors with notes/loops in render order so cross-actor-CC
+    // messages emit their `<g></g>` placeholders ADJACENT to the
+    // surrounding signals (not all batched up-front).
+    let mut activation_anchors: Vec<(usize, Option<ActivationRect>)> = Vec::new();
     // ── Layout-pass activations (ACTIVE_START only) ─────────────────
     //
     // Upstream's layout pass (sequenceRenderer.ts:2030 loop) only tracks
@@ -1089,7 +1160,10 @@ pub fn render(
                 let render_x =
                     centre + ((render_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
                 let anchor_idx = activation_anchors.len();
-                activation_anchors.push(None);
+                // ACTIVE_START events are appended to the parser stream
+                // AFTER the addMessage that carries the `+` suffix —
+                // jison.333. They claim the next id slot.
+                activation_anchors.push((idx, None));
                 activations.push(ActivationSlot {
                     startx: render_x,
                     starty: vertical + 2.0,
@@ -1144,7 +1218,7 @@ pub fn render(
                     .iter()
                     .filter(|a| &a.actor == actor_id)
                     .count() as u32;
-                activation_anchors[slot.anchor_idx] = Some(ActivationRect {
+                activation_anchors[slot.anchor_idx].1 = Some(ActivationRect {
                     x: slot.startx,
                     y: starty,
                     height: stopy - starty,
@@ -1182,6 +1256,20 @@ pub fn render(
                 return Ok(placeholder(d, id));
             };
             let from_actor = &actors[actor_idx];
+            // For `Note over A,B` (2 actors, Over) — resolve the
+            // second actor here so the cross-actor span branch below
+            // can compute the upstream `else`-branch geometry.
+            let to_actor_for_over: Option<&_> = if note.placement_actors.len() == 2
+                && matches!(placement, NotePlacement::Over)
+            {
+                let to_id = &note.placement_actors[1];
+                match d.actors.iter().position(|a| &a.id == to_id) {
+                    Some(i) => Some(&actors[i]),
+                    None => return Ok(placeholder(d, id)),
+                }
+            } else {
+                None
+            };
             // buildNoteModel for single-actor placement.
             // Optional `:wrap:` prefix triggers a two-stage wrap:
             //   1. First wrapLabel(msg.text, conf.width, noteFont)
@@ -1248,20 +1336,42 @@ pub fn render(
                         + (from_actor.width - actor_margin) / 2.0;
                 }
                 NotePlacement::Over => {
-                    // upstream OVER (msg.to === msg.from):
-                    //   width = shouldWrap
-                    //     ? max(conf.width, fromW)
-                    //     : max(fromW, conf.width, textW + 2*noteMargin)
-                    //   startx = fromX + (fromW - width) / 2
-                    note_w = if should_wrap {
-                        cfg.width.max(from_actor.width)
+                    if let Some(to_actor) = to_actor_for_over {
+                        // upstream `else` branch (2-actor Over,
+                        // msg.from !== msg.to):
+                        //   width  = |fromX + fromW/2 - (toX + toW/2)|
+                        //          + actorMargin
+                        //   startx = (fromX < toX
+                        //               ? fromX + fromW/2
+                        //               : toX + toW/2)
+                        //          - actorMargin/2
+                        // Text width does NOT participate in the
+                        // width formula here — the span between actor
+                        // centres plus actorMargin is authoritative.
+                        let from_center = from_actor.x + from_actor.width / 2.0;
+                        let to_center = to_actor.x + to_actor.width / 2.0;
+                        note_w = (from_center - to_center).abs() + actor_margin;
+                        note_x = if from_actor.x < to_actor.x {
+                            from_center - actor_margin / 2.0
+                        } else {
+                            to_center - actor_margin / 2.0
+                        };
                     } else {
-                        from_actor
-                            .width
-                            .max(cfg.width)
-                            .max(text_w + 2.0 * cfg.note_margin)
-                    };
-                    note_x = from_actor.x + (from_actor.width - note_w) / 2.0;
+                        // upstream OVER (msg.to === msg.from):
+                        //   width = shouldWrap
+                        //     ? max(conf.width, fromW)
+                        //     : max(fromW, conf.width, textW + 2*noteMargin)
+                        //   startx = fromX + (fromW - width) / 2
+                        note_w = if should_wrap {
+                            cfg.width.max(from_actor.width)
+                        } else {
+                            from_actor
+                                .width
+                                .max(cfg.width)
+                                .max(text_w + 2.0 * cfg.note_margin)
+                        };
+                        note_x = from_actor.x + (from_actor.width - note_w) / 2.0;
+                    }
                 }
             }
             // Second-stage wrap: re-wrap to final note_w - 2*wrapPadding
@@ -1833,12 +1943,16 @@ pub fn render(
         // -1156): ACTIVE_START / CC / CCR all map to newActivation;
         // ACTIVE_END maps to endActivation + drawActivation.
         // Helper: push a new activation slot + reserve an anchor `<g>`.
+        // `slot_idx` is the synthetic event's data-id slot — used so the
+        // anchor `<g></g>` can be interleaved with notes/loops in render
+        // order (rather than batched up-front).
         fn push_activation(
             activations: &mut Vec<ActivationSlot>,
-            anchors: &mut Vec<Option<ActivationRect>>,
+            anchors: &mut Vec<(usize, Option<ActivationRect>)>,
             actor_id: &str,
             actor_centre: f64,
             cur_vert: f64,
+            slot_idx: usize,
         ) {
             let stacked = activations
                 .iter()
@@ -1848,7 +1962,7 @@ pub fn render(
             // (sequenceRenderer.ts:151). stackedSize starts at 0 → x = centre - 5.
             let x = actor_centre + ((stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
             let anchor_idx = anchors.len();
-            anchors.push(None);
+            anchors.push((slot_idx, None));
             activations.push(ActivationSlot {
                 startx: x,
                 starty: cur_vert + 2.0,
@@ -1858,15 +1972,15 @@ pub fn render(
         }
         match m.central_connection {
             Some(CentralConnection::AtTo) => {
-                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
+                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
             }
             Some(CentralConnection::AtFrom) => {
-                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical);
+                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical, idx + 1);
             }
             Some(CentralConnection::Dual) => {
                 // CC then CCR. Order matters: to-side first per jison.350-352.
-                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
-                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical);
+                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
+                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical, idx + 2);
             }
             None => {}
         }
@@ -1874,7 +1988,7 @@ pub fn render(
             // `+` suffix → activeStart{actor: to} (jison.333). Mirrors
             // ACTIVE_START — pushes BOTH the render-pass anchor AND the
             // layout-pass bounds entry.
-            push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
+            push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
             let layout_stacked = layout_activations
                 .iter()
                 .filter(|a| a.actor == m.to)
@@ -1907,7 +2021,7 @@ pub fn render(
                     .iter()
                     .filter(|a| a.actor == m.from)
                     .count() as u32;
-                activation_anchors[slot.anchor_idx] = Some(ActivationRect {
+                activation_anchors[slot.anchor_idx].1 = Some(ActivationRect {
                     x: slot.startx,
                     y: starty,
                     height: stopy - starty,
@@ -2222,22 +2336,12 @@ pub fn render(
     // closes stay empty — that's fixture 24's case for the four
     // unclosed activations (Alice CC L5, Bob CCR L5, Bob ACTIVE_START L6,
     // Bob CCR L7) preceding the one popped at L9.
-    for anchor in &activation_anchors {
-        match anchor {
-            Some(rect) => {
-                out.push_str("<g><rect x=\"");
-                push_num(&mut out, rect.x);
-                out.push_str("\" y=\"");
-                push_num(&mut out, rect.y);
-                out.push_str("\" fill=\"#EDF2AE\" stroke=\"#666\" width=\"10\" height=\"");
-                push_num(&mut out, rect.height);
-                out.push_str("\" class=\"activation");
-                out.push_str(&rect.class_n.to_string());
-                out.push_str("\"></rect></g>");
-            }
-            None => out.push_str("<g></g>"),
-        }
-    }
+    //
+    // The actual emission of these anchors is interleaved with notes /
+    // loops in the merge loop below — upstream walks the signal stream
+    // in order and `anchorElement` / `drawNote` / `drawLoop` each
+    // append to `diagram` at the moment they run, so DOM order tracks
+    // synthetic-event id (the `data-id="iN"` slot).
 
     // ── Stickman body groups (Actor type only) ──────────────────────
     //
@@ -2273,19 +2377,42 @@ pub fn render(
     enum BlockRef<'a> {
         Loop(&'a LoopRender),
         Note(&'a NoteRender),
+        Anchor(&'a Option<ActivationRect>),
     }
-    let mut blocks: Vec<(usize, BlockRef)> = Vec::with_capacity(loops.len() + notes.len());
+    let mut blocks: Vec<(usize, usize, BlockRef)> =
+        Vec::with_capacity(loops.len() + notes.len() + activation_anchors.len());
+    // Secondary key: stable order tag — anchors emit BEFORE
+    // co-indexed notes/loops in upstream parser order. Currently no
+    // collisions arise (each id-slot is consumed by exactly one
+    // synthetic event), but we keep the secondary key for robustness.
     for lr in &loops {
-        blocks.push((lr.idx, BlockRef::Loop(lr)));
+        blocks.push((lr.idx, 1, BlockRef::Loop(lr)));
     }
     for n in &notes {
-        blocks.push((n.idx, BlockRef::Note(n)));
+        blocks.push((n.idx, 1, BlockRef::Note(n)));
     }
-    blocks.sort_by_key(|&(idx, _)| idx);
-    for (_, b) in &blocks {
+    for (anchor_idx, anchor) in &activation_anchors {
+        blocks.push((*anchor_idx, 0, BlockRef::Anchor(anchor)));
+    }
+    blocks.sort_by_key(|&(idx, sec, _)| (idx, sec));
+    for (_, _, b) in &blocks {
         match b {
             BlockRef::Loop(lr) => emit_loop(&mut out, lr),
             BlockRef::Note(n) => emit_note(&mut out, n),
+            BlockRef::Anchor(anchor) => match anchor {
+                Some(rect) => {
+                    out.push_str("<g><rect x=\"");
+                    push_num(&mut out, rect.x);
+                    out.push_str("\" y=\"");
+                    push_num(&mut out, rect.y);
+                    out.push_str("\" fill=\"#EDF2AE\" stroke=\"#666\" width=\"10\" height=\"");
+                    push_num(&mut out, rect.height);
+                    out.push_str("\" class=\"activation");
+                    out.push_str(&rect.class_n.to_string());
+                    out.push_str("\"></rect></g>");
+                }
+                None => out.push_str("<g></g>"),
+            },
         }
     }
 
