@@ -1656,6 +1656,48 @@ pub fn render(
             if note_x + note_w > bounds_stopx {
                 bounds_stopx = note_x + note_w;
             }
+            // Widen any open rect/loop blocks so they enclose this note.
+            // Mirrors upstream `bounds.insert(noteModel.startx, noteModel.starty,
+            // noteModel.stopx, noteModel.stopy)` with `n*boxMargin` outset
+            // per nesting level (outermost gets the biggest outset).
+            let stack_len = seq_items.len();
+            for (cnt0, it) in seq_items.iter().enumerate() {
+                let n = (stack_len - cnt0) as f64;
+                let widened_startx = note_x - n * box_margin;
+                let widened_stopx = note_x + note_w + n * box_margin;
+                let widened_stopy = starty_for_note + note_h + n * box_margin;
+                match *it {
+                    SeqItem::Loop(li) => {
+                        let lr = &mut loops[li];
+                        if widened_startx < lr.startx {
+                            lr.startx = widened_startx;
+                        }
+                        if widened_stopx > lr.stopx {
+                            lr.stopx = widened_stopx;
+                        }
+                        if widened_stopy > lr.stopy {
+                            lr.stopy = widened_stopy;
+                        }
+                    }
+                    SeqItem::Rect(pidx) => {
+                        let r = &mut pending_rects[pidx];
+                        r.widen_x(widened_startx, widened_stopx);
+                        r.widen_stopy(widened_stopy);
+                    }
+                }
+            }
+            // Widen overall diagram bounds so the SVG viewBox includes
+            // the rect/loop outset (the largest n applies).
+            if stack_len > 0 {
+                let outermost_n = stack_len as f64;
+                let outset = outermost_n * box_margin;
+                if note_x - outset < bounds_startx {
+                    bounds_startx = note_x - outset;
+                }
+                if note_x + note_w + outset > bounds_stopx {
+                    bounds_stopx = note_x + note_w + outset;
+                }
+            }
             continue;
         }
         let m = match item {
