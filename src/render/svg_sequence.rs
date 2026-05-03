@@ -980,6 +980,137 @@ pub fn render(
     let mut events: Vec<WalkEvent> = Vec::with_capacity(d.items.len() + 4);
     flatten(&d.items, &mut events);
 
+    // ── Pre-pass: compute per-loop-block "loopWidth" used to wrap the
+    // bracketed title/section labels. Mirrors upstream
+    // `calculateLoopBounds` (mermaid.js:139343): for each open block on
+    // the stack, accumulate `width = max(width, msgModel.width)` over
+    // every inner message, then return `width - labelBoxWidth` at end.
+    //
+    // `loop_widths[i]` is the wrap-budget for the i-th LoopStart event
+    // (in pre-order across the flattened event stream); section
+    // labels share the same budget as their parent block. AltSection
+    // events do not get their own slot — the same budget applies.
+    let loop_widths: Vec<f64> = {
+        // Per upstream `calculateLoopBounds` (mermaid.js:139343):
+        //   - non-self msg: current.width = max(width, msgModel.width)
+        //                                   - labelBoxWidth
+        //   - self msg:     current.width = max(width, abs(to-from))
+        //                                   - labelBoxWidth
+        //   - both branches also update current.from / current.to via
+        //     min/max so abs(to-from) tracks the cumulative span.
+        // We mirror per open-frame state.
+        let mut out: Vec<f64> = Vec::new();
+        struct Frame {
+            li: usize,
+            from: f64,
+            to: f64,
+            width: f64,
+        }
+        let mut stack: Vec<Frame> = Vec::new();
+        for ev in &events {
+            match ev {
+                WalkEvent::LoopStart { .. } => {
+                    let li = out.len();
+                    out.push(0.0);
+                    stack.push(Frame {
+                        li,
+                        from: f64::INFINITY,
+                        to: f64::NEG_INFINITY,
+                        width: 0.0,
+                    });
+                }
+                WalkEvent::LoopEnd => {
+                    if let Some(f) = stack.pop() {
+                        out[f.li] = f.width.max(0.0);
+                    }
+                }
+                WalkEvent::RectStart(_) | WalkEvent::RectEnd | WalkEvent::AltSection(_) => {}
+                WalkEvent::Item(it) => {
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    if let DiagramItem::Message(m) = it {
+                        let from_actor = actors.iter().find(|a| a.id == m.from);
+                        let to_actor = actors.iter().find(|a| a.id == m.to);
+                        let (Some(fa), Some(ta)) = (from_actor, to_actor) else { continue };
+                        let fa_cx = fa.x + fa.width / 2.0;
+                        let ta_cx = ta.x + ta.width / 2.0;
+                        let is_self = m.from == m.to;
+                        // msgModel.width approximation. For self,
+                        // bounded=0. For non-self, upstream's
+                        // buildMessageModel applies activation+arrow
+                        // offsets that shrink boundedWidth by ~3-7 px
+                        // (`activationWidth/2 - 1 = 4` for `+`-activated
+                        // targets + SOLID arrow `-3` stopx). Approximate
+                        // with a -7 trim on the cx-cx span; clamps at 0.
+                        let raw_bounded = if is_self { 0.0 } else { (fa_cx - ta_cx).abs() };
+                        let bounded_width = (raw_bounded - 7.0).max(0.0);
+                        let wrap_eff = m.wrap || cfg.wrap;
+                        let text_w_term = if wrap_eff {
+                            0.0
+                        } else {
+                            let resolved = resolve_hash_entities_for_measure(&m.text);
+                            crate::font_metrics::text_width(
+                                &resolved,
+                                "sans-serif",
+                                cfg.message_font_size as f64,
+                                false,
+                                false,
+                            )
+                            .round()
+                                + 2.0 * cfg.wrap_padding
+                        };
+                        let msg_width = text_w_term
+                            .max(bounded_width + 2.0 * cfg.wrap_padding)
+                            .max(cfg.width);
+                        // For non-self use msgModel startx/stopx
+                        // approximations to widen current.from/.to. For
+                        // self use actor.x ± msg.width/2 and ± actor.width/2.
+                        if is_self {
+                            let half_msg = msg_width / 2.0;
+                            let half_w = fa.width / 2.0;
+                            let cand_from = (fa.x - half_msg).min(fa.x - half_w);
+                            let cand_to = (fa.x + half_msg).max(fa.x + half_w);
+                            for fr in stack.iter_mut() {
+                                if cand_from < fr.from {
+                                    fr.from = cand_from;
+                                }
+                                if cand_to > fr.to {
+                                    fr.to = cand_to;
+                                }
+                                let span = (fr.to - fr.from).abs();
+                                fr.width = fr.width.max(span) - cfg.label_box_width;
+                            }
+                        } else {
+                            // Approximate msgModel.startx/stopx as fa_cx, ta_cx
+                            // (ignoring activation widening — close enough).
+                            let mstart = fa_cx.min(ta_cx);
+                            let mstop = fa_cx.max(ta_cx);
+                            for fr in stack.iter_mut() {
+                                if mstart < fr.from {
+                                    fr.from = mstart;
+                                }
+                                if mstop > fr.to {
+                                    fr.to = mstop;
+                                }
+                                fr.width = fr.width.max(msg_width) - cfg.label_box_width;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out
+    };
+    // Counter into `loop_widths` advanced at each LoopStart in the main
+    // walk below — section labels (AltSection) share the parent block's
+    // current slot, looked up via the active_loops stack mapping.
+    let mut loop_width_cursor: usize = 0;
+    // For each open block on `active_loops`, also remember its
+    // pre-computed wrap-budget so AltSection labels can wrap with the
+    // same width without re-walking events.
+    let mut active_loop_widths: Vec<f64> = Vec::new();
+
     for event in events.into_iter() {
         let item = match event {
             WalkEvent::LoopStart { keyword, label } => {
@@ -999,7 +1130,26 @@ pub fn render(
                 // label case the bracketed string fits without wrapping;
                 // for now use cfg.width as a generous budget so single-
                 // word labels stay on one line.
-                let bracketed = format!("[{}]", label);
+                // Wrap-budget for this block's title — pre-computed in
+                // the calculateLoopBounds-style pre-pass above. Mirrors
+                // upstream `wrapLabel("[msg]", loopWidth - 2*wrapPadding,
+                // messageFont)` (mermaid.js:137955).
+                let lw = loop_widths.get(loop_width_cursor).copied().unwrap_or(0.0);
+                loop_width_cursor += 1;
+                active_loop_widths.push(lw);
+                let raw_bracketed = format!("[{}]", label);
+                let wrap_budget = (lw - 2.0 * cfg.wrap_padding).max(0.0);
+                let bracketed = if wrap_budget > 0.0 {
+                    wrap_label(
+                        &raw_bracketed,
+                        wrap_budget,
+                        "sans-serif",
+                        cfg.message_font_size as f64,
+                    )
+                } else {
+                    raw_bracketed
+                };
+                let title_lines = split_br(&bracketed);
                 let line_h_msg = crate::font_metrics::line_height(
                     "sans-serif",
                     cfg.message_font_size as f64,
@@ -1007,7 +1157,8 @@ pub fn render(
                     false,
                 )
                 .round();
-                let text_h = line_h_msg; // single-line approximation
+                // textDims.height = lines * round(per-line height).
+                let text_h = line_h_msg * (title_lines.len() as f64);
                 let post_margin = box_margin + cfg.box_text_margin;
                 let total_offset = text_h.max(cfg.label_box_height);
                 let height_adjust = post_margin + total_offset;
@@ -1041,15 +1192,27 @@ pub fn render(
                 // (mermaid.js:138901 ALT_ELSE / PAR_AND / CRITICAL_OPTION
                 // branches all go through adjustLoopHeightForWrap.)
                 let li = *active_loops.last().expect("AltSection without start");
+                let lw = active_loop_widths.last().copied().unwrap_or(0.0);
                 let pre_margin = box_margin + cfg.box_text_margin;
                 let post_margin = box_margin;
                 vertical += pre_margin;
                 let divider_y = vertical;
                 let has_label = !label.is_empty();
-                let bracketed = if has_label {
+                let raw_bracketed = if has_label {
                     format!("[{}]", label)
                 } else {
                     String::new()
+                };
+                let wrap_budget = (lw - 2.0 * cfg.wrap_padding).max(0.0);
+                let bracketed = if has_label && wrap_budget > 0.0 {
+                    wrap_label(
+                        &raw_bracketed,
+                        wrap_budget,
+                        "sans-serif",
+                        cfg.message_font_size as f64,
+                    )
+                } else {
+                    raw_bracketed
                 };
                 let height_adjust = if has_label {
                     let line_h_msg = crate::font_metrics::line_height(
@@ -1059,7 +1222,8 @@ pub fn render(
                         false,
                     )
                     .round();
-                    let text_h = line_h_msg;
+                    let n_lines = split_br(&bracketed).len() as f64;
+                    let text_h = line_h_msg * n_lines;
                     let total_offset = text_h.max(cfg.label_box_height);
                     post_margin + total_offset
                 } else {
@@ -1089,6 +1253,7 @@ pub fn render(
                 // bounds.insert (see widening pass below); here we only
                 // bumpVerticalPos to the final stopy and pop the stack.
                 let li = active_loops.pop().expect("LoopEnd without start");
+                active_loop_widths.pop();
                 seq_items.pop();
                 let lr = &mut loops[li];
                 // If a loop has zero inner messages, startx/stopx stay
@@ -3691,22 +3856,41 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
     // tspan=true (default in getTextObj3) ⇒ wraps text in <tspan x=…>.
     let title_x = lr.startx + LABEL_BOX_W / 2.0 + (lr.stopx - lr.startx) / 2.0;
     let title_y_input = lr.starty + 10.0 + 5.0; // boxMargin + boxTextMargin
-    let title_y = round_js(title_y_input + 2.5);
-    out.push_str("<text x=\"");
-    push_num(out, title_x);
-    out.push_str("\" y=\"");
-    push_num(out, title_y);
-    out.push_str(
-        "\" text-anchor=\"middle\" style=\"font-family: ",
+    // Multi-line title (wrapped via wrap_label when too wide for the
+    // block's available width). Each `<br/>` split becomes its own
+    // `<text>` element with `tspan: true`. yfunc per upstream drawText
+    // (mermaid.js:136811): line k's y = round(y_input +
+    // (prevTextHeight + textHeight + textMargin) / 2) where prev=text=
+    // k * line_h_unrounded after k iterations.
+    let title_lines = split_br(&lr.title);
+    // Per-line bbox.height ≈ 18.625 for sans-serif 16px (font_metrics
+    // line_height returns the unrounded value).
+    let lh_unrounded = crate::font_metrics::line_height(
+        "sans-serif",
+        16.0,
+        false,
+        false,
     );
-    out.push_str(&attr_escape(FONT_FAMILY));
-    out.push_str(
-        "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
-    );
-    push_num(out, title_x);
-    out.push_str("\">");
-    out.push_str(&xml_escape(&lr.title));
-    out.push_str("</tspan></text>");
+    for (k, line) in title_lines.iter().enumerate() {
+        // After k iterations of the bbox accumulation, prev=text=k*lh.
+        let acc = (k as f64) * lh_unrounded;
+        let title_y = round_js(title_y_input + (acc + acc + 5.0) / 2.0);
+        out.push_str("<text x=\"");
+        push_num(out, title_x);
+        out.push_str("\" y=\"");
+        push_num(out, title_y);
+        out.push_str(
+            "\" text-anchor=\"middle\" style=\"font-family: ",
+        );
+        out.push_str(&attr_escape(FONT_FAMILY));
+        out.push_str(
+            "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
+        );
+        push_num(out, title_x);
+        out.push_str("\">");
+        out.push_str(&xml_escape(line));
+        out.push_str("</tspan></text>");
+    }
     // Section labels (alt/par/critical) — bracketed text centred in
     // each section's first row. NO `<tspan>` wrapper here, mirroring
     // upstream which calls `drawText` without the `tspan: true` flag
