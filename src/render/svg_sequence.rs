@@ -338,8 +338,10 @@ pub fn render(
                 };
                 // Wrap-aware width: when `wrap:` set, pre-wrap the text
                 // before measuring. Take max line width (split on
-                // `<br>`).
-                let measured = if m.wrap {
+                // `<br>`). Effective wrap = per-message flag OR
+                // diagram-level config (`%%{init:{config:{wrap:true}}}%%`).
+                let wrap = m.wrap || cfg.wrap;
+                let measured = if wrap {
                     wrap_label(
                         &m.text,
                         cfg.width - 2.0 * cfg.wrap_padding,
@@ -754,7 +756,9 @@ pub fn render(
             return Ok(placeholder(d, id));
         };
         let bounded_width = ((fa.x + fa.width / 2.0) - (ta.x + ta.width / 2.0)).abs();
-        let final_msg_text = if m.wrap {
+        // Effective wrap = per-message flag OR diagram-level config.
+        let wrap_effective = m.wrap || cfg.wrap;
+        let final_msg_text = if wrap_effective {
             let max_w = (bounded_width + 2.0 * cfg.wrap_padding).max(cfg.width);
             wrap_label(
                 &m.text,
