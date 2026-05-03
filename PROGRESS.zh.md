@@ -1,25 +1,16 @@
 # 阶段进展
 
-截至 2026-05-03，Wave 15-EE 完结（部分）。
+截至 2026-05-04，Wave 16-A 完结。
 
-**当前指标：1289 / 1323 byte-exact（约 97.4%）**。
+**当前指标：1292 / 1323 byte-exact（约 97.2%）**。
 
-- 1289 = 1264（W15-T 入手点）+25：
-  - W15-U（reverse arrow CC offset）+6
-  - W15-V（note vs control-structure 排序）+5
-  - W15-W（multi-actor Note over A,B）+1
-  - W15-X（self-loop reverse path +10）+2 → 后追 +1
-  - W15-Y/popup-mirror（properties + popup actor-top）+1+1
-  - W15-Z（activation y/height Math.min）+1
-  - W15-AA（cross-actor message margin distribution）+1
-  - W15-CC（self-loop reverse +10 仅 autonumber 时）+1
-  - W15-DD（opt label wrap height）+3
-  - W15-AA-extension（non-adjacent Note distribute to to.prev）+1
-  - rect-widen-by-note + bounds depth outset +0（demo/01 advance 113→39542）
-  - autonumber counter + step semantics +1
-  - par_over single-section +1
-- 1323 = sweep_all 处理的 fixture 总数（已剔除环境性 6 项）
-- 差额 34 = cypress/sequence 8（box×4 / create×2 / 27 +2px / 76 多feature）+ demos/sequence 3（box×1 / KaTeX×2）+ mindmap 17 + KaTeX flowchart 6（out of scope）
+- 1292 = 1289（W15-EE 入手点）+3：
+  - W16-A（fixture 27 bidirectional bounds.insert line endpoints）+1
+  - W16-B（mindmap Circle + RoundedRect single-node）+2
+- 1323 = sweep_all 处理的 fixture 总数
+- 差额 31 = cypress/sequence 6（box×4 + create×2）+ demos/sequence 3（box×1 + loop×2）+ mindmap 15 + demos/mindmap 1 + KaTeX flowchart 6（out of scope）
+
+W16-A 子 agent 实现了 sequence box + create/destroy 渲染骨架，但因改动过大引入严重回归（134→9/140），已全部回滚到 68dee74。经验教训：sequence 渲染改动必须**逐函数增量推进**，不能一次性修改 only_supported_items + 多个 emit_actor_top/bottom 函数签名。
 
 ## Wave 15-spike + 15-A（2026-05-03）
 
