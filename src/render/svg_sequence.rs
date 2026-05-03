@@ -126,6 +126,8 @@ pub fn render(
                 | ActorType::Actor
                 | ActorType::Boundary
                 | ActorType::Control
+                | ActorType::Entity
+                | ActorType::Database
         ))
     {
         return Ok(placeholder(d, id));
@@ -1159,7 +1161,13 @@ pub fn render(
                 // (lowered to front). Bodies emit later, after defs.
                 ActorType::Actor
                 | ActorType::Boundary
-                | ActorType::Control => out.push_str("<g></g>"),
+                | ActorType::Control
+                | ActorType::Entity => out.push_str("<g></g>"),
+                // Database bottom group is FULL — upstream `drawActorTypeDatabase`
+                // appends cylinder + text directly inside the lowered `<g>`
+                // instead of emitting a body group later. So we emit the
+                // complete cylinder body here.
+                ActorType::Database => emit_actor_database_bottom_group(&mut out, a, bottom_y),
                 _ => unreachable!("gated above"),
             }
         }
@@ -1205,11 +1213,17 @@ pub fn render(
                     popup,
                 )
             }
-            // Control uses centerY = actor_y + 75 (vs Actor's
+            // Control / Entity use centerY = actor_y + 75 (vs Actor's
             // actor.height + 15). Same `<g><line .../></g>` shape, body
             // emits later after defs.
-            ActorType::Control => {
+            ActorType::Control | ActorType::Entity => {
                 emit_actor_top_lifeline_actor(&mut out, a, 75.0, lifeline_y2, rank, popup)
+            }
+            // Database: lifeline + root-N wrapper + cylinder + text packed
+            // inside a SINGLE outer <g> (upstream's `boxplusLineGroup`).
+            // No separate body emission later — top group is self-contained.
+            ActorType::Database => {
+                emit_actor_database_top_group(&mut out, a, lifeline_y2, rank, popup)
             }
             _ => unreachable!("gated above"),
         }
@@ -1285,7 +1299,9 @@ pub fn render(
         emit_note(&mut out, n);
     }
 
-    // Top bodies, declaration order, only for Actor / Boundary / Control.
+    // Top bodies, declaration order, only for Actor / Boundary / Control / Entity.
+    // Database is NOT in this loop — its body is fully embedded inside the
+    // top group emitted earlier.
     for (i, a) in actors.iter().enumerate() {
         match a.actor_type {
             ActorType::Actor => {
@@ -1299,6 +1315,9 @@ pub fn render(
             ActorType::Control => {
                 emit_actor_control_body(&mut out, a, 0.0, false, id);
             }
+            ActorType::Entity => {
+                emit_actor_entity_body(&mut out, a, 0.0, false);
+            }
             _ => continue,
         }
     }
@@ -1309,7 +1328,8 @@ pub fn render(
     }
 
     // Bottom bodies, declaration order, only for Actor / Boundary /
-    // Control — and only when mirroring.
+    // Control / Entity — and only when mirroring. Database is NOT in this
+    // loop — its body is fully embedded inside the bottom group.
     if mirror {
         for (i, a) in actors.iter().enumerate() {
             match a.actor_type {
@@ -1323,6 +1343,9 @@ pub fn render(
                 }
                 ActorType::Control => {
                     emit_actor_control_body(&mut out, a, bottom_y, true, id);
+                }
+                ActorType::Entity => {
+                    emit_actor_entity_body(&mut out, a, bottom_y, true);
                 }
                 _ => continue,
             }
@@ -1666,6 +1689,272 @@ fn emit_actor_control_body(
         out.push_str("</tspan></text>");
     }
     out.push_str("</g>");
+}
+
+/// Emit one `<g class="actor actor-{top,bottom}" ...>` body group for an
+/// Entity-type actor — a circle of radius 22 with a horizontal underline,
+/// plus the description text. Differs from Boundary/Control:
+/// - class is `actor` (not `actor-man`);
+/// - no explicit `style` attribute on the outer <g> (default theme stroke
+///   comes from CSS `.actor` rule);
+/// - top transform `translate(0, r/2-5)` = `translate(0, 6)`;
+/// - bottom transform `translate(0, r)` = `translate(0, 22)`;
+/// - circle cy = actor_y + (top ? 25 : 10);
+/// - underline: x1 = cx-r, x2 = cx+r, y1 = y2 = cy + r, stroke-width=2;
+/// - text uses class `actor actor-man` (matches upstream's
+///   `ACTOR_MAN_FIGURE_CLASS` arg in the textAttrs dict — not `actor-box`).
+/// - top-pass post-bbox `actor.height` mutation = bbox.height + 20 = 64;
+/// - bottom text uses height=64 (post-bbox), top uses initial actor.height.
+///
+/// Mirrors upstream `drawActorTypeEntity` (mermaid.js line 137267).
+fn emit_actor_entity_body(out: &mut String, a: &ActorRender, actor_y: f64, is_footer: bool) {
+    const RADIUS: f64 = 22.0;
+    let center = a.x + a.width / 2.0;
+    let cy = actor_y + if is_footer { 10.0 } else { 25.0 };
+
+    // Outer <g>. Attribute order: class, name, transform, [data-* if top].
+    out.push_str("<g class=\"actor ");
+    out.push_str(if is_footer { "actor-bottom" } else { "actor-top" });
+    out.push_str("\" name=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" transform=\"translate(0, ");
+    push_num(out, if is_footer { RADIUS } else { RADIUS / 2.0 - 5.0 });
+    out.push_str(")\"");
+    if !is_footer {
+        out.push_str(" data-et=\"participant\" data-type=\"entity\" data-id=\"");
+        out.push_str(&xml_escape(&a.id));
+        out.push('"');
+    }
+    out.push('>');
+
+    // <circle cx=center cy=cy r=22 width=actor.width height=actor.height>
+    // upstream uses `actor.height` BEFORE the post-bbox mutation for both
+    // top (initial value) and bottom (mutated value 64 by the time bottom-pass
+    // runs).
+    let circle_h = if is_footer { 64.0 } else { a.height };
+    out.push_str("<circle cx=\"");
+    push_num(out, center);
+    out.push_str("\" cy=\"");
+    push_num(out, cy);
+    out.push_str("\" r=\"");
+    push_num(out, RADIUS);
+    out.push_str("\" width=\"");
+    push_num(out, a.width);
+    out.push_str("\" height=\"");
+    push_num(out, circle_h);
+    out.push_str("\"></circle>");
+
+    // <line x1=cx-r x2=cx+r y1=cy+r y2=cy+r stroke-width=2>
+    // upstream attribute order: x1, x2, y1, y2, stroke-width.
+    out.push_str("<line x1=\"");
+    push_num(out, center - RADIUS);
+    out.push_str("\" x2=\"");
+    push_num(out, center + RADIUS);
+    out.push_str("\" y1=\"");
+    push_num(out, cy + RADIUS);
+    out.push_str("\" y2=\"");
+    push_num(out, cy + RADIUS);
+    out.push_str("\" stroke-width=\"2\"></line>");
+
+    // Text. y6 = rect.y + (top ? 30 : 15); y = y6 + height/2.
+    // height: top uses initial actor.height (e.g. 65); bottom uses post-bbox 64.
+    let y6_offset = if is_footer { 15.0 } else { 30.0 };
+    let text_height = if is_footer { 64.0 } else { a.height };
+    let text_y = actor_y + y6_offset + text_height / 2.0;
+    let lines = split_br(&a.description);
+    let n_lines = lines.len();
+    let font_size = 16.0_f64;
+    for (i, line) in lines.iter().enumerate() {
+        let dy = (i as f64) * font_size - font_size * ((n_lines as f64) - 1.0) / 2.0;
+        out.push_str("<text x=\"");
+        push_num(out, center);
+        out.push_str("\" y=\"");
+        push_num(out, text_y);
+        out.push_str(
+            "\" style=\"text-anchor: middle; font-size: 16px; font-weight: 400; font-family: ",
+        );
+        out.push_str(&attr_escape(ACTOR_FONT_FAMILY));
+        out.push_str(
+            ";\" dominant-baseline=\"central\" alignment-baseline=\"central\" class=\"actor actor-man\"><tspan x=\"",
+        );
+        push_num(out, center);
+        out.push_str("\" dy=\"");
+        push_num(out, dy);
+        out.push_str("\">");
+        out.push_str(&xml_escape(line));
+        out.push_str("</tspan></text>");
+    }
+    out.push_str("</g>");
+}
+
+/// Emit the FULL bottom group for a Database-type actor — a single outer
+/// `<g>` containing the cylinder body + description text. Unlike the other
+/// non-participant types, database doesn't emit an empty `<g></g>`
+/// placeholder followed by a body group later; everything goes here.
+///
+/// Mirrors upstream `drawActorTypeDatabase` (mermaid.js line 137330) when
+/// `isFooter=true`: `boxplusLineGroup = elem.append("g").lower()`, no
+/// lifeline (skipped via `if (!isFooter)`), `g2 = boxplusLineGroup`,
+/// `cylinderGroup = g2.append("g")` with class `actor actor-bottom`,
+/// path with the cylinder shape, transform=`translate(w4, ry)`, then
+/// text appended to `g2`.
+fn emit_actor_database_bottom_group(out: &mut String, a: &ActorRender, bottom_y: f64) {
+    let center = a.x + a.width / 2.0;
+    // Cylinder geometry: w4 = h3 = actor.width / 3. Square aspect for the
+    // cylinder body, regardless of actor.width. rx = w4/2 (ellipse x-radius
+    // matches half-width). ry = rx / (2.5 + w4/50) (squashed ellipse — the
+    // formula skinnies the lid as actors get wider).
+    let w4 = a.width / 3.0;
+    let h3 = w4;
+    let rx = w4 / 2.0;
+    let ry = rx / (2.5 + w4 / 50.0);
+    let body_h = h3 - 2.0 * ry;
+
+    // Outer <g> (boxplusLineGroup, no attrs)
+    out.push_str("<g>");
+
+    // Cylinder <g class="actor actor-bottom" style="stroke: #9370DB;" transform="translate(w4,ry)">
+    // Note: style is set via `cylinderGroup.style("stroke", actorBorder)`
+    // (default theme classic). attribute order: class, style, transform.
+    out.push_str("<g class=\"actor actor-bottom\" style=\"stroke: #9370DB;\" transform=\"translate(");
+    push_num(out, w4);
+    out.push_str(",");
+    push_num(out, ry);
+    out.push_str(")\"><path d=\"\n  M ");
+    push_num(out, a.x);
+    out.push(',');
+    push_num(out, bottom_y + ry);
+    out.push_str("\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 ");
+    push_num(out, w4);
+    out.push_str(",0\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 -");
+    push_num(out, w4);
+    out.push_str(",0\n  l 0,");
+    push_num(out, body_h);
+    out.push_str("\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 ");
+    push_num(out, w4);
+    out.push_str(",0\n  l 0,-");
+    push_num(out, body_h);
+    out.push_str("\n\"></path></g>");
+
+    // Text inside g2 (= boxplusLineGroup). y6 = rect.y + 35; height =
+    // post-bbox actor.height = (h3 - 2*ry) + labelBoxHeight = body_h + 20.
+    // Note this is the BOTTOM-pass call — top-pass uses initial actor.height.
+    let text_height = body_h + 20.0;
+    let text_y = bottom_y + 35.0 + text_height / 2.0;
+    emit_actor_box_text(out, center, text_y, &a.description);
+
+    out.push_str("</g>");
+}
+
+/// Emit the FULL top group for a Database-type actor — single outer `<g>`
+/// containing: lifeline, `<g id="root-N" data-et=...>` wrapper which
+/// contains the cylinder body, and finally the description text inside the
+/// root-N wrapper.
+///
+/// Mirrors upstream `drawActorTypeDatabase` (mermaid.js line 137330) for
+/// `isFooter=false`. centerY for the lifeline = `actor_y + actor.height +
+/// 2 * boxTextMargin` = 0 + 65 + 10 = 75 (uses INITIAL actor.height —
+/// before post-bbox mutation).
+fn emit_actor_database_top_group(
+    out: &mut String,
+    a: &ActorRender,
+    bottom_y: f64,
+    rank: usize,
+    popup: bool,
+) {
+    let center = a.x + a.width / 2.0;
+    let w4 = a.width / 3.0;
+    let h3 = w4;
+    let rx = w4 / 2.0;
+    let ry = rx / (2.5 + w4 / 50.0);
+    let body_h = h3 - 2.0 * ry;
+    // Lifeline centerY = actor_y + actor.height + 2 * boxTextMargin
+    // = 0 + a.height + 10. For default config a.height=65 → centery=75.
+    let centery = a.height + 10.0;
+
+    // Outer <g>: popup (`onclick`) wrapper if links present; plain otherwise.
+    if popup {
+        push_popup_g_open(out, rank);
+    } else {
+        out.push_str("<g>");
+    }
+    // Lifeline <line id="actorN" .../>
+    out.push_str("<line id=\"actor");
+    out.push_str(&rank.to_string());
+    out.push_str("\" x1=\"");
+    push_num(out, center);
+    out.push_str("\" y1=\"");
+    push_num(out, centery);
+    out.push_str("\" x2=\"");
+    push_num(out, center);
+    out.push_str("\" y2=\"");
+    push_num(out, bottom_y);
+    out.push_str(
+        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
+    );
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" data-et=\"life-line\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\"></line>");
+
+    // <g id="root-N" data-et="participant" data-type="database" data-id="X">
+    out.push_str("<g id=\"root-");
+    out.push_str(&rank.to_string());
+    out.push_str("\" data-et=\"participant\" data-type=\"database\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\">");
+
+    // Cylinder
+    out.push_str("<g class=\"actor actor-top\" style=\"stroke: #9370DB;\" transform=\"translate(");
+    push_num(out, w4);
+    out.push_str(",");
+    push_num(out, ry);
+    out.push_str(")\"><path d=\"\n  M ");
+    push_num(out, a.x);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str("\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 ");
+    push_num(out, w4);
+    out.push_str(",0\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 -");
+    push_num(out, w4);
+    out.push_str(",0\n  l 0,");
+    push_num(out, body_h);
+    out.push_str("\n  a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 ");
+    push_num(out, w4);
+    out.push_str(",0\n  l 0,-");
+    push_num(out, body_h);
+    out.push_str("\n\"></path></g>");
+
+    // Text inside g2 (the root-N <g>). Top-pass: uses INITIAL actor.height.
+    let text_y = 35.0 + a.height / 2.0;
+    emit_actor_box_text(out, center, text_y, &a.description);
+
+    // Close root-N and outer <g>.
+    out.push_str("</g></g>");
 }
 
 /// Emit one `<g class="actor-man actor-{top,bottom}" ...>` body group
