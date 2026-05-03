@@ -4103,12 +4103,12 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
 
     // <line> or <path> next.
     if m.is_self {
-        // Reverse half-arrows on self-loops use `marker-start`, so the
-        // path's start point + first control point shift right by +10
-        // to clear the arrow head occupying the source side. The second
-        // control point and end point (the inbound side, on the actor
-        // centre) remain at `sx`.
-        let start_offset = if half_marker_start.is_some() { 10.0 } else { 0.0 };
+        // Reverse half-arrows on self-loops use `marker-start`. With
+        // autonumber active, the path's start point + first control
+        // point shift right by +10 to clear the arrow head and make
+        // room for the sequence-number circle on the source side.
+        // Without autonumber, no shift is applied (upstream byte-exact).
+        let start_offset = if half_marker_start.is_some() && m.seq_index.is_some() { 10.0 } else { 0.0 };
         let lsx = m.self_line_start_x;
         let sx = m.self_startx;
         let lsy = m.line_start_y;
