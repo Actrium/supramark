@@ -232,19 +232,27 @@ pub fn render(
             // Autonumber occupies an item-id slot and toggles per-message
             // sequence-number rendering — supported below.
             DiagramItem::Autonumber { .. } => true,
-            // `loop <label> ... end` / `opt <label> ... end` — single-
-            // section variants. Inner items can themselves be Message /
-            // Note / Autonumber / Loop / Opt / Alt (nesting allowed —
-            // recursive support check). Mirrors upstream's
+            // `loop <label> ... end` / `opt <label> ... end` /
+            // `break <label> ... end` — single-section variants. Inner
+            // items can themselves be Message / Note / Autonumber /
+            // nested Loop / Opt / Alt / Par / Critical / Break
+            // (recursive support check). Mirrors upstream's
             // `LOOP_START`/`LOOP_END` (and `OPT_START`/`OPT_END`,
-            // `ALT_START`/`ALT_END`) event pairs around drawLoop.
-            DiagramItem::Loop { items, .. } | DiagramItem::Opt { items, .. } => {
-                only_supported_items(items)
-            }
+            // `ALT_START`/`ALT_END`, `BREAK_START`/`BREAK_END`,
+            // `PAR_START`/`PAR_END`, `CRITICAL_START`/`CRITICAL_END`)
+            // event pairs around drawLoop.
+            DiagramItem::Loop { items, .. }
+            | DiagramItem::Opt { items, .. }
+            | DiagramItem::Break { items, .. } => only_supported_items(items),
             // `alt <label> ... else <label2> ... end` — multi-section
             // variant. Each branch may contain Message / Note /
             // Autonumber / nested Loop / Opt / Alt.
-            DiagramItem::Alt { branches } => {
+            DiagramItem::Alt { branches } | DiagramItem::Critical { branches } => {
+                branches.iter().all(|b| only_supported_items(&b.items))
+            }
+            // `par <label> ... and <label2> ... end` — multi-section
+            // parallel variant. ParBranch shape mirrors AltBranch.
+            DiagramItem::Par { branches } => {
                 branches.iter().all(|b| only_supported_items(&b.items))
             }
             // `activate <actor>` / `deactivate <actor>` — explicit
@@ -728,6 +736,14 @@ pub fn render(
                     flatten(inner, out);
                     out.push(WalkEvent::LoopEnd);
                 }
+                DiagramItem::Break { label, items: inner } => {
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "break",
+                        label,
+                    });
+                    flatten(inner, out);
+                    out.push(WalkEvent::LoopEnd);
+                }
                 DiagramItem::Alt { branches } => {
                     if branches.is_empty() {
                         continue;
@@ -735,6 +751,38 @@ pub fn render(
                     let first = &branches[0];
                     out.push(WalkEvent::LoopStart {
                         keyword: "alt",
+                        label: &first.label,
+                    });
+                    flatten(&first.items, out);
+                    for arm in &branches[1..] {
+                        out.push(WalkEvent::AltSection(&arm.label));
+                        flatten(&arm.items, out);
+                    }
+                    out.push(WalkEvent::LoopEnd);
+                }
+                DiagramItem::Par { branches } => {
+                    if branches.is_empty() {
+                        continue;
+                    }
+                    let first = &branches[0];
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "par",
+                        label: &first.label,
+                    });
+                    flatten(&first.items, out);
+                    for arm in &branches[1..] {
+                        out.push(WalkEvent::AltSection(&arm.label));
+                        flatten(&arm.items, out);
+                    }
+                    out.push(WalkEvent::LoopEnd);
+                }
+                DiagramItem::Critical { branches } => {
+                    if branches.is_empty() {
+                        continue;
+                    }
+                    let first = &branches[0];
+                    out.push(WalkEvent::LoopStart {
+                        keyword: "critical",
                         label: &first.label,
                     });
                     flatten(&first.items, out);
@@ -798,30 +846,43 @@ pub fn render(
                 continue;
             }
             WalkEvent::AltSection(label) => {
-                // ALT_ELSE → adjustLoopHeightForWrap with
+                // ALT_ELSE / PAR_AND / CRITICAL_OPTION → adjustLoopHeightForWrap with
                 //   preMargin  = boxMargin + boxTextMargin (15)
                 //   postMargin = boxMargin                  (10)
                 // Steps:
                 //   1. bumpVerticalPos(preMargin)
                 //   2. addSectionToLoop  → divider_y = vertical
-                //   3. bumpVerticalPos(postMargin + totalOffset)
-                // (mermaid.js:138901 ALT_ELSE branch)
+                //   3. bumpVerticalPos(postMargin + totalOffset) — but only
+                //      add `totalOffset` when `msg.message` is non-empty
+                //      (mirrors upstream `if (msg.id && msg.message && ...)`
+                //      gate at sequenceRenderer.ts:909).
+                // (mermaid.js:138901 ALT_ELSE / PAR_AND / CRITICAL_OPTION
+                // branches all go through adjustLoopHeightForWrap.)
                 let li = *active_loops.last().expect("AltSection without start");
                 let pre_margin = box_margin + cfg.box_text_margin;
                 let post_margin = box_margin;
                 vertical += pre_margin;
                 let divider_y = vertical;
-                let bracketed = format!("[{}]", label);
-                let line_h_msg = crate::font_metrics::line_height(
-                    "sans-serif",
-                    cfg.message_font_size as f64,
-                    false,
-                    false,
-                )
-                .round();
-                let text_h = line_h_msg;
-                let total_offset = text_h.max(cfg.label_box_height);
-                let height_adjust = post_margin + total_offset;
+                let has_label = !label.is_empty();
+                let bracketed = if has_label {
+                    format!("[{}]", label)
+                } else {
+                    String::new()
+                };
+                let height_adjust = if has_label {
+                    let line_h_msg = crate::font_metrics::line_height(
+                        "sans-serif",
+                        cfg.message_font_size as f64,
+                        false,
+                        false,
+                    )
+                    .round();
+                    let text_h = line_h_msg;
+                    let total_offset = text_h.max(cfg.label_box_height);
+                    post_margin + total_offset
+                } else {
+                    post_margin
+                };
                 // The section label is centred on the row that lies
                 // BETWEEN divider_y and divider_y + height_adjust. The
                 // y_input handed to drawText mirrors title's offset:
@@ -1814,7 +1875,15 @@ pub fn render(
         let popup = !a.links.is_empty() && !force_menus;
         match a.actor_type {
             ActorType::Participant => {
-                emit_actor_top_participant(&mut out, a, lifeline_y2, rank, popup)
+                emit_actor_top_participant(
+                    &mut out,
+                    a,
+                    lifeline_y2,
+                    rank,
+                    root_counter,
+                    popup,
+                );
+                root_counter += 1;
             }
             // Boundary uses the same lifeline-only top group as Actor — body
             // emits later after defs. Lifeline `<g><line id="actorN" .../></g>`
@@ -3162,7 +3231,13 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
     // each section's first row. NO `<tspan>` wrapper here, mirroring
     // upstream which calls `drawText` without the `tspan: true` flag
     // for section titles (mermaid.js drawLoop section title path).
+    // Empty labels emit no <text> at all — upstream `addSectionToLoop`
+    // pushes the divider but `drawText(...,'')` is a no-op when the
+    // text is empty (gate at sequenceRenderer.ts:909).
     for sec in &lr.sections {
+        if sec.label.is_empty() {
+            continue;
+        }
         let sec_x = (lr.startx + lr.stopx) / 2.0;
         let sec_y = round_js(sec.label_y + 2.5);
         out.push_str("<text x=\"");
@@ -3315,7 +3390,14 @@ fn emit_actor_bottom_participant(out: &mut String, a: &ActorRender, bottom_y: f6
     out.push_str("</g>");
 }
 
-fn emit_actor_top_participant(out: &mut String, a: &ActorRender, bottom_y: f64, rank: usize, popup: bool) {
+fn emit_actor_top_participant(
+    out: &mut String,
+    a: &ActorRender,
+    bottom_y: f64,
+    rank: usize,
+    root_index: usize,
+    popup: bool,
+) {
     let _ = a.cnt;
     let cx = a.x + a.width / 2.0;
     let centery = a.height; // actorY=0 + actor.height
@@ -3342,7 +3424,7 @@ fn emit_actor_top_participant(out: &mut String, a: &ActorRender, bottom_y: f64, 
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\"></line><g id=\"root-");
-    out.push_str(&rank.to_string());
+    out.push_str(&root_index.to_string());
     out.push_str(
         "\" data-et=\"participant\" data-type=\"participant\" data-id=\"",
     );
