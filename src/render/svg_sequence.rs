@@ -188,17 +188,12 @@ pub fn render(
     fn only_supported_items(items: &[DiagramItem]) -> bool {
         items.iter().all(|it| match it {
             DiagramItem::Message(m) => {
-                // Reject implicit `+` / `-` activations — full activation
-                // rendering is not yet ported. Central-connection auto-
-                // activate (`AtTo`/`Dual` set `activate=true` in the parser)
-                // is fine: the renderer applies the upstream stopx shorten
-                // without drawing an actual activation rect.
-                if m.deactivate {
-                    return false;
-                }
-                if m.activate && m.central_connection.is_none() {
-                    return false;
-                }
+                // Activation lifecycle (`+`/`-` suffix on messages) is
+                // handled below: `+` opens an activation on `to`, `-`
+                // closes the most-recent activation on `from`. Central-
+                // connection auto-activate (`AtTo`/`Dual`) also lifts
+                // `activate=true`; that is fine and NEVER draws a rect on
+                // its own — only an explicit `deactivate` / `-` does.
                 matches!(
                     m.arrow,
                     Some(ArrowType::SolidArrow)
@@ -252,6 +247,13 @@ pub fn render(
             DiagramItem::Alt { branches } => {
                 branches.iter().all(|b| only_supported_items(&b.items))
             }
+            // `activate <actor>` / `deactivate <actor>` — explicit
+            // lifeline activation start/end. `Activate` opens an
+            // activation slot for the actor (no rect emitted on its own);
+            // `Deactivate` pops the most-recent open activation and emits
+            // a `<rect class="activationN">` rectangle. Mirrors upstream
+            // sequenceRenderer.ts:1145-1156 (ACTIVE_START / ACTIVE_END).
+            DiagramItem::Activate(_) | DiagramItem::Deactivate(_) => true,
             _ => false,
         })
     }
@@ -611,6 +613,65 @@ pub fn render(
     // entry on this stack — mirrors upstream `updateBounds` per
     // `sequenceItems` element.
     let mut active_loops: Vec<usize> = Vec::new();
+    // ── Activation tracking ─────────────────────────────────────────
+    //
+    // Mirrors upstream `bounds.activations` (sequenceRenderer.ts:148-169
+    // newActivation/endActivation + 1145-1156 ACTIVE_START / ACTIVE_END
+    // dispatch). Each open activation has a startx (lifeline centre +
+    // half-width offset for stacking), starty (verticalPos+2 at push
+    // time), and the actor id. On close (Deactivate / `-` suffix /
+    // ACTIVE_END), `lastIndexOf actor` pops the most-recent slot and
+    // emits one `<rect class="activationN">` rectangle.
+    const ACTIVATION_WIDTH: f64 = 10.0;
+    #[derive(Debug, Clone)]
+    struct ActivationSlot {
+        startx: f64,
+        starty: f64,
+        actor: String,
+        /// Index into `activation_anchors` — the empty `<g>` slot
+        /// reserved at newActivation time. activeEnd writes a `<rect>`
+        /// into this slot.
+        anchor_idx: usize,
+    }
+    #[derive(Debug, Clone)]
+    struct ActivationRect {
+        x: f64,
+        y: f64,
+        height: f64,
+        /// `class="activationN"` where N = totalActivationsSeen % 3 per
+        /// upstream `actorActivations(msg.from).length`.
+        class_n: u32,
+    }
+    let mut activations: Vec<ActivationSlot> = Vec::new();
+    // Render-order list of activation anchor groups. Each newActivation
+    // appends a placeholder; each endActivation populates the matching
+    // entry with a rect. Mirrors upstream `svgDraw.anchorElement(diagram)`
+    // which appends `elem.append('g')` for every push, regardless of
+    // whether it ever gets a rect.
+    let mut activation_anchors: Vec<Option<ActivationRect>> = Vec::new();
+    // ── Layout-pass activations (ACTIVE_START only) ─────────────────
+    //
+    // Upstream's layout pass (sequenceRenderer.ts:2030 loop) only tracks
+    // ACTIVE_START / ACTIVE_END in `bounds.activations` — CC events fall
+    // through to `buildMessageModel()` which returns `{}` for non-arrow
+    // types (1837-1874). `activationBounds()` is consulted by
+    // buildMessageModel @ 1876-1877 to compute the message's
+    // [fromLeft, fromRight, toLeft, toRight], so an open activation on
+    // the from / to actor shifts the start / stop x of every subsequent
+    // message until ACTIVE_END.
+    //
+    // Activations from `+` suffix (`actor signal '+' actor text`)
+    // appear AFTER the addMessage signal in the parser's emission list
+    // (jison.333-334), so the current message's startx/stopx still use
+    // the PRE-push bounds. Same for `-`: ACTIVE_END comes AFTER the
+    // addMessage, so the current message uses PRE-pop bounds.
+    #[derive(Debug, Clone)]
+    struct LayoutActivation {
+        startx: f64,
+        stopx: f64,
+        actor: String,
+    }
+    let mut layout_activations: Vec<LayoutActivation> = Vec::new();
     // Autonumber state — mirrors upstream's `sequenceIndex`,
     // `sequenceIndexStep`, `db.showSequenceNumbers()` running tally.
     // Each `Autonumber` item updates these in declaration order; the
@@ -815,6 +876,101 @@ pub fn render(
                     CentralConnection::Dual => 2,
                 };
             }
+        }
+        // ── Activate / Deactivate items ────────────────────────────
+        //
+        // Mirrors upstream sequenceRenderer.ts:1145-1156 ACTIVE_START /
+        // ACTIVE_END dispatch. ACTIVE_START pushes a new activation slot
+        // (no SVG output on its own); ACTIVE_END pops the most-recent
+        // open slot for the actor and emits ONE `<rect class="activationN">`
+        // rectangle. The special case at sequenceRenderer.ts:1112-1116
+        // forces a minimum 18-pixel rect height when starty+18 >
+        // verticalPos: starty becomes verticalPos-6, then verticalPos +=
+        // 12, giving stopy-starty = 18.
+        if let DiagramItem::Activate(actor_id) = item {
+            if let Some(actor) = actors.iter().find(|a| &a.id == actor_id) {
+                let centre = actor.x + actor.width / 2.0;
+                // Render-pass activation (used for anchor `<g>` emission).
+                let render_stacked = activations
+                    .iter()
+                    .filter(|a| &a.actor == actor_id)
+                    .count() as f64;
+                let render_x =
+                    centre + ((render_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+                let anchor_idx = activation_anchors.len();
+                activation_anchors.push(None);
+                activations.push(ActivationSlot {
+                    startx: render_x,
+                    starty: vertical + 2.0,
+                    actor: actor_id.clone(),
+                    anchor_idx,
+                });
+                // Layout-pass activation (used for message startx/stopx
+                // adjustment via activationBounds). Layout-pass startx
+                // mirrors render-pass formula because upstream uses the
+                // same newActivation in both passes.
+                let layout_stacked = layout_activations
+                    .iter()
+                    .filter(|a| &a.actor == actor_id)
+                    .count() as f64;
+                let layout_x =
+                    centre + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+                layout_activations.push(LayoutActivation {
+                    startx: layout_x,
+                    stopx: layout_x + ACTIVATION_WIDTH,
+                    actor: actor_id.clone(),
+                });
+            }
+            continue;
+        }
+        if let DiagramItem::Deactivate(actor_id) = item {
+            let last_render = activations
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, a)| &a.actor == actor_id)
+                .map(|(i, _)| i);
+            if let Some(li) = last_render {
+                let slot = activations.remove(li);
+                // Special case (sequenceRenderer.ts:1112-1116): when
+                // the activation hasn't been open long enough for an
+                // 18-px tall rect, force starty back from verticalPos and
+                // bump the LOCAL stopy by 12. Upstream does NOT
+                // propagate the +12 to bounds.verticalPos (the LOCAL
+                // `verticalPos` arg is only used by drawActivation + the
+                // immediately-following bounds.insert), so we leave
+                // `vertical` untouched.
+                let mut starty = slot.starty;
+                let mut stopy = vertical;
+                if starty + 18.0 > stopy {
+                    starty = stopy - 6.0;
+                    stopy += 12.0;
+                }
+                // class N = `actorActivations(msg.from).length` taken
+                // POST-splice (sequenceRenderer.ts:1122) — i.e. the
+                // remaining same-actor slots after pop, mod 3.
+                let remaining = activations
+                    .iter()
+                    .filter(|a| &a.actor == actor_id)
+                    .count() as u32;
+                activation_anchors[slot.anchor_idx] = Some(ActivationRect {
+                    x: slot.startx,
+                    y: starty,
+                    height: stopy - starty,
+                    class_n: remaining % 3,
+                });
+            }
+            // Pop the matching layout-pass entry.
+            if let Some(li) = layout_activations
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, a)| &a.actor == actor_id)
+                .map(|(i, _)| i)
+            {
+                layout_activations.remove(li);
+            }
+            continue;
         }
         // Autonumber: update running counters/visibility, no SVG output
         // of its own — it occupies an item-id slot but doesn't draw.
@@ -1026,10 +1182,34 @@ pub fn render(
         let is_self = m.from == m.to;
 
         // startx / stopx: standard left→right for SolidArrow → arrow_end shrinks by 3.
-        let from_left = fa.x + fa.width / 2.0 - 1.0;
-        let from_right = fa.x + fa.width / 2.0 + 1.0;
-        let to_left = ta.x + ta.width / 2.0 - 1.0;
-        let to_right = ta.x + ta.width / 2.0 + 1.0;
+        //
+        // `activationBounds` (sequenceRenderer.ts:886-904): for an actor
+        // with N open activations, the seed is `[centre-1, centre+1]`,
+        // then the loop reduces with `min`/`max` over each activation's
+        // `[startx, stopx]`. With 1 open activation pushed at stacked=0
+        // (x=centre-5, stopx=centre+5), bounds = [centre-5, centre+5].
+        // With 2 stacked activations (x=centre-5..centre, stopx=
+        // centre+5..centre+10), bounds = [centre-5, centre+10]. We
+        // consult `layout_activations` (ACTIVE_START / `+` derived only;
+        // CC events DON'T contribute to layout bounds — they only
+        // contribute to render-pass anchor `<g>`s).
+        let activation_bounds = |actor: &str, centre: f64| -> (f64, f64) {
+            let mut left = centre - 1.0;
+            let mut right = centre + 1.0;
+            for la in layout_activations.iter().filter(|a| a.actor == actor) {
+                if la.startx < left {
+                    left = la.startx;
+                }
+                if la.stopx > right {
+                    right = la.stopx;
+                }
+            }
+            (left, right)
+        };
+        let fa_centre = fa.x + fa.width / 2.0;
+        let ta_centre = ta.x + ta.width / 2.0;
+        let (from_left, from_right) = activation_bounds(&m.from, fa_centre);
+        let (to_left, to_right) = activation_bounds(&m.to, ta_centre);
         let is_arrow_to_right = from_left <= to_left;
         let mut startx = if is_arrow_to_right {
             from_right
@@ -1368,6 +1548,111 @@ pub fn render(
             from_cx: circle_from_cx,
             to_cx: circle_to_cx,
         });
+
+        // ── Per-message activation side effects ─────────────────────
+        //
+        // Upstream emits synthetic activation signals AFTER each
+        // addMessage when the message has `+` / `-` suffix or `()`
+        // central connections. Order matches the parser's signal-list
+        // emission (jison.331-355): addMessage → CC(to) → CCR(from)
+        // for DUAL; addMessage → CC(to) for AtTo; addMessage → CCR(from)
+        // for AtFrom; addMessage → activeStart{actor:to} for `+`;
+        // addMessage → activeEnd{actor:from} for `-`. Each event is
+        // processed by the render-pass switch (sequenceRenderer.ts:1145
+        // -1156): ACTIVE_START / CC / CCR all map to newActivation;
+        // ACTIVE_END maps to endActivation + drawActivation.
+        // Helper: push a new activation slot + reserve an anchor `<g>`.
+        fn push_activation(
+            activations: &mut Vec<ActivationSlot>,
+            anchors: &mut Vec<Option<ActivationRect>>,
+            actor_id: &str,
+            actor_centre: f64,
+            cur_vert: f64,
+        ) {
+            let stacked = activations
+                .iter()
+                .filter(|a| a.actor == actor_id)
+                .count() as f64;
+            // x = actor.x + actor.width/2 + ((stackedSize-1) * activationWidth) / 2
+            // (sequenceRenderer.ts:151). stackedSize starts at 0 → x = centre - 5.
+            let x = actor_centre + ((stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+            let anchor_idx = anchors.len();
+            anchors.push(None);
+            activations.push(ActivationSlot {
+                startx: x,
+                starty: cur_vert + 2.0,
+                actor: actor_id.to_string(),
+                anchor_idx,
+            });
+        }
+        match m.central_connection {
+            Some(CentralConnection::AtTo) => {
+                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
+            }
+            Some(CentralConnection::AtFrom) => {
+                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical);
+            }
+            Some(CentralConnection::Dual) => {
+                // CC then CCR. Order matters: to-side first per jison.350-352.
+                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
+                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical);
+            }
+            None => {}
+        }
+        if m.activate && m.central_connection.is_none() {
+            // `+` suffix → activeStart{actor: to} (jison.333). Mirrors
+            // ACTIVE_START — pushes BOTH the render-pass anchor AND the
+            // layout-pass bounds entry.
+            push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical);
+            let layout_stacked = layout_activations
+                .iter()
+                .filter(|a| a.actor == m.to)
+                .count() as f64;
+            let layout_x =
+                ta_cx + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+            layout_activations.push(LayoutActivation {
+                startx: layout_x,
+                stopx: layout_x + ACTIVATION_WIDTH,
+                actor: m.to.clone(),
+            });
+        }
+        if m.deactivate {
+            // `-` suffix → activeEnd{actor: from} (jison.337).
+            let last_idx = activations
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, a)| a.actor == m.from)
+                .map(|(i, _)| i);
+            if let Some(li) = last_idx {
+                let slot = activations.remove(li);
+                let mut starty = slot.starty;
+                let mut stopy = vertical;
+                if starty + 18.0 > stopy {
+                    starty = stopy - 6.0;
+                    stopy += 12.0;
+                }
+                let remaining = activations
+                    .iter()
+                    .filter(|a| a.actor == m.from)
+                    .count() as u32;
+                activation_anchors[slot.anchor_idx] = Some(ActivationRect {
+                    x: slot.startx,
+                    y: starty,
+                    height: stopy - starty,
+                    class_n: remaining % 3,
+                });
+            }
+            if let Some(li) = layout_activations
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, a)| a.actor == m.from)
+                .map(|(i, _)| i)
+            {
+                layout_activations.remove(li);
+            }
+        }
         // (height/stopy bookkeeping not needed since we only use vertical)
     }
     let _ = bottom_margin_adj;
@@ -1610,25 +1895,40 @@ pub fn render(
     out.push_str(&consts::DEF_STICK_TOP.replace("__ID__", id));
     out.push_str(&consts::DEF_STICK_BOTTOM.replace("__ID__", id));
 
-    // Central-connection activation anchors. Mirrors upstream's
-    // `bounds.newActivation(...)` → `svgDraw.anchorElement(diagram)` →
-    // `elem.append('g')` for each CENTRAL_CONNECTION /
-    // CENTRAL_CONNECTION_REVERSE / CENTRAL_CONNECTION_DUAL — these
-    // produce empty `<g></g>` placeholders right after `</defs>`,
-    // before the message text/line/circle groups.
+    // Activation anchors. Mirrors upstream's `bounds.newActivation(...)`
+    // → `svgDraw.anchorElement(diagram)` → `elem.append('g')` for each
+    // CENTRAL_CONNECTION / CENTRAL_CONNECTION_REVERSE /
+    // CENTRAL_CONNECTION_DUAL / ACTIVE_START + each `+` suffix on a
+    // message — these produce empty `<g></g>` placeholders right after
+    // `</defs>`, before the message text/line/circle groups.
     //   AtTo (`actor signal '()' actor`)         → 1 anchor (at `to`)
     //   AtFrom (`actor '()' signal actor`)       → 1 anchor (at `from`)
     //   Dual (`actor '()' signal '()' actor`)    → 2 anchors
-    // Per the jison grammar @ sequenceDiagram.jison:340-352.
-    for m in &messages {
-        if let Some(cc) = m.central_connection {
-            let n = match cc {
-                CentralConnection::AtTo | CentralConnection::AtFrom => 1,
-                CentralConnection::Dual => 2,
-            };
-            for _ in 0..n {
-                out.push_str("<g></g>");
+    //   `activate <actor>`                        → 1 anchor
+    //   `actor signal + actor text` (`+` suffix) → 1 anchor (at `to`)
+    // Per jison.331-355 + sequenceRenderer.ts:1145-1156.
+    //
+    // Anchors that get a matching `deactivate <actor>` / `-` suffix /
+    // ACTIVE_END have a `<rect class="activationN">` inserted into the
+    // anchor `<g>` by `svgDraw.drawActivation`
+    // (sequenceRenderer.ts:1117-1125). Anchors whose activation never
+    // closes stay empty — that's fixture 24's case for the four
+    // unclosed activations (Alice CC L5, Bob CCR L5, Bob ACTIVE_START L6,
+    // Bob CCR L7) preceding the one popped at L9.
+    for anchor in &activation_anchors {
+        match anchor {
+            Some(rect) => {
+                out.push_str("<g><rect x=\"");
+                push_num(&mut out, rect.x);
+                out.push_str("\" y=\"");
+                push_num(&mut out, rect.y);
+                out.push_str("\" fill=\"#EDF2AE\" stroke=\"#666\" width=\"10\" height=\"");
+                push_num(&mut out, rect.height);
+                out.push_str("\" class=\"activation");
+                out.push_str(&rect.class_n.to_string());
+                out.push_str("\"></rect></g>");
             }
+            None => out.push_str("<g></g>"),
         }
     }
 
