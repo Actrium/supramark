@@ -128,6 +128,7 @@ pub fn render(
                 | ActorType::Control
                 | ActorType::Entity
                 | ActorType::Database
+                | ActorType::Queue
         ))
     {
         return Ok(placeholder(d, id));
@@ -1163,11 +1164,12 @@ pub fn render(
                 | ActorType::Boundary
                 | ActorType::Control
                 | ActorType::Entity => out.push_str("<g></g>"),
-                // Database bottom group is FULL — upstream `drawActorTypeDatabase`
-                // appends cylinder + text directly inside the lowered `<g>`
-                // instead of emitting a body group later. So we emit the
-                // complete cylinder body here.
+                // Database / Queue / Collections bottom groups are FULL —
+                // upstream `drawActorTypeXxx` appends body shape + text
+                // directly inside the lowered `<g>` instead of emitting a
+                // body group later. So we emit the complete body here.
                 ActorType::Database => emit_actor_database_bottom_group(&mut out, a, bottom_y),
+                ActorType::Queue => emit_actor_queue_bottom_group(&mut out, a, bottom_y),
                 _ => unreachable!("gated above"),
             }
         }
@@ -1187,13 +1189,15 @@ pub fn render(
     // initial 2000 default that drawActorType* assigned.
     let lifeline_y2 = if mirror { bottom_y } else { 2000.0 };
     let force_menus = d.config.force_menus;
-    // Database `root-N` ids are renumbered by the reference normaliser
-    // (`generate_ref.mjs:counterRules`) per first-DOM-appearance, NOT by the
-    // upstream `actorCnt` (which uses declaration order). Since we walk
-    // actors in reverse here and emit each top group sequentially, we just
-    // need a counter that increments once per Database actor encountered in
-    // DOM order — i.e. in this reverse iteration.
-    let mut db_counter: usize = 0;
+    // Database / Queue / Collections `root-N` ids are renumbered by the
+    // reference normaliser (`generate_ref.mjs:counterRules`) per first-DOM-
+    // appearance, NOT by the upstream `actorCnt` (which uses declaration
+    // order). Since we walk actors in reverse here and emit each top group
+    // sequentially, we just need a counter that increments once per actor
+    // of these types encountered in DOM order — i.e. in this reverse
+    // iteration. The counter is shared across all three types because they
+    // all match the same `root-N` regex in `counterRules`.
+    let mut root_counter: usize = 0;
     for (rank, a) in actors.iter().rev().enumerate() {
         // Upstream `drawActorTypeParticipant` / `drawActorTypeActor`:
         //   if (Object.keys(actor.links || {}).length && !conf.forceMenus) {
@@ -1226,19 +1230,31 @@ pub fn render(
             ActorType::Control | ActorType::Entity => {
                 emit_actor_top_lifeline_actor(&mut out, a, 75.0, lifeline_y2, rank, popup)
             }
-            // Database: lifeline + root-N wrapper + cylinder + text packed
-            // inside a SINGLE outer <g> (upstream's `boxplusLineGroup`).
-            // No separate body emission later — top group is self-contained.
+            // Database / Queue / Collections: lifeline + root-N wrapper +
+            // body shape + text packed inside a SINGLE outer <g> (upstream's
+            // `boxplusLineGroup`). No separate body emission later — top
+            // group is self-contained.
             ActorType::Database => {
                 emit_actor_database_top_group(
                     &mut out,
                     a,
                     lifeline_y2,
                     rank,
-                    db_counter,
+                    root_counter,
                     popup,
                 );
-                db_counter += 1;
+                root_counter += 1;
+            }
+            ActorType::Queue => {
+                emit_actor_queue_top_group(
+                    &mut out,
+                    a,
+                    lifeline_y2,
+                    rank,
+                    root_counter,
+                    popup,
+                );
+                root_counter += 1;
             }
             _ => unreachable!("gated above"),
         }
@@ -1970,6 +1986,154 @@ fn emit_actor_database_top_group(
     // Text inside g2 (the root-N <g>). Top-pass: uses INITIAL actor.height.
     let text_y = 35.0 + a.height / 2.0;
     emit_actor_box_text(out, center, text_y, &a.description);
+
+    // Close root-N and outer <g>.
+    out.push_str("</g></g>");
+}
+
+/// Emit the body shape of a Queue-type actor — two `<g>` wrappers, each
+/// containing one `<path>`. The first path is the closed cylinder side
+/// (left semi-arc + top + right semi-arc + bottom + Z). The second path
+/// is the right-side arc only (foreground arc that sits in front of the
+/// closed shape).
+///
+/// Geometry (mirrors upstream `drawActorTypeQueue` lines 642-664):
+///   ry = rect.height / 2
+///   rx = ry / (2.5 + rect.height / 50)
+///   first  <g transform="translate(rx, -ry)">   path closed shape
+///   second <g transform="translate(width-rx, -ry)">  right arc only
+///   first  path:  M rect.x,rect.y+ry
+///                 a rx,ry 0 0 0 0,height
+///                 h width-2rx
+///                 a rx,ry 0 0 0 0,-height
+///                 Z
+///   second path:  M rect.x,rect.y+ry
+///                 a rx,ry 0 0 0 0,height
+///
+/// The path templates use literal newlines (4 spaces of indent for the
+/// closed shape and 6 spaces for the arc — these come from the upstream
+/// JS template literals' source indentation).
+fn emit_actor_queue_body_paths(out: &mut String, a: &ActorRender, actor_y: f64) {
+    let ry = a.height / 2.0;
+    let rx = ry / (2.5 + a.height / 50.0);
+    let body_h = a.height;
+    let h_seg = a.width - 2.0 * rx;
+
+    // First <g transform="translate(rx, -ry)"><path d="M x,y+ry a rx,ry 0 0 0 0,h h ... a ... Z\n  ">
+    out.push_str("<g transform=\"translate(");
+    push_num(out, rx);
+    out.push_str(", -");
+    push_num(out, ry);
+    out.push_str(")\"><path d=\"M ");
+    push_num(out, a.x);
+    out.push(',');
+    push_num(out, actor_y + ry);
+    out.push_str("\n    a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 0,");
+    push_num(out, body_h);
+    out.push_str("\n    h ");
+    push_num(out, h_seg);
+    out.push_str("\n    a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 0,-");
+    push_num(out, body_h);
+    out.push_str("\n    Z\n  \"></path></g>");
+
+    // Second <g transform="translate(width-rx, -ry)"><path d="M x,y+ry\n      a rx,ry 0 0 0 0,h">
+    out.push_str("<g transform=\"translate(");
+    push_num(out, a.width - rx);
+    out.push_str(", -");
+    push_num(out, ry);
+    out.push_str(")\"><path d=\"M ");
+    push_num(out, a.x);
+    out.push(',');
+    push_num(out, actor_y + ry);
+    out.push_str("\n      a ");
+    push_num(out, rx);
+    out.push(',');
+    push_num(out, ry);
+    out.push_str(" 0 0 0 0,");
+    push_num(out, body_h);
+    out.push_str("\"></path></g>");
+}
+
+/// Emit the FULL bottom group for a Queue-type actor — single outer
+/// `<g class="actor actor-bottom">` containing the two queue body paths
+/// + description text. Mirrors upstream `drawActorTypeQueue` (line 581)
+/// when `isFooter=true`: `boxplusLineGroup = elem.append("g").lower()`,
+/// `g.attr('class', cssclass)` where cssclass is `'actor actor-bottom'`,
+/// then path emission, then text.
+fn emit_actor_queue_bottom_group(out: &mut String, a: &ActorRender, bottom_y: f64) {
+    out.push_str("<g class=\"actor actor-bottom\">");
+    emit_actor_queue_body_paths(out, a, bottom_y);
+    let cx = a.x + a.width / 2.0;
+    let cy = bottom_y + a.height / 2.0;
+    emit_actor_box_text(out, cx, cy, &a.description);
+    out.push_str("</g>");
+}
+
+/// Emit the FULL top group for a Queue-type actor — outer plain `<g>`
+/// (or popup-onclick wrapper) containing: lifeline `<line id="actorN">`,
+/// then `<g id="root-N" class="actor actor-top" data-et="participant"
+/// data-type="queue" data-id="X">` containing the two queue body paths
+/// + description text.
+///
+/// Mirrors upstream `drawActorTypeQueue` (line 581) when `isFooter=false`.
+/// centerY for the lifeline = `actor_y + actor.height` = 0 + a.height
+/// (= 65 for default conf).
+fn emit_actor_queue_top_group(
+    out: &mut String,
+    a: &ActorRender,
+    bottom_y: f64,
+    rank: usize,
+    root_index: usize,
+    popup: bool,
+) {
+    let center = a.x + a.width / 2.0;
+    let centery = a.height; // actor_y=0 + actor.height
+
+    if popup {
+        push_popup_g_open(out, rank);
+    } else {
+        out.push_str("<g>");
+    }
+    // Lifeline
+    out.push_str("<line id=\"actor");
+    out.push_str(&rank.to_string());
+    out.push_str("\" x1=\"");
+    push_num(out, center);
+    out.push_str("\" y1=\"");
+    push_num(out, centery);
+    out.push_str("\" x2=\"");
+    push_num(out, center);
+    out.push_str("\" y2=\"");
+    push_num(out, bottom_y);
+    out.push_str(
+        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
+    );
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" data-et=\"life-line\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\"></line>");
+
+    // <g id="root-N" class="actor actor-top" data-et=... data-type="queue" data-id=X>
+    out.push_str("<g id=\"root-");
+    out.push_str(&root_index.to_string());
+    out.push_str("\" class=\"actor actor-top\" data-et=\"participant\" data-type=\"queue\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\">");
+
+    // Body paths
+    emit_actor_queue_body_paths(out, a, 0.0);
+
+    // Text inside root-N. cy = actor_y + height/2.
+    let cy = a.height / 2.0;
+    emit_actor_box_text(out, center, cy, &a.description);
 
     // Close root-N and outer <g>.
     out.push_str("</g></g>");
