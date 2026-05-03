@@ -644,14 +644,23 @@ fn split_box_header(s: &str) -> (Option<String>, String) {
 }
 
 fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) -> Actor {
-    let (head, type_anno) = match s.find("@{") {
+    // Split off optional `@{ ... }` annotation. The remaining string is
+    // `<id>` + optional ` as <description>`. Upstream supports the
+    // annotation appearing before or after the `as` clause, e.g.
+    // `participant API@{ "type": "..." } as External Name`. We splice
+    // the prefix and suffix together so `find_as` still locates ` as `.
+    let (head_owned, type_anno) = match s.find("@{") {
         Some(p) => {
             let after = &s[p + 2..];
-            let close = after.find('}').map(|q| p + 2 + q + 1).unwrap_or(s.len());
-            (s[..p].trim(), Some(&s[p..close]))
+            let close_off = after.find('}').map(|q| q + 1).unwrap_or(after.len());
+            let anno = &s[p..p + 2 + close_off];
+            let prefix = &s[..p];
+            let suffix = &s[p + 2 + close_off..];
+            (format!("{} {}", prefix.trim(), suffix.trim()), Some(anno))
         }
-        None => (s, None),
+        None => (s.to_string(), None),
     };
+    let head = head_owned.trim();
     let (id, mut descr) = match find_as(head) {
         Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
         None => {
@@ -708,8 +717,8 @@ fn find_as(s: &str) -> Option<(&str, &str)> {
     let mut i = 0;
     while i + 4 <= bytes.len() {
         if (bytes[i] == b' ' || bytes[i] == b'\t')
-            && bytes[i + 1] == b'a'
-            && bytes[i + 2] == b's'
+            && (bytes[i + 1] == b'a' || bytes[i + 1] == b'A')
+            && (bytes[i + 2] == b's' || bytes[i + 2] == b'S')
             && (bytes[i + 3] == b' ' || bytes[i + 3] == b'\t')
         {
             return Some((&s[..i], &s[i + 4..]));

@@ -1934,14 +1934,31 @@ pub fn render(
     //
     // We track this per-type so the box_stopy / svg_height match upstream
     // exactly even when control inflates the maxHeight above conf.height.
-    let max_actor_height = d
-        .actors
-        .iter()
-        .map(|a| match a.actor_type {
-            ActorType::Control => 84.0_f64,
+    // Per-actor mutated `actor.height` (post top-pass drawActor) governs the
+    // `maxHeight` upstream computes from the bottom-pass return values.
+    // Upstream initialises `maxHeight = 0` then maxes over each `drawActor`
+    // return value, so the result reflects the smallest cylinder/figure when
+    // a diagram has no Participant/Actor.
+    let actor_h_for = |a: &ActorRender| -> f64 {
+        match a.actor_type {
+            ActorType::Control => 84.0,
+            ActorType::Boundary | ActorType::Entity => 64.0,
+            // Database `actor.height = bbox(lastPath) + labelBoxHeight`. The
+            // last path command is the right-side `l 0,-(h3-2*ry)` line; in
+            // SVG `getBBox` collapses to that segment's height = body_h.
+            // body_h = h3 - 2*ry, h3 = width/3, rx = h3/2,
+            // ry = rx / (2.5 + w4/50). For default width=150 -> ~35.71.
+            ActorType::Database => {
+                let w4 = a.width / 3.0;
+                let h3 = w4;
+                let rx = w4 / 2.0;
+                let ry = rx / (2.5 + w4 / 50.0);
+                (h3 - 2.0 * ry) + 20.0
+            }
             _ => actor_h,
-        })
-        .fold(actor_h, f64::max);
+        }
+    };
+    let max_actor_height = actors.iter().map(actor_h_for).fold(0.0_f64, f64::max);
     let (bottom_y, box_stopy) = if mirror {
         let by = vertical + box_margin * 2.0;
         let stopy = by + max_actor_height + box_margin;
