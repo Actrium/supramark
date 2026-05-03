@@ -161,6 +161,22 @@ pub fn render(
                         | Some(ArrowType::DottedPoint)
                         | Some(ArrowType::BiSolid)
                         | Some(ArrowType::BiDotted)
+                        | Some(ArrowType::SolidTop)
+                        | Some(ArrowType::SolidBottom)
+                        | Some(ArrowType::StickTop)
+                        | Some(ArrowType::StickBottom)
+                        | Some(ArrowType::SolidTopDotted)
+                        | Some(ArrowType::SolidBottomDotted)
+                        | Some(ArrowType::StickTopDotted)
+                        | Some(ArrowType::StickBottomDotted)
+                        | Some(ArrowType::SolidTopReverse)
+                        | Some(ArrowType::SolidBottomReverse)
+                        | Some(ArrowType::StickTopReverse)
+                        | Some(ArrowType::StickBottomReverse)
+                        | Some(ArrowType::SolidTopReverseDotted)
+                        | Some(ArrowType::SolidBottomReverseDotted)
+                        | Some(ArrowType::StickTopReverseDotted)
+                        | Some(ArrowType::StickBottomReverseDotted)
                 )
             }
             DiagramItem::Note(n) => {
@@ -802,6 +818,27 @@ pub fn render(
             m.arrow,
             Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted)
         );
+        // Forward filled half-arrow heads (`-|\`, `-|/`, dotted variants):
+        // line.x2 shrinks by 3 toward the source, exactly like the
+        // standard arrowhead (mirrors upstream's `stopx += adjustValue(3)`
+        // — only STICK / OPEN / REVERSE forms are excluded).
+        let has_forward_solid_half = matches!(
+            m.arrow,
+            Some(ArrowType::SolidTop)
+                | Some(ArrowType::SolidBottom)
+                | Some(ArrowType::SolidTopDotted)
+                | Some(ArrowType::SolidBottomDotted)
+        );
+        // Reverse half-arrows (head at source). Solid reverse shrinks
+        // line.x1 toward the source by 3 (`startx -= adjustValue(3)`),
+        // stick reverse does NOT shrink either endpoint.
+        let has_reverse_solid_half = matches!(
+            m.arrow,
+            Some(ArrowType::SolidTopReverse)
+                | Some(ArrowType::SolidBottomReverse)
+                | Some(ArrowType::SolidTopReverseDotted)
+                | Some(ArrowType::SolidBottomReverseDotted)
+        );
         if !is_self {
             if m.activate {
                 if is_arrow_to_right {
@@ -810,14 +847,19 @@ pub fn render(
                     stopx += 4.0;
                 }
             }
-            if has_arrowhead || has_crosshead || has_pointhead || is_bidir {
+            if has_arrowhead
+                || has_crosshead
+                || has_pointhead
+                || is_bidir
+                || has_forward_solid_half
+            {
                 if is_arrow_to_right {
                     stopx -= 3.0;
                 } else {
                     stopx += 3.0;
                 }
             }
-            if is_bidir {
+            if is_bidir || has_reverse_solid_half {
                 if is_arrow_to_right {
                     startx += 3.0;
                 } else {
@@ -1849,6 +1891,14 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
             | ArrowType::DottedCross
             | ArrowType::DottedPoint
             | ArrowType::BiDotted
+            | ArrowType::SolidTopDotted
+            | ArrowType::SolidBottomDotted
+            | ArrowType::StickTopDotted
+            | ArrowType::StickBottomDotted
+            | ArrowType::SolidTopReverseDotted
+            | ArrowType::SolidBottomReverseDotted
+            | ArrowType::StickTopReverseDotted
+            | ArrowType::StickBottomReverseDotted
     );
     // `has_arrowhead`: upstream attaches `marker-end="...arrowhead"` for
     // SOLID / DOTTED only — the `_OPEN` variants (`->`, `-->`) get no
@@ -1872,6 +1922,35 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     // Bidirectional arrows (`<<->>`, `<<-->>`) carry arrowheads on both
     // ends → both `marker-start` AND `marker-end="...arrowhead"`.
     let is_bidir = matches!(m.arrow, ArrowType::BiSolid | ArrowType::BiDotted);
+    // Forward filled / stick half-arrow heads (`-|\`, `-|/`, `-\\`, `-//`
+    // and dotted variants). Each maps to one of four marker ids on
+    // `marker-end`. Mirrors upstream sequenceRenderer.ts:3518-3528.
+    let half_marker_end: Option<&str> = match m.arrow {
+        ArrowType::SolidTop | ArrowType::SolidTopDotted => Some("-solidTopArrowHead"),
+        ArrowType::SolidBottom | ArrowType::SolidBottomDotted => Some("-solidBottomArrowHead"),
+        ArrowType::StickTop | ArrowType::StickTopDotted => Some("-stickTopArrowHead"),
+        ArrowType::StickBottom | ArrowType::StickBottomDotted => Some("-stickBottomArrowHead"),
+        _ => None,
+    };
+    // Reverse half-arrows put the head at the source actor instead of
+    // the destination. The marker is mirrored (top↔bottom) because the
+    // marker is rendered with `auto-start-reverse` orientation when used
+    // as `marker-start`. Mirrors sequenceRenderer.ts:3530-3541.
+    let half_marker_start: Option<&str> = match m.arrow {
+        ArrowType::SolidTopReverse | ArrowType::SolidTopReverseDotted => {
+            Some("-solidBottomArrowHead")
+        }
+        ArrowType::SolidBottomReverse | ArrowType::SolidBottomReverseDotted => {
+            Some("-solidTopArrowHead")
+        }
+        ArrowType::StickTopReverse | ArrowType::StickTopReverseDotted => {
+            Some("-stickBottomArrowHead")
+        }
+        ArrowType::StickBottomReverse | ArrowType::StickBottomReverseDotted => {
+            Some("-stickTopArrowHead")
+        }
+        _ => None,
+    };
 
     // <text> per line (multi-line via `<br>` splits to separate <text>
     // elements with stepping y, mirroring upstream `drawText` in
@@ -1952,6 +2031,16 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
             out.push_str("\" marker-end=\"url(#");
             out.push_str(id);
             out.push_str("-filled-head)");
+        } else if let Some(marker) = half_marker_end {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str(marker);
+            out.push(')');
+        } else if let Some(marker) = half_marker_start {
+            out.push_str("\" marker-start=\"url(#");
+            out.push_str(id);
+            out.push_str(marker);
+            out.push(')');
         }
         if m.seq_index.is_some() {
             out.push_str("\" x1=\"");
@@ -2016,6 +2105,16 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         out.push_str("\" marker-end=\"url(#");
         out.push_str(id);
         out.push_str("-filled-head)\">");
+    } else if let Some(marker) = half_marker_end {
+        out.push_str("\" marker-end=\"url(#");
+        out.push_str(id);
+        out.push_str(marker);
+        out.push_str(")\">");
+    } else if let Some(marker) = half_marker_start {
+        out.push_str("\" marker-start=\"url(#");
+        out.push_str(id);
+        out.push_str(marker);
+        out.push_str(")\">");
     } else {
         out.push_str("\">");
     }

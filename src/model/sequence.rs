@@ -92,6 +92,36 @@ pub enum ArrowType {
     /// Bidirectional variants `<<->>` `<<-->>`.
     BiSolid,
     BiDotted,
+    /// Forward half-arrows. Mirrors upstream's `LINETYPE.SOLID_TOP / _BOTTOM`
+    /// and `STICK_TOP / _BOTTOM`. Source token examples:
+    ///   `-|\` SolidTop      (filled triangle, lower half)
+    ///   `-|/` SolidBottom   (filled triangle, upper half)
+    ///   `-\\` StickTop      (stick line, lower half)
+    ///   `-//` StickBottom   (stick line, upper half)
+    /// The `--` dotted variants append `Dotted`.
+    SolidTop,
+    SolidBottom,
+    StickTop,
+    StickBottom,
+    SolidTopDotted,
+    SolidBottomDotted,
+    StickTopDotted,
+    StickBottomDotted,
+    /// Reverse half-arrows — head appears at the source actor instead of
+    /// the destination. Mirrors upstream's `LINETYPE.SOLID_ARROW_TOP_REVERSE`
+    /// family. Source token examples:
+    ///   `/|-` SolidTopReverse,  `\|-` SolidBottomReverse,
+    ///   `//-` StickTopReverse,  `\\-` StickBottomReverse.
+    /// The `--` dotted variants (`/|--`, `\|--`, `//--`, `\\--`)
+    /// append `Dotted`.
+    SolidTopReverse,
+    SolidBottomReverse,
+    StickTopReverse,
+    StickBottomReverse,
+    SolidTopReverseDotted,
+    SolidBottomReverseDotted,
+    StickTopReverseDotted,
+    StickBottomReverseDotted,
 }
 
 /// Central-connection marker style. Mirrors upstream's

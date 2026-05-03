@@ -782,9 +782,35 @@ fn strip_wrap_prefix(s: &str) -> (bool, &str) {
 
 
 fn parse_message_line(s: &str) -> Option<Message> {
+    // Token order matters: longer tokens come first so that
+    // e.g. `-->` does not pre-empt `--|\` or `-->>` does not pre-empt
+    // `-->`. Each entry mirrors one upstream lex rule (see
+    // `mermaid.esm/sequenceDiagram-*.mjs` rules 61-86).
     static ARROWS: &[(&str, ArrowType)] = &[
         ("<<-->>", ArrowType::BiDotted),
         ("<<->>", ArrowType::BiSolid),
+        // Reverse half-arrows, dotted (`/|--`, `\|--`, `//--`, `\\--`)
+        // — kept ahead of `-->` so the leading slash/backslash does
+        // not let `find` slide past and match on the trailing `-->`.
+        ("/|--", ArrowType::SolidTopReverseDotted),
+        ("\\|--", ArrowType::SolidBottomReverseDotted),
+        ("//--", ArrowType::StickTopReverseDotted),
+        ("\\\\--", ArrowType::StickBottomReverseDotted),
+        // Forward half-arrows, dotted (`--|\`, `--|/`, `--\\`, `--//`)
+        ("--|\\", ArrowType::SolidTopDotted),
+        ("--|/", ArrowType::SolidBottomDotted),
+        ("--\\\\", ArrowType::StickTopDotted),
+        ("--//", ArrowType::StickBottomDotted),
+        // Reverse half-arrows, solid (`/|-`, `\|-`, `//-`, `\\-`).
+        ("/|-", ArrowType::SolidTopReverse),
+        ("\\|-", ArrowType::SolidBottomReverse),
+        ("//-", ArrowType::StickTopReverse),
+        ("\\\\-", ArrowType::StickBottomReverse),
+        // Forward half-arrows, solid (`-|\`, `-|/`, `-\\`, `-//`).
+        ("-|\\", ArrowType::SolidTop),
+        ("-|/", ArrowType::SolidBottom),
+        ("-\\\\", ArrowType::StickTop),
+        ("-//", ArrowType::StickBottom),
         ("-->>", ArrowType::DottedArrow),
         ("->>", ArrowType::SolidArrow),
         ("--x", ArrowType::DottedCross),
