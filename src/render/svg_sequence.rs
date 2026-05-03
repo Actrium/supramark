@@ -604,11 +604,25 @@ pub fn render(
                     }
                     let message_width = text_w + 2.0 * cfg.wrap_padding;
                     let half = message_width / 2.0;
-                    // Both upstream branches converge to msg.from when
-                    // from !== to. Mirror that.
-                    let _ = to_i;
+                    // Upstream contributes to BOTH msg.from AND
+                    // msg.to.prevActor. For adjacent A,B these reduce
+                    // to A. For non-adjacent A,D (skipping B,C),
+                    // contributes to A AND C — ensuring both A→B and
+                    // C→D gaps can hold half the note width.
                     if max_msg_width_per_actor[from_i] < half {
                         max_msg_width_per_actor[from_i] = half;
+                    }
+                    let to_prev = if to_i > from_i {
+                        to_i.checked_sub(1)
+                    } else if to_i < from_i {
+                        Some(to_i + 1)
+                    } else {
+                        None
+                    };
+                    if let Some(p) = to_prev {
+                        if max_msg_width_per_actor[p] < half {
+                            max_msg_width_per_actor[p] = half;
+                        }
                     }
                     continue;
                 }
