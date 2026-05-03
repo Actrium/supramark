@@ -1032,8 +1032,20 @@ pub fn render(
     if mirror {
         svg_height = svg_height - box_margin + bottom_margin_adj;
     }
+    // Frontmatter `title:` lifts the diagram down by 40 px to make room
+    // for the title bar above. Upstream sequenceRenderer.draw():
+    //   const extraVertForTitle = title ? 40 : 0;
+    //   viewBox y = -(diagramMarginY + extraVertForTitle)
+    //   viewBox height = svgHeight + extraVertForTitle
+    let has_title = d
+        .title
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    let extra_vert_for_title = if has_title { 40.0 } else { 0.0 };
     let vb_x = bounds_startx - dia_margin_x;
-    let vb_y = -dia_margin_y;
+    let vb_y = -dia_margin_y - extra_vert_for_title;
+    let vb_height = svg_height + extra_vert_for_title;
 
     // ── Emit ────────────────────────────────────────────────────────
     let mut out = String::with_capacity(28 * 1024);
@@ -1048,7 +1060,7 @@ pub fn render(
     out.push(' ');
     push_num(&mut out, svg_width);
     out.push(' ');
-    push_num(&mut out, svg_height);
+    push_num(&mut out, vb_height);
     out.push_str(
         "\" role=\"graphics-document document\" aria-roledescription=\"sequence\">",
     );
@@ -1090,7 +1102,14 @@ pub fn render(
     let lifeline_y2 = if mirror { bottom_y } else { 2000.0 };
     let force_menus = d.config.force_menus;
     for (rank, a) in actors.iter().rev().enumerate() {
-        let popup = !a.links.is_empty() || force_menus;
+        // Upstream `drawActorTypeParticipant` / `drawActorTypeActor`:
+        //   if (Object.keys(actor.links || {}).length && !conf.forceMenus) {
+        //     g.attr("onclick", popupMenuToggle(...)).attr("cursor", "pointer");
+        //   }
+        // i.e. the per-actor onclick wrapper is suppressed when forceMenus
+        // is set — instead, the `<g id="actorN_popup">` block emits with
+        // `display="block !important"` later (see emit_actor_popup).
+        let popup = !a.links.is_empty() && !force_menus;
         match a.actor_type {
             ActorType::Participant => {
                 emit_actor_top_participant(&mut out, a, lifeline_y2, rank, popup)
@@ -1211,6 +1230,22 @@ pub fn render(
         }
         let rank = n_actors - 1 - i;
         emit_actor_popup(&mut out, a, rank, force_menus);
+    }
+
+    // Frontmatter title bar — emitted *after* every other element so it
+    // sits at the end of the DOM. Upstream sequenceRenderer.draw():
+    //   diagram.append("text").text(title)
+    //          .attr("x", (box.stopx - box.startx) / 2 - 2 * diagramMarginX)
+    //          .attr("y", -25);
+    // No class / no font attrs — naked `<text x=… y="-25">…</text>`.
+    if has_title {
+        let title = d.title.as_deref().unwrap_or("");
+        let title_x = box_width / 2.0 - 2.0 * dia_margin_x;
+        out.push_str("<text x=\"");
+        push_num(&mut out, title_x);
+        out.push_str("\" y=\"-25\">");
+        out.push_str(&xml_escape(title));
+        out.push_str("</text>");
     }
 
     out.push_str("</svg>");
