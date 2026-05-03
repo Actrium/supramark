@@ -1818,7 +1818,7 @@ fn emit_actor_database_bottom_group(out: &mut String, a: &ActorRender, bottom_y:
     // (default theme classic). attribute order: class, style, transform.
     out.push_str("<g class=\"actor actor-bottom\" style=\"stroke: #9370DB;\" transform=\"translate(");
     push_num(out, w4);
-    out.push_str(",");
+    out.push_str(", ");
     push_num(out, ry);
     out.push_str(")\"><path d=\"\n  M ");
     push_num(out, a.x);
@@ -1919,7 +1919,7 @@ fn emit_actor_database_top_group(
     // Cylinder
     out.push_str("<g class=\"actor actor-top\" style=\"stroke: #9370DB;\" transform=\"translate(");
     push_num(out, w4);
-    out.push_str(",");
+    out.push_str(", ");
     push_num(out, ry);
     out.push_str(")\"><path d=\"\n  M ");
     push_num(out, a.x);
