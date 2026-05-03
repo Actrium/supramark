@@ -149,17 +149,17 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             d.meta.title = Some(v);
             continue;
         }
-        if let Some(rest) = strip_kw(line, "accTitle") {
+        if let Some(rest) = line.strip_prefix("accTitle") {
             if let Some(v) = rest.trim_start().strip_prefix(':') {
                 d.meta.acc_title = Some(v.trim().to_string());
+                continue;
             }
-            continue;
         }
-        if let Some(rest) = strip_kw(line, "accDescr") {
+        if let Some(rest) = line.strip_prefix("accDescr") {
             if let Some(v) = rest.trim_start().strip_prefix(':') {
                 d.meta.acc_descr = Some(v.trim().to_string());
+                continue;
             }
-            continue;
         }
 
         // autonumber [start [step]] | autonumber off

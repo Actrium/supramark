@@ -2219,8 +2219,35 @@ pub fn render(
     out.push(' ');
     push_num(&mut out, vb_height);
     out.push_str(
-        "\" role=\"graphics-document document\" aria-roledescription=\"sequence\">",
+        "\" role=\"graphics-document document\" aria-roledescription=\"sequence\"",
     );
+    let acc_title = d.meta.acc_title.as_deref();
+    let acc_descr = d.meta.acc_descr.as_deref();
+    if acc_descr.is_some() {
+        out.push_str(" aria-describedby=\"chart-desc-");
+        out.push_str(id);
+        out.push('"');
+    }
+    if acc_title.is_some() {
+        out.push_str(" aria-labelledby=\"chart-title-");
+        out.push_str(id);
+        out.push('"');
+    }
+    out.push('>');
+    if let Some(t) = acc_title {
+        out.push_str("<title id=\"chart-title-");
+        out.push_str(id);
+        out.push_str("\">");
+        out.push_str(&xml_escape(t));
+        out.push_str("</title>");
+    }
+    if let Some(dsc) = acc_descr {
+        out.push_str("<desc id=\"chart-desc-");
+        out.push_str(id);
+        out.push_str("\">");
+        out.push_str(&xml_escape(dsc));
+        out.push_str("</desc>");
+    }
 
     // Background rects — emit BEFORE everything else so they sit at
     // the bottom of the visual stack. Upstream pushes models in
