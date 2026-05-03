@@ -1,12 +1,25 @@
 # 阶段进展
 
-截至 2026-05-03，Wave 15-G 完结。
+截至 2026-05-03，Wave 15-EE 完结（部分）。
 
-**当前指标：1238 / 1323 byte-exact（约 93.6%）**。
+**当前指标：1289 / 1323 byte-exact（约 97.4%）**。
 
-- 1238 = Wave 15 累计 +32（87/88 actor wrap +2，118 popup link +1，demos/02 title +1，08/14 boundary +2，half-arrow 17 fixture +18，control +2，114/115 message-wrap +2，entity +2，database +3）
+- 1289 = 1264（W15-T 入手点）+25：
+  - W15-U（reverse arrow CC offset）+6
+  - W15-V（note vs control-structure 排序）+5
+  - W15-W（multi-actor Note over A,B）+1
+  - W15-X（self-loop reverse path +10）+2 → 后追 +1
+  - W15-Y/popup-mirror（properties + popup actor-top）+1+1
+  - W15-Z（activation y/height Math.min）+1
+  - W15-AA（cross-actor message margin distribution）+1
+  - W15-CC（self-loop reverse +10 仅 autonumber 时）+1
+  - W15-DD（opt label wrap height）+3
+  - W15-AA-extension（non-adjacent Note distribute to to.prev）+1
+  - rect-widen-by-note + bounds depth outset +0（demo/01 advance 113→39542）
+  - autonumber counter + step semantics +1
+  - par_over single-section +1
 - 1323 = sweep_all 处理的 fixture 总数（已剔除环境性 6 项）
-- 差额 85 = sequence ~56 + mindmap 18 + KaTeX 6 + stadium rough 1 + misc ~4
+- 差额 34 = cypress/sequence 8（box×4 / create×2 / 27 +2px / 76 多feature）+ demos/sequence 3（box×1 / KaTeX×2）+ mindmap 17 + KaTeX flowchart 6（out of scope）
 
 ## Wave 15-spike + 15-A（2026-05-03）
 
