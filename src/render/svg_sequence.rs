@@ -129,6 +129,7 @@ pub fn render(
                 | ActorType::Entity
                 | ActorType::Database
                 | ActorType::Queue
+                | ActorType::Collections
         ))
     {
         return Ok(placeholder(d, id));
@@ -1170,6 +1171,9 @@ pub fn render(
                 // body group later. So we emit the complete body here.
                 ActorType::Database => emit_actor_database_bottom_group(&mut out, a, bottom_y),
                 ActorType::Queue => emit_actor_queue_bottom_group(&mut out, a, bottom_y),
+                ActorType::Collections => {
+                    emit_actor_collections_bottom_group(&mut out, a, bottom_y)
+                }
                 _ => unreachable!("gated above"),
             }
         }
@@ -1247,6 +1251,17 @@ pub fn render(
             }
             ActorType::Queue => {
                 emit_actor_queue_top_group(
+                    &mut out,
+                    a,
+                    lifeline_y2,
+                    rank,
+                    root_counter,
+                    popup,
+                );
+                root_counter += 1;
+            }
+            ActorType::Collections => {
+                emit_actor_collections_top_group(
                     &mut out,
                     a,
                     lifeline_y2,
@@ -2134,6 +2149,136 @@ fn emit_actor_queue_top_group(
     // Text inside root-N. cy = actor_y + height/2.
     let cy = a.height / 2.0;
     emit_actor_box_text(out, center, cy, &a.description);
+
+    // Close root-N and outer <g>.
+    out.push_str("</g></g>");
+}
+
+/// Emit the body shape of a Collections-type actor — two stacked `<rect>`
+/// elements: a main rect (with `actor actor-top`/`actor actor-bottom` class)
+/// and a shadow rect offset by 6 (top: `+6,+6`, bottom: `-6,+6`) with class
+/// `actor` only. Order: main first, shadow second (drawn on top).
+///
+/// Mirrors upstream `drawActorTypeCollections` lines 502-530:
+///   const offset = 6
+///   shadowRect.x = rect.x + (isFooter ? -offset : -offset)  [always -offset]
+///   shadowRect.y = rect.y + (isFooter ? +offset : +offset)  [always +offset]
+fn emit_actor_collections_body_rects(
+    out: &mut String,
+    a: &ActorRender,
+    actor_y: f64,
+    is_footer: bool,
+) {
+    let cls_main = if is_footer {
+        "actor actor-bottom"
+    } else {
+        "actor actor-top"
+    };
+    // Main rect (on top per upstream order: drawRect(g, rect) first, then shadow)
+    out.push_str("<rect x=\"");
+    push_num(out, a.x);
+    out.push_str("\" y=\"");
+    push_num(out, actor_y);
+    out.push_str("\" fill=\"#eaeaea\" stroke=\"#666\" width=\"");
+    push_num(out, a.width);
+    out.push_str("\" height=\"");
+    push_num(out, a.height);
+    out.push_str("\" name=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" class=\"");
+    out.push_str(cls_main);
+    out.push_str("\"></rect>");
+    // Shadow rect: offset (-6, +6) relative to main, class="actor"
+    out.push_str("<rect x=\"");
+    push_num(out, a.x - 6.0);
+    out.push_str("\" y=\"");
+    push_num(out, actor_y + 6.0);
+    out.push_str("\" fill=\"#eaeaea\" stroke=\"#666\" width=\"");
+    push_num(out, a.width);
+    out.push_str("\" height=\"");
+    push_num(out, a.height);
+    out.push_str("\" name=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" class=\"actor\"></rect>");
+}
+
+/// Emit the FULL bottom group for a Collections-type actor — single outer
+/// plain `<g>` containing the two stacked rectangles + description text.
+///
+/// Mirrors upstream `drawActorTypeCollections` (line 463) when
+/// `isFooter=true`: outer `<g>` (lowered) without `class` attribute (the
+/// class lands on the rects, not the wrapper). Text is positioned at
+/// `(rect.x - offset + width/2, rect.y + offset + height/2)`
+/// = `(a.x + width/2 - 6, bottom_y + 6 + height/2)`.
+fn emit_actor_collections_bottom_group(out: &mut String, a: &ActorRender, bottom_y: f64) {
+    out.push_str("<g>");
+    emit_actor_collections_body_rects(out, a, bottom_y, true);
+    let cx = a.x + a.width / 2.0 - 6.0;
+    let cy = bottom_y + 6.0 + a.height / 2.0;
+    emit_actor_box_text(out, cx, cy, &a.description);
+    out.push_str("</g>");
+}
+
+/// Emit the FULL top group for a Collections-type actor — outer `<g>`
+/// (or popup-onclick wrapper) containing the lifeline, then a sibling
+/// `<g id="root-N" data-et="participant" data-type="collections"
+/// data-id="X">` containing the two stacked rectangles + description text.
+///
+/// Mirrors upstream `drawActorTypeCollections` (line 463) when
+/// `isFooter=false`. centerY for the lifeline = `actor_y + actor.height`
+/// (= 65 for default conf). Note the wrapper `<g id="root-N">` does NOT
+/// carry a `class` attribute — the class is set only on the rects (line 518
+/// upstream sets `rect.class = cssclass`, not `g.attr('class', ...)`).
+fn emit_actor_collections_top_group(
+    out: &mut String,
+    a: &ActorRender,
+    bottom_y: f64,
+    rank: usize,
+    root_index: usize,
+    popup: bool,
+) {
+    let center = a.x + a.width / 2.0;
+    let centery = a.height;
+
+    if popup {
+        push_popup_g_open(out, rank);
+    } else {
+        out.push_str("<g>");
+    }
+    // Lifeline
+    out.push_str("<line id=\"actor");
+    out.push_str(&rank.to_string());
+    out.push_str("\" x1=\"");
+    push_num(out, center);
+    out.push_str("\" y1=\"");
+    push_num(out, centery);
+    out.push_str("\" x2=\"");
+    push_num(out, center);
+    out.push_str("\" y2=\"");
+    push_num(out, bottom_y);
+    out.push_str(
+        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
+    );
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" data-et=\"life-line\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\"></line>");
+
+    // <g id="root-N" data-et="participant" data-type="collections" data-id=X>
+    // (no class attribute, unlike queue and participant)
+    out.push_str("<g id=\"root-");
+    out.push_str(&root_index.to_string());
+    out.push_str("\" data-et=\"participant\" data-type=\"collections\" data-id=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\">");
+
+    // Rects
+    emit_actor_collections_body_rects(out, a, 0.0, false);
+
+    // Text inside root-N. cx = center - 6, cy = 6 + height/2.
+    let cx = center - 6.0;
+    let cy = 6.0 + a.height / 2.0;
+    emit_actor_box_text(out, cx, cy, &a.description);
 
     // Close root-N and outer <g>.
     out.push_str("</g></g>");
