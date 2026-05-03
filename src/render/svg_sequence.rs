@@ -443,7 +443,43 @@ pub fn render(
         .collect();
 
     let mut max_msg_width_per_actor: Vec<f64> = vec![0.0; n_actors];
-    for it in &d.items {
+    // Upstream `getMaxMessageWidthPerActor` walks the FLAT message list
+    // returned by `diagObj.db.getMessages()` — that list already includes
+    // every message and note inside loop/alt/opt/par/critical/break/rect
+    // blocks (the parser appends them all to a single flat array, with
+    // LOOP_START/END/etc. markers interleaved). Our AST keeps blocks as
+    // nested children, so we need to walk recursively to mirror the
+    // flat-iteration behaviour. Without this, messages inside a `loop`
+    // or `alt` contribute nothing to inter-actor margins.
+    fn collect_items<'a>(items: &'a [DiagramItem], out: &mut Vec<&'a DiagramItem>) {
+        for it in items {
+            match it {
+                DiagramItem::Loop { items, .. }
+                | DiagramItem::Opt { items, .. }
+                | DiagramItem::Break { items, .. }
+                | DiagramItem::Rect { items, .. } => {
+                    out.push(it);
+                    collect_items(items, out);
+                }
+                DiagramItem::Alt { branches } | DiagramItem::Critical { branches } => {
+                    out.push(it);
+                    for b in branches {
+                        collect_items(&b.items, out);
+                    }
+                }
+                DiagramItem::Par { branches } => {
+                    out.push(it);
+                    for b in branches {
+                        collect_items(&b.items, out);
+                    }
+                }
+                _ => out.push(it),
+            }
+        }
+    }
+    let mut flat_items: Vec<&DiagramItem> = Vec::new();
+    collect_items(&d.items, &mut flat_items);
+    for it in flat_items {
         match it {
             DiagramItem::Message(m) => {
                 let (Some(&from_i), Some(&to_i)) = (
