@@ -62,6 +62,11 @@ pub struct Actor {
     /// Mirrors upstream `addActor`'s `description.wrap` field, fed by
     /// `parseMessage`'s `extractWrap`.
     pub wrap: bool,
+    /// Popup-menu entries collected from `link <actor>: <name> @ <url>`
+    /// and `links <actor>: {...}` directives. Insertion order is the
+    /// source order — upstream `svgDraw.popupMenu` walks `Object.entries`
+    /// in the same order.
+    pub links: Vec<(String, String)>,
 }
 
 /// Arrow-token classification — matches upstream's `LINETYPE`

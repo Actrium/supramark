@@ -358,12 +358,28 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             continue;
         }
 
-        // links / link / properties / details — record-and-skip.
-        if line.starts_with("links ")
-            || line.starts_with("link ")
-            || line.starts_with("properties ")
-            || line.starts_with("details ")
-        {
+        // `link <actor>: <name> @ <url>` — single popup-menu entry.
+        if let Some(rest) = line.strip_prefix("link ") {
+            if let Some((actor_id, name, url)) = parse_link_directive(rest) {
+                ensure_actor(&mut d, &actor_id, current_box);
+                if let Some(a) = d.actors.iter_mut().find(|a| a.id == actor_id) {
+                    a.links.push((name, url));
+                }
+            }
+            continue;
+        }
+        // `links <actor>: {"K1":"V1", "K2":"V2"}` — bulk popup-menu entries.
+        if let Some(rest) = line.strip_prefix("links ") {
+            if let Some((actor_id, entries)) = parse_links_directive(rest) {
+                ensure_actor(&mut d, &actor_id, current_box);
+                if let Some(a) = d.actors.iter_mut().find(|a| a.id == actor_id) {
+                    a.links.extend(entries);
+                }
+            }
+            continue;
+        }
+        // properties / details — record-and-skip (not yet rendered).
+        if line.starts_with("properties ") || line.starts_with("details ") {
             continue;
         }
 
@@ -459,6 +475,116 @@ fn mark_destroyed(d: &mut SequenceDiagram, id: &str) {
     if let Some(a) = d.actors.iter_mut().find(|a| a.id == id) {
         a.destroyed = true;
     }
+}
+
+/// Auto-register an actor referenced by a `link` / `links` / `properties`
+/// directive when it has not been explicitly declared yet. Mirrors
+/// upstream `sequenceDb.addLinks`'s implicit-create path.
+fn ensure_actor(d: &mut SequenceDiagram, id: &str, current_box: Option<usize>) {
+    if d.actors.iter().any(|a| a.id == id) {
+        return;
+    }
+    let actor = Actor {
+        id: id.to_string(),
+        description: id.to_string(),
+        actor_type: ActorType::Participant,
+        box_index: current_box,
+        ..Default::default()
+    };
+    add_actor(d, actor, false);
+}
+
+/// Parse `link <actor>: <name> @ <url>`. Returns
+/// `(actor_id, link_name, link_url)` on success, else `None`.
+fn parse_link_directive(rest: &str) -> Option<(String, String, String)> {
+    let colon = rest.find(':')?;
+    let actor_id = rest[..colon].trim().to_string();
+    if actor_id.is_empty() {
+        return None;
+    }
+    let body = rest[colon + 1..].trim();
+    // Locate the LAST ` @ ` so URLs containing `@` survive.
+    let at = body.rfind(" @ ")?;
+    let name = body[..at].trim().to_string();
+    let url = body[at + 3..].trim().to_string();
+    if name.is_empty() || url.is_empty() {
+        return None;
+    }
+    Some((actor_id, name, url))
+}
+
+/// Parse `links <actor>: {"K1":"V1", "K2":"V2"}`. JSON-like; we hand-roll
+/// the parse since we only need string→string pairs and the upstream
+/// grammar feeds the body straight to `JSON.parse`.
+fn parse_links_directive(rest: &str) -> Option<(String, Vec<(String, String)>)> {
+    let colon = rest.find(':')?;
+    let actor_id = rest[..colon].trim().to_string();
+    if actor_id.is_empty() {
+        return None;
+    }
+    let body = rest[colon + 1..].trim();
+    let body = body.strip_prefix('{')?.trim_end();
+    let body = body.strip_suffix('}')?;
+    let mut entries = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip leading whitespace + commas.
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        // Expect a quoted key.
+        if bytes[i] != b'"' {
+            return None;
+        }
+        i += 1;
+        let key_start = i;
+        while i < bytes.len() && bytes[i] != b'"' {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        let key = body[key_start..i].to_string();
+        i += 1; // closing quote
+        // Skip whitespace then `:`.
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b':' {
+            return None;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'"' {
+            return None;
+        }
+        i += 1;
+        let val_start = i;
+        while i < bytes.len() && bytes[i] != b'"' {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        let val = body[val_start..i].to_string();
+        i += 1;
+        entries.push((key, val));
+    }
+    Some((actor_id, entries))
 }
 
 fn trim_comments(line: &str) -> &str {
@@ -558,6 +684,7 @@ fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) 
         created: false,
         destroyed: false,
         wrap,
+        links: Vec::new(),
     }
 }
 
@@ -770,6 +897,14 @@ fn strip_frontmatter(src: &str, d: &mut SequenceDiagram) -> String {
             d.meta.title = Some(v);
         } else if let Some(v) = t.strip_prefix("theme:") {
             d.theme_name = Some(v.trim().to_string());
+        } else if let Some(v) = t.strip_prefix("forceMenus:") {
+            // Frontmatter form (demos/sequence/02): `sequence: \n  forceMenus: true`.
+            let v = v.trim();
+            if v.starts_with("true") {
+                d.config.force_menus = true;
+            } else if v.starts_with("false") {
+                d.config.force_menus = false;
+            }
         }
     }
     let after = &body[close + 4..];
@@ -798,6 +933,11 @@ fn strip_init_directives(src: &str, d: &mut SequenceDiagram) -> String {
             // own `wrap:` / `nowrap:` prefix).
             if let Some(v) = sniff_bool(block, "wrap") {
                 d.config.wrap = v;
+            }
+            // Sniff `forceMenus: true|false` — flips popup-menu rendering
+            // even for actors without `link`/`links` directives.
+            if let Some(v) = sniff_bool(block, "forceMenus") {
+                d.config.force_menus = v;
             }
             rest = &after[end + 3..];
         } else {

@@ -31,6 +31,8 @@ struct ActorRender {
     /// 1-based actor counter as upstream's `actorCnt`. Kept for
     /// future fixtures that need self-message / activation IDs.
     cnt: usize,
+    /// Popup-menu entries from `link`/`links` directives.
+    links: Vec<(String, String)>,
 }
 
 /// Information collected per-message for the render pass.
@@ -502,6 +504,7 @@ pub fn render(
             width: actor_widths[i],
             height: actor_h,
             cnt: i + 1,
+            links: a.links.clone(),
         })
         .collect();
 
@@ -1085,13 +1088,15 @@ pub fn render(
     // y2 rewrite (actor.stopy is undefined), so the value stays at the
     // initial 2000 default that drawActorType* assigned.
     let lifeline_y2 = if mirror { bottom_y } else { 2000.0 };
+    let force_menus = d.config.force_menus;
     for (rank, a) in actors.iter().rev().enumerate() {
+        let popup = !a.links.is_empty() || force_menus;
         match a.actor_type {
             ActorType::Participant => {
-                emit_actor_top_participant(&mut out, a, lifeline_y2, rank)
+                emit_actor_top_participant(&mut out, a, lifeline_y2, rank, popup)
             }
             ActorType::Actor => {
-                emit_actor_top_lifeline_actor(&mut out, a, lifeline_y2, rank)
+                emit_actor_top_lifeline_actor(&mut out, a, lifeline_y2, rank, popup)
             }
             _ => unreachable!("gated above"),
         }
@@ -1191,6 +1196,21 @@ pub fn render(
             let (torso_id, arms_id) = stick_ids.bottom[i];
             emit_actor_man_body(&mut out, a, bottom_y, true, torso_id, arms_id);
         }
+    }
+
+    // Popup menus — one `<g id="actorN_popup">` per actor with links (or
+    // for every actor when `forceMenus` is set). Walks DECLARATION order
+    // (not the reversed top-group order), so the ranked id `actorN_popup`
+    // is `(n_actors - 1 - decl_index)` to keep alignment with the actor
+    // line ids emitted by the reversed top loop above.
+    let force_menus = d.config.force_menus;
+    let n_actors = actors.len();
+    for (i, a) in actors.iter().enumerate() {
+        if a.links.is_empty() && !force_menus {
+            continue;
+        }
+        let rank = n_actors - 1 - i;
+        emit_actor_popup(&mut out, a, rank, force_menus);
     }
 
     out.push_str("</svg>");
@@ -1441,6 +1461,18 @@ fn emit_note(out: &mut String, n: &NoteRender) {
     out.push_str("</g>");
 }
 
+/// Emit the opening `<g onclick="..." cursor="pointer">` that wraps an
+/// actor's top group when popup menus are enabled (either the actor has
+/// `link`/`links` entries, or `forceMenus: true` is set on the diagram).
+/// Mirrors upstream `svgDraw.popupMenuToggle`.
+fn push_popup_g_open(out: &mut String, rank: usize) {
+    out.push_str("<g onclick=\"var pu = document.getElementById('actor");
+    out.push_str(&rank.to_string());
+    out.push_str(
+        "_popup'); if (pu != null) { pu.style.display = pu.style.display == 'block' ? 'none' : 'block'; }\" cursor=\"pointer\">",
+    );
+}
+
 /// Lifeline-only top group for Actor type — `<g><line id="actorN"></g>`.
 /// The body (stick-figure) is emitted separately, after `<defs>`.
 fn emit_actor_top_lifeline_actor(
@@ -1448,12 +1480,18 @@ fn emit_actor_top_lifeline_actor(
     a: &ActorRender,
     bottom_y: f64,
     rank: usize,
+    popup: bool,
 ) {
     let cx = a.x + a.width / 2.0;
     // For Actor type, lifeline starts at actor.height + 15 = 80 (default
     // conf.height=65). Mirrors upstream `centerY = actorY + 80`.
     let centery = a.height + 15.0;
-    out.push_str("<g><line id=\"actor");
+    if popup {
+        push_popup_g_open(out, rank);
+    } else {
+        out.push_str("<g>");
+    }
+    out.push_str("<line id=\"actor");
     out.push_str(&rank.to_string());
     out.push_str("\" x1=\"");
     push_num(out, cx);
@@ -1520,12 +1558,17 @@ fn emit_actor_bottom_participant(out: &mut String, a: &ActorRender, bottom_y: f6
     out.push_str("</g>");
 }
 
-fn emit_actor_top_participant(out: &mut String, a: &ActorRender, bottom_y: f64, rank: usize) {
+fn emit_actor_top_participant(out: &mut String, a: &ActorRender, bottom_y: f64, rank: usize, popup: bool) {
     let _ = a.cnt;
     let cx = a.x + a.width / 2.0;
     let centery = a.height; // actorY=0 + actor.height
     let top_y = 0.0;
-    out.push_str("<g><line id=\"actor");
+    if popup {
+        push_popup_g_open(out, rank);
+    } else {
+        out.push_str("<g>");
+    }
+    out.push_str("<line id=\"actor");
     out.push_str(&rank.to_string());
     out.push_str("\" x1=\"");
     push_num(out, cx);
@@ -1561,6 +1604,61 @@ fn emit_actor_top_participant(out: &mut String, a: &ActorRender, bottom_y: f64, 
     let cy = top_y + a.height / 2.0;
     emit_actor_box_text(out, cx, cy, &a.description);
     out.push_str("</g></g>");
+}
+
+/// Emit `<g id="actorN_popup" class="actorPopupMenu" display="...">` —
+/// the popup container holding a panel `<rect>` plus one `<a><text>`
+/// per link. Mirrors upstream `svgDraw.popupMenu`.
+///
+/// Geometry — derived from the upstream svg:
+///   - rect.x = actor.x, rect.y = actor.height (= 65 for default conf)
+///   - rect.width = actor.width
+///   - rect.height = 20 + 30 * N    (N = link count, no header text)
+///   - text.x = actor.x + 10
+///   - text.y of link n = actor.height + 30 * (n + 1)
+fn emit_actor_popup(out: &mut String, a: &ActorRender, rank: usize, force_menus: bool) {
+    let panel_x = a.x;
+    let panel_y = a.height; // actor box bottom in the top group.
+    let n_links = a.links.len() as f64;
+    let panel_h = 20.0 + 30.0 * n_links;
+    let display = if force_menus { "block !important" } else { "none" };
+
+    out.push_str("<g id=\"actor");
+    out.push_str(&rank.to_string());
+    out.push_str("_popup\" class=\"actorPopupMenu\" display=\"");
+    out.push_str(display);
+    out.push_str("\"><rect class=\"actorPopupMenuPanel actor actor-bottom\" x=\"");
+    push_num(out, panel_x);
+    out.push_str("\" y=\"");
+    push_num(out, panel_y);
+    out.push_str("\" fill=\"#eaeaea\" stroke=\"#666\" width=\"");
+    push_num(out, a.width);
+    out.push_str("\" height=\"");
+    push_num(out, panel_h);
+    out.push_str("\" rx=\"3\" ry=\"3\"></rect>");
+
+    let text_x = panel_x + 10.0;
+    for (i, (name, url)) in a.links.iter().enumerate() {
+        let text_y = panel_y + 30.0 * ((i as f64) + 1.0);
+        out.push_str("<a href=\"");
+        out.push_str(&attr_escape(url));
+        out.push_str("\" target=\"_blank\"><text x=\"");
+        push_num(out, text_x);
+        out.push_str("\" y=\"");
+        push_num(out, text_y);
+        out.push_str(
+            "\" style=\"text-anchor: start; font-weight: 400; font-family: ",
+        );
+        out.push_str(&attr_escape(ACTOR_FONT_FAMILY));
+        out.push_str(
+            ";\" dominant-baseline=\"central\" alignment-baseline=\"central\" class=\"actor\"><tspan x=\"",
+        );
+        push_num(out, text_x);
+        out.push_str("\" dy=\"0\">");
+        out.push_str(&xml_escape(name));
+        out.push_str("</tspan></text></a>");
+    }
+    out.push_str("</g>");
 }
 
 fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
