@@ -1995,11 +1995,21 @@ pub fn render(
         // base is `vertical` plus the optional self bonus.
         let insert_stopy_base = vertical;
         let self_extra_stopy = if is_self { 30.0 } else { 0.0 };
+        let line_minx = startx.min(stopx);
+        let line_maxx = startx.max(stopx);
         let stack_len = seq_items.len();
         for (cnt0, item) in seq_items.iter().enumerate() {
             let n = (stack_len - cnt0) as f64;
-            let widened_startx = item_startx - n * box_margin;
-            let widened_stopx = item_stopx + n * box_margin;
+            let mut widened_startx = item_startx - n * box_margin;
+            let mut widened_stopx = item_stopx + n * box_margin;
+            let line_w_startx = line_minx - n * box_margin;
+            let line_w_stopx = line_maxx + n * box_margin;
+            if line_w_startx < widened_startx {
+                widened_startx = line_w_startx;
+            }
+            if line_w_stopx > widened_stopx {
+                widened_stopx = line_w_stopx;
+            }
             let widened_stopy = insert_stopy_base + self_extra_stopy + n * box_margin;
             match *item {
                 SeqItem::Loop(li) => {
