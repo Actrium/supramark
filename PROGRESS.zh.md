@@ -1,12 +1,12 @@
 # 阶段进展
 
-截至 2026-05-03，Wave 15-A 完结。
+截至 2026-05-03，Wave 15-B 完结。
 
-**当前指标：1208 / 1323 byte-exact（约 90.93%）**。
+**当前指标：1209 / 1323 byte-exact（约 91.0%）**。
 
-- 1208 = Wave 15-A 新增 +2（cypress/sequence/87 wrap 前缀 +1，cypress/sequence/88 config wrap +1）
+- 1209 = Wave 15 累计 +3（87 wrap 前缀 +1，88 config wrap +1，118 popup link +1）
 - 1323 = sweep_all 处理的 fixture 总数（已剔除环境性 6 项）
-- 差额 115 = sequence ~86 + mindmap 18 + KaTeX 6 + stadium rough 1 + misc ~4
+- 差额 114 = sequence ~85 + mindmap 18 + KaTeX 6 + stadium rough 1 + misc ~4
 
 ## Wave 15-spike + 15-A（2026-05-03）
 
@@ -22,7 +22,17 @@ W15-spike 在 5 个失败 fixture 上对比 reference (mjs) 与 Rust (rs) 的 me
 
 50. **`sniff_bool` 需识别单引号 key**：fixture 88 init 块写 `'wrap': true`（非 `"wrap": true`），需扩展 parser 单引号路径。
 
-W15-A 实现 `actor.wrap` 分支（svg_sequence.rs:205-285 actor_widths → actor_dims，含 width / height / 渲染描述三元组），cypress/sequence/87 + 88 byte-exact，121 width 部分已修但剩余 diff 来自 popup link，归 W15-B 处理。
+W15-A 实现 `actor.wrap` 分支（svg_sequence.rs:205-285 actor_widths → actor_dims，含 width / height / 渲染描述三元组），cypress/sequence/87 + 88 byte-exact。
+
+**W15-B**（commit `f8df214`）实现 popup link / forceMenus 渲染：
+- `Actor.links: Vec<(String, String)>` 字段，parser 加 `link <actor>: <name> @ <url>` / `links <actor>: {...}`（手写 JSON-like）/ `forceMenus`（init directive + frontmatter 双路）解析
+- `link` 指令自动注册尚未存在的 actor（镜像上游 addLinks）
+- Renderer：仅当有 link 或 forceMenus 时把 actor top group 包成 `<g onclick="var pu = ...">`；SVG 末尾按 declaration 顺序 emit `<g id="actorN_popup" class="actorPopupMenu" display="...">`
+- cypress/sequence/118 byte-exact
+
+**W15-B 副产品 intel**（用于 W15-C+ 排单）：
+51. **cypress/sequence/121 不是 popup 问题**：121 需要 properties 解析 + `<rect class="actorPopupMenuPanel <classFromProps> actor-top" fill="<fillFromProps>">` + 头部 title 行 + 顶部 actor box 内嵌 @clock/@computer `<use>` 引用 → 属于 W13-D 标的"actor type variants"多 wave 工作。
+52. **demos/sequence/02 不是 popup 问题**：popup 段已正确生成且带 `display="block !important"`，剩余 diff 来自 frontmatter title 渲染（viewBox 高度差 40 = title bar 高度），与 popup 无关。这是较小 scope 的独立任务。
 
 旧记录（按时间倒序）：1099 → 1135 → 1136 (W6) → 1145 (W7) → 1151 (W8) → 1161 (W9) → 1179 (W10) → 1184 (W11) → 1200 (W12) → 1204 (W13) → 1206 (W14)。
 
