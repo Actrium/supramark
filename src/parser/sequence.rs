@@ -265,6 +265,18 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             }
             continue;
         }
+        // `par_over <label>` is a single-section parallel block —
+        // upstream renders it with the same `par` labelBox + label as a
+        // regular `par`, no `and` divider. Treat as Par with one branch.
+        if let Some(rest) = line.strip_prefix("par_over ") {
+            stack.push(Frame::Par {
+                branches: vec![ParBranch {
+                    label: rest.trim().to_string(),
+                    items: Vec::new(),
+                }],
+            });
+            continue;
+        }
         if let Some(rest) = strip_kw(line, "par") {
             stack.push(Frame::Par {
                 branches: vec![ParBranch {
