@@ -2255,27 +2255,38 @@ pub fn render(
     let n_actors_total = actors.len();
     let stick_ids = compute_stick_ids(d, n_actors_total);
 
-    // Loop / control-structure blocks — emitted at LOOP_END time
-    // upstream (sequenceRenderer.ts:138858), which means they land in
-    // the diagram tree BEFORE any messagesToDraw flush. For our walk
-    // they are pushed to `loops` in source order and emitted here.
-    // Notes that fall AFTER a loop in source still come after these
-    // (matches fixture 110/111 DOM ordering: control-structure → note).
-    for lr in &loops {
-        emit_loop(&mut out, lr);
-    }
-
-    // Notes — emitted in iteration order, BEFORE messages. Upstream
-    // calls `drawNote` inline during the message loop, but message
-    // shapes are batched in `messagesToDraw` and emitted later.
-    //
+    // Loop / control-structure blocks AND notes — both kinds land in
+    // the diagram tree BEFORE the messagesToDraw flush, but their
+    // relative DOM order is the order they were appended during the
+    // walk. Upstream `drawLoop` fires at LOOP_END (so the loop lands
+    // when its bracketed `]` keyword closes) and `drawNote` fires
+    // inline at the note's signal. Both share the per-signal id
+    // counter (`data-id="iN"`), and the resulting DOM order matches
+    // ascending id. We merge the two lists by `idx` here so that:
+    //   • fixture 110 (loop ends at i3, note at i4) → control-struct first
+    //   • fixture 19  (note at i4, alt ends at i12) → note first
     // Notes are also emitted BEFORE Actor-type top bodies because in
     // upstream the top `drawActors` runs AFTER the message loop —
     // `actElem = elem.append('g')` (no `.lower()`) for Actor body, so
     // it's appended at the END of `elem.children`, after the notes
     // that were appended during the message loop.
+    enum BlockRef<'a> {
+        Loop(&'a LoopRender),
+        Note(&'a NoteRender),
+    }
+    let mut blocks: Vec<(usize, BlockRef)> = Vec::with_capacity(loops.len() + notes.len());
+    for lr in &loops {
+        blocks.push((lr.idx, BlockRef::Loop(lr)));
+    }
     for n in &notes {
-        emit_note(&mut out, n);
+        blocks.push((n.idx, BlockRef::Note(n)));
+    }
+    blocks.sort_by_key(|&(idx, _)| idx);
+    for (_, b) in &blocks {
+        match b {
+            BlockRef::Loop(lr) => emit_loop(&mut out, lr),
+            BlockRef::Note(n) => emit_note(&mut out, n),
+        }
     }
 
     // Top bodies, declaration order, only for Actor / Boundary / Control / Entity.
