@@ -1,14 +1,15 @@
 # 阶段进展
 
-截至 2026-05-03，Wave 14 完结。
+截至 2026-05-03，Wave 14 完结，环境性 fixture 已移入 known_ignored。
 
-**当前指标：1206 / 1328 byte-exact（约 90.81%）**。
+**当前指标：1206 / 1323 byte-exact（约 90.85%）**。
 
 - 1206 = Wave 14 新增 +2（demos/venn/12 v8_trig +1，demos/venn/11 cross-hatch +1）
-- 1328 = sweep_all 处理的 fixture 总数（剔除 ELK opt-in 后的全集）
-- 差额 122 = sequence ~88 + mindmap 18 + KaTeX 6 + venn 04 (constrainedMDS) 1 + gantt timezone 4 + demos/class/08 1 + stadium rough 1 + ELK 1 + misc ~2
-- ELK fixtures 仍由 `is_elk()` 程序性过滤，不再走 known_ignored
-- venn handDrawn 全收（demos/venn 11/12，仅剩 04 constrainedMDS V8 PRNG 环境性阻塞）
+- 1323 = sweep_all 处理的 fixture 总数 = 1328（全集）− 5 个新进 ignore（cypress/gantt/05 + 39, demos/gantt/06 + 07, demos/venn/04；demos/class/08 因无 ref svg 一直被静默 skip，不计入分母）
+- 差额 117 = sequence ~88 + mindmap 18 + KaTeX 6 + stadium rough 1 + misc ~4
+- ELK fixtures 仍由 `is_elk()` 程序性过滤
+- 环境性 6 项（gantt × 4、class/08、venn/04）已写入 `tests/known_ignored.txt`，不再算失败
+- venn handDrawn 全收（demos/venn 11/11，constrainedMDS 已 ignore）
 
 旧记录（按时间倒序）：1099 → 1135 → 1136 (W6) → 1145 (W7) → 1151 (W8) → 1161 (W9) → 1179 (W10) → 1184 (W11) → 1200 (W12) → 1204 (W13) → 1206 (W14)。
 
@@ -347,20 +348,12 @@
 7. **mindmap cose-bilkent 五大件** —— 18 fixture，~3000 LOC 物理引擎。
 8. **KaTeX × 6** —— 独立 Phase。
 
-### 环境性 / 不修复
+### 环境性 / 不修复（合计 6 项）
 
-- **gantt timezone × 4** —— V8 `new Date()` quirk。
-- **demos/class/08** —— 上游 fixture 与 jison 自相矛盾。
-- **demos/venn/04** —— constrainedMDS 依赖 V8 PRNG 状态。
-- **demos/flowchart/65 stadium rough** —— `look: handDrawn` stadium，与 KaTeX 解耦后单独 phase。
-- **ELK × 1** —— 程序性过滤。
-8. **Icon shapes × 1** —— 独立 Phase。
-
-### 环境性 / 不修复
-
-9. **gantt timezone × 4** —— V8 quirk。
-10. **demos/class/08** —— 上游自相矛盾。
-11. **ELK × 1** —— 程序性过滤。
+- **gantt timezone × 4** —— V8 `new Date()` 解析畸形日期串、DST 边界、`%s` epoch 处理与任何 Rust 时间库都不同；要 byte-exact 需自带 V8 行为日期解析器（不值得）。
+- **demos/class/08** —— 上游 fixture 文本与 jison 接受集自相矛盾（port 之前就坏）；除非改 fixture 或 grammar 否则无法 byte-exact。
+- **demos/venn/04** —— 4-set venn 触发 `constrainedMDS` 迭代优化器，收敛轨迹依赖 V8 `Math.random()` 调用时刻 PRNG 状态，我们不共享。
+- **ELK × 1** —— `flowchart-elk LR` 需要 ELK Java 布局引擎，已 `is_elk()` 程序性过滤，非真失败。
 
 > 本项目只维护中文版 PROGRESS。
 
