@@ -850,6 +850,21 @@ pub fn render(
                 | Some(ArrowType::SolidTopReverseDotted)
                 | Some(ArrowType::SolidBottomReverseDotted)
         );
+        // Upstream `isReverseArrowType` (sequenceRenderer.ts:4392) covers
+        // ALL eight reverse half-arrow types — both solid and stick.
+        // Used by the autonumber path (3557) and the autonumber-X
+        // selector (3588).
+        let is_reverse_arrow = matches!(
+            m.arrow,
+            Some(ArrowType::SolidTopReverse)
+                | Some(ArrowType::SolidBottomReverse)
+                | Some(ArrowType::StickTopReverse)
+                | Some(ArrowType::StickBottomReverse)
+                | Some(ArrowType::SolidTopReverseDotted)
+                | Some(ArrowType::SolidBottomReverseDotted)
+                | Some(ArrowType::StickTopReverseDotted)
+                | Some(ArrowType::StickBottomReverseDotted)
+        );
         if !is_self {
             if m.activate {
                 if is_arrow_to_right {
@@ -940,11 +955,22 @@ pub fn render(
         };
         // autonumberX = isLeftToRight ? fromBounds + 1 : toBounds - 1
         // where fromBounds = min over all four actor edges, toBounds = max.
+        // Reverse-arrow types invert the selector
+        // (sequenceRenderer.ts:3588-3592):
+        //   isReverse  → isLeftToRight ? toBounds - 1 : fromBounds + 1
+        // because the head sits at the source side, so the number circle
+        // needs to land on the OTHER end of the lifeline lattice.
         let fa_cx = fa.x + fa.width / 2.0;
         let ta_cx = ta.x + ta.width / 2.0;
         let from_bounds = (fa_cx - 1.0).min(ta_cx - 1.0);
         let to_bounds = (fa_cx + 1.0).max(ta_cx + 1.0);
-        let seq_x = if is_arrow_to_right {
+        let seq_x = if is_reverse_arrow {
+            if is_arrow_to_right {
+                to_bounds - 1.0
+            } else {
+                from_bounds + 1.0
+            }
+        } else if is_arrow_to_right {
             from_bounds + 1.0
         } else {
             to_bounds - 1.0
@@ -994,13 +1020,45 @@ pub fn render(
                     }
                     x
                 }
+            } else if is_reverse_arrow {
+                // sequenceRenderer.ts:3570-3579 — reverse arrows DO NOT
+                // shift x1 by SEQUENCE_NUMBER_RADIUS the way standard
+                // arrows do. The only x1 adjustment is the RTL (-7.5)
+                // dual/reverse central-connection case.
+                if is_arrow_to_right {
+                    startx
+                } else {
+                    let mut x = startx;
+                    if is_dual_or_reverse_cc {
+                        x -= 7.5;
+                    }
+                    x
+                }
             } else {
                 startx + 6.0
             }
         } else {
             startx
         };
-        let line_x2 = stopx;
+        // x2 base. Reverse + autonumber: stopx contracts toward the
+        // sequence-number circle (which sits past the destination end of
+        // the lifeline lattice in the reverse-arrow layout).
+        //   LTR (stopx>startx): lineStopX = stopx - 12
+        //   RTL (stopx<startx): lineStopX = stopx - 6
+        // Plus +15 if the message has any central connection.
+        let line_x2 = if seq_index.is_some() && !is_self && is_reverse_arrow && !is_bidir {
+            let mut x = if is_arrow_to_right {
+                stopx - 12.0
+            } else {
+                stopx - 6.0
+            };
+            if has_central_conn {
+                x += 15.0;
+            }
+            x
+        } else {
+            stopx
+        };
         if seq_index.is_some() {
             auto_seq_index += auto_seq_step;
         }
