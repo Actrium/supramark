@@ -101,6 +101,35 @@ struct NoteRender {
     idx: usize,
 }
 
+/// Per-loop block geometry collected during the layout pass.
+///
+/// Mirrors upstream `loopModel` (sequenceRenderer.ts) for the
+/// non-nested, single-section `loop … end` variant. Captured at
+/// LOOP_END time after all inner messages have widened the bounds.
+#[derive(Debug, Clone)]
+struct LoopRender {
+    /// Block left edge — `min(inner_msgs.fromBounds) - n*boxMargin`
+    /// where n is the nesting depth (1 for top-level loop).
+    startx: f64,
+    /// Block right edge — `max(inner_msgs.toBounds) + n*boxMargin`.
+    stopx: f64,
+    /// Block top edge — `verticalPos` after `bumpVerticalPos(boxMargin)`
+    /// fired by LOOP_START's preMargin.
+    starty: f64,
+    /// Block bottom edge — `last_inner_msg.stopy + n*boxMargin` per
+    /// `updateBounds`.
+    stopy: f64,
+    /// Bracketed title text (e.g. `[Loopy]`), already wrap-formatted.
+    /// Mirrors upstream `msg.message = wrapLabel(\`[${msg.message}]\`,
+    /// loopWidth - 2*wrapPadding, textConf)`.
+    title: String,
+    /// Block keyword shown inside the labelBox — `loop`/`alt`/`opt`/etc.
+    /// For this iteration only `loop` is supported.
+    keyword: &'static str,
+    /// 0-based item index assigned at LOOP_END — feeds `data-id="iN"`.
+    idx: usize,
+}
+
 const FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 const ACTOR_FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 
@@ -194,6 +223,21 @@ pub fn render(
             // Autonumber occupies an item-id slot and toggles per-message
             // sequence-number rendering — supported below.
             DiagramItem::Autonumber { .. } => true,
+            // `loop <label> ... end` — single-section variant, no nested
+            // control-structures inside. Inner items must themselves be
+            // supported (recursive check). Mirrors upstream's
+            // `LOOP_START`/`LOOP_END` event pair around drawLoop.
+            DiagramItem::Loop { items, .. } => {
+                // Reject nested Loop / Alt / Par / Opt / Critical / Break /
+                // Rect — only flat Loop with Message / Note / Autonumber
+                // inside is byte-exact in this iteration.
+                items.iter().all(|inner| match inner {
+                    DiagramItem::Message(_)
+                    | DiagramItem::Note(_)
+                    | DiagramItem::Autonumber { .. } => true,
+                    _ => false,
+                }) && only_supported_items(items)
+            }
             _ => false,
         })
     }
@@ -543,6 +587,16 @@ pub fn render(
 
     let mut messages: Vec<MsgRender> = Vec::new();
     let mut notes: Vec<NoteRender> = Vec::new();
+    // Loop blocks — each entry is one `<g data-et="control-structure">`.
+    // Populated at LOOP_END time so startx/stopx/stopy reflect the union
+    // of inner-message bounds. Emitted (in source order) BEFORE notes
+    // and messages, mirroring upstream's drawLoop-on-LOOP_END flow.
+    let mut loops: Vec<LoopRender> = Vec::new();
+    // Stack of indices into `loops` for currently-open Loop blocks.
+    // Inner messages widen `loops[i].startx/stopx` for every active
+    // entry on this stack — mirrors upstream `updateBounds` per
+    // `sequenceItems` element.
+    let mut active_loops: Vec<usize> = Vec::new();
     // Autonumber state — mirrors upstream's `sequenceIndex`,
     // `sequenceIndexStep`, `db.showSequenceNumbers()` running tally.
     // Each `Autonumber` item updates these in declaration order; the
@@ -561,7 +615,104 @@ pub fn render(
     // one slot. So a message with `Dual` is followed by +2 synthetic
     // events, advancing the counter by 3 total per Dual addMessage.
     let mut msg_id_counter: usize = 0;
-    for (_orig_idx, item) in d.items.iter().enumerate() {
+
+    // Flatten d.items into a linear event stream. Each `Loop { items }`
+    // becomes `LoopStart(label) … <inner events> … LoopEnd`. This keeps
+    // the per-item layout body unchanged while still letting us track
+    // open-loop bounds via `active_loops`.
+    enum WalkEvent<'a> {
+        LoopStart(&'a str),
+        LoopEnd,
+        Item(&'a DiagramItem),
+    }
+    fn flatten<'a>(items: &'a [DiagramItem], out: &mut Vec<WalkEvent<'a>>) {
+        for it in items {
+            match it {
+                DiagramItem::Loop { label, items: inner } => {
+                    out.push(WalkEvent::LoopStart(label));
+                    flatten(inner, out);
+                    out.push(WalkEvent::LoopEnd);
+                }
+                _ => out.push(WalkEvent::Item(it)),
+            }
+        }
+    }
+    let mut events: Vec<WalkEvent> = Vec::with_capacity(d.items.len() + 4);
+    flatten(&d.items, &mut events);
+
+    for event in events.into_iter() {
+        let item = match event {
+            WalkEvent::LoopStart(label) => {
+                // LOOP_START → consume one idx slot, bumpVerticalPos(boxMargin),
+                // capture starty, then bump heightAdjust = postMargin +
+                // max(textHeight, labelBoxHeight). For the simple case the
+                // bracketed `[label]` fits on one line and textHeight ≤ 20
+                // so the max collapses to labelBoxHeight (=20). Mirrors
+                // upstream `adjustLoopHeightForWrap` (sequenceRenderer.ts:137949).
+                let _loop_start_idx = msg_id_counter;
+                msg_id_counter += 1;
+                vertical += box_margin;
+                let starty = vertical;
+                // Bracket-wrap the label. Width budget = `loopWidth -
+                // 2*wrapPadding` — but loopWidth depends on inner-msg
+                // bounds which we don't have yet. For the simple short-
+                // label case the bracketed string fits without wrapping;
+                // for now use cfg.width as a generous budget so single-
+                // word labels stay on one line.
+                let bracketed = format!("[{}]", label);
+                let line_h_msg = crate::font_metrics::line_height(
+                    "sans-serif",
+                    cfg.message_font_size as f64,
+                    false,
+                    false,
+                )
+                .round();
+                let text_h = line_h_msg; // single-line approximation
+                let post_margin = box_margin + cfg.box_text_margin;
+                let total_offset = text_h.max(cfg.label_box_height);
+                let height_adjust = post_margin + total_offset;
+                vertical += height_adjust;
+                let li = loops.len();
+                loops.push(LoopRender {
+                    startx: f64::INFINITY,
+                    stopx: f64::NEG_INFINITY,
+                    starty,
+                    stopy: 0.0,
+                    title: bracketed,
+                    keyword: "loop",
+                    idx: 0, // assigned at LoopEnd
+                });
+                active_loops.push(li);
+                continue;
+            }
+            WalkEvent::LoopEnd => {
+                // LOOP_END → consume one idx slot, finalize stopy/stopx
+                // bounds, and bumpVerticalPos to loopModel.stopy.
+                // updateBounds stops_y = inner_stopy + n*boxMargin where
+                // n is the depth of THIS loop on `active_loops` (1 for
+                // top-level). Same n widens startx/stopx outwards.
+                let li = active_loops.pop().expect("LoopEnd without start");
+                let depth = active_loops.len() as f64 + 1.0; // 1 for top-level
+                let lr = &mut loops[li];
+                // If a loop has zero inner messages, startx/stopx stay
+                // at ±∞ — there is no actor extent contribution. Snap to
+                // the entire actor lattice in that degenerate case (not
+                // exercised by any current fixture; safe default).
+                if lr.startx.is_infinite() {
+                    lr.startx = bounds_startx;
+                    lr.stopx = bounds_stopx;
+                }
+                lr.startx -= depth * box_margin;
+                lr.stopx += depth * box_margin;
+                lr.stopy = vertical + depth * box_margin;
+                lr.idx = msg_id_counter;
+                msg_id_counter += 1;
+                // bumpVerticalPos(loopModel.stopy - getVerticalPos())
+                vertical = lr.stopy;
+                continue;
+            }
+            WalkEvent::Item(it) => it,
+        };
         let idx = msg_id_counter;
         msg_id_counter += 1;
         if let DiagramItem::Message(m) = item {
@@ -964,6 +1115,20 @@ pub fn render(
         let ta_cx = ta.x + ta.width / 2.0;
         let from_bounds = (fa_cx - 1.0).min(ta_cx - 1.0);
         let to_bounds = (fa_cx + 1.0).max(ta_cx + 1.0);
+        // Widen every currently-open loop's startx/stopx — mirrors
+        // upstream `bounds.insert(msgModel.fromBounds, ..., msgModel.toBounds, ...)`
+        // → `updateBounds` walking `sequenceItems`. The depth-dependent
+        // ±n*boxMargin outset is applied at LoopEnd, so here we just
+        // collect the raw min/max.
+        for &li in &active_loops {
+            let lr = &mut loops[li];
+            if from_bounds < lr.startx {
+                lr.startx = from_bounds;
+            }
+            if to_bounds > lr.stopx {
+                lr.stopx = to_bounds;
+            }
+        }
         let seq_x = if is_reverse_arrow {
             if is_arrow_to_right {
                 to_bounds - 1.0
@@ -1389,6 +1554,16 @@ pub fn render(
     // when N=2 for both).
     let n_actors_total = actors.len();
     let stick_ids = compute_stick_ids(d, n_actors_total);
+
+    // Loop / control-structure blocks — emitted at LOOP_END time
+    // upstream (sequenceRenderer.ts:138858), which means they land in
+    // the diagram tree BEFORE any messagesToDraw flush. For our walk
+    // they are pushed to `loops` in source order and emitted here.
+    // Notes that fall AFTER a loop in source still come after these
+    // (matches fixture 110/111 DOM ordering: control-structure → note).
+    for lr in &loops {
+        emit_loop(&mut out, lr);
+    }
 
     // Notes — emitted in iteration order, BEFORE messages. Upstream
     // calls `drawNote` inline during the message loop, but message
@@ -2466,6 +2641,115 @@ fn emit_actor_man_body(
         out.push_str("</tspan></text>");
     }
     out.push_str("</g>");
+}
+
+/// Emit one `<g data-et="control-structure" data-id="iN">` for a Loop
+/// (or Alt/Opt/etc, when those land) block: 4 dashed border lines, a
+/// 5-vertex labelBox polygon at the top-left, the keyword label inside
+/// it (`loop`/`alt`/...), and the bracketed title centred in the top
+/// row. Mirrors upstream `drawLoop` in svgDraw (mermaid.js:137622).
+///
+/// `LABEL_BOX_W=50, LABEL_BOX_H=20, CUT=7` are upstream's hard-coded
+/// `genPoints(...,cut=7)` constants — see `drawLabel` (mermaid.js:136895).
+fn emit_loop(out: &mut String, lr: &LoopRender) {
+    const LABEL_BOX_W: f64 = 50.0;
+    const LABEL_BOX_H: f64 = 20.0;
+    const CUT: f64 = 7.0;
+    out.push_str("<g data-et=\"control-structure\" data-id=\"i");
+    out.push_str(&lr.idx.to_string());
+    out.push_str("\">");
+    // Four dashed border lines: top, right, bottom, left.
+    let draw_line = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64| {
+        out.push_str("<line x1=\"");
+        push_num(out, x1);
+        out.push_str("\" y1=\"");
+        push_num(out, y1);
+        out.push_str("\" x2=\"");
+        push_num(out, x2);
+        out.push_str("\" y2=\"");
+        push_num(out, y2);
+        out.push_str("\" class=\"loopLine\"></line>");
+    };
+    draw_line(out, lr.startx, lr.starty, lr.stopx, lr.starty);
+    draw_line(out, lr.stopx, lr.starty, lr.stopx, lr.stopy);
+    draw_line(out, lr.startx, lr.stopy, lr.stopx, lr.stopy);
+    draw_line(out, lr.startx, lr.starty, lr.startx, lr.stopy);
+    // labelBox polygon (5 vertices). genPoints(x,y,w,h,cut=7).
+    let lx = lr.startx;
+    let ly = lr.starty;
+    let p2x = lx + LABEL_BOX_W;
+    let p3y = ly + LABEL_BOX_H - CUT;
+    let p4x = lx + LABEL_BOX_W - CUT * 1.2;
+    let p5y = ly + LABEL_BOX_H;
+    out.push_str("<polygon points=\"");
+    push_num(out, lx);
+    out.push(',');
+    push_num(out, ly);
+    out.push(' ');
+    push_num(out, p2x);
+    out.push(',');
+    push_num(out, ly);
+    out.push(' ');
+    push_num(out, p2x);
+    out.push(',');
+    push_num(out, p3y);
+    out.push(' ');
+    push_num(out, p4x);
+    out.push(',');
+    push_num(out, p5y);
+    out.push(' ');
+    push_num(out, lx);
+    out.push(',');
+    push_num(out, p5y);
+    out.push_str("\" class=\"labelBox\"></polygon>");
+    // Keyword label `loop` (or `alt`/`opt`/...) inside the labelBox.
+    // drawLabel offsets txtObject.y by height/2 BEFORE drawText; with
+    // valign='middle', textMargin=boxTextMargin=5 and prevTextHeight=
+    // textHeight=0 on the first iteration:
+    //   y = round(y + height/2 + (0 + 0 + 5)/2)
+    //     = round(starty + 10 + 2.5) = round(starty + 12.5)
+    //   x = round(startx + LABEL_BOX_W/2)
+    let label_y = round_js(ly + LABEL_BOX_H / 2.0 + 2.5);
+    let label_x = round_js(lx + LABEL_BOX_W / 2.0);
+    out.push_str("<text x=\"");
+    push_num(out, label_x);
+    out.push_str("\" y=\"");
+    push_num(out, label_y);
+    out.push_str(
+        "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
+    );
+    out.push_str(&attr_escape(FONT_FAMILY));
+    out.push_str(
+        "; font-size: 16px; font-weight: 400;\" class=\"labelText\">",
+    );
+    out.push_str(lr.keyword);
+    out.push_str("</text>");
+    // Block title `[Loopy]` centred in the top row.
+    //   x = startx + LABEL_BOX_W/2 + (stopx - startx)/2
+    //   y_input = starty + boxMargin + boxTextMargin
+    // drawText (with valign='middle', textMargin=5, no width / no
+    // anchor remap because width=undefined):
+    //   y = round(y_input + (0 + 0 + 5)/2)
+    //     = round(starty + 10 + 5 + 2.5) = round(starty + 17.5)
+    // tspan=true (default in getTextObj3) ⇒ wraps text in <tspan x=…>.
+    let title_x = lr.startx + LABEL_BOX_W / 2.0 + (lr.stopx - lr.startx) / 2.0;
+    let title_y_input = lr.starty + 10.0 + 5.0; // boxMargin + boxTextMargin
+    let title_y = round_js(title_y_input + 2.5);
+    out.push_str("<text x=\"");
+    push_num(out, title_x);
+    out.push_str("\" y=\"");
+    push_num(out, title_y);
+    out.push_str(
+        "\" text-anchor=\"middle\" style=\"font-family: ",
+    );
+    out.push_str(&attr_escape(FONT_FAMILY));
+    out.push_str(
+        "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
+    );
+    push_num(out, title_x);
+    out.push_str("\">");
+    out.push_str(&xml_escape(&lr.title));
+    out.push_str("</tspan></text></g>");
 }
 
 /// Emit one `<g data-et="note" data-id="iN">` containing a rounded
