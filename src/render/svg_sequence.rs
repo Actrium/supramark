@@ -122,7 +122,10 @@ pub fn render(
         .iter()
         .all(|a| matches!(
             a.actor_type,
-            ActorType::Participant | ActorType::Actor | ActorType::Boundary
+            ActorType::Participant
+                | ActorType::Actor
+                | ActorType::Boundary
+                | ActorType::Control
         ))
     {
         return Ok(placeholder(d, id));
@@ -1052,9 +1055,30 @@ pub fn render(
     // bumps verticalPos by `boxMargin*2`, then per-actor footer pass
     // adds `maxHeight + boxMargin` so box.stopy = vertical + 95 by
     // default.
+    //
+    // `maxHeight` upstream is the max of `drawActor` return values, which
+    // is each actor's `actor.height` AFTER the top-pass mutation. For
+    // most types the mutation lands at:
+    //   Participant : initial actor.height (no body-bbox mutation
+    //                 beyond the wrap-driven case)
+    //   Actor       : 65 (stickman bbox: cy-r .. legs)
+    //   Boundary    : 64 (44 bbox + 20 labelBoxHeight)
+    //   Control     : 84 (44 bbox + 2*20 labelBoxHeight)
+    //   Entity      : 64 (44 bbox + 20 labelBoxHeight)
+    //
+    // We track this per-type so the box_stopy / svg_height match upstream
+    // exactly even when control inflates the maxHeight above conf.height.
+    let max_actor_height = d
+        .actors
+        .iter()
+        .map(|a| match a.actor_type {
+            ActorType::Control => 84.0_f64,
+            _ => actor_h,
+        })
+        .fold(actor_h, f64::max);
     let (bottom_y, box_stopy) = if mirror {
         let by = vertical + box_margin * 2.0;
-        let stopy = by + actor_h + box_margin;
+        let stopy = by + max_actor_height + box_margin;
         (by, stopy)
     } else {
         (vertical, vertical)
@@ -1126,10 +1150,12 @@ pub fn render(
         for a in actors.iter().rev() {
             match a.actor_type {
                 ActorType::Participant => emit_actor_bottom_participant(&mut out, a, bottom_y),
-                // Actor and Boundary both emit empty <g></g> placeholder for
-                // their bottom group's `line2` (lowered to front). Bodies
-                // emit later, after defs.
-                ActorType::Actor | ActorType::Boundary => out.push_str("<g></g>"),
+                // Actor / Boundary / Control / Entity all emit empty
+                // <g></g> placeholder for their bottom group's `line2`
+                // (lowered to front). Bodies emit later, after defs.
+                ActorType::Actor
+                | ActorType::Boundary
+                | ActorType::Control => out.push_str("<g></g>"),
                 _ => unreachable!("gated above"),
             }
         }
@@ -1164,9 +1190,22 @@ pub fn render(
             }
             // Boundary uses the same lifeline-only top group as Actor — body
             // emits later after defs. Lifeline `<g><line id="actorN" .../></g>`
-            // is identical to Actor.
+            // is identical to Actor (centerY = actor.height + 15 = 80).
             ActorType::Actor | ActorType::Boundary => {
-                emit_actor_top_lifeline_actor(&mut out, a, lifeline_y2, rank, popup)
+                emit_actor_top_lifeline_actor(
+                    &mut out,
+                    a,
+                    a.height + 15.0,
+                    lifeline_y2,
+                    rank,
+                    popup,
+                )
+            }
+            // Control uses centerY = actor_y + 75 (vs Actor's
+            // actor.height + 15). Same `<g><line .../></g>` shape, body
+            // emits later after defs.
+            ActorType::Control => {
+                emit_actor_top_lifeline_actor(&mut out, a, 75.0, lifeline_y2, rank, popup)
             }
             _ => unreachable!("gated above"),
         }
@@ -1242,7 +1281,7 @@ pub fn render(
         emit_note(&mut out, n);
     }
 
-    // Top bodies, declaration order, only for Actor / Boundary types.
+    // Top bodies, declaration order, only for Actor / Boundary / Control.
     for (i, a) in actors.iter().enumerate() {
         match a.actor_type {
             ActorType::Actor => {
@@ -1253,6 +1292,9 @@ pub fn render(
                 let (torso_id, arms_id) = stick_ids.top[i];
                 emit_actor_boundary_body(&mut out, a, 0.0, false, torso_id, arms_id);
             }
+            ActorType::Control => {
+                emit_actor_control_body(&mut out, a, 0.0, false, id);
+            }
             _ => continue,
         }
     }
@@ -1262,8 +1304,8 @@ pub fn render(
         emit_message(&mut out, id, m);
     }
 
-    // Bottom bodies, declaration order, only for Actor / Boundary types —
-    // and only when mirroring.
+    // Bottom bodies, declaration order, only for Actor / Boundary /
+    // Control — and only when mirroring.
     if mirror {
         for (i, a) in actors.iter().enumerate() {
             match a.actor_type {
@@ -1274,6 +1316,9 @@ pub fn render(
                 ActorType::Boundary => {
                     let (torso_id, arms_id) = stick_ids.bottom[i];
                     emit_actor_boundary_body(&mut out, a, bottom_y, true, torso_id, arms_id);
+                }
+                ActorType::Control => {
+                    emit_actor_control_body(&mut out, a, bottom_y, true, id);
                 }
                 _ => continue,
             }
@@ -1517,6 +1562,109 @@ fn emit_actor_boundary_body(
 }
 
 /// Emit one `<g class="actor-man actor-{top,bottom}" ...>` body group
+/// for a Control-type actor. Differs from Boundary:
+/// - body contains `<defs><marker .../></defs>` + `<circle r=22>` +
+///   `<line marker-end="url(...)" transform="translate(cx, cy-r)">` + text;
+/// - top group attribute order is `name, style, data-et, data-type, data-id`
+///   (style precedes data-*, unlike Boundary which has style AFTER name and
+///   data-* AFTER transform); style includes `fill: #ECECFF;`;
+/// - bottom group lacks data-* but keeps the same style;
+/// - centerY for the lifeline is `actor_y + 75` (set in caller).
+///
+/// Geometry: cx = actor.x + actor.width/2, cy = actor_y + 32, r = 22.
+/// The `<line>` arrow has no x/y attrs — only `transform=translate(cx, cy-r)`,
+/// i.e. translate(cx, actor_y+10).
+///
+/// Text positioning: y6 = rect.y + r + (top ? 12 : 5), then y = y6 + height/2.
+/// Upstream mutates `actor.height = bbox.height + 2*labelBoxHeight = 44 + 40 = 84`
+/// at the end of the top-pass, so the bottom-pass sees height=84 in `rect3.height`.
+/// Top-pass uses the initial actor.height (e.g. 65 by default).
+///
+/// Mirrors upstream `drawActorTypeControl` (mermaid.js line 137206).
+fn emit_actor_control_body(
+    out: &mut String,
+    a: &ActorRender,
+    actor_y: f64,
+    is_footer: bool,
+    diagram_id: &str,
+) {
+    const RADIUS: f64 = 22.0;
+    let center = a.x + a.width / 2.0;
+    let cy = actor_y + 32.0;
+
+    out.push_str("<g class=\"actor-man ");
+    out.push_str(if is_footer {
+        "actor-bottom"
+    } else {
+        "actor-top"
+    });
+    out.push_str("\" name=\"");
+    out.push_str(&xml_escape(&a.id));
+    out.push_str("\" style=\"stroke: #9370DB; fill: #ECECFF;\"");
+    if !is_footer {
+        out.push_str(" data-et=\"participant\" data-type=\"control\" data-id=\"");
+        out.push_str(&xml_escape(&a.id));
+        out.push('"');
+    }
+    out.push('>');
+
+    // <defs><marker id="{id}-filled-head-control" .../></defs>
+    out.push_str("<defs><marker id=\"");
+    out.push_str(diagram_id);
+    out.push_str(
+        "-filled-head-control\" refX=\"11\" refY=\"5.8\" markerWidth=\"20\" markerHeight=\"28\" orient=\"172.5\" stroke-width=\"1.2\"><path d=\"M 14.4 5.6 L 7.2 10.4 L 8.8 5.6 L 7.2 0.8 Z\"></path></marker></defs>",
+    );
+
+    // <circle cx=center cy=actor_y+32 r=22 filter="">
+    out.push_str("<circle cx=\"");
+    push_num(out, center);
+    out.push_str("\" cy=\"");
+    push_num(out, cy);
+    out.push_str("\" r=\"");
+    push_num(out, RADIUS);
+    out.push_str("\" filter=\"\"></circle>");
+
+    // <line marker-end="url(#...-filled-head-control)" transform="translate(cx, cy-r)">
+    out.push_str("<line marker-end=\"url(#");
+    out.push_str(diagram_id);
+    out.push_str("-filled-head-control)\" transform=\"translate(");
+    push_num(out, center);
+    out.push_str(", ");
+    push_num(out, cy - RADIUS);
+    out.push_str(")\"></line>");
+
+    // Text. y6 = rect.y + r + (top ? 12 : 5). height: top uses initial
+    // actor.height; bottom uses the post-bbox value 84.
+    let y6_offset = if is_footer { 5.0 } else { 12.0 };
+    let text_height = if is_footer { 84.0 } else { a.height };
+    let text_y = actor_y + RADIUS + y6_offset + text_height / 2.0;
+    let lines = split_br(&a.description);
+    let n_lines = lines.len();
+    let font_size = 16.0_f64;
+    for (i, line) in lines.iter().enumerate() {
+        let dy = (i as f64) * font_size - font_size * ((n_lines as f64) - 1.0) / 2.0;
+        out.push_str("<text x=\"");
+        push_num(out, center);
+        out.push_str("\" y=\"");
+        push_num(out, text_y);
+        out.push_str(
+            "\" style=\"text-anchor: middle; font-size: 16px; font-weight: 400; font-family: ",
+        );
+        out.push_str(&attr_escape(ACTOR_FONT_FAMILY));
+        out.push_str(
+            ";\" dominant-baseline=\"central\" alignment-baseline=\"central\" class=\"actor actor-man\"><tspan x=\"",
+        );
+        push_num(out, center);
+        out.push_str("\" dy=\"");
+        push_num(out, dy);
+        out.push_str("\">");
+        out.push_str(&xml_escape(line));
+        out.push_str("</tspan></text>");
+    }
+    out.push_str("</g>");
+}
+
+/// Emit one `<g class="actor-man actor-{top,bottom}" ...>` body group
 /// (the stickman lines + circle + text). Used for the `actor` keyword.
 /// Mirrors upstream `drawActorTypeActor` lines 1181–1268.
 fn emit_actor_man_body(
@@ -1697,14 +1845,12 @@ fn push_popup_g_open(out: &mut String, rank: usize) {
 fn emit_actor_top_lifeline_actor(
     out: &mut String,
     a: &ActorRender,
+    centery: f64,
     bottom_y: f64,
     rank: usize,
     popup: bool,
 ) {
     let cx = a.x + a.width / 2.0;
-    // For Actor type, lifeline starts at actor.height + 15 = 80 (default
-    // conf.height=65). Mirrors upstream `centerY = actorY + 80`.
-    let centery = a.height + 15.0;
     if popup {
         push_popup_g_open(out, rank);
     } else {
