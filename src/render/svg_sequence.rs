@@ -1054,6 +1054,19 @@ pub fn render(
                     CentralConnection::Dual => 2,
                 };
             }
+            // `+` / `-` suffixes (jison.333-338) emit a follow-up
+            // activeStart / activeEnd event into the parser stream
+            // — each consumes one slot on its own. CC events already
+            // claim their own activation slots above (jison.341-352),
+            // so skip here when central_connection is set.
+            if m.central_connection.is_none() {
+                if m.activate {
+                    msg_id_counter += 1;
+                }
+                if m.deactivate {
+                    msg_id_counter += 1;
+                }
+            }
         }
         // ── Activate / Deactivate items ────────────────────────────
         //
@@ -1573,8 +1586,14 @@ pub fn render(
         // needs to land on the OTHER end of the lifeline lattice.
         let fa_cx = fa.x + fa.width / 2.0;
         let ta_cx = ta.x + ta.width / 2.0;
-        let from_bounds = (fa_cx - 1.0).min(ta_cx - 1.0);
-        let to_bounds = (fa_cx + 1.0).max(ta_cx + 1.0);
+        // fromBounds / toBounds upstream are min/max over the FOUR
+        // activation-aware edges `[fromLeft, fromRight, toLeft, toRight]`
+        // (sequenceRenderer.ts:1974-2000). Activations widen these
+        // beyond the ±1 actor centerline. Using activation_bounds()
+        // here keeps rect / loop bounds correct when an activation
+        // is open at insert time.
+        let from_bounds = from_left.min(to_left);
+        let to_bounds = from_right.max(to_right);
         // Widen every currently-open sequenceItem (loop OR rect)
         // — mirrors upstream `bounds.insert` →
         // `updateBounds` walking `sequenceItems` at
