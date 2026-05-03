@@ -1774,6 +1774,31 @@ pub fn render(
                 bounds_stopx = widened_stopx;
             }
         }
+        // Mirror upstream `bounds.insert(msgModel.fromBounds, msgModel.starty,
+        // msgModel.toBounds, msgModel.stopy)` (sequenceRenderer.ts:3459) —
+        // the SECOND insert in boundMessage. msgModel.starty was captured
+        // BEFORE the message bumps (= the previous `vertical`, which
+        // upstream tracks as `bounds.getVerticalPos()` at message entry).
+        // Its updateBounds pass applies Math.min on each open activation's
+        // `starty` with `msgModel.starty - n*boxMargin` where
+        // `n = sequenceItems.length - cnt + 1` (cnt = 1-based iteration
+        // index over the activation list, AFTER sequenceItems pass already
+        // consumed cnt). The cnt counter is shared across the two foreach
+        // passes, so the K-th activation has `cnt = sequenceItems.len + K`
+        // and `n = 1 - K` ⇒ only the FIRST activation in iteration order
+        // (K=1, n=0) gets pulled with the unmodified starty; later
+        // activations get `starty + K-1` and rarely change.
+        if !activations.is_empty() {
+            let stack_len_for_act = seq_items.len();
+            for (k0, slot) in activations.iter_mut().enumerate() {
+                let cnt = stack_len_for_act + k0 + 1;
+                let n = (stack_len_for_act as i64) - (cnt as i64) + 1;
+                let candidate = starty_for_msg - (n as f64) * box_margin;
+                if candidate < slot.starty {
+                    slot.starty = candidate;
+                }
+            }
+        }
         let seq_x = if is_reverse_arrow {
             if is_arrow_to_right {
                 to_bounds - 1.0
