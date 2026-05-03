@@ -3902,11 +3902,16 @@ fn emit_actor_popup(out: &mut String, a: &ActorRender, rank: usize, force_menus:
     out.push_str(&rank.to_string());
     out.push_str("_popup\" class=\"actorPopupMenu\" display=\"");
     out.push_str(display);
-    out.push_str("\"><rect class=\"actorPopupMenuPanel actor actor-bottom\" x=\"");
+    let (panel_fill, panel_cls) = actor_rect_style(a);
+    out.push_str("\"><rect class=\"actorPopupMenuPanel ");
+    out.push_str(panel_cls);
+    out.push_str(" actor-bottom\" x=\"");
     push_num(out, panel_x);
     out.push_str("\" y=\"");
     push_num(out, panel_y);
-    out.push_str("\" fill=\"#eaeaea\" stroke=\"#666\" width=\"");
+    out.push_str("\" fill=\"");
+    out.push_str(panel_fill);
+    out.push_str("\" stroke=\"#666\" width=\"");
     push_num(out, a.width);
     out.push_str("\" height=\"");
     push_num(out, panel_h);
