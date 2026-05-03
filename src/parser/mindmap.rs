@@ -183,14 +183,13 @@ fn process_logical_line(
         return Ok(());
     }
 
-    let (id, descr, ty) = parse_node_token(trimmed);
-    add_node(diag, indent, id, descr, ty, base_level);
+    let (id, descr, raw_descr, ty) = parse_node_token(trimmed);
+    add_node(diag, indent, id, descr, raw_descr, ty, base_level);
     Ok(())
 }
 
-/// Parse one node token, returning `(id, description, type)`.
-fn parse_node_token(s: &str) -> (String, String, MindmapNodeType) {
-    // Try multi-char openers first.
+/// Parse one node token, returning `(id, description, raw_descr, type)`.
+fn parse_node_token(s: &str) -> (String, String, String, MindmapNodeType) {
     for (open, close, ty) in [
         ("((", "))", MindmapNodeType::Circle),
         ("))", "((", MindmapNodeType::Bang),
@@ -201,10 +200,11 @@ fn parse_node_token(s: &str) -> (String, String, MindmapNodeType) {
             if let Some(end) = s.rfind(close) {
                 if end > rest + open.len() {
                     let id = s[..rest].trim().to_string();
-                    let descr = s[rest + open.len()..end].trim().to_string();
-                    let descr = strip_markdown_quotes(&descr);
+                    let inner = &s[rest + open.len()..end];
+                    let descr = strip_markdown_quotes(&inner.trim());
+                    let raw_descr = inner.trim_start_matches('\n').to_string();
                     let id = if id.is_empty() { descr.clone() } else { id };
-                    return (id, descr, ty);
+                    return (id, descr, raw_descr, ty);
                 }
             }
         }
@@ -213,10 +213,10 @@ fn parse_node_token(s: &str) -> (String, String, MindmapNodeType) {
         if let Some(close_idx) = s.rfind(']') {
             if close_idx > open_idx {
                 let id = s[..open_idx].trim().to_string();
-                let descr = s[open_idx + 1..close_idx].trim().to_string();
-                let descr = strip_markdown_quotes(&descr);
+                let descr = strip_markdown_quotes(&s[open_idx + 1..close_idx].trim());
+                let raw_descr = descr.clone();
                 let id = if id.is_empty() { descr.clone() } else { id };
-                return (id, descr, MindmapNodeType::Rect);
+                return (id, descr, raw_descr, MindmapNodeType::Rect);
             }
         }
     }
@@ -224,16 +224,16 @@ fn parse_node_token(s: &str) -> (String, String, MindmapNodeType) {
         if let Some(close_idx) = s.rfind(')') {
             if close_idx > open_idx {
                 let id = s[..open_idx].trim().to_string();
-                let descr = s[open_idx + 1..close_idx].trim().to_string();
-                let descr = strip_markdown_quotes(&descr);
+                let inner = &s[open_idx + 1..close_idx];
+                let descr = strip_markdown_quotes(&inner.trim());
+                let raw_descr = inner.trim_start_matches('\n').to_string();
                 let id = if id.is_empty() { descr.clone() } else { id };
-                return (id, descr, MindmapNodeType::RoundedRect);
+                return (id, descr, raw_descr, MindmapNodeType::RoundedRect);
             }
         }
     }
-    // Plain identifier — no brackets.
     let id = s.trim().to_string();
-    (id.clone(), id, MindmapNodeType::Default)
+    (id.clone(), id.clone(), id, MindmapNodeType::Default)
 }
 
 /// Strip backtick-fenced markdown wrappers (`` `text` ``). Upstream's
@@ -255,6 +255,7 @@ fn add_node(
     raw_indent: usize,
     id: String,
     descr: String,
+    raw_descr: String,
     ty: MindmapNodeType,
     base_level: &mut Option<usize>,
 ) {
@@ -281,6 +282,7 @@ fn add_node(
         node_id: id,
         level,
         descr,
+        raw_descr,
         node_type: ty,
         children: Vec::new(),
         parent,

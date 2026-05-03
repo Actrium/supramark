@@ -167,11 +167,17 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
 /// `mindmapRenderer.ts` per-shape padding override followed by the
 /// shape-specific `labelHelper` formula.
 fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
-    // Measure the label (jsdom shim font: sans-serif 14px, non-bold).
-    let bbox_w = text_width(&n.descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
-    let bbox_h = line_height(SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
+    let (bbox_w, bbox_h) = match n.node_type {
+        MindmapNodeType::Circle | MindmapNodeType::RoundedRect => {
+            measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX)
+        }
+        _ => {
+            let bw = text_width(&n.descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
+            let bh = line_height(SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
+            (bw, bh)
+        }
+    };
 
-    // Per-shape padding override from `mindmapRenderer.ts`.
     let padding = match n.node_type {
         MindmapNodeType::RoundedRect => 15.0,
         MindmapNodeType::Circle => 10.0,
@@ -180,21 +186,21 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
         MindmapNodeType::Hexagon | MindmapNodeType::Cloud | MindmapNodeType::Bang => n.padding,
     };
 
-    // halfPadding = padding / 2 in upstream `util.ts::labelHelper`.
     let half_padding = padding / 2.0;
     let (shape_w, shape_h) = match n.node_type {
         MindmapNodeType::Default => {
-            // defaultMindmapNode.ts: w = bbox.w + 8*halfPadding,
-            //                       h = bbox.h + 2*halfPadding.
             (bbox_w + 8.0 * half_padding, bbox_h + 2.0 * half_padding)
         }
         MindmapNodeType::Rect => {
-            // squareRect (classic): labelPaddingX = padding * 2,
-            // labelPaddingY = padding. Total = bbox + 2 * paddingX/Y.
             (bbox_w + 4.0 * padding, bbox_h + 2.0 * padding)
         }
-        // Other shapes — not yet supported by the single-node fast
-        // path; size with the default formula as a placeholder.
+        MindmapNodeType::Circle => {
+            let r = (bbox_w / 2.0).max(bbox_h / 2.0) + padding;
+            (2.0 * r, 2.0 * r)
+        }
+        MindmapNodeType::RoundedRect => {
+            (bbox_w + 2.0 * padding, bbox_h + 2.0 * padding)
+        }
         _ => (bbox_w + 8.0 * half_padding, bbox_h + 2.0 * half_padding),
     };
 
@@ -209,6 +215,21 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
         padding,
         section: section_for(n, d),
     }
+}
+
+fn measure_multiline_raw(text: &str, family: &str, size: f64) -> (f64, f64) {
+    let lh = line_height(family, size, false, false);
+    let mut max_w = 0.0_f64;
+    let mut line_count = 0usize;
+    for line in text.split('\n') {
+        let w = text_width(line, family, size, false, false);
+        max_w = max_w.max(w);
+        line_count += 1;
+    }
+    if line_count == 0 {
+        line_count = 1;
+    }
+    (max_w, line_count as f64 * lh)
 }
 
 /// Section index assignment matches upstream `mindmapDb.section`:

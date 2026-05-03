@@ -25,10 +25,11 @@ pub fn render(
         ));
     }
     if d.nodes.len() == 1 {
-        // Single-node fast path: byte-exact for cypress 05/06/07/08/09.
         return match d.nodes[0].node_type {
             MindmapNodeType::Default => render_single(d, l, theme, id, ShapeKind::Default),
             MindmapNodeType::Rect => render_single(d, l, theme, id, ShapeKind::Rect),
+            MindmapNodeType::Circle => render_single(d, l, theme, id, ShapeKind::Circle),
+            MindmapNodeType::RoundedRect => render_single(d, l, theme, id, ShapeKind::RoundedRect),
             other => Err(MermaidError::Unsupported(format!(
                 "mindmap: node shape {:?} not yet supported",
                 other
@@ -120,76 +121,35 @@ fn render_single(
         ty = fmt_num(n.y),
     ));
 
-    // Shape body — `<path>` + `<line>` for default, `<rect>` for rect.
-    match shape {
-        ShapeKind::Default => {
-            let half_w = n.shape_w / 2.0;
-            let half_h = n.shape_h / 2.0;
-            let inner_w = n.shape_w - 10.0; // w - 2*rd
-            let inner_h = n.shape_h - 10.0; // h - 2*rd
-            out.push_str(&format!(
-                r#"<path id="{ndom}" class="node-bkg node-0" style="" d="
-    M{nx} {hh}
-    v{nih}
-    q0,-5 5,-5
-    h{iw}
-    q5,0 5,5
-    v{ih}
-    q0,5 -5,5
-    h{niw}
-    q-5,0 -5,-5
-    Z
-  "></path>"#,
-                ndom = node_dom_id,
-                nx = fmt_num(-half_w),
-                hh = fmt_num(half_h - 5.0),
-                nih = fmt_num(-inner_h),
-                iw = fmt_num(inner_w),
-                ih = fmt_num(inner_h),
-                niw = fmt_num(-inner_w),
-            ));
-            out.push_str(&format!(
-                r#"<line class="node-line-" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"></line>"#,
-                x1 = fmt_num(-half_w),
-                y1 = fmt_num(half_h),
-                x2 = fmt_num(half_w),
-                y2 = fmt_num(half_h),
-            ));
-        }
-        ShapeKind::Rect => {
-            // Upstream `squareRect` emits a `<rect class="basic
-            // label-container" ...>` centred on the origin.
-            let half_w = n.shape_w / 2.0;
-            let half_h = n.shape_h / 2.0;
-            out.push_str(&format!(
-                r#"<rect class="basic label-container" style="" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
-                x = fmt_num(-half_w),
-                y = fmt_num(-half_h),
-                w = fmt_num(n.shape_w),
-                h = fmt_num(n.shape_h),
-            ));
-        }
-        // Single-node fast path is only ever called with Default / Rect
-        // (caller in `render` enforces this). Multi-node shapes route
-        // through `render_multi` -> `emit_shape_body`.
-        _ => unreachable!("render_single called with unexpected shape: {:?}", shape),
-    }
+    emit_shape_body(&mut out, shape, n, &node_dom_id);
 
-    // <g class="label"> wrapping the foreignObject. When the node has
-    // an `::icon(...)` or `img` decoration, upstream's `labelHelper`
-    // calls `addHtmlSpan({addSvgBackground: true})` which adds
-    // `class="labelBkg"` to the inner `<div>`.
     let has_icon = d.nodes[0].icon.is_some();
     let label_bkg_attr = if has_icon { r#" class="labelBkg""# } else { "" };
-    out.push_str(&format!(
-        r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
-        tx = fmt_num(-n.bbox_w / 2.0),
-        ty = fmt_num(-n.bbox_h / 2.0),
-        w = fmt_num(n.bbox_w),
-        h = fmt_num(n.bbox_h),
-        bkg = label_bkg_attr,
-        text = html_escape(&d.nodes[0].descr),
-    ));
+
+    match shape {
+        ShapeKind::Circle | ShapeKind::RoundedRect => {
+            out.push_str(&format!(
+                r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{text}</span></div></foreignObject></g>"#,
+                tx = fmt_num(-n.bbox_w / 2.0),
+                ty = fmt_num(-n.bbox_h / 2.0),
+                w = fmt_num(n.bbox_w),
+                h = fmt_num(n.bbox_h),
+                bkg = label_bkg_attr,
+                text = html_escape(&d.nodes[0].raw_descr),
+            ));
+        }
+        _ => {
+            out.push_str(&format!(
+                r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
+                tx = fmt_num(-n.bbox_w / 2.0),
+                ty = fmt_num(-n.bbox_h / 2.0),
+                w = fmt_num(n.bbox_w),
+                h = fmt_num(n.bbox_h),
+                bkg = label_bkg_attr,
+                text = html_escape(&d.nodes[0].descr),
+            ));
+        }
+    }
 
     // Close node g + nodes g + outer g.
     out.push_str("</g></g></g>");
@@ -316,15 +276,30 @@ fn render_multi(
 
         let has_icon = src.icon.is_some();
         let label_bkg_attr = if has_icon { r#" class="labelBkg""# } else { "" };
-        out.push_str(&format!(
-            r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
-            tx = fmt_num(-n.bbox_w / 2.0),
-            ty = fmt_num(-n.bbox_h / 2.0),
-            w = fmt_num(n.bbox_w),
-            h = fmt_num(n.bbox_h),
-            bkg = label_bkg_attr,
-            text = html_escape(&src.descr),
-        ));
+        match kind {
+            ShapeKind::Circle | ShapeKind::RoundedRect => {
+                out.push_str(&format!(
+                    r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{text}</span></div></foreignObject></g>"#,
+                    tx = fmt_num(-n.bbox_w / 2.0),
+                    ty = fmt_num(-n.bbox_h / 2.0),
+                    w = fmt_num(n.bbox_w),
+                    h = fmt_num(n.bbox_h),
+                    bkg = label_bkg_attr,
+                    text = html_escape(&src.raw_descr),
+                ));
+            }
+            _ => {
+                out.push_str(&format!(
+                    r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
+                    tx = fmt_num(-n.bbox_w / 2.0),
+                    ty = fmt_num(-n.bbox_h / 2.0),
+                    w = fmt_num(n.bbox_w),
+                    h = fmt_num(n.bbox_h),
+                    bkg = label_bkg_attr,
+                    text = html_escape(&src.descr),
+                ));
+            }
+        }
 
         out.push_str("</g>");
     }
@@ -402,9 +377,8 @@ fn emit_shape_body(out: &mut String, kind: ShapeKind, n: &PositionedNode, dom_id
             ));
         }
         ShapeKind::RoundedRect => {
-            // Stadium / pill stand-in via a rounded rectangle.
             out.push_str(&format!(
-                r#"<rect class="basic label-container" style="" x="{x}" y="{y}" width="{w}" height="{h}" rx="5" ry="5"></rect>"#,
+                r#"<rect class="basic label-container" style="" rx="5" ry="5" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
                 x = fmt_num(-half_w),
                 y = fmt_num(-half_h),
                 w = fmt_num(n.shape_w),

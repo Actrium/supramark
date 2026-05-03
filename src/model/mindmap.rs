@@ -43,8 +43,13 @@ pub struct MindmapNode {
     /// Indentation level, re-based so root is 0.
     pub level: usize,
     /// User-visible label (the text inside the shape brackets, or the
-    /// identifier when no brackets were given).
+    /// identifier when no brackets were given). Trimmed of leading/trailing
+    /// whitespace — used for Default/Rect shapes that wrap text in `<p>`.
     pub descr: String,
+    /// Raw inner text for Circle/RoundedRect shapes. Preserves
+    /// newlines and indentation so jsdom's multi-line measurement
+    /// and span innerHTML match upstream byte-for-byte.
+    pub raw_descr: String,
     pub node_type: MindmapNodeType,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
