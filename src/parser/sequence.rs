@@ -943,16 +943,73 @@ fn parse_message_line(s: &str) -> Option<Message> {
     if from.is_empty() || to.is_empty() {
         return None;
     }
+    // Upstream lex rule for TXT (`:` after a signal) is
+    // `/^(?::(?:(?:no)?wrap)?[^#\n;]*)/i`. Both `#` and `;` terminate
+    // the message text. To preserve `#word;` entity placeholders
+    // (which contain `;`) upstream pre-processes the source via
+    // `encodeEntities`, replacing each `#word;` with a non-ASCII
+    // surrogate that survives lex. Replicate the same scan here:
+    // truncate the text at the first `;` that is NOT the closing
+    // delimiter of a `#word;` placeholder.
+    let text_trim = truncate_at_first_unescaped_semicolon(text);
     Some(Message {
         from,
         to,
-        text: text.trim().to_string(),
+        text: text_trim.trim().to_string(),
         arrow: Some(kind),
         activate,
         deactivate,
         wrap,
         central_connection,
     })
+}
+
+/// Walk `s` left-to-right, returning the slice up to (but not
+/// including) the first `;` that terminates the message text.
+///
+/// Upstream's `encodeEntities` rewrites `#word;` to a non-ASCII
+/// surrogate before the lexer runs, so any `;` inside such a
+/// placeholder is invisible to the `[^#\n;]*` rule. We approximate
+/// the same effect: a `;` directly preceded by a `#word` sequence
+/// (alphanumerics, optional leading `+`/`-` for numeric form) is
+/// considered part of an entity placeholder and does NOT terminate
+/// the message.
+fn truncate_at_first_unescaped_semicolon(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b';' {
+            // Walk backwards from `i` and look for the most recent `#`
+            // — if all chars between `#` and `;` are ASCII alphanum
+            // (or the leading `+`/`-` of a numeric form), this is a
+            // `#word;` placeholder and we keep going.
+            let mut j = i;
+            let mut is_entity = false;
+            while j > 0 {
+                j -= 1;
+                let c = bytes[j];
+                if c == b'#' {
+                    let inner = &s[j + 1..i];
+                    let is_alnum = !inner.is_empty()
+                        && inner.bytes().all(|b| b.is_ascii_alphanumeric());
+                    let is_signed_num = (inner.starts_with('+') || inner.starts_with('-'))
+                        && inner[1..].bytes().all(|b| b.is_ascii_digit());
+                    if is_alnum || is_signed_num {
+                        is_entity = true;
+                    }
+                    break;
+                }
+                if !c.is_ascii_alphanumeric() && c != b'+' && c != b'-' {
+                    break;
+                }
+            }
+            if !is_entity {
+                return &s[..i];
+            }
+        }
+        i += 1;
+    }
+    s
 }
 
 fn strip_activation(s: &str) -> (bool, bool, &str) {

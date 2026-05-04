@@ -61,6 +61,15 @@ struct MsgRender {
     to: String,
     /// One entry per `<br>`-split line.
     lines: Vec<String>,
+    /// Raw message text — populated when the message carries `$$..$$`
+    /// KaTeX, drives the `<foreignObject>` rendering path.
+    raw_text: String,
+    /// Pre-computed `min(startx, stopx)` for the KaTeX foreignObject
+    /// horizontal anchor (`x = round(startx + |startx-stopx|/2 - w/2)`).
+    msg_min_startx: f64,
+    /// Pre-computed `|startx - stopx|` for the KaTeX foreignObject
+    /// horizontal anchor.
+    msg_dx_abs: f64,
     arrow: ArrowType,
     line_start_y: f64,
     text_x: f64,
@@ -107,6 +116,9 @@ struct MsgRender {
 struct NoteRender {
     /// One entry per `<br>`-split line.
     lines: Vec<String>,
+    /// Raw note text — populated when the note carries `$$..$$` KaTeX,
+    /// drives the `<foreignObject>` rendering path.
+    raw_text: String,
     rect_x: f64,
     rect_y: f64,
     rect_w: f64,
@@ -1970,6 +1982,7 @@ pub fn render(
 
             notes.push(NoteRender {
                 lines: note_lines.iter().map(|s| s.to_string()).collect(),
+                raw_text: note.text.clone(),
                 rect_x: note_x,
                 rect_y: starty_for_note,
                 rect_w: note_w,
@@ -2602,6 +2615,9 @@ pub fn render(
             from: m.from.clone(),
             to: m.to.clone(),
             lines: msg_lines.iter().map(|s| s.to_string()).collect(),
+            raw_text: m.text.clone(),
+            msg_min_startx: startx.min(stopx),
+            msg_dx_abs: (startx - stopx).abs(),
             arrow: m.arrow.unwrap_or(ArrowType::SolidArrow),
             line_start_y,
             text_x,
@@ -3026,10 +3042,22 @@ pub fn render(
             if katex_body.is_empty() {
                 continue;
             }
+            // The KaTeX body of actor A appears, *as a substring*,
+            // inside another actor B's KaTeX body — i.e. the same
+            // expression is rendered twice (once standalone for A,
+            // once nested inside B). Upstream's non-awaited byKatex
+            // calls share the same KaTeX module instance and the
+            // duplicated render hits a state-pollution path that
+            // causes the second `await` (renderKatexSanitized) to
+            // throw, leaving an empty `<switch>` behind. We treat
+            // that as the trigger condition.
             let dup = actors.iter().any(|b| {
-                !std::ptr::eq(a, b)
-                    && b.description.contains(&format!("$${}$$", katex_body))
-                    && b.description != a.description
+                if std::ptr::eq(a, b) || b.description == a.description {
+                    return false;
+                }
+                let other_body = extract_first_katex_body(&b.description);
+                !other_body.is_empty()
+                    && other_body.contains(&katex_body)
                     && b.description.len() > a.description.len()
             });
             if dup {
@@ -4482,25 +4510,36 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
         false,
         false,
     );
-    for (k, line) in title_lines.iter().enumerate() {
-        // After k iterations of the bbox accumulation, prev=text=k*lh.
-        let acc = (k as f64) * lh_unrounded;
-        let title_y = round_js(title_y_input + (acc + acc + 5.0) / 2.0);
-        out.push_str("<text x=\"");
-        push_num(out, title_x);
-        out.push_str("\" y=\"");
-        push_num(out, title_y);
-        out.push_str(
-            "\" text-anchor=\"middle\" style=\"font-family: ",
-        );
-        out.push_str(&attr_escape(FONT_FAMILY));
-        out.push_str(
-            "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
-        );
-        push_num(out, title_x);
-        out.push_str("\">");
-        out.push_str(&xml_escape(line));
-        out.push_str("</tspan></text>");
+    if has_katex(&lr.title) {
+        // drawKatex on loopText: foreignObject is centred between
+        // startx..stopx and y is `round(starty)` of the loopModel —
+        // here the upstream loopModel.starty is `lr.starty` itself.
+        if let Some((html, w, h)) = try_render_seq_katex(&lr.title) {
+            let cx = (lr.startx + lr.stopx) / 2.0;
+            let y = lr.starty.round();
+            emit_katex_foreign_object(out, &html, w, h, cx, y);
+        }
+    } else {
+        for (k, line) in title_lines.iter().enumerate() {
+            // After k iterations of the bbox accumulation, prev=text=k*lh.
+            let acc = (k as f64) * lh_unrounded;
+            let title_y = round_js(title_y_input + (acc + acc + 5.0) / 2.0);
+            out.push_str("<text x=\"");
+            push_num(out, title_x);
+            out.push_str("\" y=\"");
+            push_num(out, title_y);
+            out.push_str(
+                "\" text-anchor=\"middle\" style=\"font-family: ",
+            );
+            out.push_str(&attr_escape(FONT_FAMILY));
+            out.push_str(
+                "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
+            );
+            push_num(out, title_x);
+            out.push_str("\">");
+            out.push_str(&xml_escape(line));
+            out.push_str("</tspan></text>");
+        }
     }
     // Section labels (alt/par/critical) — bracketed text centred in
     // each section's first row. NO `<tspan>` wrapper here, mirroring
@@ -4553,6 +4592,11 @@ fn emit_rect(out: &mut String, r: &RectRender) {
 /// Emit one `<g data-et="note" data-id="iN">` containing a rounded
 /// rect + one `<text><tspan>` per `<br>`-split line. Mirrors upstream
 /// `drawNote` (`drawText` with `tspan: true`, `valign='center'`).
+///
+/// When the note text contains `$$..$$` KaTeX, the per-line `<text>`
+/// fallback is replaced by a single `<foreignObject>` carrying the
+/// rendered KaTeX HTML (matching upstream's `drawKatex` path that
+/// `drawNote` dispatches to via `hasKatex(textObj.text)`).
 fn emit_note(out: &mut String, n: &NoteRender) {
     out.push_str("<g data-et=\"note\" data-id=\"i");
     out.push_str(&n.idx.to_string());
@@ -4565,6 +4609,22 @@ fn emit_note(out: &mut String, n: &NoteRender) {
     out.push_str("\" height=\"");
     push_num(out, n.rect_h);
     out.push_str("\" class=\"note\"></rect>");
+    if has_katex(&n.raw_text) {
+        if let Some((html, w, h)) = try_render_seq_katex(&n.raw_text) {
+            // drawKatex on noteText: foreignObject is centred *over* the
+            // rect (rectX + rectW/2 - w/2, rectY + rectH/2 - h/2). The
+            // upstream code also bumps the rect's height to
+            // `dim.height + 2*textMargin`; in jsdom dim.height comes from
+            // the textContent measurement (`round` of one sans-serif-14
+            // line ⇒ 16), so the rect is already that tall after layout.
+            let cx = n.rect_x + n.rect_w / 2.0;
+            let cy = n.rect_y + n.rect_h / 2.0;
+            let y = (cy - h / 2.0).round();
+            emit_katex_foreign_object(out, &html, w, h, cx, y);
+            out.push_str("</g>");
+            return;
+        }
+    }
     for (i, line_text) in n.lines.iter().enumerate() {
         let y = round_js(n.starty_raw + (i as f64) * n.line_step + n.margin_half);
         out.push_str("<text x=\"");
@@ -4715,6 +4775,60 @@ fn emit_actor_box_text_ex(
     if katex {
         out.push_str("</switch>");
     }
+}
+
+/// Render a KaTeX label and return `(html, raw_width, raw_height)`. The
+/// raw measurements correspond to upstream `getBoundingClientRect()`'s
+/// fractional output, so the caller can independently round the values
+/// it splats into the `<foreignObject>` width/height attributes versus
+/// the values it feeds into the x/y centring math (upstream applies
+/// `Math.round` separately at each call site, see `drawKatex` in
+/// sequenceDiagram-S5P6DPVE.mjs:1976-1995).
+#[cfg(feature = "katex")]
+fn try_render_seq_katex(text: &str) -> Option<(String, f64, f64)> {
+    if !has_katex(text) {
+        return None;
+    }
+    match crate::katex::render_label_raw(text) {
+        Ok(html) => {
+            let font = crate::render::foreign_object::HtmlLabelFont::default();
+            let (w, h) = crate::render::foreign_object::measure_html_markup_label(
+                &html, &font, f64::INFINITY, false,
+            );
+            Some((html, w, h))
+        }
+        Err(_) => None,
+    }
+}
+
+#[cfg(not(feature = "katex"))]
+fn try_render_seq_katex(_text: &str) -> Option<(String, f64, f64)> {
+    None
+}
+
+/// Emit a `<foreignObject>` carrying KaTeX-rendered HTML, matching
+/// upstream `drawKatex` output for note/message/loop label. `w` and `h`
+/// are the raw (unrounded) measurements; the helper rounds the value
+/// going into each attribute / centring computation independently.
+fn emit_katex_foreign_object(
+    out: &mut String,
+    html: &str,
+    w: f64,
+    h: f64,
+    cx: f64,
+    y: f64,
+) {
+    out.push_str("<foreignObject height=\"");
+    push_num(out, h.round());
+    out.push_str("\" width=\"");
+    push_num(out, w.round());
+    out.push_str("\" x=\"");
+    push_num(out, (cx - w / 2.0).round());
+    out.push_str("\" y=\"");
+    push_num(out, y);
+    out.push_str("\"><div style=\"width: fit-content;\" xmlns=\"http://www.w3.org/1999/xhtml\">");
+    out.push_str(html);
+    out.push_str("</div></foreignObject>");
 }
 
 /// Resolve the `(fill, base_class)` pair for an actor's main rectangle.
@@ -4971,25 +5085,48 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     // <text> per line (multi-line via `<br>` splits to separate <text>
     // elements with stepping y, mirroring upstream `drawText` in
     // `valign='center'` mode with `tspan: false`).
-    for (n, line_text) in m.lines.iter().enumerate() {
-        let y = round_js(m.starty_raw + (n as f64) * m.line_step + m.y_offset);
-        out.push_str("<text x=\"");
-        push_num(out, m.text_x);
-        out.push_str("\" y=\"");
-        push_num(out, y);
-        out.push_str(
-            "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
-        );
-        out.push_str(&attr_escape(FONT_FAMILY));
-        out.push_str("; font-size: 16px; font-weight: 400;\" class=\"messageText\" dy=\"1em\">");
-        if line_text.is_empty() {
-            // Upstream `drawText` substitutes a zero-width space (U+200B)
-            // for empty lines so the bbox is still measurable.
-            out.push_str("\u{200B}");
-        } else {
-            out.push_str(&xml_escape(line_text));
+    //
+    // When the message text contains `$$..$$` KaTeX, the per-line
+    // `<text>` fallback is replaced by a single `<foreignObject>` with
+    // the rendered KaTeX HTML. Mirrors upstream `drawKatex` invoked
+    // from sequenceRenderer.ts via `hasKatex(msg.message) ? drawKatex
+    // : drawText`. The y anchor matches `round(starty - h)` of the
+    // upstream msgModel.
+    let mut katex_emitted = false;
+    if has_katex(&m.raw_text) {
+        if let Some((html, w, h)) = try_render_seq_katex(&m.raw_text) {
+            // drawKatex on messageText: y is `round(lineStartY - h)`
+            // where `lineStartY` is the message's line draw y (this
+            // crate's `line_start_y`) and `h` is the raw (unrounded)
+            // bbox height. Mirrors upstream sequenceRenderer.ts:3466 —
+            // `await drawKatex(..., { startx, stopx, starty: lineStartY })`.
+            let cx = m.msg_min_startx + m.msg_dx_abs / 2.0;
+            let y = (m.line_start_y - h).round();
+            emit_katex_foreign_object(out, &html, w, h, cx, y);
+            katex_emitted = true;
         }
-        out.push_str("</text>");
+    }
+    if !katex_emitted {
+        for (n, line_text) in m.lines.iter().enumerate() {
+            let y = round_js(m.starty_raw + (n as f64) * m.line_step + m.y_offset);
+            out.push_str("<text x=\"");
+            push_num(out, m.text_x);
+            out.push_str("\" y=\"");
+            push_num(out, y);
+            out.push_str(
+                "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
+            );
+            out.push_str(&attr_escape(FONT_FAMILY));
+            out.push_str("; font-size: 16px; font-weight: 400;\" class=\"messageText\" dy=\"1em\">");
+            if line_text.is_empty() {
+                // Upstream `drawText` substitutes a zero-width space (U+200B)
+                // for empty lines so the bbox is still measurable.
+                out.push_str("\u{200B}");
+            } else {
+                out.push_str(&xml_escape(line_text));
+            }
+            out.push_str("</text>");
+        }
     }
 
     // <line> or <path> next.
