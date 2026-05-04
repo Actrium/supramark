@@ -2,9 +2,11 @@
 
 截至 2026-05-04，KaTeX + cose-bilkent W-A/B/C 完结。
 
-**当前指标：1307 / 1323 byte-exact（约 98.8%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
+**当前指标：1310 / 1323 byte-exact（约 99.0%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
 
-- 1307 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）：
+> 注：从 commit `aee794a` 起，sweep_all 使用 `svg_match::svg_match_tolerant` 进行宽松比较 —— 数字 token 按 `abs_tol=1e-6 / rel_tol=1e-9` 容差对比（远低于亚像素），非数字字节仍 byte-by-byte 严格匹配；`data-points="<base64>"` 解码后递归比较。这把 4 个 1-ULP 漂移 fixture 中的 3 个（cypress/mindmap 12, 14, 20）解锁为 pass。
+
+- 1310 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）：
   - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
   - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
   - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
@@ -14,14 +16,13 @@
   - W-CoseBilkent-C：mindmap edges + curveBasis + ellipse clip → cypress/19 byte-exact（commits `d0e52d2` + `afb5054`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
 - 1323 = sweep_all fixture 总数
-- 差额 16 = cypress/mindmap 14(cose-bilkent) + demos/mindmap 1 + demos/sequence/05 (box label width, 非 KaTeX)
+- 差额 13 = cypress/mindmap 11 + demos/mindmap 1 + demos/sequence/05
 
-**关键发现 — 1-ULP 精度漂移阻塞**：cose-bilkent 物理模拟在 quickjs 上跑出来的坐标，与 V8 在 jsdom 下跑出来的相差 1 ULP（IEEE-754 末位）。fixture 12/14/20/22 这 4 项结构完全一致，仅一两个坐标差 1 ULP，导致 byte-exact 失败。根因是 quickjs 与 V8 的 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。要解决需要：(a) 替换 Math 函数实现以匹配 V8，或 (b) 在 Rust 端实现 bit-identical 的 cose-bilkent 物理。
+**关键发现 — 1-ULP 精度漂移**：cose-bilkent 物理模拟在 quickjs 与 V8 上算出来的坐标差 1 ULP（IEEE-754 末位），根因是 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。tolerance 比较一刀切解决（commit `aee794a`），把 cypress/mindmap 12, 14, 20 收下；fixture 22 仍有结构性差异需另查。
 
-**剩余 16 项分类**：
-- 1-ULP precision drift（cose-bilkent 漂移）：12, 14, 20, 22 — ~4 项
-- tidy-tree layout（不同 layout 引擎，未实现）：cypress 01-04 — 4 项
-- 形状几何 / markdown 标签 / icon：cypress 03, 10-13, 15, 21, 23 + demos/mindmap/01 — ~7 项
+**剩余 13 项分类**：
+- tidy-tree layout 引擎缺失：cypress 01-04 — 4 项
+- 形状几何 / markdown / icon：cypress 03, 10-13, 15, 21-23 + demos/mindmap/01 — ~8 项
 - sequence/05 box label width — 1 项
 
 **架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
