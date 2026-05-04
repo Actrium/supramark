@@ -1,12 +1,12 @@
 # 阶段进展
 
-截至 2026-05-04，KaTeX + cose-bilkent W-A/B/C 完结。
+截至 2026-05-05，mindmap markdown branching + sequence box undefined-margin 拿下。
 
-**当前指标：1310 / 1323 byte-exact（约 99.0%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
+**当前指标：1316 / 1323 byte-exact（约 99.5%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
 
 > 注：从 commit `aee794a` 起，sweep_all 使用 `svg_match::svg_match_tolerant` 进行宽松比较 —— 数字 token 按 `abs_tol=1e-6 / rel_tol=1e-9` 容差对比（远低于亚像素），非数字字节仍 byte-by-byte 严格匹配；`data-points="<base64>"` 解码后递归比较。这把 4 个 1-ULP 漂移 fixture 中的 3 个（cypress/mindmap 12, 14, 20）解锁为 pass。
 
-- 1310 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）：
+- 1316 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）+ 1（mindmap rect raw）+ 1（sequence box undefined margin）+ 4（mindmap markdownToHTML 分支统一）：
   - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
   - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
   - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
@@ -14,16 +14,22 @@
   - W-CoseBilkent-A：vendor cytoscape + cose-bilkent + rquickjs harness（commit `9d8de57`）
   - W-CoseBilkent-B：JS layout 接入 mindmap pipeline（commit `2f095f1`）
   - W-CoseBilkent-C：mindmap edges + curveBasis + ellipse clip → cypress/19 byte-exact（commits `d0e52d2` + `afb5054`）
+  - W-Mindmap-Rect-Raw：rect parser/sizer/render 保留多行原文，indented-code-block 跳过 `<p>` wrap → cypress/15（commit `6e6165d`）
+  - W-Sequence-Box-Margin：mirror upstream `actor.margin || 0` 默认值，未参与 actorToMessageWidth 的 actor 在 box totalWidth 里贡献 0 而非 actorMargin → demos/sequence/05（commit `d4a6bc2`）
+  - W-Mindmap-Markdown-Branch：把 `<p>` wrap 判定从形状改成 is_indented_block；单行 Circle/RoundedRect 文本（如 `((mindmap))`）现在正确包 `<p>` → cypress/01, 02, 04, 14（commit `5c0c305`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
 - 1323 = sweep_all fixture 总数
-- 差额 13 = cypress/mindmap 11 + demos/mindmap 1 + demos/sequence/05
+- 差额 7 = cypress/mindmap 6 + demos/mindmap 1
 
 **关键发现 — 1-ULP 精度漂移**：cose-bilkent 物理模拟在 quickjs 与 V8 上算出来的坐标差 1 ULP（IEEE-754 末位），根因是 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。tolerance 比较一刀切解决（commit `aee794a`），把 cypress/mindmap 12, 14, 20 收下；fixture 22 仍有结构性差异需另查。
 
-**剩余 13 项分类**：
-- tidy-tree layout 引擎缺失：cypress 01-04 — 4 项
-- 形状几何 / markdown / icon：cypress 03, 10-13, 15, 21-23 + demos/mindmap/01 — ~8 项
-- sequence/05 box label width — 1 项
+**关键发现 — sequence box undefined margin**：upstream `calculateActorMargins` 的 actor 边界循环用 `for (const actorKey in actorToMessageWidth)`，仅给参与了相邻/自环/placement 消息的 actor 赋 margin。其余 actor 的 `actor.margin` 留 undefined；后续 box `totalWidth` reduce 用 `(actor.margin || 0)` 对 undefined 取 0，而非默认 actorMargin。我们之前默认初始化所有 actor_margins=actorMargin（50）于是 totalWidth 偏大，box 缩进 padding 补不够。
+
+**关键发现 — mindmap markdownToHTML 分支**：upstream `markdownToHTML` 用 marked.lexer 切 token，paragraph token 渲染为 `<p>...</p>`，但 indented-code-block（任一非空行以 4+ 空格起头）落入 `node.raw` 兜底分支，输出原文不包 wrapper。形状（Rect/Circle/RoundedRect）不是判别依据 —— `((mindmap))`（单行）走 paragraph 分支，`((\n  The root\n))`（缩进多行）走 raw 分支。
+
+**剩余 7 项分类**：
+- 复杂 mindmap 多节点 cose-bilkent 位置漂移：cypress 03, 10-11, 13, 23 + demos/mindmap/01 — 6 项
+- 反引号 markdown wrapper：cypress 21 — 1 项
 
 **架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
 
