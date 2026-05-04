@@ -67,6 +67,11 @@ struct MsgRender {
     /// Y of the FIRST text line. Subsequent lines step by `line_step`.
     text_y_first: f64,
     line_step: f64,
+    /// Raw starty for message text (before rounding) — upstream computes
+    /// each line independently as `round(starty + 10 + n*lh + 5)`.
+    starty_raw: f64,
+    /// `10 + 5 = 15` offset for per-line rounding.
+    y_offset: f64,
     line_x1: f64,
     line_x2: f64,
     /// For self-ref: the original startx (before autonumber shift).
@@ -110,6 +115,11 @@ struct NoteRender {
     /// Y of the first text line. Subsequent lines step by `line_step`.
     text_y_first: f64,
     line_step: f64,
+    /// Raw starty for note text (before rounding) — upstream computes
+    /// each line independently as `round(starty + n*lh + margin/2)`.
+    starty_raw: f64,
+    /// `noteMargin / 2` for per-line rounding.
+    margin_half: f64,
     /// 0-based item index — used as `data-id="iN"`.
     idx: usize,
 }
@@ -1923,6 +1933,13 @@ pub fn render(
             // where `lh` is the UNROUNDED bbox height per line.
             let text_x = round_js(note_x + note_w / 2.0);
             let text_y_first = round_js(starty_for_note + cfg.note_margin / 2.0);
+            // Upstream computes each note text line independently as
+            // `round(starty + n*lh + noteMargin/2)` — rounding the full
+            // expression rather than accumulating from a rounded first
+            // line. To match, we store the raw `starty_for_note` and
+            // `note_margin / 2` so the emission pass can round per-line.
+            let note_starty_raw = starty_for_note;
+            let note_margin_half = cfg.note_margin as f64 / 2.0;
 
             notes.push(NoteRender {
                 lines: note_lines.iter().map(|s| s.to_string()).collect(),
@@ -1933,6 +1950,8 @@ pub fn render(
                 text_x,
                 text_y_first,
                 line_step: lh_unrounded,
+                starty_raw: note_starty_raw,
+                margin_half: note_margin_half,
                 idx,
             });
 
@@ -2561,6 +2580,8 @@ pub fn render(
             text_x,
             text_y_first,
             line_step,
+            starty_raw: starty_for_msg,
+            y_offset: 15.0,
             line_x1,
             line_x2,
             self_startx,
@@ -4485,7 +4506,7 @@ fn emit_note(out: &mut String, n: &NoteRender) {
     push_num(out, n.rect_h);
     out.push_str("\" class=\"note\"></rect>");
     for (i, line_text) in n.lines.iter().enumerate() {
-        let y = round_js(n.text_y_first + (i as f64) * n.line_step);
+        let y = round_js(n.starty_raw + (i as f64) * n.line_step + n.margin_half);
         out.push_str("<text x=\"");
         push_num(out, n.text_x);
         out.push_str("\" y=\"");
@@ -4832,7 +4853,7 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     // elements with stepping y, mirroring upstream `drawText` in
     // `valign='center'` mode with `tspan: false`).
     for (n, line_text) in m.lines.iter().enumerate() {
-        let y = round_js(m.text_y_first + (n as f64) * m.line_step);
+        let y = round_js(m.starty_raw + (n as f64) * m.line_step + m.y_offset);
         out.push_str("<text x=\"");
         push_num(out, m.text_x);
         out.push_str("\" y=\"");
