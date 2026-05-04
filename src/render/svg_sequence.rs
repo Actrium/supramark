@@ -2583,6 +2583,12 @@ pub fn render(
         // defer the assignment until the message's line_start_y is known.
         let half_actor_h = actor_h / 2.0;
         let had_create = pending_create_actor.is_some();
+        let cd_ta_x = ta.x;
+        let cd_ta_width = ta.width;
+        let cd_fa_x = fa.x;
+        let cd_to_left = to_left;
+        let cd_from_right = from_right;
+        let cd_ta_actor_type = ta.actor_type.clone();
         if let Some(actor_id) = pending_create_actor.take() {
             if let Some(ar) = actors.iter_mut().find(|a| a.id == actor_id) {
                 let create_y = line_start_y - half_actor_h;
@@ -2599,6 +2605,33 @@ pub fn render(
         }
         if had_create || had_destroy {
             vertical += half_actor_h;
+            // ── Extra bounds.insert for create/destroy ──────────────────
+            //
+            // Mirrors upstream `adjustCreatedDestroyedData` calling
+            // `bounds2.insert()` with stopy =
+            // `msgModel.stopy + actor.height/2` and expanded x-bounds
+            // that include the created/destroyed actor's visual extent.
+            // The x-widening is already covered by the main message
+            // widening pass (which uses from_bounds/to_bounds), but the
+            // stopy needs an extra bump of half_actor_h.
+            let create_destroy_stopy = vertical;
+            let stack_len = seq_items.len();
+            for (cnt0, item) in seq_items.iter().enumerate() {
+                let n = (stack_len - cnt0) as f64;
+                let widened_stopy = create_destroy_stopy + n * box_margin;
+                match *item {
+                    SeqItem::Loop(li) => {
+                        let lr = &mut loops[li];
+                        if widened_stopy > lr.stopy {
+                            lr.stopy = widened_stopy;
+                        }
+                    }
+                    SeqItem::Rect(pidx) => {
+                        let r = &mut pending_rects[pidx];
+                        r.widen_stopy(widened_stopy);
+                    }
+                }
+            }
         }
 
         // ── Per-message activation side effects ─────────────────────
