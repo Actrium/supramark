@@ -34,6 +34,14 @@ cli = ["dep:env_logger"]
 # output. Web/RN consumers leave this off and let their host environment's
 # JS engine drive KaTeX directly.
 katex = ["dep:rquickjs"]
+# Embed QuickJS + cytoscape + cose-bilkent for byte-exact mindmap layout.
+# Mermaid's mindmap renderer drives the JS cose-bilkent extension; a pure
+# Rust port of the multi-level coarsening / spring embedder is unlikely
+# to be byte-exact (FP accumulation, randomisation order). The headless
+# JS path is ~1.34 MB of vendored sources and a 15-LOC stub; spike at
+# /tmp/spike-cytoscape confirmed the layout runs end-to-end inside
+# rquickjs without DOM polyfills.
+cose_bilkent = ["dep:rquickjs"]
 
 [dependencies]
 thiserror = "1"
