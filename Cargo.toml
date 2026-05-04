@@ -29,11 +29,19 @@ required-features = ["cli"]
 [features]
 default = ["cli"]
 cli = ["dep:env_logger"]
+# Embed QuickJS + KaTeX for byte-exact LaTeX math rendering. Required for
+# CLI / test parity with mermaid's `forceLegacyMathML: true` reference
+# output. Web/RN consumers leave this off and let their host environment's
+# JS engine drive KaTeX directly.
+katex = ["dep:rquickjs"]
 
 [dependencies]
 thiserror = "1"
 log = "0.4"
 env_logger = { version = "0.11", optional = true }
+# QuickJS bindings for the optional `katex` feature. Pinned to 0.10 (last
+# release compatible with rust-version = "1.82"; 0.11+ requires 1.87).
+rquickjs = { version = "0.10", optional = true }
 # Config / preprocess / detect pipeline (Wave 0).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

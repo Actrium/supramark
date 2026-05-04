@@ -18,6 +18,8 @@ pub mod detect;
 pub mod error;
 pub mod font_data;
 pub mod font_metrics;
+#[cfg(feature = "katex")]
+pub mod katex;
 pub mod layout;
 pub mod math;
 pub mod model;

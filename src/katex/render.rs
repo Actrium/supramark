@@ -1,0 +1,117 @@
+//! Run `katex.renderToString` inside an embedded QuickJS runtime.
+//!
+//! KaTeX's `renderToString` walks the parsed expression and emits HTML markup
+//! through `domTree.toMarkup()` / `mathMLTree.toMarkup()` — pure string
+//! concatenation, no `document.createElement` calls. That's why the embedded
+//! runtime needs no DOM polyfill: the only globals KaTeX relies on are the
+//! standard `JSON`, `Math`, `RegExp`, `Object` builtins that QuickJS already
+//! ships.
+//!
+//! The UMD wrapper around `katex.min.js` checks `typeof self != 'undefined'`
+//! to pick its global. QuickJS leaves `self` undefined, so the wrapper falls
+//! back to top-level `this`, which in script (non-module) mode is the global
+//! object. After evaluation, `globalThis.katex.renderToString` is callable.
+
+use rquickjs::{Context, Function, Object, Runtime};
+
+/// Embedded KaTeX 0.16.45 (MIT). Rebuilt by replacing
+/// `src/katex/vendor/katex.min.js` and recompiling the crate.
+const KATEX_MIN_JS: &str = include_str!("vendor/katex.min.js");
+
+#[derive(Debug, thiserror::Error)]
+pub enum RenderError {
+    #[error("quickjs runtime error: {0}")]
+    Runtime(String),
+    #[error("katex parse error: {0}")]
+    Katex(String),
+}
+
+/// Render a LaTeX expression to mermaid-equivalent KaTeX markup —
+/// pre-sanitization. The caller still needs to feed the output through the
+/// mermaid post-processing pipeline (drop newlines, strip `<annotation>`,
+/// run our DOM-purify equivalent) before embedding it in SVG.
+///
+/// `display_mode` mirrors mermaid's `displayMode: true` for `$$..$$`
+/// expressions. KaTeX's `output: 'htmlAndMathml'` is hard-coded — that's
+/// what mermaid asks for under `forceLegacyMathML`.
+pub fn render(latex: &str, display_mode: bool) -> Result<String, RenderError> {
+    let runtime = Runtime::new().map_err(|e| RenderError::Runtime(e.to_string()))?;
+    let context = Context::full(&runtime).map_err(|e| RenderError::Runtime(e.to_string()))?;
+
+    context.with(|ctx| {
+        // Load KaTeX. The UMD wrapper installs `katex` on the global object.
+        ctx.eval::<(), _>(KATEX_MIN_JS)
+            .map_err(|e| RenderError::Runtime(format!("loading katex: {}", e)))?;
+
+        // Build the options object literally — easier than threading
+        // a serializer through rquickjs for two known fields.
+        let mode = if display_mode { "true" } else { "false" };
+        let script = format!(
+            r#"(function(latex){{
+                return globalThis.katex.renderToString(latex, {{
+                    throwOnError: true,
+                    displayMode: {mode},
+                    output: 'htmlAndMathml'
+                }});
+            }})"#
+        );
+
+        let render_fn: Function = ctx
+            .eval(script)
+            .map_err(|e| RenderError::Runtime(format!("preparing render fn: {}", e)))?;
+
+        let result: String = render_fn.call((latex,)).map_err(|e| {
+            // Distinguish KaTeX parse errors (thrown via `throwOnError: true`)
+            // from runtime issues. The rquickjs `Error` printer renders
+            // ParseError exceptions as "Error: KaTeX parse error: ...".
+            let msg = e.to_string();
+            if msg.contains("KaTeX parse error") {
+                RenderError::Katex(msg)
+            } else {
+                RenderError::Runtime(format!("calling renderToString: {}", msg))
+            }
+        })?;
+
+        // Suppress unused-warnings when the global object isn't reused.
+        let _ = ctx.globals() as Object;
+        Ok(result)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test — KaTeX loads and a trivial expression renders without
+    /// pulling DOM globals.
+    #[test]
+    fn renders_alpha() {
+        let out = render("\\alpha", true).expect("render");
+        assert!(out.contains("<math"), "expected MathML, got: {}", out);
+        assert!(out.contains("katex-html"), "expected katex-html, got: {}", out);
+    }
+
+    /// All five formula shapes that appear in the failing demo fixtures
+    /// must render without DOM globals.
+    #[test]
+    fn renders_demo_fixture_formulas() {
+        let cases = [
+            r"\alpha\beta\gamma",
+            r"\frac{a}{b}",
+            r"\overbrace{a+b+c}^{\text{note}}",
+            r"\begin{cases} a &\text{if } b \\ c &\text{if } d \end{cases}",
+            r"\int_{-\infty}^\infty \hat{f}(\xi)\,e^{2 \pi i \xi x}\,d\xi",
+        ];
+        for latex in cases {
+            let out = render(latex, true).unwrap_or_else(|e| panic!("render {}: {}", latex, e));
+            assert!(out.contains("<math"), "no MathML for {}", latex);
+        }
+    }
+
+    /// Bad LaTeX surfaces as a `Katex` error, not a runtime panic.
+    #[test]
+    fn rejects_invalid_latex() {
+        let err = render("\\nosuchcommand", true).expect_err("should fail");
+        assert!(matches!(err, RenderError::Katex(_)), "got {:?}", err);
+    }
+}
