@@ -838,7 +838,20 @@ pub fn render(
             let mut total_width = 0.0_f64;
             for actor_id in &bx.actors {
                 if let Some(&idx) = actor_id_to_idx_local.get(actor_id.as_str()) {
-                    total_width += actor_widths[idx] + actor_margins[idx];
+                    // Mirror upstream `(actor.margin || 0)`: actor.margin is
+                    // only set in calculateActorMargins for actors that appear
+                    // in `actorToMessageWidth` (i.e. those that participate
+                    // in adjacent / self / placement-bearing messages).
+                    // Actors with no contributing message stay undefined and
+                    // contribute 0 to box totalWidth (NOT the default
+                    // actorMargin). Required for fixtures with non-adjacent
+                    // messages like demos/sequence/05.
+                    let margin = if max_msg_width_per_actor[idx] == 0.0 {
+                        0.0
+                    } else {
+                        actor_margins[idx]
+                    };
+                    total_width += actor_widths[idx] + margin;
                 }
             }
             let standard_box_padding = box_margin * 8.0;
