@@ -1,19 +1,30 @@
 # 阶段进展
 
-截至 2026-05-04，KaTeX wave 完结。
+截至 2026-05-04，KaTeX + cose-bilkent W-A/B/C 完结。
 
-**当前指标：1306 / 1323 byte-exact（约 98.7%，启用 `--features katex`；不启用为 1298）**。
+**当前指标：1307 / 1323 byte-exact（约 98.8%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
 
-- 1306 = 1298 + 8（KaTeX wave）：
+- 1307 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）：
   - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
   - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
   - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
   - W-KaTeX-D：sequence note/message/loop label KaTeX → 07/08 byte-exact（commit `e40d1c5`）
+  - W-CoseBilkent-A：vendor cytoscape + cose-bilkent + rquickjs harness（commit `9d8de57`）
+  - W-CoseBilkent-B：JS layout 接入 mindmap pipeline（commit `2f095f1`）
+  - W-CoseBilkent-C：mindmap edges + curveBasis + ellipse clip → cypress/19 byte-exact（commits `d0e52d2` + `afb5054`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
 - 1323 = sweep_all fixture 总数
-- 差额 17 = mindmap 15(cose-bilkent) + demos/mindmap 1 + demos/sequence/05 (box label width, 非 KaTeX)
+- 差额 16 = cypress/mindmap 14(cose-bilkent) + demos/mindmap 1 + demos/sequence/05 (box label width, 非 KaTeX)
 
-**KaTeX 路线关键约束**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖，验证通过；DOMPurify 等价由 Rust 重写（strip_annotation / strip_semantics / expand_self_closing / nbsp_to_entity）。Cargo `katex` feature gates 整个流水线，关闭时不影响默认 build。
+**关键发现 — 1-ULP 精度漂移阻塞**：cose-bilkent 物理模拟在 quickjs 上跑出来的坐标，与 V8 在 jsdom 下跑出来的相差 1 ULP（IEEE-754 末位）。fixture 12/14/20/22 这 4 项结构完全一致，仅一两个坐标差 1 ULP，导致 byte-exact 失败。根因是 quickjs 与 V8 的 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。要解决需要：(a) 替换 Math 函数实现以匹配 V8，或 (b) 在 Rust 端实现 bit-identical 的 cose-bilkent 物理。
+
+**剩余 16 项分类**：
+- 1-ULP precision drift（cose-bilkent 漂移）：12, 14, 20, 22 — ~4 项
+- tidy-tree layout（不同 layout 引擎，未实现）：cypress 01-04 — 4 项
+- 形状几何 / markdown 标签 / icon：cypress 03, 10-13, 15, 21, 23 + demos/mindmap/01 — ~7 项
+- sequence/05 box label width — 1 项
+
+**架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
 
 W16-A 子 agent 实现了 sequence box + create/destroy 渲染骨架，但因改动过大引入严重回归（134→9/140），已全部回滚到 68dee74。W16-C 重新增量实现，逐 commit 推进，最终达到 140/140 无回归。
 
