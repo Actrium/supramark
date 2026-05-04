@@ -63,13 +63,19 @@ pub struct MindmapNode {
 }
 
 /// True when the raw descr text is parsed as an indented code block by
-/// marked.js (any non-empty line starts with 4+ spaces). Upstream's
-/// `markdownToHTML` doesn't handle the `code` token type and falls
-/// through to `node.raw`, so the foreignObject `<span>` ends up
-/// containing the raw text — no `<p>` wrap, no escaping. Renderer and
-/// layout sizing both branch on this.
+/// marked.js. Upstream's `markdownToHTML` doesn't handle the `code`
+/// token type and falls through to `node.raw`, so the foreignObject
+/// `<span>` ends up containing the raw text — no `<p>` wrap, no
+/// escaping. Renderer and layout sizing both branch on this.
+///
+/// CommonMark rule (which marked.js follows): the FIRST non-empty line
+/// must start with 4+ spaces for the block to be parsed as an indented
+/// code block. A non-indented first line followed by indented lines is
+/// still a paragraph (marked collapses the newlines).
 pub fn is_indented_block(text: &str) -> bool {
-    text.lines().any(|l| l.starts_with("    ") && !l.trim().is_empty())
+    text.lines()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| l.starts_with("    "))
 }
 
 #[derive(Debug, Clone, Default)]

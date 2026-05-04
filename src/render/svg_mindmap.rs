@@ -302,7 +302,7 @@ fn emit_label(out: &mut String, src: &MindmapNode, kind: ShapeKind, bbox_w: f64,
     let span_inner = if raw_text_branch {
         html_escape(&src.raw_descr)
     } else {
-        format!("<p>{}</p>", html_escape(&src.descr))
+        format!("<p>{}</p>", html_escape(&src.raw_descr))
     };
     out.push_str(&format!(
         r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{inner}</span></div></foreignObject></g>"#,
