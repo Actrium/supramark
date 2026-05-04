@@ -40,6 +40,18 @@ pub struct MindmapLayout {
     /// lines, foreign objects in their LOCAL coordinates — transforms
     /// are ignored, matching the jsdom shim's `elementBBox` walk).
     pub content_bbox: BBox,
+    /// Edge endpoints (start, mid, end) in absolute coordinates. Indexed
+    /// by child node index (the edge connects `parent → child`); root
+    /// nodes have `None`. Computed by clipping the centre-to-centre line
+    /// against cytoscape's default 30 × 30 node bbox.
+    pub edges: Vec<Option<EdgePoints>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EdgePoints {
+    pub start: (f64, f64),
+    pub mid: (f64, f64),
+    pub end: (f64, f64),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -66,6 +78,11 @@ pub struct PositionedNode {
     /// Effective shape outer width / height (path / rect dims).
     pub shape_w: f64,
     pub shape_h: f64,
+    /// Union bbox dimensions (shape ∪ foreignObject, transforms ignored —
+    /// matches JSDOM's `getBBox()`). These are the values mermaid feeds
+    /// into cose-bilkent as `data.{width,height}` after `insertNode()`.
+    pub cose_w: f64,
+    pub cose_h: f64,
     /// Node padding after the renderer's per-shape override.
     pub padding: f64,
     /// Section index (`-1` for root, `0..MAX_SECTIONS-1` for sub-trees).
@@ -98,6 +115,7 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         return Ok(MindmapLayout {
             nodes: positioned,
             content_bbox: local,
+            edges: vec![None],
         });
     }
 
@@ -106,12 +124,17 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
     // (reduceTrees / FR-grid / Coarsening pieces still missing), but
     // produces plausible centre coordinates so the renderer can emit a
     // visible diagram for diagnostics.
+    // Feed the union bbox dims (shape ∪ foreignObject) to cose-bilkent —
+    // upstream pulls these from `getBBox()` after inserting the node into
+    // the DOM. Without this, x/y centres drift by tens of pixels because
+    // a default `<g class="label">` extends past the shape outline (it's
+    // anchored at origin, not centred).
     let cose_nodes: Vec<(NodeId, cose_bilkent::RectangleD)> = positioned
         .iter()
         .map(|n| {
             (
                 n.id,
-                cose_bilkent::RectangleD::new(0.0, 0.0, n.shape_w.max(40.0), n.shape_h.max(40.0)),
+                cose_bilkent::RectangleD::new(0.0, 0.0, n.cose_w, n.cose_h),
             )
         })
         .collect();
@@ -131,20 +154,81 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         }
     }
 
-    // Aggregate content bbox in node-local space, then translate it via
-    // each node's centre. Upstream `setupViewPortForSVG` wraps the
-    // entire `<g>` with no transform (mindmap renders absolute coords),
-    // so the bbox is the union of every node's translated local bbox.
+    // Compute edge endpoints. Cytoscape uses its default 30 × 30 node
+    // bbox to anchor edges (since no `width`/`height` style is applied
+    // in the layout-only `styleEnabled: false` setup), so the start /
+    // end are the line's intersection with a 30 × 30 box centred at each
+    // node. Mid is the midpoint of (start, end).
+    let mut edges_out: Vec<Option<EdgePoints>> = vec![None; positioned.len()];
+    for (i, src) in d.nodes.iter().enumerate() {
+        let Some(p) = src.parent else { continue };
+        let pn = &positioned[p];
+        let cn = &positioned[i];
+        let start = clip_to_default_bbox((pn.x, pn.y), (cn.x, cn.y));
+        let end = clip_to_default_bbox((cn.x, cn.y), (pn.x, pn.y));
+        let mid = ((start.0 + end.0) / 2.0, (start.1 + end.1) / 2.0);
+        edges_out[i] = Some(EdgePoints { start, mid, end });
+    }
+
+    // Aggregate content bbox.  JSDOM's `getBBox()` shim ignores transforms
+    // (see generate_ref.mjs::elementBBox), so per-node geometry is read
+    // in node-local coordinates. The content bbox is the UNION of:
+    //   - each node's local bbox (NOT translated by node centre);
+    //   - each edge `<path>`'s control points (which carry absolute
+    //     coordinates, since no transform wraps `<g class="edgePaths">`).
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     for n in &positioned {
         let lb = local_bbox(n);
-        min_x = min_x.min(n.x + lb.x);
-        min_y = min_y.min(n.y + lb.y);
-        max_x = max_x.max(n.x + lb.x + lb.w);
-        max_y = max_y.max(n.y + lb.y + lb.h);
+        min_x = min_x.min(lb.x);
+        min_y = min_y.min(lb.y);
+        max_x = max_x.max(lb.x + lb.w);
+        max_y = max_y.max(lb.y + lb.h);
+    }
+    // The edge `<path>`'s coord text is rounded to 3 decimals by d3-path
+    // (`Math.round(v * 1000) / 1000`); JSDOM's `pathBBox` parses the
+    // string back, so we must mirror that rounding when building the
+    // content bbox — otherwise viewBox dims drift by ~1e-3.
+    for ep in edges_out.iter().flatten() {
+        let (x0, y0) = ep.start;
+        let (x1, y1) = ep.mid;
+        let (x2, y2) = ep.end;
+        // Sample every coord that lands in the path string: M/L start,
+        // first L (5*P0+P1)/6, two C control + dest sets, final L end.
+        let xs = [
+            x0,
+            (5.0 * x0 + x1) / 6.0,
+            (2.0 * x0 + x1) / 3.0,
+            (x0 + 2.0 * x1) / 3.0,
+            (x0 + 4.0 * x1 + x2) / 6.0,
+            (2.0 * x1 + x2) / 3.0,
+            (x1 + 2.0 * x2) / 3.0,
+            (x1 + 5.0 * x2) / 6.0,
+            x2,
+        ];
+        let ys = [
+            y0,
+            (5.0 * y0 + y1) / 6.0,
+            (2.0 * y0 + y1) / 3.0,
+            (y0 + 2.0 * y1) / 3.0,
+            (y0 + 4.0 * y1 + y2) / 6.0,
+            (2.0 * y1 + y2) / 3.0,
+            (y1 + 2.0 * y2) / 3.0,
+            (y1 + 5.0 * y2) / 6.0,
+            y2,
+        ];
+        for x in xs {
+            let xr = (x * 1000.0).round() / 1000.0;
+            min_x = min_x.min(xr);
+            max_x = max_x.max(xr);
+        }
+        for y in ys {
+            let yr = (y * 1000.0).round() / 1000.0;
+            min_y = min_y.min(yr);
+            max_y = max_y.max(yr);
+        }
     }
     let content_bbox = if min_x.is_finite() {
         BBox {
@@ -160,7 +244,32 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
     Ok(MindmapLayout {
         nodes: positioned,
         content_bbox,
+        edges: edges_out,
     })
+}
+
+/// Clip the segment from `from` (kept) towards `to` against a 30 × 30 box
+/// centred at `from`. Returns the intersection on the box boundary in
+/// the direction of `to`. If the segment is degenerate (`from == to`) we
+/// return `from` unchanged.
+fn clip_to_default_bbox(from: (f64, f64), to: (f64, f64)) -> (f64, f64) {
+    const HALF: f64 = 15.0; // cytoscape default node bbox = 30 × 30
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    if dx == 0.0 && dy == 0.0 {
+        return from;
+    }
+    // Parametric: from + t * (dx, dy), find smallest t > 0 hitting one of
+    // the four box edges.
+    let mut t = f64::INFINITY;
+    if dx != 0.0 {
+        let tx = (HALF * dx.signum()) / dx;
+        t = t.min(tx);
+    }
+    if dy != 0.0 {
+        let ty = (HALF * dy.signum()) / dy;
+        t = t.min(ty);
+    }
+    (from.0 + t * dx, from.1 + t * dy)
 }
 
 /// Compute width × height for a node. Mirrors upstream's
@@ -204,6 +313,16 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
         _ => (bbox_w + 8.0 * half_padding, bbox_h + 2.0 * half_padding),
     };
 
+    // Union bbox (shape ∪ foreignObject, transforms ignored — JSDOM
+    // shim semantics). Mermaid feeds these values to cose-bilkent as the
+    // node's `data.{width, height}` after `getBBox()`. Matches:
+    //   * shape: centred at origin → covers `[-shape_w/2, shape_w/2]`
+    //     × `[-shape_h/2, shape_h/2]`.
+    //   * foreignObject: ignored transform → covers `[0, bbox_w]`
+    //     × `[0, bbox_h]`.
+    let cose_w = shape_w / 2.0 + bbox_w.max(shape_w / 2.0);
+    let cose_h = shape_h / 2.0 + bbox_h.max(shape_h / 2.0);
+
     PositionedNode {
         id: n.id,
         x: 0.0,
@@ -212,6 +331,8 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
         bbox_h,
         shape_w,
         shape_h,
+        cose_w,
+        cose_h,
         padding,
         section: section_for(n, d),
     }

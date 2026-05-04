@@ -8,7 +8,8 @@
 //! through `tests/known_ignored.txt`.
 
 use crate::error::{MermaidError, Result};
-use crate::layout::mindmap::{MindmapLayout, PositionedNode, VIEWPORT_PADDING};
+use crate::layout::mindmap::{EdgePoints, MindmapLayout, PositionedNode, VIEWPORT_PADDING};
+use crate::math::js_number::js_number_to_string;
 use crate::model::mindmap::{MindmapDiagram, MindmapNodeType};
 use crate::render::rough::fmt_num;
 use crate::theme::ThemeVariables;
@@ -217,24 +218,28 @@ fn render_multi(
     out.push_str(&build_markers(id));
     out.push_str(r#"<g class="subgraphs"></g>"#);
 
-    // ─── Edges (parent -> child straight lines).
+    // ─── Edges. Emit `<path d="...">` with d3-shape `curveBasis`
+    //     interpolation over the (start, mid, end) control points
+    //     produced by the layout. `data-points` is `btoa(JSON)` of those
+    //     same three points.
     out.push_str(r#"<g class="edgePaths">"#);
     for (i, node) in d.nodes.iter().enumerate() {
         let Some(parent) = node.parent else { continue };
-        let p = &l.nodes[parent];
-        let c = &l.nodes[i];
+        let Some(ep) = l.edges.get(i).and_then(|e| e.as_ref()) else {
+            continue;
+        };
         let section = l.nodes[i].section;
         let edge_id = format!("{id}-edge_{}_{}", parent, i);
+        let d_attr = curve_basis_path(*ep);
+        let points_attr = encode_data_points(*ep);
         out.push_str(&format!(
-            r#"<path d="M{px},{py}L{cx},{cy}" id="{eid}" class=" edge-thickness-normal edge-pattern-solid edge section-edge-{sec} edge-depth-1" style="undefined;;;undefined" data-edge="true" data-et="edge" data-id="edge_{ps}_{cs}" data-look="classic"></path>"#,
-            px = fmt_num(p.x),
-            py = fmt_num(p.y),
-            cx = fmt_num(c.x),
-            cy = fmt_num(c.y),
+            r#"<path d="{d}" id="{eid}" class=" edge-thickness-normal edge-pattern-solid edge section-edge-{sec} edge-depth-1" style="undefined;;;undefined" data-edge="true" data-et="edge" data-id="edge_{ps}_{cs}" data-points="{pts}" data-look="classic"></path>"#,
+            d = d_attr,
             eid = edge_id,
             sec = section,
             ps = parent,
             cs = i,
+            pts = points_attr,
         ));
     }
     out.push_str("</g>");
@@ -777,6 +782,123 @@ impl ThemeName for ThemeVariables {
             _ => "default".to_string(),
         }
     }
+}
+
+/// Emit a SVG `d` attribute matching d3-shape's `curveBasis` for a
+/// 3-point line. Numbers are rounded to 3 decimals via the same
+/// `Math.round(v * 1000) / 1000` rule d3-path uses when `digits = 3`.
+///
+/// The expansion for points `[P0, P1, P2]`:
+///   M P0 L (5*P0+P1)/6 C (2*P0+P1)/3, (P0+2*P1)/3, (P0+4*P1+P2)/6
+///                       C (2*P1+P2)/3, (P1+2*P2)/3, (P1+5*P2)/6
+///                       L P2
+fn curve_basis_path(ep: EdgePoints) -> String {
+    let (x0, y0) = ep.start;
+    let (x1, y1) = ep.mid;
+    let (x2, y2) = ep.end;
+    let mut s = String::with_capacity(160);
+    s.push('M');
+    s.push_str(&js_round3(x0));
+    s.push(',');
+    s.push_str(&js_round3(y0));
+    s.push('L');
+    s.push_str(&js_round3((5.0 * x0 + x1) / 6.0));
+    s.push(',');
+    s.push_str(&js_round3((5.0 * y0 + y1) / 6.0));
+    s.push('C');
+    s.push_str(&js_round3((2.0 * x0 + x1) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((2.0 * y0 + y1) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((x0 + 2.0 * x1) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((y0 + 2.0 * y1) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((x0 + 4.0 * x1 + x2) / 6.0));
+    s.push(',');
+    s.push_str(&js_round3((y0 + 4.0 * y1 + y2) / 6.0));
+    s.push('C');
+    s.push_str(&js_round3((2.0 * x1 + x2) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((2.0 * y1 + y2) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((x1 + 2.0 * x2) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((y1 + 2.0 * y2) / 3.0));
+    s.push(',');
+    s.push_str(&js_round3((x1 + 5.0 * x2) / 6.0));
+    s.push(',');
+    s.push_str(&js_round3((y1 + 5.0 * y2) / 6.0));
+    s.push('L');
+    s.push_str(&js_round3(x2));
+    s.push(',');
+    s.push_str(&js_round3(y2));
+    s
+}
+
+/// `Math.round(v * 1000) / 1000` followed by `Number.toString()`.
+fn js_round3(v: f64) -> String {
+    let r = (v * 1000.0).round() / 1000.0;
+    js_number_to_string(r)
+}
+
+/// Encode `[{"x":..,"y":..}, ...]` as `btoa(...)` for a `data-points`
+/// attribute. JSON uses full-precision JS Number formatting and the
+/// base64 encode is the standard alphabet WITHOUT `=` padding stripped
+/// (matches `btoa` output).
+fn encode_data_points(ep: EdgePoints) -> String {
+    let mut json = String::with_capacity(96);
+    json.push('[');
+    let pts = [ep.start, ep.mid, ep.end];
+    for (i, (x, y)) in pts.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str("{\"x\":");
+        json.push_str(&js_number_to_string(*x));
+        json.push_str(",\"y\":");
+        json.push_str(&js_number_to_string(*y));
+        json.push('}');
+    }
+    json.push(']');
+    base64_encode(json.as_bytes())
+}
+
+/// Standard base64 encode (the alphabet `btoa` uses) WITH `=` padding.
+fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut i = 0;
+    while i + 3 <= input.len() {
+        let a = input[i] as u32;
+        let b = input[i + 1] as u32;
+        let c = input[i + 2] as u32;
+        let n = (a << 16) | (b << 8) | c;
+        out.push(CHARS[((n >> 18) & 0x3f) as usize] as char);
+        out.push(CHARS[((n >> 12) & 0x3f) as usize] as char);
+        out.push(CHARS[((n >> 6) & 0x3f) as usize] as char);
+        out.push(CHARS[(n & 0x3f) as usize] as char);
+        i += 3;
+    }
+    let rem = input.len() - i;
+    if rem == 1 {
+        let a = input[i] as u32;
+        let n = a << 16;
+        out.push(CHARS[((n >> 18) & 0x3f) as usize] as char);
+        out.push(CHARS[((n >> 12) & 0x3f) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let a = input[i] as u32;
+        let b = input[i + 1] as u32;
+        let n = (a << 16) | (b << 8);
+        out.push(CHARS[((n >> 18) & 0x3f) as usize] as char);
+        out.push(CHARS[((n >> 12) & 0x3f) as usize] as char);
+        out.push(CHARS[((n >> 6) & 0x3f) as usize] as char);
+        out.push('=');
+    }
+    out
 }
 
 fn html_escape(s: &str) -> String {
