@@ -62,6 +62,16 @@ pub struct MindmapNode {
     pub class: Option<String>,
 }
 
+/// True when the raw descr text is parsed as an indented code block by
+/// marked.js (any non-empty line starts with 4+ spaces). Upstream's
+/// `markdownToHTML` doesn't handle the `code` token type and falls
+/// through to `node.raw`, so the foreignObject `<span>` ends up
+/// containing the raw text — no `<p>` wrap, no escaping. Renderer and
+/// layout sizing both branch on this.
+pub fn is_indented_block(text: &str) -> bool {
+    text.lines().any(|l| l.starts_with("    ") && !l.trim().is_empty())
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MindmapDiagram {
     pub meta: DiagramMeta,

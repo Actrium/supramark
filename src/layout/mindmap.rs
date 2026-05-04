@@ -17,7 +17,7 @@
 use crate::error::Result;
 use crate::font_metrics::{line_height, text_width};
 use crate::layout::cose_bilkent;
-use crate::model::mindmap::{MindmapDiagram, MindmapNode, MindmapNodeType, NodeId};
+use crate::model::mindmap::{is_indented_block, MindmapDiagram, MindmapNode, MindmapNodeType, NodeId};
 use crate::theme::ThemeVariables;
 
 /// `setupViewPortForSVG` outer padding (mindmap.padding default).
@@ -277,15 +277,23 @@ fn clip_to_default_bbox(from: (f64, f64), to: (f64, f64)) -> (f64, f64) {
 /// `mindmapRenderer.ts` per-shape padding override followed by the
 /// shape-specific `labelHelper` formula.
 fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
-    let (bbox_w, bbox_h) = match n.node_type {
-        MindmapNodeType::Circle | MindmapNodeType::RoundedRect => {
-            measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX)
-        }
-        _ => {
-            let bw = text_width(&n.descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
-            let bh = line_height(SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
-            (bw, bh)
-        }
+    // bbox = JSDOM `getBBox()` shim's `measureTextBlock` over the same
+    // text the renderer emits inside the foreignObject `<span>`. When the
+    // raw text is an indented code block (any line starts with 4+
+    // spaces) markdownToHTML falls through to `node.raw`, so the span
+    // contains `raw_descr` verbatim — measure that. Otherwise the span
+    // wraps `<p>{descr}</p>`, so the displayed text is just `descr`.
+    let (bbox_w, bbox_h) = if is_indented_block(&n.raw_descr) {
+        measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX)
+    } else if matches!(
+        n.node_type,
+        MindmapNodeType::Circle | MindmapNodeType::RoundedRect
+    ) {
+        measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX)
+    } else {
+        let bw = text_width(&n.descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
+        let bh = line_height(SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX, false, false);
+        (bw, bh)
     };
 
     let padding = match n.node_type {

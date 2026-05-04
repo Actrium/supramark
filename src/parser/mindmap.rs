@@ -213,8 +213,9 @@ fn parse_node_token(s: &str) -> (String, String, String, MindmapNodeType) {
         if let Some(close_idx) = s.rfind(']') {
             if close_idx > open_idx {
                 let id = s[..open_idx].trim().to_string();
-                let descr = strip_markdown_quotes(&s[open_idx + 1..close_idx].trim());
-                let raw_descr = descr.clone();
+                let inner = &s[open_idx + 1..close_idx];
+                let descr = strip_markdown_quotes(&inner.trim());
+                let raw_descr = inner.trim_start_matches('\n').to_string();
                 let id = if id.is_empty() { descr.clone() } else { id };
                 return (id, descr, raw_descr, MindmapNodeType::Rect);
             }

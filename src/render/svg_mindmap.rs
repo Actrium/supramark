@@ -10,7 +10,7 @@
 use crate::error::{MermaidError, Result};
 use crate::layout::mindmap::{EdgePoints, MindmapLayout, PositionedNode, VIEWPORT_PADDING};
 use crate::math::js_number::js_number_to_string;
-use crate::model::mindmap::{MindmapDiagram, MindmapNodeType};
+use crate::model::mindmap::{is_indented_block, MindmapDiagram, MindmapNode, MindmapNodeType};
 use crate::render::rough::fmt_num;
 use crate::theme::ThemeVariables;
 
@@ -124,33 +124,7 @@ fn render_single(
 
     emit_shape_body(&mut out, shape, n, &node_dom_id);
 
-    let has_icon = d.nodes[0].icon.is_some();
-    let label_bkg_attr = if has_icon { r#" class="labelBkg""# } else { "" };
-
-    match shape {
-        ShapeKind::Circle | ShapeKind::RoundedRect => {
-            out.push_str(&format!(
-                r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{text}</span></div></foreignObject></g>"#,
-                tx = fmt_num(-n.bbox_w / 2.0),
-                ty = fmt_num(-n.bbox_h / 2.0),
-                w = fmt_num(n.bbox_w),
-                h = fmt_num(n.bbox_h),
-                bkg = label_bkg_attr,
-                text = html_escape(&d.nodes[0].raw_descr),
-            ));
-        }
-        _ => {
-            out.push_str(&format!(
-                r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
-                tx = fmt_num(-n.bbox_w / 2.0),
-                ty = fmt_num(-n.bbox_h / 2.0),
-                w = fmt_num(n.bbox_w),
-                h = fmt_num(n.bbox_h),
-                bkg = label_bkg_attr,
-                text = html_escape(&d.nodes[0].descr),
-            ));
-        }
-    }
+    emit_label(&mut out, &d.nodes[0], shape, n.bbox_w, n.bbox_h);
 
     // Close node g + nodes g + outer g.
     out.push_str("</g></g></g>");
@@ -283,32 +257,7 @@ fn render_multi(
 
         emit_shape_body(&mut out, kind, n, &dom_id);
 
-        let has_icon = src.icon.is_some();
-        let label_bkg_attr = if has_icon { r#" class="labelBkg""# } else { "" };
-        match kind {
-            ShapeKind::Circle | ShapeKind::RoundedRect => {
-                out.push_str(&format!(
-                    r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{text}</span></div></foreignObject></g>"#,
-                    tx = fmt_num(-n.bbox_w / 2.0),
-                    ty = fmt_num(-n.bbox_h / 2.0),
-                    w = fmt_num(n.bbox_w),
-                    h = fmt_num(n.bbox_h),
-                    bkg = label_bkg_attr,
-                    text = html_escape(&src.raw_descr),
-                ));
-            }
-            _ => {
-                out.push_str(&format!(
-                    r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label"><p>{text}</p></span></div></foreignObject></g>"#,
-                    tx = fmt_num(-n.bbox_w / 2.0),
-                    ty = fmt_num(-n.bbox_h / 2.0),
-                    w = fmt_num(n.bbox_w),
-                    h = fmt_num(n.bbox_h),
-                    bkg = label_bkg_attr,
-                    text = html_escape(&src.descr),
-                ));
-            }
-        }
+        emit_label(&mut out, src, kind, n.bbox_w, n.bbox_h);
 
         out.push_str("</g>");
     }
@@ -330,6 +279,36 @@ fn render_multi(
 ///
 /// **Scaffolding only**: bang / cloud / hexagon use simplified geometry
 /// that approximates upstream's path data without matching it byte for
+/// Emit the `<g class="label">` containing the foreignObject + inner
+/// span. Mirrors upstream `createText` → `markdownToHTML` semantics:
+/// when the descr is parsed as an indented code block (any non-empty
+/// line starts with 4+ spaces), `markdownToHTML` falls through to
+/// `node.raw` so the span content is the raw text without `<p>`. For
+/// regular single-line text the span wraps `<p>{descr}</p>`.
+fn emit_label(out: &mut String, src: &MindmapNode, kind: ShapeKind, bbox_w: f64, bbox_h: f64) {
+    let bkg = if src.icon.is_some() {
+        r#" class="labelBkg""#
+    } else {
+        ""
+    };
+    let raw_text_branch = is_indented_block(&src.raw_descr)
+        || matches!(kind, ShapeKind::Circle | ShapeKind::RoundedRect);
+    let span_inner = if raw_text_branch {
+        html_escape(&src.raw_descr)
+    } else {
+        format!("<p>{}</p>", html_escape(&src.descr))
+    };
+    out.push_str(&format!(
+        r#"<g class="label" style="" transform="translate({tx}, {ty})"><rect></rect><foreignObject width="{w}" height="{h}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"{bkg}><span class="nodeLabel markdown-node-label">{inner}</span></div></foreignObject></g>"#,
+        tx = fmt_num(-bbox_w / 2.0),
+        ty = fmt_num(-bbox_h / 2.0),
+        w = fmt_num(bbox_w),
+        h = fmt_num(bbox_h),
+        bkg = bkg,
+        inner = span_inner,
+    ));
+}
+
 /// byte. Sufficient for the renderer to produce non-empty SVG so the
 /// layout pipeline can be diagnosed end-to-end.
 fn emit_shape_body(out: &mut String, kind: ShapeKind, n: &PositionedNode, dom_id: &str) {
