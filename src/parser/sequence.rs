@@ -659,9 +659,17 @@ fn eq_keyword(s: &str, kw: &str) -> bool {
 
 fn split_box_header(s: &str) -> (Option<String>, String) {
     let s = s.trim();
-    if let Some(rest) = s.strip_prefix("rgb(") {
+    // Upstream regex: ^((?:rgba?|hsla?)\s*\(.*\)|\w*)(.*)$
+    // First arm: rgb/rgba/hsl/hsla(...) — includes closing paren.
+    if let Some(rest) = s
+        .strip_prefix("rgb(")
+        .or_else(|| s.strip_prefix("rgba("))
+        .or_else(|| s.strip_prefix("hsl("))
+        .or_else(|| s.strip_prefix("hsla("))
+    {
         if let Some(close) = rest.find(')') {
-            let fill = format!("rgb({}", &rest[..=close]);
+            let prefix_len = s.len() - rest.len();
+            let fill = s[..prefix_len + close + 1].to_string();
             let label = rest[close + 1..].trim().to_string();
             return (Some(fill), label);
         }
@@ -672,7 +680,179 @@ fn split_box_header(s: &str) -> (Option<String>, String) {
         let label = parts.next().unwrap_or("").trim().to_string();
         return (Some(fill), label);
     }
+    // Upstream captures first word (\w*) as color candidate, then
+    // validates it via CSS.supports / Option.style. We approximate with
+    // a known-set check: if the first word is a recognised CSS named
+    // colour, use it as fill; otherwise the whole string is the label
+    // and fill is transparent.
+    let first_word_end = s
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(s.len());
+    if first_word_end > 0 {
+        let candidate = &s[..first_word_end];
+        if is_css_color_name(candidate) {
+            let label = s[first_word_end..].trim().to_string();
+            return (Some(candidate.to_string()), label);
+        }
+    }
     (None, s.to_string())
+}
+
+fn is_css_color_name(name: &str) -> bool {
+    // Subset of CSS named colours that appear in mermaid fixtures.
+    // Full list has 148 entries; extend as needed.
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "aliceblue"
+            | "antiquewhite"
+            | "aqua"
+            | "aquamarine"
+            | "azure"
+            | "beige"
+            | "bisque"
+            | "black"
+            | "blanchedalmond"
+            | "blue"
+            | "blueviolet"
+            | "brown"
+            | "burlywood"
+            | "cadetblue"
+            | "chartreuse"
+            | "chocolate"
+            | "coral"
+            | "cornflowerblue"
+            | "cornsilk"
+            | "crimson"
+            | "cyan"
+            | "darkblue"
+            | "darkcyan"
+            | "darkgoldenrod"
+            | "darkgray"
+            | "darkgreen"
+            | "darkgrey"
+            | "darkkhaki"
+            | "darkmagenta"
+            | "darkolivegreen"
+            | "darkorange"
+            | "darkorchid"
+            | "darkred"
+            | "darksalmon"
+            | "darkseagreen"
+            | "darkslateblue"
+            | "darkslategray"
+            | "darkslategrey"
+            | "darkturquoise"
+            | "darkviolet"
+            | "deeppink"
+            | "deepskyblue"
+            | "dimgray"
+            | "dimgrey"
+            | "dodgerblue"
+            | "firebrick"
+            | "floralwhite"
+            | "forestgreen"
+            | "fuchsia"
+            | "gainsboro"
+            | "ghostwhite"
+            | "gold"
+            | "goldenrod"
+            | "gray"
+            | "green"
+            | "greenyellow"
+            | "grey"
+            | "honeydew"
+            | "hotpink"
+            | "indianred"
+            | "indigo"
+            | "ivory"
+            | "khaki"
+            | "lavender"
+            | "lavenderblush"
+            | "lawngreen"
+            | "lemonchiffon"
+            | "lightblue"
+            | "lightcoral"
+            | "lightcyan"
+            | "lightgoldenrodyellow"
+            | "lightgray"
+            | "lightgreen"
+            | "lightgrey"
+            | "lightpink"
+            | "lightsalmon"
+            | "lightseagreen"
+            | "lightskyblue"
+            | "lightslategray"
+            | "lightslategrey"
+            | "lightsteelblue"
+            | "lightyellow"
+            | "lime"
+            | "limegreen"
+            | "linen"
+            | "magenta"
+            | "maroon"
+            | "mediumaquamarine"
+            | "mediumblue"
+            | "mediumorchid"
+            | "mediumpurple"
+            | "mediumseagreen"
+            | "mediumslateblue"
+            | "mediumspringgreen"
+            | "mediumturquoise"
+            | "mediumvioletred"
+            | "midnightblue"
+            | "mintcream"
+            | "mistyrose"
+            | "moccasin"
+            | "navajowhite"
+            | "navy"
+            | "oldlace"
+            | "olive"
+            | "olivedrab"
+            | "orange"
+            | "orangered"
+            | "orchid"
+            | "palegoldenrod"
+            | "palegreen"
+            | "paleturquoise"
+            | "palevioletred"
+            | "papayawhip"
+            | "peachpuff"
+            | "peru"
+            | "pink"
+            | "plum"
+            | "powderblue"
+            | "purple"
+            | "rebeccapurple"
+            | "red"
+            | "rosybrown"
+            | "royalblue"
+            | "saddlebrown"
+            | "salmon"
+            | "sandybrown"
+            | "seagreen"
+            | "seashell"
+            | "sienna"
+            | "silver"
+            | "skyblue"
+            | "slateblue"
+            | "slategray"
+            | "slategrey"
+            | "snow"
+            | "springgreen"
+            | "steelblue"
+            | "tan"
+            | "teal"
+            | "thistle"
+            | "tomato"
+            | "turquoise"
+            | "violet"
+            | "wheat"
+            | "white"
+            | "whitesmoke"
+            | "yellow"
+            | "yellowgreen"
+            | "transparent"
+    )
 }
 
 fn parse_actor_decl(s: &str, default_type: ActorType, box_index: Option<usize>) -> Actor {

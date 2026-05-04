@@ -28,6 +28,7 @@ struct ActorRender {
     x: f64,
     width: f64,
     height: f64,
+    starty: f64,
     /// 1-based actor counter as upstream's `actorCnt`. Kept for
     /// future fixtures that need self-message / activation IDs.
     cnt: usize,
@@ -179,6 +180,17 @@ impl RectRender {
     }
 }
 
+struct BoxRender {
+    startx: f64,
+    stopx: f64,
+    starty: f64,
+    stopy: f64,
+    fill: String,
+    label: String,
+    text_x: f64,
+    text_y: f64,
+}
+
 const FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 const ACTOR_FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 
@@ -310,10 +322,6 @@ pub fn render(
         })
     }
     if !only_supported_items(&d.items) {
-        return Ok(placeholder(d, id));
-    }
-    // No `box`, no created/destroyed actors.
-    if !d.boxes.is_empty() {
         return Ok(placeholder(d, id));
     }
     if d.actors.iter().any(|a| a.created || a.destroyed) {
@@ -726,13 +734,72 @@ pub fn render(
         actor_margins[i] = m.max(actor_margin);
     }
 
-    // X positions: x_0 = 0; x_{i+1} = x_i + actor.width_i + actor.margin_i.
+    // X positions: mirrors upstream addActorRenderingData actor loop.
+    // When boxes are present, box margins shift actor positions:
+    //   - on box start: prevMargin += box.margin
+    //   - on box end: prevMargin += boxMargin + prevBox.margin
+    //   - actor.x = prevWidth + prevMargin
+    //   - prevWidth += actor.width + prevMargin
+    //   - prevMargin = actor.margin (overwritten)
+    //   - if actor in box: box.width = prevWidth + box.margin - box.x
     let mut xs: Vec<f64> = Vec::with_capacity(n_actors);
+    // Pre-compute per-box margins (upstream calculateActorMargins box loop).
+    let mut box_margins_for_x: Vec<f64> = vec![cfg.box_text_margin; d.boxes.len()];
+    {
+        let text_font_size = cfg.message_font_size as f64;
+        let actor_id_to_idx_local: std::collections::HashMap<&str, usize> = d
+            .actors
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (a.id.as_str(), i))
+            .collect();
+        for (bi, bx) in d.boxes.iter().enumerate() {
+            let mut total_width = 0.0_f64;
+            for actor_id in &bx.actors {
+                if let Some(&idx) = actor_id_to_idx_local.get(actor_id.as_str()) {
+                    total_width += actor_widths[idx] + actor_margins[idx];
+                }
+            }
+            let standard_box_padding = box_margin * 8.0;
+            total_width += standard_box_padding;
+            total_width -= 2.0 * cfg.box_text_margin;
+            let label = bx.label.as_str();
+            let label_w = crate::font_metrics::text_width(
+                label,
+                "sans-serif",
+                text_font_size,
+                false,
+                false,
+            )
+            .round();
+            let min_width = total_width.max(label_w + 2.0 * cfg.wrap_padding);
+            let mut bx_margin = cfg.box_text_margin;
+            if total_width < min_width {
+                bx_margin += (min_width - total_width) / 2.0;
+            }
+            box_margins_for_x[bi] = bx_margin;
+        }
+    }
     {
         let mut cursor = 0.0_f64;
+        let mut prev_margin = 0.0_f64;
+        let mut prev_box_idx: Option<usize> = None;
         for i in 0..n_actors {
-            xs.push(cursor);
-            cursor += actor_widths[i] + actor_margins[i];
+            let cur_box = d.actors[i].box_index;
+            // End of previous box.
+            if prev_box_idx != cur_box {
+                if let Some(pbi) = prev_box_idx {
+                    prev_margin += box_margin + box_margins_for_x[pbi];
+                }
+                // Start of new box.
+                if let Some(cbi) = cur_box {
+                    prev_margin += box_margins_for_x[cbi];
+                }
+            }
+            xs.push(cursor + prev_margin);
+            cursor += actor_widths[i] + prev_margin;
+            prev_margin = actor_margins[i];
+            prev_box_idx = cur_box;
         }
     }
     let actors: Vec<ActorRender> = d
@@ -749,15 +816,158 @@ pub fn render(
             x: xs[i],
             width: actor_widths[i],
             height: actor_h,
+            starty: if !d.boxes.is_empty() {
+                let tf_size = cfg.message_font_size as f64;
+                let max_bth = d.boxes.iter().map(|bx| {
+                    crate::font_metrics::line_height("sans-serif", tf_size, false, false).round()
+                }).fold(0.0_f64, f64::max);
+                box_margin + if d.boxes.iter().any(|b| !b.label.is_empty()) { max_bth } else { 0.0 }
+            } else { 0.0 },
             cnt: i + 1,
             links: a.links.clone(),
             class_name: a.class_name.clone(),
         })
         .collect();
 
+    // ── Box geometry (upstream calculateActorMargins + drawActors) ───
+    //
+    // For each box, compute x/width/margin/textMaxHeight from the actors
+    // it contains. Mirrors upstream's `calculateActorMargins` box loop:
+    //   totalWidth = sum(actor.width + actor.margin for actors in box)
+    //              + 8*boxMargin - 2*boxTextMargin
+    //   boxMsgDimensions = calculateTextDimensions(box.name, textFont)
+    //   minWidth = max(totalWidth, boxMsgDimensions.width + 2*wrapPadding)
+    //   box.margin = boxTextMargin + max(0, (minWidth - totalWidth) / 2)
+    //   box.textMaxHeight = max across all boxes of boxMsgDimensions.height
+    //
+    // Then in addActorRenderingData:
+    //   box.x = prevWidth + prevMargin  (at first actor in box)
+    //   box.width = prevWidth_at_last + box.margin - box.x
+    //
+    // After drawActors loop:
+    //   box.height = verticalPos - box.y
+    //   boxPadding = boxMargin * 2
+    //   box.startx = box.x - boxPadding
+    //   box.starty = box.y - boxPadding * 0.25
+    //   box.stopx = box.startx + box.width + 2 * boxPadding
+    //   box.stopy = box.starty + box.height + boxPadding * 0.75
+    //
+    // drawBox renders: rect(x=startx, y=starty, width=stopx-startx,
+    //   height=stopy-starty, fill=box.fill||'transparent',
+    //   stroke='rgb(0,0,0, 0.5)', class='rect')
+    //   text(x=box.x+box.width/2,
+    //        y=box.y+boxTextMargin+textMaxHeight/2,
+    //        class='text')
+    let mut box_renders: Vec<BoxRender> = Vec::new();
+    let has_boxes = !d.boxes.is_empty();
+    // Compute max_box_text_height (needed for hasBoxes vertical bump).
+    let max_box_text_height = if has_boxes {
+        let text_font_size = cfg.message_font_size as f64;
+        let mut h = 0.0_f64;
+        for bx in &d.boxes {
+            let label_h =
+                crate::font_metrics::line_height("sans-serif", text_font_size, false, false)
+                    .round();
+            if label_h > h {
+                h = label_h;
+            }
+        }
+        h
+    } else {
+        0.0
+    };
+
+    // ── hasBoxes vertical bump (upstream sequenceRenderer.ts:1070-1075) ─
+    //
+    // When boxes are present, upstream bumps verticalPos by boxMargin and
+    // then by textMaxHeight (the max box label text height). This shifts
+    // the actor top rects and the box.y origin down.
+    let has_box_titles = has_boxes && d.boxes.iter().any(|b| !b.label.is_empty());
+    let box_y = if has_boxes {
+        box_margin + if has_box_titles { max_box_text_height } else { 0.0 }
+    } else {
+        0.0
+    };
+
+    if has_boxes {
+
+        // Compute box.x and box.width from actor positions.
+        // Upstream: box.x = prevWidth + prevMargin when first actor in box
+        // is encountered. box.width = prevWidth_at_last_actor + box.margin - box.x.
+        // We replicate by walking actors in order and tracking the running
+        // prevWidth (sum of widths + margins so far) and prevMargin.
+        let mut prev_width = 0.0_f64;
+        let mut prev_margin = 0.0_f64;
+        let mut prev_box_idx: Option<usize> = None;
+        // We'll store (x, width, margin, label, fill) for each box.
+        let mut box_geom: Vec<(f64, f64, f64, String, String)> =
+            vec![(0.0, 0.0, 0.0, String::new(), String::new()); d.boxes.len()];
+        // Track which boxes have had their x set.
+        let mut box_x_set = vec![false; d.boxes.len()];
+
+        for (i, a) in d.actors.iter().enumerate() {
+            let cur_box = a.box_index;
+            // End of previous box.
+            if prev_box_idx != cur_box {
+                if let Some(pbi) = prev_box_idx {
+                    prev_margin += box_margin + box_margins_for_x[pbi];
+                }
+                // Start of new box.
+                if let Some(cbi) = cur_box {
+                    if !box_x_set[cbi] {
+                        box_geom[cbi].0 = prev_width + prev_margin;
+                        box_x_set[cbi] = true;
+                    }
+                    prev_margin += box_margins_for_x[cbi];
+                }
+            }
+            prev_width += actor_widths[i] + prev_margin;
+            if let Some(cbi) = cur_box {
+                box_geom[cbi].1 = prev_width + box_margins_for_x[cbi] - box_geom[cbi].0;
+                box_geom[cbi].2 = box_margins_for_x[cbi];
+                box_geom[cbi].3 = d.boxes[cbi].label.clone();
+                box_geom[cbi].4 = d.boxes[cbi]
+                    .fill
+                    .clone()
+                    .unwrap_or_else(|| "transparent".to_string());
+            }
+            prev_margin = actor_margins[i];
+            prev_box_idx = cur_box;
+        }
+
+        // box.y = 0 in upstream (addActorRenderingData receives
+        // verticalPos=0). The hasBoxes bump only affects
+        // actor.starty, not box.y.
+        let bx_y = 0.0_f64;
+        // box.height will be set later after vertical pass.
+        // We store partial geometry and finalize after the vertical pass.
+        for (bi, (bx_x, bx_w, _bx_margin, label, fill)) in
+            box_geom.into_iter().enumerate()
+        {
+            let box_padding = box_margin * 2.0;
+            let startx = bx_x - box_padding;
+            let starty = bx_y - box_padding * 0.25;
+            let stopx = startx + bx_w + 2.0 * box_padding;
+            // stopy will be set later — use placeholder.
+            let text_x = bx_x + bx_w / 2.0;
+            let text_y = bx_y + cfg.box_text_margin + max_box_text_height / 2.0;
+            box_renders.push(BoxRender {
+                startx,
+                starty,
+                stopx,
+                stopy: 0.0,
+                fill,
+                label,
+                text_x,
+                text_y,
+            });
+        }
+    }
+
     // Vertical pass: emulate boundMessage on each message.
-    // Initial: vertical = 0, then bumpVerticalPos(actor_h) → vertical = actor_h.
-    let mut vertical = actor_h;
+    // Initial: vertical = box_y + actor_h (box_y is 0 for no-box diagrams,
+    // or boxMargin + textMaxHeight for box diagrams).
+    let mut vertical = box_y + actor_h;
     let line_height = compute_message_line_height(cfg.message_font_size as f64);
 
     let mut messages: Vec<MsgRender> = Vec::new();
@@ -2405,6 +2615,19 @@ pub fn render(
         (vertical, vertical)
     };
 
+    // Finalize box stopy. Upstream sequenceRenderer.ts:1386:
+    //   box.height = bounds.getVerticalPos() - box.y
+    //   boxPadding = boxMargin * 2
+    //   box.starty = box.y - boxPadding * 0.25
+    //   box.stopy = box.starty + box.height + boxPadding * 0.75
+    // bounds.getVerticalPos() at this point = box_stopy.
+    let has_boxes = !box_renders.is_empty();
+    for br in &mut box_renders {
+        let box_y = br.starty + box_margin * 2.0 * 0.25;
+        let box_height = box_stopy - box_y;
+        br.stopy = br.starty + box_height + (box_margin * 2.0) * 0.75;
+    }
+
     // ── viewBox + size ──────────────────────────────────────────────
     // upstream:
     //   width = (box.stopx - box.startx) + 2 * diagramMarginX
@@ -2419,6 +2642,12 @@ pub fn render(
     let box_width = bounds_stopx - bounds_startx;
     let svg_width = box_width + 2.0 * dia_margin_x;
     let mut svg_height = box_stopy + 2.0 * dia_margin_y;
+    // When boxes are present, upstream bumps verticalPos by boxMargin
+    // after box finalisation (sequenceRenderer.ts:1390). This extra
+    // height feeds into the SVG dimensions.
+    if has_boxes {
+        svg_height += box_margin;
+    }
     if mirror {
         svg_height = svg_height - box_margin + bottom_margin_adj;
     }
@@ -2480,6 +2709,39 @@ pub fn render(
         out.push_str("\">");
         out.push_str(&xml_escape(dsc));
         out.push_str("</desc>");
+    }
+
+    // Box rects — emit BEFORE background rects so they sit at the
+    // bottom of the visual stack. Upstream iterates boxes in forward
+    // order, each drawBox calls g.lower() which pushes it to the front
+    // of the DOM — so the LAST box in iteration order appears FIRST
+    // in the DOM. We iterate in REVERSE to match this (each lowered
+    // box pushes earlier ones down, so reverse iteration + sequential
+    // output mirrors the lower-stack DOM order).
+    for br in box_renders.iter().rev() {
+        out.push_str("<g><rect x=\"");
+        push_num(&mut out, br.startx);
+        out.push_str("\" y=\"");
+        push_num(&mut out, br.starty);
+        out.push_str("\" fill=\"");
+        out.push_str(&br.fill);
+        out.push_str("\" stroke=\"rgb(0,0,0, 0.5)\" width=\"");
+        push_num(&mut out, br.stopx - br.startx);
+        out.push_str("\" height=\"");
+        push_num(&mut out, br.stopy - br.starty);
+        out.push_str("\" class=\"rect\"></rect>");
+        if !br.label.is_empty() {
+            out.push_str("<text x=\"");
+            push_num(&mut out, br.text_x);
+            out.push_str("\" y=\"");
+            push_num(&mut out, br.text_y);
+            out.push_str("\" style=\"text-anchor: middle; font-size: 16px; font-weight: 400; font-family: &quot;trebuchet ms&quot;, verdana, arial;\" dominant-baseline=\"central\" alignment-baseline=\"central\" class=\"text\"><tspan x=\"");
+            push_num(&mut out, br.text_x);
+            out.push_str("\" dy=\"0\">");
+            out.push_str(&xml_escape(&br.label));
+            out.push_str("</tspan></text>");
+        }
+        out.push_str("</g>");
     }
 
     // Background rects — emit BEFORE everything else so they sit at
@@ -3337,7 +3599,7 @@ fn emit_actor_database_top_group(
     let body_h = h3 - 2.0 * ry;
     // Lifeline centerY = actor_y + actor.height + 2 * boxTextMargin
     // = 0 + a.height + 10. For default config a.height=65 → centery=75.
-    let centery = a.height + 10.0;
+    let centery = a.starty + a.height + 10.0;
 
     // Outer <g>: popup (`onclick`) wrapper if links present; plain otherwise.
     if popup {
@@ -3518,7 +3780,7 @@ fn emit_actor_queue_top_group(
     popup: bool,
 ) {
     let center = a.x + a.width / 2.0;
-    let centery = a.height; // actor_y=0 + actor.height
+    let centery = a.starty + a.height; // actor_y=0 + actor.height
 
     if popup {
         push_popup_g_open(out, rank);
@@ -3646,7 +3908,7 @@ fn emit_actor_collections_top_group(
     popup: bool,
 ) {
     let center = a.x + a.width / 2.0;
-    let centery = a.height;
+    let centery = a.starty + a.height;
 
     if popup {
         push_popup_g_open(out, rank);
@@ -4171,8 +4433,8 @@ fn emit_actor_top_participant(
 ) {
     let _ = a.cnt;
     let cx = a.x + a.width / 2.0;
-    let centery = a.height; // actorY=0 + actor.height
-    let top_y = 0.0;
+    let centery = a.starty + a.height;
+    let top_y = a.starty;
     if popup {
         push_popup_g_open(out, rank);
     } else {
