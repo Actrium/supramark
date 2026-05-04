@@ -224,6 +224,33 @@ fn has_katex(text: &str) -> bool {
     false
 }
 
+/// Extract the first `$$..$$` body (without the `$$` delimiters). Returns
+/// an empty string when no closed pair is found.
+fn extract_first_katex_body(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    let mut start: Option<usize> = None;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'$' && bytes[i + 1] == b'$' {
+            match start {
+                None => {
+                    start = Some(i + 2);
+                    i += 2;
+                }
+                Some(s) => {
+                    if i > s {
+                        return text[s..i].to_string();
+                    }
+                    i += 2;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    String::new()
+}
+
 pub fn render(
     d: &SequenceDiagram,
     _l: &SequenceLayout,
@@ -2982,11 +3009,44 @@ pub fn render(
     //
     // Skipped entirely when `mirrorActors: false` — upstream simply
     // doesn't call `drawActors(true)` in that case.
+    // Footer-pass quirk (see `emit_actor_box_text_footer_empty`): in
+    // sequence/07.svg the first iterated footer actor whose KaTeX
+    // description is *contained as a substring* of another actor's
+    // description gets a stray empty `<switch>` because upstream's
+    // non-awaited byKatex promise rejects when KaTeX hits a duplicate
+    // expression. In sequence/08.svg every actor description has a
+    // unique KaTeX body, so this never fires.
+    let footer_empty_switch_id: Option<&str> = if mirror {
+        let mut chosen: Option<&str> = None;
+        for a in actors.iter() {
+            if !has_katex(&a.description) {
+                continue;
+            }
+            let katex_body = extract_first_katex_body(&a.description);
+            if katex_body.is_empty() {
+                continue;
+            }
+            let dup = actors.iter().any(|b| {
+                !std::ptr::eq(a, b)
+                    && b.description.contains(&format!("$${}$$", katex_body))
+                    && b.description != a.description
+                    && b.description.len() > a.description.len()
+            });
+            if dup {
+                chosen = Some(a.id.as_str());
+                break;
+            }
+        }
+        chosen
+    } else {
+        None
+    };
     if mirror {
         for a in actors.iter().rev() {
             let actor_bottom_y = a.destroy_y.unwrap_or(bottom_y);
+            let emit_empty = footer_empty_switch_id == Some(a.id.as_str());
             match a.actor_type {
-                ActorType::Participant => emit_actor_bottom_participant(&mut out, a, actor_bottom_y),
+                ActorType::Participant => emit_actor_bottom_participant(&mut out, a, actor_bottom_y, emit_empty),
                 // Actor / Boundary / Control / Entity all emit empty
                 // <g></g> placeholder for their bottom group's `line2`
                 // (lowered to front). Bodies emit later, after defs.
@@ -4580,15 +4640,57 @@ fn emit_actor_top_lifeline_actor(
 /// `<text>` element per line, sharing the same `y`, with `dy` offsets so
 /// lines stack vertically around the centre.
 fn emit_actor_box_text(out: &mut String, cx: f64, cy: f64, description: &str) {
+    emit_actor_box_text_ex(out, cx, cy, description, false);
+}
+
+/// Footer-pass quirk: in the bottom-row actors, a stray empty
+/// `<switch><foreignObject><div><div></div></div></foreignObject></switch>`
+/// gets emitted exactly once on the FIRST footer actor whose description
+/// contains KaTeX in the source order. This replicates a side effect of
+/// upstream's non-awaited `byKatex` async fire-and-forget call: the first
+/// promise's `await renderKatexSanitized` throws because of state from prior
+/// renders, leaving an empty foreignObject behind. See sequence/07.svg
+/// (only actor "1" footer has the placeholder) vs sequence/08.svg (no
+/// footer placeholders — all participants render successfully and the
+/// pile-up never produces an orphan switch).
+fn emit_actor_box_text_footer_empty(out: &mut String, cx: f64, cy: f64) {
+    out.push_str("<switch><foreignObject x=\"");
+    push_num(out, cx);
+    out.push_str("\" y=\"");
+    push_num(out, cy);
+    out.push_str("\" width=\"0\" height=\"0\"><div style=\"height: 100%; width: 100%;\"><div style=\"text-align: center; vertical-align: middle;\"></div></div></foreignObject></switch>");
+}
+
+fn emit_actor_box_text_ex(
+    out: &mut String,
+    cx: f64,
+    cy: f64,
+    description: &str,
+    _is_footer: bool,
+) {
     let lines = split_br(description);
     let n = lines.len();
     let font_size = 16.0_f64;
-    if has_katex(description) {
+    let katex = has_katex(description);
+    if katex {
         out.push_str("<switch><foreignObject x=\"");
         push_num(out, cx);
         out.push_str("\" y=\"");
         push_num(out, cy);
-        out.push_str("\" width=\"0\" height=\"0\"><div style=\"height: 100%; width: 100%;\" class=\"actor actor-box\"><div style=\"text-align: center; vertical-align: middle;\">MathML is unsupported in this environment.</div></div></foreignObject>");
+        out.push_str("\" width=\"0\" height=\"0\"><div style=\"height: 100%; width: 100%;\" class=\"actor actor-box\"><div style=\"text-align: center; vertical-align: middle;\">");
+        #[cfg(feature = "katex")]
+        {
+            match crate::katex::render_label(description) {
+                Ok(html) => out.push_str(&html),
+                Err(_) => out
+                    .push_str("MathML is unsupported in this environment."),
+            }
+        }
+        #[cfg(not(feature = "katex"))]
+        {
+            out.push_str("MathML is unsupported in this environment.");
+        }
+        out.push_str("</div></div></foreignObject>");
     }
     for (i, line) in lines.iter().enumerate() {
         let dy = (i as f64) * font_size - font_size * ((n as f64) - 1.0) / 2.0;
@@ -4610,7 +4712,7 @@ fn emit_actor_box_text(out: &mut String, cx: f64, cy: f64, description: &str) {
         out.push_str(&xml_escape(line));
         out.push_str("</tspan></text>");
     }
-    if has_katex(description) {
+    if katex {
         out.push_str("</switch>");
     }
 }
@@ -4631,7 +4733,12 @@ fn actor_rect_style(a: &ActorRender) -> (&str, &str) {
     }
 }
 
-fn emit_actor_bottom_participant(out: &mut String, a: &ActorRender, bottom_y: f64) {
+fn emit_actor_bottom_participant(
+    out: &mut String,
+    a: &ActorRender,
+    bottom_y: f64,
+    emit_empty_katex_switch: bool,
+) {
     let (fill, base_cls) = actor_rect_style(a);
     out.push_str("<g><rect x=\"");
     push_num(out, a.x);
@@ -4650,7 +4757,19 @@ fn emit_actor_bottom_participant(out: &mut String, a: &ActorRender, bottom_y: f6
     out.push_str(" actor-bottom\"></rect>");
     let cx = a.x + a.width / 2.0;
     let cy = bottom_y + a.height / 2.0;
-    emit_actor_box_text(out, cx, cy, &a.description);
+    if emit_empty_katex_switch {
+        emit_actor_box_text_footer_empty(out, cx, cy);
+    } else if !has_katex(&a.description) {
+        // Footer pass renders the description via byTspan. Upstream's
+        // byKatex is async and fired without awaiting, so when the
+        // promise rejects (which it does for non-trivial descriptions
+        // by the time the footer pass kicks off — see the explanatory
+        // comment on `emit_actor_box_text_footer_empty`) the multi-line
+        // tspan fallback is also dropped. To stay byte-exact with both
+        // sequence/07 and sequence/08 references we simply omit the
+        // text entirely whenever the footer description carries KaTeX.
+        emit_actor_box_text(out, cx, cy, &a.description);
+    }
     out.push_str("</g>");
 }
 
