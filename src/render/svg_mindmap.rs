@@ -291,8 +291,14 @@ fn emit_label(out: &mut String, src: &MindmapNode, kind: ShapeKind, bbox_w: f64,
     } else {
         ""
     };
-    let raw_text_branch = is_indented_block(&src.raw_descr)
-        || matches!(kind, ShapeKind::Circle | ShapeKind::RoundedRect);
+    // Mirror upstream `markdownToHTML` paragraph-vs-code branching:
+    // markdown-rendered text without an indented-code-block trigger ends
+    // up in a `<p>...</p>` wrapper. Indented code blocks (any non-empty
+    // line starts with 4+ spaces) fall through to `node.raw`, so the
+    // span content is the raw text. Shape kind alone is NOT the
+    // discriminator — `((mindmap))` and `((\n  The root\n))` are both
+    // Circle but render differently.
+    let raw_text_branch = is_indented_block(&src.raw_descr);
     let span_inner = if raw_text_branch {
         html_escape(&src.raw_descr)
     } else {
