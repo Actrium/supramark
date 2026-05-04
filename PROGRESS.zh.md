@@ -1,16 +1,19 @@
 # 阶段进展
 
-截至 2026-05-04，Wave 16-C 完结。
+截至 2026-05-04，KaTeX wave 完结。
 
-**当前指标：1298 / 1323 byte-exact（约 98.0%）**。
+**当前指标：1306 / 1323 byte-exact（约 98.7%，启用 `--features katex`；不启用为 1298）**。
 
-- 1298 = 1289（W15-EE 入手点）+9：
-  - W16-A（fixture 27 bidirectional bounds.insert line endpoints）+1
-  - W16-B（mindmap Circle + RoundedRect single-node）+2
-  - W16-C（sequence box 渲染 + create/destroy 渲染 + typed-actor y-offset）+6
+- 1306 = 1298 + 8（KaTeX wave）：
+  - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
+  - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
+  - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
+  - W-KaTeX-D：sequence note/message/loop label KaTeX → 07/08 byte-exact（commit `e40d1c5`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
 - 1323 = sweep_all fixture 总数
-- 差额 25 = mindmap 15(cose-bilkent) + demos/mindmap 1 + demos/flowchart 6(KaTeX) + demos/sequence 3
+- 差额 17 = mindmap 15(cose-bilkent) + demos/mindmap 1 + demos/sequence/05 (box label width, 非 KaTeX)
+
+**KaTeX 路线关键约束**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖，验证通过；DOMPurify 等价由 Rust 重写（strip_annotation / strip_semantics / expand_self_closing / nbsp_to_entity）。Cargo `katex` feature gates 整个流水线，关闭时不影响默认 build。
 
 W16-A 子 agent 实现了 sequence box + create/destroy 渲染骨架，但因改动过大引入严重回归（134→9/140），已全部回滚到 68dee74。W16-C 重新增量实现，逐 commit 推进，最终达到 140/140 无回归。
 
