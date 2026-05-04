@@ -38,6 +38,14 @@ struct ActorRender {
     /// `Some`, the main actor rect uses `<class> actor-{top,bottom}` and
     /// a `#EDF2AE` fill in place of the default `actor` / `#eaeaea`.
     class_name: Option<String>,
+    /// Y offset for actors created mid-diagram via `create participant`.
+    /// `None` for normal actors (y=0 or y=box_y); `Some(y)` for created
+    /// actors whose top group starts at `y`.
+    create_y: Option<f64>,
+    /// Y position where the lifeline stops for `destroy`ed actors.
+    /// `None` means the lifeline extends to `bottom_y`; `Some(y)` means
+    /// the lifeline `<line y2>` ends at `y`.
+    destroy_y: Option<f64>,
 }
 
 /// Information collected per-message for the render pass.
@@ -318,15 +326,14 @@ pub fn render(
             // a `<rect class="activationN">` rectangle. Mirrors upstream
             // sequenceRenderer.ts:1145-1156 (ACTIVE_START / ACTIVE_END).
             DiagramItem::Activate(_) | DiagramItem::Deactivate(_) => true,
+            DiagramItem::Create(_) | DiagramItem::Destroy(_) => true,
             _ => false,
         })
     }
     if !only_supported_items(&d.items) {
         return Ok(placeholder(d, id));
     }
-    if d.actors.iter().any(|a| a.created || a.destroyed) {
-        return Ok(placeholder(d, id));
-    }
+    
     // Need at least one actor. Empty items list is valid — just renders
     // the actor box(es) without any messages.
     if d.actors.is_empty() {
@@ -802,7 +809,7 @@ pub fn render(
             prev_box_idx = cur_box;
         }
     }
-    let actors: Vec<ActorRender> = d
+    let mut actors: Vec<ActorRender> = d
         .actors
         .iter()
         .enumerate()
@@ -826,6 +833,8 @@ pub fn render(
             cnt: i + 1,
             links: a.links.clone(),
             class_name: a.class_name.clone(),
+            create_y: if a.created { Some(0.0) } else { None },
+            destroy_y: if a.destroyed { Some(0.0) } else { None },
         })
         .collect();
 
@@ -1086,6 +1095,16 @@ pub fn render(
     // when placed `left of` / `right of` the leftmost / rightmost actor.
     let mut bounds_startx: f64 = 0.0;
     let mut bounds_stopx: f64 = actors.last().map(|a| a.x + a.width).unwrap_or(0.0);
+    // Upstream calls bounds.insert(box.x, box.y, box.x+box.width, box.height)
+    // for each box directive, which can expand bounds.stopx beyond the last
+    // actor's right edge. The inner box stopx = br.stopx - box_padding.
+    let box_padding = box_margin * 2.0;
+    for br in &box_renders {
+        let inner_stopx = br.stopx - box_padding;
+        if inner_stopx > bounds_stopx {
+            bounds_stopx = inner_stopx;
+        }
+    }
     // `msg_id_counter` mirrors upstream's `messages.length` at the time
     // each event is pushed — both real messages AND synthetic
     // `centralConnection` / `centralConnectionReverse` signals consume
@@ -1664,6 +1683,28 @@ pub fn render(
                 .map(|(i, _)| i)
             {
                 layout_activations.remove(li);
+            }
+            continue;
+        }
+        // ── Create / Destroy items ──────────────────────────────────
+        //
+        // Mirrors upstream CREATE_START / ACTIVE_END (destroy) dispatch.
+        // CREATE_START bumps verticalPos by boxMargin, then captures the
+        // bumped position as the created actor's y offset (their top rect
+        // / body starts at that y instead of y=0). ACTIVE_END (destroy)
+        // captures the current verticalPos as the lifeline termination
+        // point — the destroyed actor's lifeline <line y2> ends there.
+        if let DiagramItem::Create(actor) = item {
+            vertical += box_margin;
+            if let Some(ar) = actors.iter_mut().find(|a| a.id == actor.id) {
+                ar.create_y = Some(vertical);
+                ar.starty = vertical;
+            }
+            continue;
+        }
+        if let DiagramItem::Destroy(ref actor_id) = item {
+            if let Some(ar) = actors.iter_mut().find(|a| a.id == *actor_id) {
+                ar.destroy_y = Some(vertical);
             }
             continue;
         }
@@ -2769,8 +2810,9 @@ pub fn render(
     // doesn't call `drawActors(true)` in that case.
     if mirror {
         for a in actors.iter().rev() {
+            let actor_bottom_y = a.destroy_y.unwrap_or(bottom_y);
             match a.actor_type {
-                ActorType::Participant => emit_actor_bottom_participant(&mut out, a, bottom_y),
+                ActorType::Participant => emit_actor_bottom_participant(&mut out, a, actor_bottom_y),
                 // Actor / Boundary / Control / Entity all emit empty
                 // <g></g> placeholder for their bottom group's `line2`
                 // (lowered to front). Bodies emit later, after defs.
@@ -2782,10 +2824,10 @@ pub fn render(
                 // upstream `drawActorTypeXxx` appends body shape + text
                 // directly inside the lowered `<g>` instead of emitting a
                 // body group later. So we emit the complete body here.
-                ActorType::Database => emit_actor_database_bottom_group(&mut out, a, bottom_y),
-                ActorType::Queue => emit_actor_queue_bottom_group(&mut out, a, bottom_y),
+                ActorType::Database => emit_actor_database_bottom_group(&mut out, a, actor_bottom_y),
+                ActorType::Queue => emit_actor_queue_bottom_group(&mut out, a, actor_bottom_y),
                 ActorType::Collections => {
-                    emit_actor_collections_bottom_group(&mut out, a, bottom_y)
+                    emit_actor_collections_bottom_group(&mut out, a, actor_bottom_y)
                 }
                 _ => unreachable!("gated above"),
             }
@@ -2804,7 +2846,7 @@ pub fn render(
     // mirrorActors=false the upstream `fixLifeLineHeights` skips the
     // y2 rewrite (actor.stopy is undefined), so the value stays at the
     // initial 2000 default that drawActorType* assigned.
-    let lifeline_y2 = if mirror { bottom_y } else { 2000.0 };
+    let lifeline_y2_default = if mirror { bottom_y } else { 2000.0 };
     let force_menus = d.config.force_menus;
     // Database / Queue / Collections `root-N` ids are renumbered by the
     // reference normaliser (`generate_ref.mjs:counterRules`) per first-DOM-
@@ -2824,6 +2866,7 @@ pub fn render(
         // is set — instead, the `<g id="actorN_popup">` block emits with
         // `display="block !important"` later (see emit_actor_popup).
         let popup = !a.links.is_empty() && !force_menus;
+        let lifeline_y2 = a.destroy_y.unwrap_or(lifeline_y2_default);
         match a.actor_type {
             ActorType::Participant => {
                 emit_actor_top_participant(
@@ -2840,10 +2883,11 @@ pub fn render(
             // emits later after defs. Lifeline `<g><line id="actorN" .../></g>`
             // is identical to Actor (centerY = actor.height + 15 = 80).
             ActorType::Actor | ActorType::Boundary => {
+                let centery = a.create_y.unwrap_or(a.starty) + a.height + 15.0;
                 emit_actor_top_lifeline_actor(
                     &mut out,
                     a,
-                    a.height + 15.0,
+                    centery,
                     lifeline_y2,
                     rank,
                     popup,
@@ -2853,7 +2897,8 @@ pub fn render(
             // actor.height + 15). Same `<g><line .../></g>` shape, body
             // emits later after defs.
             ActorType::Control | ActorType::Entity => {
-                emit_actor_top_lifeline_actor(&mut out, a, 75.0, lifeline_y2, rank, popup)
+                let centery = a.create_y.unwrap_or(a.starty) + 75.0;
+                emit_actor_top_lifeline_actor(&mut out, a, centery, lifeline_y2, rank, popup)
             }
             // Database / Queue / Collections: lifeline + root-N wrapper +
             // body shape + text packed inside a SINGLE outer <g> (upstream's
@@ -3019,20 +3064,21 @@ pub fn render(
     // Database is NOT in this loop — its body is fully embedded inside the
     // top group emitted earlier.
     for (i, a) in actors.iter().enumerate() {
+        let top_actor_y = a.create_y.unwrap_or(a.starty);
         match a.actor_type {
             ActorType::Actor => {
                 let (torso_id, arms_id) = stick_ids.top[i];
-                emit_actor_man_body(&mut out, a, 0.0, false, torso_id, arms_id);
+                emit_actor_man_body(&mut out, a, top_actor_y, false, torso_id, arms_id);
             }
             ActorType::Boundary => {
                 let (torso_id, arms_id) = stick_ids.top[i];
-                emit_actor_boundary_body(&mut out, a, 0.0, false, torso_id, arms_id);
+                emit_actor_boundary_body(&mut out, a, top_actor_y, false, torso_id, arms_id);
             }
             ActorType::Control => {
-                emit_actor_control_body(&mut out, a, 0.0, false, id);
+                emit_actor_control_body(&mut out, a, top_actor_y, false, id);
             }
             ActorType::Entity => {
-                emit_actor_entity_body(&mut out, a, 0.0, false);
+                emit_actor_entity_body(&mut out, a, top_actor_y, false);
             }
             _ => continue,
         }
@@ -3048,20 +3094,21 @@ pub fn render(
     // loop — its body is fully embedded inside the bottom group.
     if mirror {
         for (i, a) in actors.iter().enumerate() {
+            let actor_bottom_y = a.destroy_y.unwrap_or(bottom_y);
             match a.actor_type {
                 ActorType::Actor => {
                     let (torso_id, arms_id) = stick_ids.bottom[i];
-                    emit_actor_man_body(&mut out, a, bottom_y, true, torso_id, arms_id);
+                    emit_actor_man_body(&mut out, a, actor_bottom_y, true, torso_id, arms_id);
                 }
                 ActorType::Boundary => {
                     let (torso_id, arms_id) = stick_ids.bottom[i];
-                    emit_actor_boundary_body(&mut out, a, bottom_y, true, torso_id, arms_id);
+                    emit_actor_boundary_body(&mut out, a, actor_bottom_y, true, torso_id, arms_id);
                 }
                 ActorType::Control => {
-                    emit_actor_control_body(&mut out, a, bottom_y, true, id);
+                    emit_actor_control_body(&mut out, a, actor_bottom_y, true, id);
                 }
                 ActorType::Entity => {
-                    emit_actor_entity_body(&mut out, a, bottom_y, true);
+                    emit_actor_entity_body(&mut out, a, actor_bottom_y, true);
                 }
                 _ => continue,
             }
@@ -3643,7 +3690,7 @@ fn emit_actor_database_top_group(
     out.push_str(")\"><path d=\"\n  M ");
     push_num(out, a.x);
     out.push(',');
-    push_num(out, ry);
+    push_num(out, a.starty + ry);
     out.push_str("\n  a ");
     push_num(out, rx);
     out.push(',');
@@ -3669,7 +3716,7 @@ fn emit_actor_database_top_group(
     out.push_str("\n\"></path></g>");
 
     // Text inside g2 (the root-N <g>). Top-pass: uses INITIAL actor.height.
-    let text_y = 35.0 + a.height / 2.0;
+    let text_y = a.starty + 35.0 + a.height / 2.0;
     emit_actor_box_text(out, center, text_y, &a.description);
 
     // Close root-N and outer <g>.
@@ -3814,10 +3861,10 @@ fn emit_actor_queue_top_group(
     out.push_str("\">");
 
     // Body paths
-    emit_actor_queue_body_paths(out, a, 0.0);
+    emit_actor_queue_body_paths(out, a, a.starty);
 
     // Text inside root-N. cy = actor_y + height/2.
-    let cy = a.height / 2.0;
+    let cy = a.starty + a.height / 2.0;
     emit_actor_box_text(out, center, cy, &a.description);
 
     // Close root-N and outer <g>.
@@ -3943,11 +3990,11 @@ fn emit_actor_collections_top_group(
     out.push_str("\">");
 
     // Rects
-    emit_actor_collections_body_rects(out, a, 0.0, false);
+    emit_actor_collections_body_rects(out, a, a.starty, false);
 
-    // Text inside root-N. cx = center - 6, cy = 6 + height/2.
+    // Text inside root-N. cx = center - 6, cy = starty + 6 + height/2.
     let cx = center - 6.0;
-    let cy = 6.0 + a.height / 2.0;
+    let cy = a.starty + 6.0 + a.height / 2.0;
     emit_actor_box_text(out, cx, cy, &a.description);
 
     // Close root-N and outer <g>.
