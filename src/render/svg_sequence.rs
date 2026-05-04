@@ -202,6 +202,18 @@ struct BoxRender {
 const FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 const ACTOR_FONT_FAMILY: &str = "\"trebuchet ms\", verdana, arial";
 
+fn has_katex(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'$' && bytes[i + 1] == b'$' {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 pub fn render(
     d: &SequenceDiagram,
     _l: &SequenceLayout,
@@ -390,18 +402,20 @@ pub fn render(
             // height is rounded individually then summed for actDims.
             let lines = split_br(&description);
             let mut tw_max = 0.0_f64;
-            for line in &lines {
-                let resolved = resolve_hash_entities_for_measure(line);
-                let w = crate::font_metrics::text_width(
-                    &resolved,
-                    "\"trebuchet ms\", verdana, arial",
-                    16.0,
-                    false,
-                    false,
-                )
-                .round();
-                if w > tw_max {
-                    tw_max = w;
+            if !has_katex(&description) {
+                for line in &lines {
+                    let resolved = resolve_hash_entities_for_measure(line);
+                    let w = crate::font_metrics::text_width(
+                        &resolved,
+                        "\"trebuchet ms\", verdana, arial",
+                        16.0,
+                        false,
+                        false,
+                    )
+                    .round();
+                    if w > tw_max {
+                        tw_max = w;
+                    }
                 }
             }
             let line_h = crate::font_metrics::line_height(
@@ -411,8 +425,12 @@ pub fn render(
                 false,
             )
             .round();
-            let actdims_h = line_h * (lines.len() as f64);
-            let width = if wrap {
+            let actdims_h = if has_katex(&description) {
+                line_h
+            } else {
+                line_h * (lines.len() as f64)
+            };
+            let width = if wrap || has_katex(&description) {
                 default_actor_w
             } else {
                 let candidate = tw_max + 2.0 * cfg.wrap_padding;
@@ -520,18 +538,20 @@ pub fn render(
                 };
                 let lines = split_br(&measured);
                 let mut msg_text_width = 0.0_f64;
-                for line in &lines {
-                    let resolved = resolve_hash_entities_for_measure(line);
-                    let w = crate::font_metrics::text_width(
-                        &resolved,
-                        "sans-serif",
-                        cfg.message_font_size as f64,
-                        false,
-                        false,
-                    )
-                    .round();
-                    if w > msg_text_width {
-                        msg_text_width = w;
+                if !has_katex(&measured) {
+                    for line in &lines {
+                        let resolved = resolve_hash_entities_for_measure(line);
+                        let w = crate::font_metrics::text_width(
+                            &resolved,
+                            "sans-serif",
+                            cfg.message_font_size as f64,
+                            false,
+                            false,
+                        )
+                        .round();
+                        if w > msg_text_width {
+                            msg_text_width = w;
+                        }
                     }
                 }
                 let message_width = msg_text_width + 2.0 * cfg.wrap_padding;
@@ -603,18 +623,20 @@ pub fn render(
                     };
                     let lines = split_br(&measured_text);
                     let mut text_w = 0.0_f64;
-                    for line in &lines {
-                        let resolved = resolve_hash_entities_for_measure(line);
-                        let w = crate::font_metrics::text_width(
-                            &resolved,
-                            "trebuchet ms",
-                            cfg.message_font_size as f64,
-                            false,
-                            false,
-                        )
-                        .round();
-                        if w > text_w {
-                            text_w = w;
+                    if !has_katex(&measured_text) {
+                        for line in &lines {
+                            let resolved = resolve_hash_entities_for_measure(line);
+                            let w = crate::font_metrics::text_width(
+                                &resolved,
+                                "trebuchet ms",
+                                cfg.message_font_size as f64,
+                                false,
+                                false,
+                            )
+                            .round();
+                            if w > text_w {
+                                text_w = w;
+                            }
                         }
                     }
                     let message_width = text_w + 2.0 * cfg.wrap_padding;
@@ -675,18 +697,20 @@ pub fn render(
                 };
                 let lines = split_br(&measured_text);
                 let mut text_w = 0.0_f64;
-                for line in &lines {
-                    let resolved = resolve_hash_entities_for_measure(line);
-                    let w = crate::font_metrics::text_width(
-                        &resolved,
-                        "trebuchet ms",
-                        cfg.message_font_size as f64,
-                        false,
-                        false,
-                    )
-                    .round();
-                    if w > text_w {
-                        text_w = w;
+                if !has_katex(&measured_text) {
+                    for line in &lines {
+                        let resolved = resolve_hash_entities_for_measure(line);
+                        let w = crate::font_metrics::text_width(
+                            &resolved,
+                            "trebuchet ms",
+                            cfg.message_font_size as f64,
+                            false,
+                            false,
+                        )
+                        .round();
+                        if w > text_w {
+                            text_w = w;
+                        }
                     }
                 }
                 let message_width = text_w + 2.0 * cfg.wrap_padding;
@@ -771,14 +795,18 @@ pub fn render(
             total_width += standard_box_padding;
             total_width -= 2.0 * cfg.box_text_margin;
             let label = bx.label.as_str();
-            let label_w = crate::font_metrics::text_width(
-                label,
-                "sans-serif",
-                text_font_size,
-                false,
-                false,
-            )
-            .round();
+            let label_w = if has_katex(label) {
+                0.0
+            } else {
+                crate::font_metrics::text_width(
+                    label,
+                    "sans-serif",
+                    text_font_size,
+                    false,
+                    false,
+                )
+                .round()
+            };
             let min_width = total_width.max(label_w + 2.0 * cfg.wrap_padding);
             let mut bx_margin = cfg.box_text_margin;
             if total_width < min_width {
@@ -1289,7 +1317,7 @@ pub fn render(
                         let raw_bounded = if is_self { 0.0 } else { (fa_cx - ta_cx).abs() };
                         let bounded_width = (raw_bounded - 7.0).max(0.0);
                         let wrap_eff = m.wrap || cfg.wrap;
-                        let text_w_term = if wrap_eff {
+                        let text_w_term = if wrap_eff || has_katex(&m.text) {
                             0.0
                         } else {
                             let resolved = resolve_hash_entities_for_measure(&m.text);
@@ -1353,6 +1381,8 @@ pub fn render(
     // pre-computed wrap-budget so AltSection labels can wrap with the
     // same width without re-walking events.
     let mut active_loop_widths: Vec<f64> = Vec::new();
+    let mut pending_create_actor: Option<String> = None;
+    let mut pending_destroy_actors: Vec<String> = Vec::new();
 
     for event in events.into_iter() {
         let item = match event {
@@ -1382,7 +1412,7 @@ pub fn render(
                 active_loop_widths.push(lw);
                 let raw_bracketed = format!("[{}]", label);
                 let wrap_budget = (lw - 2.0 * cfg.wrap_padding).max(0.0);
-                let bracketed = if wrap_budget > 0.0 {
+                let bracketed = if wrap_budget > 0.0 && !has_katex(&raw_bracketed) {
                     wrap_label(
                         &raw_bracketed,
                         wrap_budget,
@@ -1447,7 +1477,7 @@ pub fn render(
                     String::new()
                 };
                 let wrap_budget = (lw - 2.0 * cfg.wrap_padding).max(0.0);
-                let bracketed = if has_label && wrap_budget > 0.0 {
+                let bracketed = if has_label && wrap_budget > 0.0 && !has_katex(&raw_bracketed) {
                     wrap_label(
                         &raw_bracketed,
                         wrap_budget,
@@ -1566,7 +1596,9 @@ pub fn render(
             WalkEvent::Item(it) => it,
         };
         let idx = msg_id_counter;
-        msg_id_counter += 1;
+        if !matches!(item, DiagramItem::Create(_) | DiagramItem::Destroy(_)) {
+            msg_id_counter += 1;
+        }
         if let DiagramItem::Message(m) = item {
             if let Some(cc) = m.central_connection {
                 msg_id_counter += match cc {
@@ -1695,17 +1727,11 @@ pub fn render(
         // captures the current verticalPos as the lifeline termination
         // point — the destroyed actor's lifeline <line y2> ends there.
         if let DiagramItem::Create(actor) = item {
-            vertical += box_margin;
-            if let Some(ar) = actors.iter_mut().find(|a| a.id == actor.id) {
-                ar.create_y = Some(vertical);
-                ar.starty = vertical;
-            }
+            pending_create_actor = Some(actor.id.clone());
             continue;
         }
         if let DiagramItem::Destroy(ref actor_id) = item {
-            if let Some(ar) = actors.iter_mut().find(|a| a.id == *actor_id) {
-                ar.destroy_y = Some(vertical);
-            }
+            pending_destroy_actors.push(actor_id.clone());
             continue;
         }
         // Autonumber: update running counters/visibility, no SVG output
@@ -1758,18 +1784,20 @@ pub fn render(
             };
             let intermediate_lines = split_br(&intermediate_text);
             let mut text_w = 0.0_f64;
-            for line in &intermediate_lines {
-                let resolved = resolve_hash_entities_for_measure(line);
-                let w = crate::font_metrics::text_width(
-                    &resolved,
-                    "trebuchet ms",
-                    cfg.message_font_size as f64,
-                    false,
-                    false,
-                )
-                .round();
-                if w > text_w {
-                    text_w = w;
+            if !has_katex(&intermediate_text) {
+                for line in &intermediate_lines {
+                    let resolved = resolve_hash_entities_for_measure(line);
+                    let w = crate::font_metrics::text_width(
+                        &resolved,
+                        "trebuchet ms",
+                        cfg.message_font_size as f64,
+                        false,
+                        false,
+                    )
+                    .round();
+                    if w > text_w {
+                        text_w = w;
+                    }
                 }
             }
             let note_w: f64;
@@ -1875,7 +1903,11 @@ pub fn render(
                 false,
                 false,
             );
-            let text_h = (lh_unrounded * (note_lines.len() as f64)).round();
+            let text_h = if has_katex(&note.text) {
+                16.0
+            } else {
+                (lh_unrounded * (note_lines.len() as f64)).round()
+            };
             let note_h = text_h + 2.0 * cfg.note_margin;
             vertical += note_h;
 
@@ -1988,11 +2020,13 @@ pub fn render(
             m.text.clone()
         };
         let msg_lines = split_br(&final_msg_text);
-        let n_lines = msg_lines.len() as f64;
-        let text_dims_height = line_height * n_lines;
+        let n_lines = if has_katex(&m.text) { 1.0 } else { msg_lines.len() as f64 };
+        let text_dims_height = if has_katex(&m.text) { 0.0 } else { line_height * n_lines };
         let starty_for_msg = vertical;
         vertical += 10.0;
-        vertical += line_height;
+        if !has_katex(&m.text) {
+            vertical += line_height;
+        }
         let is_self = m.from == m.to;
 
         // startx / stopx: standard left→right for SolidArrow → arrow_end shrinks by 3.
@@ -2147,18 +2181,20 @@ pub fn render(
         // even though the lifeline sits on a single actor centre.
         let self_dx: Option<f64> = if is_self {
             let mut msg_text_width = 0.0_f64;
-            for line in &msg_lines {
-                let resolved = resolve_hash_entities_for_measure(line);
-                let w = crate::font_metrics::text_width(
-                    &resolved,
-                    "sans-serif",
-                    cfg.message_font_size as f64,
-                    false,
-                    false,
-                )
-                .round();
-                if w > msg_text_width {
-                    msg_text_width = w;
+            if !has_katex(&m.text) {
+                for line in &msg_lines {
+                    let resolved = resolve_hash_entities_for_measure(line);
+                    let w = crate::font_metrics::text_width(
+                        &resolved,
+                        "sans-serif",
+                        cfg.message_font_size as f64,
+                        false,
+                        false,
+                    )
+                    .round();
+                    if w > msg_text_width {
+                        msg_text_width = w;
+                    }
                 }
             }
             let dx = (msg_text_width / 2.0).max(default_actor_w / 2.0);
@@ -2491,22 +2527,35 @@ pub fn render(
             to_cx: circle_to_cx,
         });
 
-        // ── Per-message activation side effects ─────────────────────
+        // ── Create / Destroy y-offset assignment ────────────────────
         //
-        // Upstream emits synthetic activation signals AFTER each
-        // addMessage when the message has `+` / `-` suffix or `()`
-        // central connections. Order matches the parser's signal-list
-        // emission (jison.331-355): addMessage → CC(to) → CCR(from)
-        // for DUAL; addMessage → CC(to) for AtTo; addMessage → CCR(from)
-        // for AtFrom; addMessage → activeStart{actor:to} for `+`;
-        // addMessage → activeEnd{actor:from} for `-`. Each event is
-        // processed by the render-pass switch (sequenceRenderer.ts:1145
-        // -1156): ACTIVE_START / CC / CCR all map to newActivation;
-        // ACTIVE_END maps to endActivation + drawActivation.
-        // Helper: push a new activation slot + reserve an anchor `<g>`.
-        // `slot_idx` is the synthetic event's data-id slot — used so the
-        // anchor `<g></g>` can be interleaved with notes/loops in render
-        // order (rather than batched up-front).
+        // In upstream, `create participant X` positions the actor's top
+        // group at `lineStartY - actorH/2`, and `destroy X` cuts the
+        // lifeline at `lineStartY - actorH/2`. Both are computed from
+        // the create/destroy message's lineStartY. The Create/Destroy
+        // items fire BEFORE their message in the parser stream, so we
+        // defer the assignment until the message's line_start_y is known.
+        let half_actor_h = actor_h / 2.0;
+        let had_create = pending_create_actor.is_some();
+        if let Some(actor_id) = pending_create_actor.take() {
+            if let Some(ar) = actors.iter_mut().find(|a| a.id == actor_id) {
+                let create_y = line_start_y - half_actor_h;
+                ar.create_y = Some(create_y);
+                ar.starty = create_y;
+            }
+        }
+        let mut had_destroy = false;
+        for actor_id in pending_destroy_actors.drain(..) {
+            if let Some(ar) = actors.iter_mut().find(|a| a.id == actor_id) {
+                ar.destroy_y = Some(line_start_y - half_actor_h);
+                had_destroy = true;
+            }
+        }
+        if had_create || had_destroy {
+            vertical += half_actor_h;
+        }
+
+        // ── Per-message activation side effects ─────────────────────
         fn push_activation(
             activations: &mut Vec<ActivationSlot>,
             anchors: &mut Vec<(usize, Option<ActivationRect>)>,
@@ -4409,6 +4458,13 @@ fn emit_actor_box_text(out: &mut String, cx: f64, cy: f64, description: &str) {
     let lines = split_br(description);
     let n = lines.len();
     let font_size = 16.0_f64;
+    if has_katex(description) {
+        out.push_str("<switch><foreignObject x=\"");
+        push_num(out, cx);
+        out.push_str("\" y=\"");
+        push_num(out, cy);
+        out.push_str("\" width=\"0\" height=\"0\"><div style=\"height: 100%; width: 100%;\" class=\"actor actor-box\"><div style=\"text-align: center; vertical-align: middle;\">MathML is unsupported in this environment.</div></div></foreignObject>");
+    }
     for (i, line) in lines.iter().enumerate() {
         let dy = (i as f64) * font_size - font_size * ((n as f64) - 1.0) / 2.0;
         out.push_str("<text x=\"");
@@ -4428,6 +4484,9 @@ fn emit_actor_box_text(out: &mut String, cx: f64, cy: f64, description: &str) {
         out.push_str("\">");
         out.push_str(&xml_escape(line));
         out.push_str("</tspan></text>");
+    }
+    if has_katex(description) {
+        out.push_str("</switch>");
     }
 }
 
