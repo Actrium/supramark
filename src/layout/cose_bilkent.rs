@@ -1121,6 +1121,17 @@ pub fn run_layout(
         return LayoutOutcome::Ok(Vec::new());
     }
 
+    // When the `cose_bilkent` feature is enabled, delegate to the embedded
+    // cytoscape + cose-bilkent JS implementation. The native simulation
+    // below is kept as a fallback for non-feature builds and as a baseline
+    // for diff'ing the JS path during development.
+    #[cfg(feature = "cose_bilkent")]
+    {
+        if let Some(out) = run_layout_via_js(nodes, edges) {
+            return out;
+        }
+    }
+
     // Build the layout graph.
     let mut id_to_idx: HashMap<NodeId, usize> = HashMap::new();
     let mut graph = LGraph::default();
@@ -1160,6 +1171,78 @@ pub fn run_layout(
         .map(|n| (n.id, (n.rect.center_x() - cx, n.rect.center_y() - cy)))
         .collect();
     LayoutOutcome::Ok(positions)
+}
+
+// ---------------------------------------------------------------------
+// Section: JS-backed implementation (feature-gated)
+// ---------------------------------------------------------------------
+
+/// Delegate to the embedded cytoscape + cose-bilkent JavaScript layout
+/// when the `cose_bilkent` feature is enabled. Returns `None` if the JS
+/// pipeline crashes — in that case the caller falls back to the native
+/// (non-byte-exact) simulation.
+///
+/// We feed each node's `RectangleD::{width, height}` directly to cytoscape's
+/// `data.{width, height}` (and `n.layoutDimensions` returns `{w, h}`),
+/// matching mermaid's pipeline that fills these in from the rendered
+/// `<g>`'s `getBBox()` before invoking the layout.
+#[cfg(feature = "cose_bilkent")]
+fn run_layout_via_js(
+    nodes: &[(NodeId, RectangleD)],
+    edges: &[(usize, usize)],
+) -> Option<LayoutOutcome> {
+    use crate::cose_bilkent_js::{Edge as JsEdge, Graph as JsGraph, Node as JsNode};
+
+    let js_nodes: Vec<JsNode> = nodes
+        .iter()
+        .map(|(id, rect)| JsNode {
+            id: id.to_string(),
+            label: String::new(),
+            width: rect.width,
+            height: rect.height,
+            padding: 0.0,
+        })
+        .collect();
+    let js_edges: Vec<JsEdge> = edges
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (s, t))| {
+            let src = nodes.get(*s)?.0;
+            let tgt = nodes.get(*t)?.0;
+            Some(JsEdge {
+                id: format!("e{}", i),
+                source: src.to_string(),
+                target: tgt.to_string(),
+            })
+        })
+        .collect();
+    let g = JsGraph {
+        nodes: js_nodes,
+        edges: js_edges,
+    };
+
+    let out = match crate::cose_bilkent_js::layout(&g) {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!(target: "cose_bilkent", "JS layout failed, falling back to native: {}", e);
+            return None;
+        }
+    };
+
+    // Map JS output back onto NodeId. Build a lookup keyed on stringified id.
+    let mut by_id: std::collections::HashMap<String, (f64, f64)> =
+        std::collections::HashMap::with_capacity(out.nodes.len());
+    for n in out.nodes {
+        by_id.insert(n.id, (n.x, n.y));
+    }
+    let positions: Vec<(NodeId, (f64, f64))> = nodes
+        .iter()
+        .filter_map(|(id, _)| {
+            let key = id.to_string();
+            by_id.get(&key).copied().map(|p| (*id, p))
+        })
+        .collect();
+    Some(LayoutOutcome::Ok(positions))
 }
 
 // ---------------------------------------------------------------------
