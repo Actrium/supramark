@@ -891,17 +891,71 @@ fn base64_encode(input: &[u8]) -> String {
 }
 
 fn html_escape(s: &str) -> String {
+    // Mirror upstream `markdownToHTML`: `<br/>`, `<br>`, `<br />` are
+    // inline HTML elements that marked.lexer passes through verbatim, so
+    // they survive `span.html(...)` as real `<br>` elements. Everything
+    // else gets standard HTML escaping. Without this, `<br/>` ends up as
+    // `&lt;br/&gt;` in our output and the diff breaks at the inner span.
+    let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            // Try to recognise a `<br>`, `<br/>`, `<br />` (any case).
+            if i + 3 <= bytes.len()
+                && bytes[i + 1].eq_ignore_ascii_case(&b'b')
+                && bytes[i + 2].eq_ignore_ascii_case(&b'r')
+            {
+                let after = bytes.get(i + 3).copied();
+                if matches!(after, Some(b' ') | Some(b'/') | Some(b'>') | Some(b'\t')) {
+                    if let Some(rel_end) = bytes[i..].iter().position(|&b| b == b'>') {
+                        out.push_str(&s[i..i + rel_end + 1]);
+                        i += rel_end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        let c = bytes[i];
         match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
+            b'&' => {
+                out.push_str("&amp;");
+                i += 1;
+            }
+            b'<' => {
+                out.push_str("&lt;");
+                i += 1;
+            }
+            b'>' => {
+                out.push_str("&gt;");
+                i += 1;
+            }
+            b'"' => {
+                out.push_str("&quot;");
+                i += 1;
+            }
+            _ => {
+                let cl = utf8_char_len_first(c);
+                out.push_str(&s[i..(i + cl).min(bytes.len())]);
+                i += cl;
+            }
         }
     }
     out
+}
+
+fn utf8_char_len_first(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xC0 {
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    }
 }
 
 /// Suppress unused param warnings for the imported types when this

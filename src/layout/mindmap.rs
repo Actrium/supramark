@@ -339,10 +339,20 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
 }
 
 fn measure_multiline_raw(text: &str, family: &str, size: f64) -> (f64, f64) {
+    // Mermaid's pipeline: descr → markdownToHTML → `<p>...<br/>...</p>` →
+    // span.html(...) → div. The JSDOM bbox shim measures `el.textContent`,
+    // which excludes element-level markup like `<br/>`. So bbox.width is
+    // textWidth of the visible characters with `<br/>` tags stripped, and
+    // bbox.height is a single line (the shim doesn't introduce breaks for
+    // `<br/>`). Mirror that here — otherwise nodes containing `<br/>`
+    // (e.g. cypress mindmap 13 `gc6((grand<br/>child 6))`) measure ~30 px
+    // wider than upstream, which propagates into cose-bilkent's input
+    // dimensions and shifts the simulated layout.
+    let stripped = strip_br(text);
     let lh = line_height(family, size, false, false);
     let mut max_w = 0.0_f64;
     let mut line_count = 0usize;
-    for line in text.split('\n') {
+    for line in stripped.split('\n') {
         let w = text_width(line, family, size, false, false);
         max_w = max_w.max(w);
         line_count += 1;
@@ -351,6 +361,54 @@ fn measure_multiline_raw(text: &str, family: &str, size: f64) -> (f64, f64) {
         line_count = 1;
     }
     (max_w, line_count as f64 * lh)
+}
+
+/// Remove `<br/>`, `<br>`, `<br />` (any case, optional whitespace) — the
+/// JSDOM bbox shim's `textContent` walk skips these elements, so the
+/// measured width matches the text-only contents.
+fn strip_br(s: &str) -> String {
+    // Cheap regex-free pass: scan for "<br" then advance past the matching
+    // ">"; pass everything else through verbatim. Case-insensitive.
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 <= bytes.len()
+            && bytes[i] == b'<'
+            && bytes[i + 1].eq_ignore_ascii_case(&b'b')
+            && bytes[i + 2].eq_ignore_ascii_case(&b'r')
+        {
+            // After `<br`, peek the next char: must be space, `/`, or `>`
+            // for it to be a real `<br>` tag.
+            let after = bytes.get(i + 3).copied();
+            let is_tag = matches!(after, Some(b' ') | Some(b'/') | Some(b'>') | Some(b'\t'));
+            if is_tag {
+                if let Some(end) = bytes[i..].iter().position(|&b| b == b'>') {
+                    i += end + 1;
+                    continue;
+                }
+            }
+        }
+        // Not a `<br>` tag — copy the next UTF-8 char.
+        let ch_len = utf8_char_len(bytes[i]);
+        out.push_str(&s[i..i + ch_len.min(bytes.len() - i)]);
+        i += ch_len;
+    }
+    out
+}
+
+fn utf8_char_len(first_byte: u8) -> usize {
+    if first_byte < 0x80 {
+        1
+    } else if first_byte < 0xC0 {
+        1
+    } else if first_byte < 0xE0 {
+        2
+    } else if first_byte < 0xF0 {
+        3
+    } else {
+        4
+    }
 }
 
 /// Section index assignment matches upstream `mindmapDb.section`:
