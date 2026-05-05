@@ -1,12 +1,12 @@
 # 阶段进展
 
-截至 2026-05-04，mindmap markdown raw_descr 统一拿下 cypress/21。
+截至 2026-05-05，mindmap `<br/>` 度量与渲染分离拿下 cypress/13 + demos/mindmap/01。
 
-**当前指标：1317 / 1323 byte-exact（约 99.5%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
+**当前指标：1319 / 1323 byte-exact（约 99.7%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
 
 > 注：从 commit `aee794a` 起，sweep_all 使用 `svg_match::svg_match_tolerant` 进行宽松比较 —— 数字 token 按 `abs_tol=1e-6 / rel_tol=1e-9` 容差对比（远低于亚像素），非数字字节仍 byte-by-byte 严格匹配；`data-points="<base64>"` 解码后递归比较。这把 4 个 1-ULP 漂移 fixture 中的 3 个（cypress/mindmap 12, 14, 20）解锁为 pass。
 
-- 1317 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）+ 1（mindmap rect raw）+ 1（sequence box undefined margin）+ 4（mindmap markdownToHTML 分支统一）+ 1（mindmap raw_descr 反引号保留）：
+- 1319 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）+ 1（mindmap rect raw）+ 1（sequence box undefined margin）+ 4（mindmap markdownToHTML 分支统一）+ 1（mindmap raw_descr 反引号保留）+ 2（mindmap `<br/>` 度量分离）：
   - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
   - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
   - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
@@ -18,9 +18,10 @@
   - W-Sequence-Box-Margin：mirror upstream `actor.margin || 0` 默认值，未参与 actorToMessageWidth 的 actor 在 box totalWidth 里贡献 0 而非 actorMargin → demos/sequence/05（commit `d4a6bc2`）
   - W-Mindmap-Markdown-Branch：把 `<p>` wrap 判定从形状改成 is_indented_block；单行 Circle/RoundedRect 文本（如 `((mindmap))`）现在正确包 `<p>` → cypress/01, 02, 04, 14（commit `5c0c305`）
   - W-Mindmap-Raw-Descr：layout 度量 + renderer 文本统一用 `raw_descr` 而非 `descr`，反引号等原始字符如实保留 → cypress/21
+  - W-Mindmap-Br-Strip：度量端去 `<br/>` 后再 textWidth（textContent 不含 br 元素文本），渲染端 html_escape 跳过 br 让其作为 HTML 元素保留；含 `<br/>` 节点的 bbox 从 ~130 修正到 ~88，cose-bilkent 输入对齐 → cypress/13 + demos/mindmap/01（commit `6932396`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
 - 1323 = sweep_all fixture 总数
-- 差额 6 = cypress/mindmap 5 + demos/mindmap 1（全部 cose-bilkent 物理模拟漂移）
+- 差额 4 = cypress/mindmap 4（03, 10, 11, 23）
 
 **关键发现 — 1-ULP 精度漂移**：cose-bilkent 物理模拟在 quickjs 与 V8 上算出来的坐标差 1 ULP（IEEE-754 末位），根因是 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。tolerance 比较一刀切解决（commit `aee794a`），把 cypress/mindmap 12, 14, 20 收下；fixture 22 仍有结构性差异需另查。
 
@@ -28,9 +29,12 @@
 
 **关键发现 — mindmap markdownToHTML 分支**：upstream `markdownToHTML` 用 marked.lexer 切 token，paragraph token 渲染为 `<p>...</p>`，但 indented-code-block（任一非空行以 4+ 空格起头）落入 `node.raw` 兜底分支，输出原文不包 wrapper。形状（Rect/Circle/RoundedRect）不是判别依据 —— `((mindmap))`（单行）走 paragraph 分支，`((\n  The root\n))`（缩进多行）走 raw 分支。
 
-**剩余 6 项分类**（全部为复杂 mindmap 多节点 cose-bilkent 位置漂移）：
-- cypress/mindmap：03, 10, 11, 13, 23 — 5 项
-- demos/mindmap：01 — 1 项
+**关键发现 — cose-bilkent 失败根因不是 ULP**：QuickJS `Math.sin/sqrt/pow/log/cos/atan/exp` 多组样本与 V8 字节相同（fixture 12 全 Default-shape 同结构 max delta 1.42e-14 通过容差），cose-bilkent 物理本身确定。失败根因是**喂给 cose-bilkent 的 width/height 错了**：mermaid 上游 `cy.add({ data: { width, height } })` 的 width/height 来自 JSDOM `getBBox()` 对实际 `<g class="node">` 的实测，我们端则是合成公式。bbox 端 `<br/>` 计入了文本（textContent 把 br 算空），渲染端 `<br/>` 又被 escape 成 `&lt;br/&gt;`（应保留为 HTML 元素），两 bug 双向偏。
+
+**剩余 4 项分类**：
+- cypress/mindmap：10, 11（含 bang `((..))` 形状）— bang/cloud 渲染目前是占位 rounded-rect，几何外凸 10-20px 没复刻
+- cypress/mindmap：03（`layout: tidy-tree` 不走 cose-bilkent，需独立端口非分层 tidy-tree 算法）
+- cypress/mindmap：23（15 节点 default-only，position 漂移幅度大、待诊断）
 
 **架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
 
