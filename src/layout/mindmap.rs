@@ -18,6 +18,7 @@ use crate::error::Result;
 use crate::font_metrics::{line_height, text_width};
 use crate::layout::cose_bilkent;
 use crate::model::mindmap::{MindmapDiagram, MindmapNode, MindmapNodeType, NodeId};
+use crate::render::rough::fmt_num;
 use crate::theme::ThemeVariables;
 
 /// `setupViewPortForSVG` outer padding (mindmap.padding default).
@@ -87,6 +88,10 @@ pub struct PositionedNode {
     pub padding: f64,
     /// Section index (`-1` for root, `0..MAX_SECTIONS-1` for sub-trees).
     pub section: i32,
+    /// Shape kind (carried over from the source node so per-shape bbox
+    /// helpers can be invoked at content-bbox aggregation time without
+    /// re-resolving the diagram graph).
+    pub kind: MindmapNodeType,
 }
 
 /// Default font face / size used by the jsdom shim when no explicit
@@ -101,8 +106,7 @@ pub fn layout(d: &MindmapDiagram, _theme: &ThemeVariables) -> Result<MindmapLayo
         return Ok(MindmapLayout::default());
     }
 
-    let mut positioned: Vec<PositionedNode> =
-        d.nodes.iter().map(|n| size_node(n, d)).collect();
+    let mut positioned: Vec<PositionedNode> = d.nodes.iter().map(|n| size_node(n, d)).collect();
 
     if d.nodes.len() == 1 {
         // cose-bilkent single-node fast path: centre = (W/2 + 15, H/2 + 15).
@@ -284,8 +288,7 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
     // block) or wrapped in `<p>...</p>`. In both cases the `textContent`
     // that the bbox shim measures is exactly `raw_descr` — the `<p>`
     // tags are not part of textContent.
-    let (bbox_w, bbox_h) =
-        measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX);
+    let (bbox_w, bbox_h) = measure_multiline_raw(&n.raw_descr, SHIM_FONT_FAMILY, SHIM_FONT_SIZE_PX);
 
     let padding = match n.node_type {
         MindmapNodeType::RoundedRect => 15.0,
@@ -297,19 +300,13 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
 
     let half_padding = padding / 2.0;
     let (shape_w, shape_h) = match n.node_type {
-        MindmapNodeType::Default => {
-            (bbox_w + 8.0 * half_padding, bbox_h + 2.0 * half_padding)
-        }
-        MindmapNodeType::Rect => {
-            (bbox_w + 4.0 * padding, bbox_h + 2.0 * padding)
-        }
+        MindmapNodeType::Default => (bbox_w + 8.0 * half_padding, bbox_h + 2.0 * half_padding),
+        MindmapNodeType::Rect => (bbox_w + 4.0 * padding, bbox_h + 2.0 * padding),
         MindmapNodeType::Circle => {
             let r = (bbox_w / 2.0).max(bbox_h / 2.0) + padding;
             (2.0 * r, 2.0 * r)
         }
-        MindmapNodeType::RoundedRect => {
-            (bbox_w + 2.0 * padding, bbox_h + 2.0 * padding)
-        }
+        MindmapNodeType::RoundedRect => (bbox_w + 2.0 * padding, bbox_h + 2.0 * padding),
         MindmapNodeType::Bang => {
             // Upstream `bangShape`:
             //   w = bbox.width  + 10 * halfPadding
@@ -334,29 +331,21 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
     };
 
     // Union bbox (shape ∪ foreignObject, transforms ignored — JSDOM
-    // shim semantics). Mermaid feeds these values to cose-bilkent as the
-    // node's `data.{width, height}` after `getBBox()`. The shape origin
-    // depends on the shape type:
-    //   * centred shapes (default, rect, rounded, circle, hexagon) draw
-    //     a path/rect with coordinates already in `[-w/2, w/2]`, so the
-    //     shape covers `[-shape_w/2, shape_w/2]`. Foreign object is at
-    //     `translate(-bbox_w/2, -bbox_h/2)` (transform ignored) so it
-    //     covers `[0, bbox_w]`. Union = `shape_w/2 + max(shape_w/2,
-    //     bbox_w)`.
-    //   * bang / cloud start at `M0 0` and trace into +x/+y space, with
-    //     a `transform="translate(-eff/2, -eff/2)"` on the path element
-    //     (ignored by JSDOM). Path bbox covers `[0, eff_w]`. Foreign
-    //     object also covers `[0, bbox_w]`. Union = `max(eff_w, bbox_w)
-    //     = shape_w` (since shape_w >= bbox_w by construction).
-    let (cose_w, cose_h) = match n.node_type {
-        MindmapNodeType::Bang | MindmapNodeType::Cloud => {
-            (shape_w.max(bbox_w), shape_h.max(bbox_h))
-        }
-        _ => (
-            shape_w / 2.0 + bbox_w.max(shape_w / 2.0),
-            shape_h / 2.0 + bbox_h.max(shape_h / 2.0),
-        ),
-    };
+    // `getBBox()` shim semantics). Mermaid feeds these values to
+    // cose-bilkent as the node's `data.{width, height}` after the node
+    // is inserted into the DOM. Synthetic formulae are unsound here
+    // because shape paths use SVG `q`/`a` commands whose CONTROL points
+    // (or arc endpoints) extend past the half-w/half-h envelope —
+    // mirror `generate_ref.mjs::pathBBox` (endpoints + control points
+    // only, arcs sampled at endpoints) by parsing the same `d` string
+    // the renderer emits.
+    //
+    // Foreign object: inner `<g class="label">` carries
+    // `translate(-bbox_w/2, -bbox_h/2)` (transform ignored), so its
+    // contribution is `(0, 0, bbox_w, bbox_h)`.
+    let shape_box = shape_intrinsic_box(n.node_type, shape_w, shape_h);
+    let fo_box = (0.0_f64, 0.0_f64, bbox_w, bbox_h);
+    let (_ux, _uy, cose_w, cose_h) = union_bbox(&[shape_box, Some(fo_box)]);
 
     PositionedNode {
         id: n.id,
@@ -370,6 +359,7 @@ fn size_node(n: &MindmapNode, d: &MindmapDiagram) -> PositionedNode {
         cose_h,
         padding,
         section: section_for(n, d),
+        kind: n.node_type,
     }
 }
 
@@ -470,29 +460,604 @@ fn section_for(n: &MindmapNode, d: &MindmapDiagram) -> i32 {
 
 /// Compute the local bbox for a single node — the union of its inner
 /// shape and `<foreignObject>` rectangles in node-local coordinates
-/// (transforms are ignored, matching the jsdom shim).
-///
-/// All currently supported shapes (default, rect) draw a centred body
-/// in `[-w/2, w/2] × [-h/2, h/2]`. The `<foreignObject>` is wrapped in
-/// a `<g class="label" transform="translate(-bbox_w/2, -bbox_h/2)">`
-/// (transform ignored), so it contributes `(0, 0, bbox_w, bbox_h)`.
+/// (transforms are ignored, matching the jsdom shim's `getBBox()` walk
+/// in `generate_ref.mjs::elementBBox`).
 fn local_bbox(n: &PositionedNode) -> BBox {
-    let shape_min_x = -n.shape_w / 2.0;
-    let shape_max_x = n.shape_w / 2.0;
-    let shape_min_y = -n.shape_h / 2.0;
-    let shape_max_y = n.shape_h / 2.0;
-    let fo_min_x = 0.0;
-    let fo_max_x = n.bbox_w;
-    let fo_min_y = 0.0;
-    let fo_max_y = n.bbox_h;
-    let min_x = shape_min_x.min(fo_min_x);
-    let min_y = shape_min_y.min(fo_min_y);
-    let max_x = shape_max_x.max(fo_max_x);
-    let max_y = shape_max_y.max(fo_max_y);
-    BBox {
-        x: min_x,
-        y: min_y,
-        w: max_x - min_x,
-        h: max_y - min_y,
+    let shape_box = shape_intrinsic_box(n.kind, n.shape_w, n.shape_h);
+    let fo_box = (0.0_f64, 0.0_f64, n.bbox_w, n.bbox_h);
+    let (x, y, w, h) = union_bbox(&[shape_box, Some(fo_box)]);
+    BBox { x, y, w, h }
+}
+
+// ─── jsdom-compatible bbox helpers ────────────────────────────────────────
+//
+// Mirror `tests/support/generate_ref.mjs` `pathBBox` / `polyBBox` /
+// `unionBox` / `intrinsicBox` exactly — these compute the dimensions
+// upstream's mermaid feeds into cose-bilkent (and into the viewport
+// padding pass) via `g.getBBox()` in the jsdom shim. Synthetic formulae
+// drift because SVG `q` control points and `a` arc endpoints extend past
+// the half-w/half-h envelope.
+
+/// Pick a per-shape intrinsic bbox `(x, y, w, h)` matching the geometry
+/// the renderer emits. Returns `None` if the shape contributes nothing
+/// (defensive — every supported shape has a non-empty body).
+pub(crate) fn shape_intrinsic_box(
+    kind: MindmapNodeType,
+    shape_w: f64,
+    shape_h: f64,
+) -> Option<(f64, f64, f64, f64)> {
+    let half_w = shape_w / 2.0;
+    let half_h = shape_h / 2.0;
+    match kind {
+        MindmapNodeType::Default => {
+            // Path = `default_path_d`. Includes `<line>` overlay across
+            // the bottom (`y = half_h`); both contribute, but the path
+            // itself extends past `[-half_w, half_w]` because of the
+            // 5px corner radius `q` control points.
+            let d = default_path_d(shape_w, shape_h);
+            let pb = path_bbox(&d);
+            // The line element runs from (-half_w, half_h) to (half_w,
+            // half_h). It's a degenerate horizontal segment so its
+            // bbox is (half_w * 2) × 0 — width=2*half_w, height=0.
+            // jsdom `intrinsicBox` for `<line>` uses min/abs (always
+            // produces (-half_w, half_h, shape_w, 0)), and `unionBox`
+            // SKIPS boxes with `width==0 && height==0` only — a
+            // height=0 box still contributes its x range.
+            let line_box = Some((-half_w, half_h, shape_w, 0.0));
+            Some(union_two(pb, line_box))
+        }
+        MindmapNodeType::Rect => Some((-half_w, -half_h, shape_w, shape_h)),
+        MindmapNodeType::Circle => {
+            // squareCircle: r = max(half_w, half_h).
+            let r = half_w.max(half_h);
+            Some((-r, -r, 2.0 * r, 2.0 * r))
+        }
+        MindmapNodeType::RoundedRect => Some((-half_w, -half_h, shape_w, shape_h)),
+        MindmapNodeType::Hexagon => {
+            // Polygon points (matches `emit_shape_body` Hexagon branch).
+            let f = half_h / 3.0_f64.sqrt();
+            let m = f / 2.0;
+            let xs = [
+                -half_w + m,
+                half_w - m,
+                half_w,
+                half_w - m,
+                -half_w + m,
+                -half_w,
+            ];
+            let ys = [-half_h, -half_h, 0.0, half_h, half_h, 0.0];
+            let mut min_x = f64::INFINITY;
+            let mut min_y = f64::INFINITY;
+            let mut max_x = f64::NEG_INFINITY;
+            let mut max_y = f64::NEG_INFINITY;
+            for i in 0..6 {
+                if xs[i] < min_x {
+                    min_x = xs[i];
+                }
+                if xs[i] > max_x {
+                    max_x = xs[i];
+                }
+                if ys[i] < min_y {
+                    min_y = ys[i];
+                }
+                if ys[i] > max_y {
+                    max_y = ys[i];
+                }
+            }
+            Some((min_x, min_y, max_x - min_x, max_y - min_y))
+        }
+        MindmapNodeType::Bang => {
+            // jsdom ignores the `transform="translate(...)"` on the
+            // path element itself, so the path bbox lives at the M0 0
+            // origin in local coords.
+            let d = bang_path_d(shape_w, shape_h);
+            Some(path_bbox(&d))
+        }
+        MindmapNodeType::Cloud => {
+            let d = cloud_path_d(shape_w, shape_h);
+            Some(path_bbox(&d))
+        }
+    }
+}
+
+/// Build the same `d` attribute string the renderer emits for the
+/// default mindmap shape (rounded-bottom rectangle with 5px corner
+/// radius). Numbers must be formatted via `fmt_num` so the parsed bbox
+/// matches the jsdom shim's `parseFloat` round-trip exactly.
+pub(crate) fn default_path_d(shape_w: f64, shape_h: f64) -> String {
+    let half_w = shape_w / 2.0;
+    let half_h = shape_h / 2.0;
+    let inner_w = shape_w - 10.0;
+    let inner_h = shape_h - 10.0;
+    format!(
+        "\n    M{nx} {hh}\n    v{nih}\n    q0,-5 5,-5\n    h{iw}\n    q5,0 5,5\n    v{ih}\n    q0,5 -5,5\n    h{niw}\n    q-5,0 -5,-5\n    Z\n  ",
+        nx = fmt_num(-half_w),
+        hh = fmt_num(half_h - 5.0),
+        nih = fmt_num(-inner_h),
+        iw = fmt_num(inner_w),
+        ih = fmt_num(inner_h),
+        niw = fmt_num(-inner_w),
+    )
+}
+
+/// Build the bang shape `d` attribute (12-arc explosion, M0 0 origin,
+/// translate baked into path geometry — translate attribute itself is
+/// ignored by jsdom shim).
+///
+/// `-1.0 * x` literals mirror upstream `bangShape`'s JS source — kept
+/// verbatim so byte-exact diff against `mermaid.js` stays trivial.
+#[allow(clippy::neg_multiply)]
+pub(crate) fn bang_path_d(ew: f64, eh: f64) -> String {
+    let r = 0.15 * ew;
+    let r08 = r * 0.8;
+    format!(
+        "M0 0 \n    a{r},{r} 1 0,0 {a1},{b1}\n    a{r},{r} 1 0,0 {a1},{z}\n    a{r},{r} 1 0,0 {a1},{z}\n    a{r},{r} 1 0,0 {a1},{b2}\n\n    a{r},{r} 1 0,0 {c1},{d1}\n    a{r08},{r08} 1 0,0 0,{d2}\n    a{r},{r} 1 0,0 {c2},{d1}\n\n    a{r},{r} 1 0,0 {e1},{f1}\n    a{r},{r} 1 0,0 {e1},0\n    a{r},{r} 1 0,0 {e1},0\n    a{r},{r} 1 0,0 {e1},{f2}\n\n    a{r},{r} 1 0,0 {g1},{h1}\n    a{r08},{r08} 1 0,0 0,{h2}\n    a{r},{r} 1 0,0 {g2},{h1}\n  H0 V0 Z",
+        r = fmt_num(r),
+        r08 = fmt_num(r08),
+        a1 = fmt_num(ew * 0.25),
+        b1 = fmt_num(-1.0 * eh * 0.1),
+        z = fmt_num(0.0),
+        b2 = fmt_num(eh * 0.1),
+        c1 = fmt_num(ew * 0.15),
+        d1 = fmt_num(eh * 0.33),
+        d2 = fmt_num(eh * 0.34),
+        c2 = fmt_num(-1.0 * ew * 0.15),
+        e1 = fmt_num(-1.0 * ew * 0.25),
+        f1 = fmt_num(eh * 0.15),
+        f2 = fmt_num(-1.0 * eh * 0.15),
+        g1 = fmt_num(-1.0 * ew * 0.1),
+        h1 = fmt_num(-1.0 * eh * 0.33),
+        h2 = fmt_num(-1.0 * eh * 0.34),
+        g2 = fmt_num(ew * 0.1),
+    )
+}
+
+/// Build the cloud shape `d` attribute (9-arc puffy outline).
+///
+/// `-1.0 * x` literals mirror upstream `cloudShape`'s JS source — kept
+/// verbatim so byte-exact diff against `mermaid.js` stays trivial.
+#[allow(clippy::neg_multiply)]
+pub(crate) fn cloud_path_d(w: f64, h: f64) -> String {
+    let r1 = 0.15 * w;
+    let r2 = 0.25 * w;
+    let r3 = 0.35 * w;
+    let r4 = 0.20 * w;
+    format!(
+        "M0 0 \n    a{r1},{r1} 0 0,1 {a1},{b1}\n    a{r3},{r3} 1 0,1 {a2},{b1}\n    a{r2},{r2} 1 0,1 {a3},{b2}\n\n    a{r1},{r1} 1 0,1 {c1},{d1}\n    a{r4},{r4} 1 0,1 {c2},{d2}\n\n    a{r2},{r1} 1 0,1 {e1},{f1}\n    a{r3},{r3} 1 0,1 {e2},0\n    a{r1},{r1} 1 0,1 {e1},{f2}\n\n    a{r1},{r1} 1 0,1 {g1},{h1}\n    a{r4},{r4} 1 0,1 {g2},{h2}\n  H0 V0 Z",
+        r1 = fmt_num(r1),
+        r2 = fmt_num(r2),
+        r3 = fmt_num(r3),
+        r4 = fmt_num(r4),
+        a1 = fmt_num(w * 0.25),
+        b1 = fmt_num(-1.0 * w * 0.1),
+        a2 = fmt_num(w * 0.4),
+        a3 = fmt_num(w * 0.35),
+        b2 = fmt_num(w * 0.2),
+        c1 = fmt_num(w * 0.15),
+        d1 = fmt_num(h * 0.35),
+        c2 = fmt_num(-1.0 * w * 0.15),
+        d2 = fmt_num(h * 0.65),
+        e1 = fmt_num(-1.0 * w * 0.25),
+        f1 = fmt_num(w * 0.15),
+        e2 = fmt_num(-1.0 * w * 0.5),
+        f2 = fmt_num(-1.0 * w * 0.15),
+        g1 = fmt_num(-1.0 * w * 0.1),
+        h1 = fmt_num(-1.0 * h * 0.35),
+        g2 = fmt_num(w * 0.1),
+        h2 = fmt_num(-1.0 * h * 0.65),
+    )
+}
+
+/// Replicate `generate_ref.mjs::pathBBox`. Returns `(x, y, w, h)`.
+///
+/// Curves: cubic / quadratic include all control points (super-set of
+/// the true curve bbox — same approximation upstream's jsdom shim
+/// uses); arcs (`A`/`a`) sample the END point only, NOT the bulge.
+/// `H`/`V`/`Z` updated state correctly. An empty / unrecognised string
+/// returns `(0, 0, 0, 0)`.
+pub(crate) fn path_bbox(d: &str) -> (f64, f64, f64, f64) {
+    if d.is_empty() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let toks = tokenize_path(d);
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut cx = 0.0_f64;
+    let mut cy = 0.0_f64;
+    let mut sx = 0.0_f64;
+    let mut sy = 0.0_f64;
+    let mut cmd: char = ' ';
+    let mut i = 0usize;
+
+    macro_rules! addp {
+        ($x:expr, $y:expr) => {{
+            let xx: f64 = $x;
+            let yy: f64 = $y;
+            if xx < min_x {
+                min_x = xx;
+            }
+            if yy < min_y {
+                min_y = yy;
+            }
+            if xx > max_x {
+                max_x = xx;
+            }
+            if yy > max_y {
+                max_y = yy;
+            }
+        }};
+    }
+
+    while i < toks.len() {
+        if let PathTok::Cmd(c) = toks[i] {
+            cmd = c;
+            i += 1;
+        }
+        if cmd == ' ' {
+            i += 1;
+            continue;
+        }
+        let rel = cmd.is_ascii_lowercase();
+        // Pull n numbers; abort if not enough.
+        match cmd {
+            'M' | 'm' => {
+                let (Some(mut x), Some(mut y)) = (read_num(&toks, &mut i), read_num(&toks, &mut i))
+                else {
+                    continue;
+                };
+                if rel {
+                    x += cx;
+                    y += cy;
+                }
+                cx = x;
+                cy = y;
+                sx = x;
+                sy = y;
+                addp!(x, y);
+                cmd = if rel { 'l' } else { 'L' };
+            }
+            'L' | 'l' => {
+                let (Some(mut x), Some(mut y)) = (read_num(&toks, &mut i), read_num(&toks, &mut i))
+                else {
+                    continue;
+                };
+                if rel {
+                    x += cx;
+                    y += cy;
+                }
+                cx = x;
+                cy = y;
+                addp!(x, y);
+            }
+            'H' | 'h' => {
+                let Some(mut x) = read_num(&toks, &mut i) else {
+                    continue;
+                };
+                if rel {
+                    x += cx;
+                }
+                cx = x;
+                addp!(x, cy);
+            }
+            'V' | 'v' => {
+                let Some(mut y) = read_num(&toks, &mut i) else {
+                    continue;
+                };
+                if rel {
+                    y += cy;
+                }
+                cy = y;
+                addp!(cx, y);
+            }
+            'C' | 'c' => {
+                let (
+                    Some(mut x1),
+                    Some(mut y1),
+                    Some(mut x2),
+                    Some(mut y2),
+                    Some(mut x),
+                    Some(mut y),
+                ) = (
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                )
+                else {
+                    continue;
+                };
+                if rel {
+                    x1 += cx;
+                    y1 += cy;
+                    x2 += cx;
+                    y2 += cy;
+                    x += cx;
+                    y += cy;
+                }
+                addp!(x1, y1);
+                addp!(x2, y2);
+                addp!(x, y);
+                cx = x;
+                cy = y;
+            }
+            'S' | 's' => {
+                let (Some(mut x2), Some(mut y2), Some(mut x), Some(mut y)) = (
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                ) else {
+                    continue;
+                };
+                if rel {
+                    x2 += cx;
+                    y2 += cy;
+                    x += cx;
+                    y += cy;
+                }
+                addp!(x2, y2);
+                addp!(x, y);
+                cx = x;
+                cy = y;
+            }
+            'Q' | 'q' => {
+                let (Some(mut x1), Some(mut y1), Some(mut x), Some(mut y)) = (
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                    read_num(&toks, &mut i),
+                ) else {
+                    continue;
+                };
+                if rel {
+                    x1 += cx;
+                    y1 += cy;
+                    x += cx;
+                    y += cy;
+                }
+                addp!(x1, y1);
+                addp!(x, y);
+                cx = x;
+                cy = y;
+            }
+            'T' | 't' => {
+                let (Some(mut x), Some(mut y)) = (read_num(&toks, &mut i), read_num(&toks, &mut i))
+                else {
+                    continue;
+                };
+                if rel {
+                    x += cx;
+                    y += cy;
+                }
+                addp!(x, y);
+                cx = x;
+                cy = y;
+            }
+            'A' | 'a' => {
+                // rx ry x-axis-rotation large-arc sweep x y
+                if read_num(&toks, &mut i).is_none() {
+                    continue;
+                }
+                if read_num(&toks, &mut i).is_none() {
+                    continue;
+                }
+                if read_num(&toks, &mut i).is_none() {
+                    continue;
+                }
+                if read_num(&toks, &mut i).is_none() {
+                    continue;
+                }
+                if read_num(&toks, &mut i).is_none() {
+                    continue;
+                }
+                let (Some(mut x), Some(mut y)) = (read_num(&toks, &mut i), read_num(&toks, &mut i))
+                else {
+                    continue;
+                };
+                if rel {
+                    x += cx;
+                    y += cy;
+                }
+                addp!(x, y);
+                cx = x;
+                cy = y;
+            }
+            'Z' | 'z' => {
+                cx = sx;
+                cy = sy;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    if !min_x.is_finite() {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PathTok {
+    Cmd(char),
+    Num(f64),
+}
+
+fn tokenize_path(d: &str) -> Vec<PathTok> {
+    let mut out = Vec::new();
+    let bytes = d.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphabetic() && b"MmLlHhVvZzCcSsQqTtAa".contains(&c) {
+            out.push(PathTok::Cmd(c as char));
+            i += 1;
+        } else if c == b'-' || c == b'.' || c.is_ascii_digit() {
+            let start = i;
+            if c == b'-' {
+                i += 1;
+            }
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b'.' {
+                i += 1;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+                i += 1;
+                if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+                    i += 1;
+                }
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    i += 1;
+                }
+            }
+            if start == i {
+                i += 1;
+                continue;
+            }
+            let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
+            if let Ok(v) = s.parse::<f64>() {
+                out.push(PathTok::Num(v));
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn read_num(toks: &[PathTok], i: &mut usize) -> Option<f64> {
+    if *i < toks.len() {
+        match toks[*i] {
+            PathTok::Num(v) => {
+                *i += 1;
+                return Some(v);
+            }
+            PathTok::Cmd(_) => return None,
+        }
+    }
+    None
+}
+
+/// Replicate `generate_ref.mjs::unionBox`. Skips boxes with both
+/// `width==0` AND `height==0`, and returns `(0, 0, 0, 0)` if every
+/// input is skipped or `None`.
+pub(crate) fn union_bbox(boxes: &[Option<(f64, f64, f64, f64)>]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut found = false;
+    for b in boxes {
+        let Some((x, y, w, h)) = *b else { continue };
+        if w == 0.0 && h == 0.0 {
+            continue;
+        }
+        found = true;
+        if x < min_x {
+            min_x = x;
+        }
+        if y < min_y {
+            min_y = y;
+        }
+        if x + w > max_x {
+            max_x = x + w;
+        }
+        if y + h > max_y {
+            max_y = y + h;
+        }
+    }
+    if !found {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+}
+
+fn union_two(a: (f64, f64, f64, f64), b: Option<(f64, f64, f64, f64)>) -> (f64, f64, f64, f64) {
+    union_bbox(&[Some(a), b])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_bbox_simple_line() {
+        let (x, y, w, h) = path_bbox("M0 0 L 10 5");
+        assert_eq!((x, y, w, h), (0.0, 0.0, 10.0, 5.0));
+    }
+
+    #[test]
+    fn path_bbox_arc_uses_endpoints_only() {
+        // A semicircle from (0,0) to (10,0) via radius 5 — endpoint
+        // sample only, NOT the bulge at y=5.
+        let (x, y, w, h) = path_bbox("M0 0 A5,5 0 0,1 10,0");
+        assert_eq!(x, 0.0);
+        assert_eq!(y, 0.0);
+        assert_eq!(w, 10.0);
+        assert_eq!(h, 0.0);
+    }
+
+    #[test]
+    fn path_bbox_quadratic_includes_control() {
+        // Q control point at (5, 10), end at (10, 0) — control is in.
+        let (x, y, w, h) = path_bbox("M0 0 Q 5 10 10 0");
+        assert_eq!((x, y, w, h), (0.0, 0.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn path_bbox_relative_z_resets() {
+        // After Z, cursor should be at (0, 0); next m relative to origin.
+        let (x, y, w, h) = path_bbox("M0 0 L 5 5 Z m 10 10 l 5 5");
+        // Path covers (0,0)-(5,5), then jumps to (10,10), goes to (15,15).
+        assert_eq!(x, 0.0);
+        assert_eq!(y, 0.0);
+        assert_eq!(w, 15.0);
+        assert_eq!(h, 15.0);
+    }
+
+    #[test]
+    fn bang_path_bbox_matches_js_oracle() {
+        // From cypress/mindmap/10.svg path 0 (root bang).
+        // ew = 4 * 21.306396484375 + 8.52255859375 = ?  Actually back out
+        // from the JS oracle: x=-8.52255859375, y=-5.6296875, w=106.531..,
+        // h=70.37109375. Original ew = 4 * 21.306396484375 = 85.225586,
+        // shape_w = ew = ?, this is path bbox post-fmt_num.
+        // Use bang_path_d directly with the same ew/eh that produced
+        // those numbers: ew=85.22..., eh=56.296875.
+        let ew = 85.22558593750_f64;
+        let eh = 56.296875_f64;
+        let d = bang_path_d(ew, eh);
+        let (x, y, w, h) = path_bbox(&d);
+        // JS oracle on the live SVG d-string returns these values.
+        assert!((x - (-8.52255859375)).abs() < 1e-9, "x = {}", x);
+        assert!((y - (-5.6296875)).abs() < 1e-9, "y = {}", y);
+        assert!((w - 106.531982421875).abs() < 1e-9, "w = {}", w);
+        assert!((h - 70.37109375).abs() < 1e-9, "h = {}", h);
+    }
+
+    #[test]
+    fn union_skips_empty_boxes() {
+        let u = union_bbox(&[Some((0.0, 0.0, 0.0, 0.0)), Some((1.0, 2.0, 3.0, 4.0))]);
+        assert_eq!(u, (1.0, 2.0, 3.0, 4.0));
+    }
+
+    #[test]
+    fn union_keeps_zero_height_box() {
+        // A horizontal line (h=0, w>0) is not empty; jsdom unionBox
+        // skips ONLY when both are zero.
+        let u = union_bbox(&[Some((-5.0, 10.0, 10.0, 0.0)), Some((0.0, 0.0, 1.0, 1.0))]);
+        assert_eq!(u, (-5.0, 0.0, 10.0, 10.0));
     }
 }
