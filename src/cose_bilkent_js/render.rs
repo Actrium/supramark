@@ -21,6 +21,38 @@ const LAYOUT_BASE_JS: &str = include_str!("vendor/layout-base.js");
 const COSE_BASE_JS: &str = include_str!("vendor/cose-base.js");
 const COSE_BILKENT_JS: &str = include_str!("vendor/cytoscape-cose-bilkent.js");
 
+/// fdlibm-based `Math.pow` injected into the QuickJS context — verbatim port
+/// of V8's `src/base/ieee754.cc::pow` (which is itself derived from fdlibm
+/// e_pow.c). cose-bilkent's cooling schedule (`cose-base.js:450`) calls
+/// `Math.pow(coolingCycle, log(96)/log(25))` once per coarsening level; V8's
+/// fdlibm pow and QuickJS's libm pow disagree by 1 ULP on inputs like
+/// `pow(15, 1.4179944924264754)`, and the spring-embedder dynamics amplify
+/// that 1 ULP into a >250 px visual delta over ~38 iterations — the sole
+/// remaining cause of cypress/mindmap/23 byte-drift. Patching `Math.pow`
+/// here makes the layout byte-identical to a Node/V8 reference run.
+///
+/// Endianness: this code assumes a little-endian host (x86-64, aarch64-LE).
+/// On those targets `u32[0]` is the low half, `u32[1]` the high half of the
+/// shared-buffer double — matches V8's `EXTRACT_WORDS(hi, lo, d)`. The shim
+/// performs an endian self-check and throws on big-endian hosts.
+const POW_SHIM: &str = include_str!("v8_pow_shim.js");
+
+/// Companion to `POW_SHIM` — patches `Math.sin` / `Math.cos` with V8's
+/// fdlibm-based implementations. QuickJS's host libm differs from V8 by ~1
+/// ULP on inputs like `cos(0.1)` and `sin(18.0)`. cose-bilkent's RandomSeed
+/// (`x = Math.sin(seed++) * 10000`) reads sin at integer arguments, and the
+/// branchRadialLayout pass calls cos at small radian values; either drift
+/// shifts initial node positions and the spring embedder's iteration trace,
+/// leaving 1 ULP residuals in 4 of 16 final node centres for fixture 23.
+const SINCOS_SHIM: &str = include_str!("v8_sincos_shim.js");
+
+/// Test-only re-export of the trig shims so integration tests in
+/// `mod.rs::tests` can install them into a bare QuickJS context.
+#[cfg(test)]
+pub(crate) const POW_SHIM_FOR_TEST: &str = POW_SHIM;
+#[cfg(test)]
+pub(crate) const SINCOS_SHIM_FOR_TEST: &str = SINCOS_SHIM;
+
 /// Minimal host shim. cytoscape's UMD reads `console.warn` / `console.log`
 /// at the top level (silenced) and starts a `requestAnimationFrame` loop in
 /// styleEnabled mode that falls through to `setTimeout(fn, 1000/60)` — we
@@ -203,6 +235,18 @@ fn run_in_quickjs(graph_json: &str) -> Result<LayoutOutput, LayoutError> {
         ctx.eval::<(), _>(HOST_SHIM)
             .catch(&ctx)
             .map_err(|e| LayoutError::Runtime(format!("shim: {:?}", e)))?;
+        // Patch Math.pow with V8's fdlibm-based implementation BEFORE loading
+        // any vendored library — cytoscape / cose-base / layout-base must all
+        // see the patched function. See `v8_pow_shim.js` for the rationale.
+        ctx.eval::<(), _>(POW_SHIM)
+            .catch(&ctx)
+            .map_err(|e| LayoutError::Runtime(format!("pow shim: {:?}", e)))?;
+        // Patch Math.sin / Math.cos with V8's fdlibm-based implementations
+        // for the same reason — the RandomSeed RNG and branchRadialLayout
+        // both rely on these matching V8 byte-for-byte.
+        ctx.eval::<(), _>(SINCOS_SHIM)
+            .catch(&ctx)
+            .map_err(|e| LayoutError::Runtime(format!("sincos shim: {:?}", e)))?;
         ctx.eval::<(), _>(CYTOSCAPE_JS)
             .catch(&ctx)
             .map_err(|e| LayoutError::Runtime(format!("load cytoscape: {:?}", e)))?;
@@ -326,7 +370,11 @@ fn parse_layout_output(json: &str) -> Result<LayoutOutput, LayoutError> {
     let mut nodes = Vec::with_capacity(nodes_v.len());
     for n in nodes_v {
         nodes.push(PositionedNode {
-            id: n.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            id: n
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             x: n.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
             y: n.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
             label: n
@@ -343,7 +391,11 @@ fn parse_layout_output(json: &str) -> Result<LayoutOutput, LayoutError> {
     let f = |v: Option<&Value>| -> Option<f64> { v.and_then(|x| x.as_f64()) };
     for e in edges_v {
         edges.push(PositionedEdge {
-            id: e.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            id: e
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             source: e
                 .get("source")
                 .and_then(|v| v.as_str())
