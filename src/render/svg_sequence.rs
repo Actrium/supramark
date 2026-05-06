@@ -379,6 +379,42 @@ impl SequenceSvgBounds {
         self.add_point(max_x + HACK_X_FOR_POLYGON, max_y);
     }
 
+    /// Track a polygon as if it were the underlying URectangle.  Used for
+    /// handwritten participant rect-replacements where Java's LimitFinder
+    /// sees the un-jiggled rect (`drawRectangle` adds `(x-1, y-1)` and
+    /// `(x+w-1, y+h-1)`).  We don't have the original rect dims here but
+    /// the polygon's bounding box approximates them; the `-1` offset on
+    /// the max corner mirrors `drawRectangle`'s rounding.  We also drop
+    /// the `HACK_X_FOR_POLYGON` (it's only there for arrow-head
+    /// triangles that might clip the right edge — irrelevant for boxes).
+    fn track_polygon_as_rect(&mut self, coords: &[f64]) {
+        if coords.len() < 2 {
+            return;
+        }
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+        for pair in coords.chunks_exact(2) {
+            min_x = min_x.min(pair[0]);
+            max_x = max_x.max(pair[0]);
+            min_y = min_y.min(pair[1]);
+            max_y = max_y.max(pair[1]);
+        }
+        if !min_x.is_finite() || !max_x.is_finite() {
+            return;
+        }
+        // Mirror Java's `LimitFinder.drawRectangle`: the `-1` matches the
+        // rounding semantics for rectangle bounds vs polygon bounds.
+        self.add_point(min_x - 1.0, min_y - 1.0);
+        self.add_point(max_x - 1.0, max_y - 1.0);
+        // SvgGraphics.svgPolygon ensureVisible per vertex (no -1, but only
+        // shadow-padded — for un-shadowed we mirror as the raw vertex).
+        for pair in coords.chunks_exact(2) {
+            self.add_sg_point(pair[0], pair[1]);
+        }
+    }
+
     /// Track polygon bounds for a shadowed polygon. Java's LimitFinder applies
     /// `HACK_X_FOR_POLYGON = 10` on the x axis; its SvgGraphics separately
     /// calls `ensureVisible(point + 2*deltaShadow)` per vertex when a drop
@@ -571,11 +607,58 @@ fn parse_path_endpoints(d: &str) -> Vec<f64> {
 fn measure_sequence_body_dim_full(body: &str) -> Option<((f64, f64), (f64, f64))> {
     static TAG_RE: OnceLock<Regex> = OnceLock::new();
     static ATTR_RE: OnceLock<Regex> = OnceLock::new();
+    static PART_G_RE: OnceLock<Regex> = OnceLock::new();
     let tag_re = TAG_RE.get_or_init(|| {
         Regex::new(r#"<(rect|line|text|ellipse|circle|polygon|polyline|path)\b([^>]*)>"#).unwrap()
     });
     let attr_re =
         ATTR_RE.get_or_init(|| Regex::new(r#"([A-Za-z_:][-A-Za-z0-9_:.]*)="([^"]*)""#).unwrap());
+    // Pre-scan for `<g class="participant ...">` and `<g class="participant-lifeline">`
+    // ranges.  Polygons emitted inside these (for handwritten participant boxes
+    // / lifelines) are rect-replacements: Java's `LimitFinder` sees the
+    // un-jiggled `URectangle` because `udrawable.drawU` is invoked on a
+    // *non*-handwritten LimitFinder.  We mirror that by tracking these
+    // polygons rect-style (with a `-1` offset on max coords) instead of
+    // polygon-style (no -1, with HACK_X_FOR_POLYGON).  See
+    // `klimt/drawing/LimitFinder.java::drawRectangle/drawUPolygon`.
+    let part_g_re = PART_G_RE.get_or_init(|| {
+        Regex::new(r#"<g class="(?:participant participant-head|participant participant-tail|participant-lifeline)\b"#)
+            .unwrap()
+    });
+    // Collect (start, end) byte ranges of participant-box / lifeline group bodies.
+    // For each `<g class="participant...">` start, find the matching `</g>`
+    // (groups are emitted as a single non-nested wrapper here, with optional
+    // inner `<g><title>...</title>` for lifelines — they all close before the
+    // outer `</g>`).
+    let mut part_ranges: Vec<(usize, usize)> = Vec::new();
+    for m in part_g_re.find_iter(body) {
+        let start = m.start();
+        // Find the next `</g>` and walk past nested `<g`/`</g>` pairs.
+        let mut depth: i32 = 1;
+        let mut idx = m.end();
+        while depth > 0 {
+            let open = body[idx..].find("<g").map(|p| idx + p);
+            let close = body[idx..].find("</g>").map(|p| idx + p);
+            match (open, close) {
+                (Some(o), Some(c)) if o < c => {
+                    depth += 1;
+                    idx = o + 2;
+                }
+                (_, Some(c)) => {
+                    depth -= 1;
+                    idx = c + 4;
+                }
+                _ => {
+                    // Unbalanced; bail out and don't record this range.
+                    idx = body.len();
+                    break;
+                }
+            }
+        }
+        part_ranges.push((start, idx));
+    }
+    let in_participant_group =
+        |pos: usize| -> bool { part_ranges.iter().any(|&(s, e)| pos >= s && pos < e) };
 
     let mut bounds = SequenceSvgBounds::default();
 
@@ -677,7 +760,13 @@ fn measure_sequence_body_dim_full(body: &str) -> Option<((f64, f64), (f64, f64))
             }
             "polygon" | "polyline" => {
                 let coords = parse_svg_points(attr_map.get("points").copied());
-                if has_shadow {
+                let pos = cap.get(0).map(|m| m.start()).unwrap_or(0);
+                if in_participant_group(pos) {
+                    // Handwritten participant rect-replacement polygon.  Track
+                    // as rect using polygon's bounding box (Java LF sees the
+                    // un-jiggled URectangle).
+                    bounds.track_polygon_as_rect(&coords);
+                } else if has_shadow {
                     bounds.track_polygon_points_shadowed(&coords, DEFAULT_SHADOW);
                 } else {
                     bounds.track_polygon_points(&coords);
@@ -1191,7 +1280,13 @@ fn draw_participant_rect_with_font(
     let fill_attrs = resolve_fill_attrs(bg);
     if handwritten {
         // Handwritten: draw as a jiggled polygon with fresh RNG per shape.
-        let rx_val = if rounded { 2.5 } else { 0.0 };
+        // Java's `URectangleHand` receives the raw `rect.getRx()` from
+        // `URectangle.rounded(roundCorner)` and halves it itself
+        // (`Math.min(rx/2, width/2)`).  For sequence participants the skin
+        // sets `RoundCorner 5`, so the value handed to URectangleHand is `5`.
+        // Mirror that semantic: pass the un-halved corner here, the
+        // `rect_to_hand_polygon` helper halves it internally.
+        let rx_val = if rounded { 5.0 } else { 0.0 };
         let ry_val = rx_val;
         let mut rng = JavaRandom::new(HAND_SEED);
         let pts = rect_to_hand_polygon(box_width, box_height, rx_val, ry_val, &mut rng);
