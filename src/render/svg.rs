@@ -299,7 +299,17 @@ pub fn render_with_source(
     } else {
         meta
     };
-    let mut svg = if effective_meta.is_empty() && !meta.pragmas.contains_key("svginteractive") {
+    // Java applies the document-level chrome (header/footer/title/caption/legend)
+    // via TextBlockExporter, which only fires when there's actual meta content to
+    // render.  The `svginteractive` pragma is unrelated chrome — Java handles it
+    // as an `SvgOption` flag that injects CSS/JS into `<defs>` on the existing
+    // SvgGraphics root.  Wrapping the body just to inject CSS/JS would force a
+    // re-derivation of the viewport from `raw_body_dim`, which truncates the
+    // fractional half-pixel that the body's `ensureVisible` had already rounded
+    // up — losing 1px on width and height.  Mirror Java by only wrapping when
+    // the meta is non-empty; the standalone `inject_svginteractive` step below
+    // takes care of the pragma without touching dimensions.
+    let mut svg = if effective_meta.is_empty() {
         body_result.svg
     } else {
         // Document-level BackGroundColor from <style> is stored as "document.backgroundcolor";
