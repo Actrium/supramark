@@ -486,49 +486,31 @@ fn to_dot(graph: &LayoutGraph) -> String {
     dot
 }
 
+use std::sync::OnceLock;
+
+pub type DotRenderer = fn(&str) -> Result<String, Error>;
+static CUSTOM_RENDERER: OnceLock<DotRenderer> = OnceLock::new();
+
+/// Set a custom DOT renderer for the entire process.
+/// This is used by tests to inject deterministic backends (e.g. Node+WASM).
+pub fn set_custom_dot_renderer(renderer: DotRenderer) {
+    let _ = CUSTOM_RENDERER.set(renderer);
+}
+
 /// Run Graphviz `dot` on a DOT source string, returning the SVG output.
 ///
-/// Two backends are available, picked at runtime:
-///
-/// 1. **Native** (default, used by the production `plantuml_little`
-///    library + CLI). Uses the in-process `graphviz-anywhere` crate
-///    (a safe wrapper around the same libgvc that the Graphviz CLI
-///    uses), so no `dot` subprocess / runtime dependency is required —
-///    callers get the same SVG the `dot -Tsvg` CLI would produce.
-///
-/// 2. **Wasm** (opt-in via `PLANTUML_LITTLE_TEST_BACKEND=wasm`). Spawns
-///    a long-lived Node.js subprocess that loads
-///    `@kookyleo/graphviz-anywhere-web`'s viz.wasm and streams
-///    DOT → SVG requests to it. The point is byte-identical SVG output
-///    on every developer machine and every CI runner — the same wasm
-///    binary ships to all platforms, so Graphviz's floating-point
-///    layout math produces the same bytes everywhere. Used by
-///    `scripts/check_reference_failures.sh` and the reference-test CI
-///    job to guarantee reproducibility.
-///
-/// libgvc maintains global mutable state (plugin registry, error buffers,
-/// etc.) and is not thread-safe, so we serialize all native Graphviz
-/// access through a process-wide mutex. Previously the `dot` subprocess
-/// provided isolation implicitly; this lock preserves the same guarantee
-/// in-process. The wasm backend has its own serialization inside
-/// `wasm_backend::render_dot_to_svg`.
+/// Strategy:
+/// 1. If a custom renderer is set via [`set_custom_dot_renderer`], use it.
+/// 2. Otherwise, use the native in-process `graphviz-anywhere` crate.
 fn render_dot_to_svg(dot_src: &str) -> Result<String, Error> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if crate::layout::wasm_backend::wasm_backend_selected() {
-            return crate::layout::wasm_backend::render_dot_to_svg(dot_src);
-        }
+    if let Some(renderer) = CUSTOM_RENDERER.get() {
+        return renderer(dot_src);
     }
     render_dot_to_svg_native(dot_src)
 }
 
 fn render_dot_to_svg_native(dot_src: &str) -> Result<String, Error> {
-    use std::sync::Mutex;
-    static GV_LOCK: Mutex<()> = Mutex::new(());
-
-    let _guard = GV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = crate::dot::graphviz::gv_lock();
     let ctx = GraphvizContext::new()
         .map_err(|e| Error::Layout(format!("failed to create graphviz context: {e}")))?;
     ctx.render_to_string(dot_src, Engine::Dot, Format::Svg)

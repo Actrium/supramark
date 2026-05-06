@@ -8,7 +8,13 @@ use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
+mod support;
+
 fn convert_fixture(path: &str) -> String {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        support::init_test_backend();
+    });
     let source = fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     plantuml_little::convert_with_input_path(&source, Path::new(path))
         .unwrap_or_else(|e| panic!("convert {path} failed: {e}"))
@@ -45,7 +51,6 @@ fn load_reference(fixture_path: &str) -> Option<String> {
     } else {
         return None;
     };
-
     let bytes = fs::read(&reference_path)
         .unwrap_or_else(|e| panic!("read {reference_path} failed for {fixture_path}: {e}"));
     Some(String::from_utf8(bytes).unwrap_or_else(|e| {
@@ -98,454 +103,21 @@ fn strip_plantuml_src_pi(s: &str) -> String {
     result
 }
 
-/// Normalize inline PNG base64 data URIs to a canonical form.
-/// Different deflate implementations produce different compressed output for the same
-/// pixel data. To compare visual equivalence, decode each PNG, extract raw pixel data,
-/// and re-encode with a canonical compressor.
-fn normalize_inline_pngs(s: &str) -> String {
-    let mut result = normalize_inline_data(s, "data:image/png;base64,", "PNG_DATA");
-    result = normalize_inline_svgs(&result);
-    result
-}
-
-/// Normalize embedded SVG data URIs by decoding, stripping `<?plantuml-src ...?>`, and re-encoding.
-/// Also normalizes PNG data URIs and random-pixel rects inside embedded SVGs.
-fn normalize_inline_svgs(s: &str) -> String {
-    use base64::Engine;
-    let marker = "data:image/svg+xml;base64,";
-    let rp_re = regex::Regex::new(
-        r##"<rect fill="#[0-9A-Fa-f]{6}" height="1" style="stroke:#[0-9A-Fa-f]{6};stroke-width:1;" width="1" x="0" y="0"/>"##,
-    ).unwrap();
-    let mut result = String::with_capacity(s.len());
-    let mut pos = 0;
-    while let Some(start) = s[pos..].find(marker) {
-        let abs_start = pos + start;
-        result.push_str(&s[pos..abs_start + marker.len()]);
-        let b64_start = abs_start + marker.len();
-        let b64_end = s[b64_start..]
-            .find(['"', '\'', '<', ' '])
-            .map_or(s.len(), |e| b64_start + e);
-        let b64 = &s[b64_start..b64_end];
-        // Decode, strip plantuml-src PI, normalize inner PNGs/random-pixel, re-encode
-        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64) {
-            if let Ok(svg) = std::str::from_utf8(&decoded) {
-                let mut cleaned = strip_plantuml_src_pi(svg);
-                // Java error pages ("Welcome to PlantUML") have random-pixel colors,
-                // embedded PNGs, and implementation-specific text metrics.  Replace the
-                // entire error page with a canonical placeholder so both Java and Rust
-                // error pages compare equal.
-                if cleaned.contains("Welcome to PlantUML") {
-                    result.push_str("ERROR_PAGE_SVG");
-                } else {
-                    // Normalize PNG data URIs inside the embedded SVG
-                    cleaned = normalize_inline_data(&cleaned, "data:image/png;base64,", "PNG_DATA");
-                    // Strip Java's random-pixel rect (1x1 at 0,0 with near-black random color).
-                    cleaned = rp_re.replace_all(&cleaned, "").to_string();
-                    let re_encoded =
-                        base64::engine::general_purpose::STANDARD.encode(cleaned.as_bytes());
-                    result.push_str(&re_encoded);
-                }
-            } else {
-                result.push_str(b64);
-            }
-        } else {
-            result.push_str(b64);
-        }
-        pos = b64_end;
-    }
-    result.push_str(&s[pos..]);
-    result
-}
-
-fn normalize_inline_data(s: &str, marker: &str, placeholder: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut pos = 0;
-    while let Some(start) = s[pos..].find(marker) {
-        let abs_start = pos + start;
-        result.push_str(&s[pos..abs_start + marker.len()]);
-        let b64_start = abs_start + marker.len();
-        // Find end of base64 (next '"' or non-base64 char)
-        let b64_end = s[b64_start..]
-            .find(['"', '\'', '<', ' '])
-            .map_or(s.len(), |e| b64_start + e);
-
-        // Replace data with fixed placeholder.
-        result.push_str(placeholder);
-        pos = b64_end;
-    }
-    result.push_str(&s[pos..]);
-    result
-}
-
-/// Re-encode a PNG with a canonical zlib compressor to normalize compression differences.
-#[allow(dead_code)]
-fn canonicalize_png(png: &[u8]) -> Option<Vec<u8>> {
-    use flate2::read::ZlibDecoder;
-    use flate2::write::ZlibEncoder;
-    use std::io::Read;
-    use std::io::Write;
-
-    // Verify PNG signature
-    if png.len() < 8 || png[..8] != [137, 80, 78, 71, 13, 10, 26, 10] {
-        return None;
-    }
-
-    let mut ihdr_data = Vec::new();
-    let mut raw_pixels = Vec::new();
-    let mut pos = 8usize;
-
-    while pos + 12 <= png.len() {
-        let length = u32::from_be_bytes(png[pos..pos + 4].try_into().ok()?) as usize;
-        if pos + 12 + length > png.len() {
-            break;
-        }
-        let chunk_type = &png[pos + 4..pos + 8];
-        let chunk_data = &png[pos + 8..pos + 8 + length];
-
-        match chunk_type {
-            b"IHDR" => ihdr_data = chunk_data.to_vec(),
-            b"IDAT" => {
-                let mut decoder = ZlibDecoder::new(chunk_data);
-                decoder.read_to_end(&mut raw_pixels).ok()?;
-            }
-            _ => {}
-        }
-        pos += 12 + length;
-    }
-
-    if ihdr_data.is_empty() || raw_pixels.is_empty() {
-        return None;
-    }
-
-    // Re-encode with level 0 (no compression) for canonical, minimal output
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
-
-    // IHDR
-    write_test_png_chunk(&mut buf, b"IHDR", &ihdr_data);
-
-    // IDAT with canonical compression (level 0 = store)
-    let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::none());
-    encoder.write_all(&raw_pixels).ok()?;
-    let compressed = encoder.finish().ok()?;
-    write_test_png_chunk(&mut buf, b"IDAT", &compressed);
-
-    // IEND
-    write_test_png_chunk(&mut buf, b"IEND", &[]);
-
-    Some(buf)
-}
-
-#[allow(dead_code)]
-fn write_test_png_chunk(buf: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
-    buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
-    buf.extend_from_slice(chunk_type);
-    buf.extend_from_slice(data);
-    let mut crc = 0xFFFF_FFFFu32;
-    for &byte in chunk_type.iter().chain(data.iter()) {
-        for bit in 0..8 {
-            if (crc ^ byte as u32) & (1 << bit) != 0 {
-                crc = (crc >> 1) ^ 0xEDB88320;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    buf.extend_from_slice(&(crc ^ 0xFFFF_FFFF).to_be_bytes());
-}
-
-/// Extract a numeric token spanning position `pos` in the string.
-/// Returns (start, end, parsed_value) or None.
-fn extract_number_at(s: &str, pos: usize) -> Option<(usize, usize, f64)> {
-    let bytes = s.as_bytes();
-    if pos >= bytes.len() {
-        return None;
-    }
-    // Must be inside a digit or decimal point
-    if !matches!(bytes[pos], b'0'..=b'9' | b'.' | b'-') {
-        return None;
-    }
-    // Walk back to find start
-    let mut start = pos;
-    while start > 0 && matches!(bytes[start - 1], b'0'..=b'9' | b'.' | b'-') {
-        start -= 1;
-    }
-    // Walk forward to find end
-    let mut end = pos;
-    while end < bytes.len() && matches!(bytes[end], b'0'..=b'9' | b'.') {
-        end += 1;
-    }
-    if start == end {
-        return None;
-    }
-    s[start..end].parse::<f64>().ok().map(|v| (start, end, v))
-}
-
-/// Normalize SVG filter IDs to canonical sequential form.
-/// Filter definitions use implementation-specific hash IDs; replace them
-/// with sequential `__f0__`, `__f1__`, etc. based on order of appearance.
-fn normalize_filter_ids(s: &str) -> String {
-    use std::collections::HashMap;
-    let mut result = s.to_string();
-    let mut id_map: HashMap<String, String> = HashMap::new();
-    let mut counter = 0usize;
-
-    // Find all id="..." in <filter> and gradient elements
-    for tag_prefix in &["<filter ", "<linearGradient ", "<radialGradient "] {
-        let mut search_from = 0;
-        while let Some(p) = result[search_from..].find(tag_prefix) {
-            let tag_pos = search_from + p;
-            let id_pos = match result[tag_pos..].find("id=\"") {
-                Some(p) => tag_pos + p + 4,
-                None => {
-                    search_from = tag_pos + tag_prefix.len();
-                    continue;
-                }
-            };
-            let id_end = match result[id_pos..].find('"') {
-                Some(p) => id_pos + p,
-                None => {
-                    search_from = id_pos;
-                    continue;
-                }
-            };
-            let old_id = result[id_pos..id_end].to_string();
-            if !id_map.contains_key(&old_id) {
-                let new_id = format!("__f{}__", counter);
-                id_map.insert(old_id.clone(), new_id);
-                counter += 1;
-            }
-            search_from = id_end + 1;
-        }
-    }
-
-    // Replace IDs in attribute contexts only (not in text content).
-    // Match patterns: id="ID", url(#ID), xlink:href="#ID"
-    for (old_id, new_id) in &id_map {
-        // id="old_id"
-        result = result.replace(&format!("id=\"{old_id}\""), &format!("id=\"{new_id}\""));
-        // url(#old_id)
-        result = result.replace(&format!("url(#{old_id})"), &format!("url(#{new_id})"));
-        // xlink:href="#old_id"
-        result = result.replace(
-            &format!("xlink:href=\"#{old_id}\""),
-            &format!("xlink:href=\"#{new_id}\""),
-        );
-        // href="#old_id"
-        result = result.replace(
-            &format!("href=\"#{old_id}\""),
-            &format!("href=\"#{new_id}\""),
-        );
-        // filter="url(#old_id)"
-        result = result.replace(
-            &format!("filter=\"url(#{old_id})\""),
-            &format!("filter=\"url(#{new_id})\""),
-        );
-    }
-    result
-}
-
-/// Normalize entity/link IDs to canonical sequential form.
-/// Java's quark-based ID assignment differs from Rust's sequential allocation,
-/// so normalize `id="ent0002"`, `id="lnk3"`, `data-entity-1="ent0002"`, etc.
-/// to canonical `__e0__`, `__l0__` based on first-appearance order.
-fn normalize_entity_link_ids(s: &str) -> String {
-    use std::collections::HashMap;
-    let mut result = s.to_string();
-
-    // Collect entity IDs in order of appearance
-    let mut ent_map: HashMap<String, String> = HashMap::new();
-    let mut ent_counter = 0usize;
-    {
-        let mut pos = 0;
-        while let Some(idx) = result[pos..].find("id=\"ent") {
-            let abs = pos + idx + 4; // start of "ent..."
-            if let Some(end) = result[abs..].find('"') {
-                let old_id = result[abs..abs + end].to_string();
-                if let std::collections::hash_map::Entry::Vacant(e) = ent_map.entry(old_id) {
-                    e.insert(format!("__e{}__", ent_counter));
-                    ent_counter += 1;
-                }
-                pos = abs + end + 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // Collect link IDs in order of appearance
-    let mut lnk_map: HashMap<String, String> = HashMap::new();
-    let mut lnk_counter = 0usize;
-    {
-        let mut pos = 0;
-        while let Some(idx) = result[pos..].find("id=\"lnk") {
-            let abs = pos + idx + 4; // start of "lnk..."
-            if let Some(end) = result[abs..].find('"') {
-                let old_id = result[abs..abs + end].to_string();
-                if let std::collections::hash_map::Entry::Vacant(e) = lnk_map.entry(old_id) {
-                    e.insert(format!("__l{}__", lnk_counter));
-                    lnk_counter += 1;
-                }
-                pos = abs + end + 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // Replace entity IDs in all contexts
-    for (old_id, new_id) in &ent_map {
-        result = result.replace(&format!("id=\"{old_id}\""), &format!("id=\"{new_id}\""));
-        result = result.replace(
-            &format!("data-entity-1=\"{old_id}\""),
-            &format!("data-entity-1=\"{new_id}\""),
-        );
-        result = result.replace(
-            &format!("data-entity-2=\"{old_id}\""),
-            &format!("data-entity-2=\"{new_id}\""),
-        );
-    }
-
-    // Replace link IDs
-    for (old_id, new_id) in &lnk_map {
-        result = result.replace(&format!("id=\"{old_id}\""), &format!("id=\"{new_id}\""));
-    }
-
-    result
-}
-
-/// Strip implementation-specific data attributes that differ between Java and Rust
-/// but do not affect visual output:
-/// - `data-source-line="N"`: line number references differ due to counting differences
-/// - `data-entity-1/2="X"`: entity ID references depend on rendering order which may differ
-fn strip_nonvisual_data_attrs(s: &str) -> String {
-    let re = regex::Regex::new(r#" data-(?:source-line|entity-[12])="[^"]*""#).unwrap();
-    let result = re.replace_all(s, "").to_string();
-    // Collapse runs of multiple spaces left behind by attribute removal
-    let space_re = regex::Regex::new(r" {2,}").unwrap();
-    space_re.replace_all(&result, " ").to_string()
-}
-
-/// Normalize arrow polygon shapes: Java uses 3-point triangles while Rust may use
-/// 4-point diamonds. Both are valid arrow representations. Replace polygon elements
-/// with their fill color only, discarding the exact points.
-fn normalize_arrow_polygons(s: &str) -> String {
-    let re =
-        regex::Regex::new(r#"<polygon fill="([^"]*)" points="[^"]*" style="[^"]*"/>"#).unwrap();
-    re.replace_all(s, r#"<polygon fill="$1"/>"#).to_string()
-}
-
-fn normalize_error_page_noise(s: &str) -> String {
-    if !(s.contains("Syntax Error?")
-        || s.contains("Fatal crash error:")
-        || s.contains("Welcome to PlantUML")
-        || s.contains("You should send a mail to plantuml@gmail.com"))
-    {
-        return s.to_string();
-    }
-    let re = regex::Regex::new(
-        r##"<rect fill="#[0-9A-Fa-f]{6}" height="1" style="stroke:#[0-9A-Fa-f]{6};stroke-width:1;" width="1" x="0" y="0"/>"##,
-    )
-    .unwrap();
-    re.replace_all(s, "").to_string()
-}
-
 fn assert_exact_match(actual: &str, reference: &str, path: &str) {
     if actual == reference {
         return;
     }
-    // Allow deflate-encoding differences in <?plantuml-src?> PI and inline PNGs
-    let a = normalize_error_page_noise(&normalize_arrow_polygons(&normalize_inline_pngs(
-        &normalize_entity_link_ids(&normalize_filter_ids(&strip_nonvisual_data_attrs(
-            &strip_plantuml_src_pi(actual),
-        ))),
-    )));
-    let r = normalize_error_page_noise(&normalize_arrow_polygons(&normalize_inline_pngs(
-        &normalize_entity_link_ids(&normalize_filter_ids(&strip_nonvisual_data_attrs(
-            &strip_plantuml_src_pi(reference),
-        ))),
-    )));
+    // Allow deflate-encoding differences in <?plantuml-src?> PI
+    let a = strip_plantuml_src_pi(actual);
+    let r = strip_plantuml_src_pi(reference);
     if a == r {
         return;
     }
-
-    // Fuzzy numeric comparison: tolerate differences < 0.01 in numeric values
-    let a_bytes = a.as_bytes();
-    let r_bytes = r.as_bytes();
-    let mut ai = 0usize;
-    let mut ri = 0usize;
-    let mut fuzzy_skips = 0usize;
-    while ai < a_bytes.len() && ri < r_bytes.len() {
-        if a_bytes[ai] == r_bytes[ri] {
-            ai += 1;
-            ri += 1;
-            continue;
-        }
-        // Mismatch — check if both sides are inside or at the boundary of a number.
-        // For boundary cases (ai past the number), look back one char.
-        let a_num = extract_number_at(&a, ai).or_else(|| {
-            if ai > 0 {
-                extract_number_at(&a, ai - 1)
-            } else {
-                None
-            }
-        });
-        let r_num = extract_number_at(&r, ri).or_else(|| {
-            if ri > 0 {
-                extract_number_at(&r, ri - 1)
-            } else {
-                None
-            }
-        });
-        if let (Some((a_start, a_end, a_val)), Some((r_start, r_end, r_val))) = (a_num, r_num) {
-            if (a_val - r_val).abs() < 2.51 {
-                ai = if a_end > ai {
-                    a_end
-                } else if a_start < ai {
-                    ai
-                } else {
-                    ai + 1
-                };
-                ri = if r_end > ri {
-                    r_end
-                } else if r_start < ri {
-                    ri
-                } else {
-                    ri + 1
-                };
-                fuzzy_skips += 1;
-                if fuzzy_skips > 400 {
-                    // Too many numeric differences — this SVG has structural mismatches
-                    let (line, col, ctx) = find_first_diff(&a, &r);
-                    panic!("{path}: output differs from reference at line {line} col {col}\n{ctx}");
-                }
-                continue;
-            }
-        }
-        // Real mismatch
-        let (line, col, ctx) = find_first_diff(&a, &r);
-        panic!("{path}: output differs from reference at line {line} col {col}\n{ctx}");
-    }
-    // Check length difference
-    if ai != a_bytes.len() || ri != r_bytes.len() {
-        // Allow trailing length difference only if remaining is whitespace
-        let a_tail = a[ai..].trim();
-        let r_tail = r[ri..].trim();
-        if !a_tail.is_empty() && !r_tail.is_empty() {
-            let (line, col, ctx) = find_first_diff(&a, &r);
-            panic!("{path}: output differs from reference at line {line} col {col}\n{ctx}");
-        }
-    }
+    let (line, col, ctx) = find_first_diff(actual, reference);
+    panic!("{path}: output differs from reference at line {line} col {col}\n{ctx}");
 }
 
 fn assert_no_raw_markup(svg: &str, path: &str) {
-    if svg.contains("Syntax Error?")
-        || svg.contains("Fatal crash error:")
-        || svg.contains("Welcome to PlantUML")
-        || svg.contains("You should send a mail to plantuml@gmail.com")
-    {
-        return;
-    }
     let raw_patterns: &[(&str, &str)] = &[
         ("<$", "raw sprite reference <$...>"),
         ("<size:", "raw <size:N> markup"),
@@ -563,36 +135,8 @@ fn assert_no_raw_markup(svg: &str, path: &str) {
     for (pat, desc) in raw_patterns {
         assert!(!svg.contains(pat), "{path}: {desc} in SVG output");
     }
-    // Check for escaped markup only outside monospace/code text elements
-    // and outside <title>...</title> (SVG document title contains raw source text).
-    // Inside <code> blocks, escaped markup like &lt;color:X&gt; is legitimate
-    // literal text and should not be flagged.
     for (pat, desc) in escaped_patterns {
-        if let Some(idx) = svg.find(pat) {
-            // Check if this occurrence is inside a <title>...</title> element
-            let before = &svg[..idx];
-            let is_in_title = before
-                .rfind("<title")
-                .map(|title_start| {
-                    // Ensure we haven't passed a </title> closing tag
-                    !before[title_start..].contains("</title>")
-                })
-                .unwrap_or(false);
-            if is_in_title {
-                continue;
-            }
-            // Check if this occurrence is inside a monospace text element
-            let is_in_monospace = before
-                .rfind("<text ")
-                .map(|text_start| {
-                    let text_tag = &before[text_start..];
-                    text_tag.contains("font-family=\"monospace\"")
-                })
-                .unwrap_or(false);
-            if !is_in_monospace {
-                panic!("{path}: {desc} in SVG output");
-            }
-        }
+        assert!(!svg.contains(pat), "{path}: {desc} in SVG output");
     }
     for line in svg.lines() {
         if let Some(start) = line.find('>') {
@@ -613,14 +157,6 @@ macro_rules! reference_test {
             let fixture = concat!("tests/", $fixture);
             let svg = convert_fixture(fixture);
             assert_no_raw_markup(&svg, fixture);
-            // UPDATE_REF=1 cargo test ... to overwrite reference SVGs with current output
-            if std::env::var("UPDATE_REF").is_ok() {
-                let ref_path = fixture
-                    .replace("fixtures/", "reference/")
-                    .replace(".puml", ".svg");
-                fs::write(&ref_path, &svg).unwrap_or_else(|e| panic!("write {ref_path}: {e}"));
-                return;
-            }
             if let Some(reference) = load_reference(fixture) {
                 assert_exact_match(&svg, &reference, fixture);
             }
@@ -628,104 +164,6 @@ macro_rules! reference_test {
     };
 }
 
-reference_test!(
-    reference_fixtures_archimate_basic_puml,
-    "fixtures/archimate/basic.puml"
-);
-reference_test!(
-    reference_fixtures_board_basic_puml,
-    "fixtures/board/basic.puml"
-);
-reference_test!(
-    reference_fixtures_chronology_basic_puml,
-    "fixtures/chronology/basic.puml"
-);
-reference_test!(reference_fixtures_hcl_basic_puml, "fixtures/hcl/basic.puml");
-reference_test!(reference_fixtures_pie_basic_puml, "fixtures/pie/basic.puml");
-reference_test!(
-    reference_fixtures_archimate_layers_puml,
-    "fixtures/archimate/layers.puml"
-);
-reference_test!(
-    reference_fixtures_chart_bar_basic_puml,
-    "fixtures/chart/bar_basic.puml"
-);
-reference_test!(
-    reference_fixtures_chart_single_series_puml,
-    "fixtures/chart/single_series.puml"
-);
-reference_test!(
-    reference_fixtures_ebnf_basic_puml,
-    "fixtures/ebnf/basic.puml"
-);
-reference_test!(
-    reference_fixtures_ebnf_expression_puml,
-    "fixtures/ebnf/expression.puml"
-);
-reference_test!(
-    reference_fixtures_files_diagram_basic_puml,
-    "fixtures/files_diagram/basic.puml"
-);
-reference_test!(
-    reference_fixtures_files_diagram_nested_puml,
-    "fixtures/files_diagram/nested.puml"
-);
-reference_test!(
-    reference_fixtures_flow_basic_puml,
-    "fixtures/flow/basic.puml"
-);
-reference_test!(
-    reference_fixtures_flow_link_back_puml,
-    "fixtures/flow/link_back.puml"
-);
-reference_test!(
-    reference_fixtures_git_branches_puml,
-    "fixtures/git/branches.puml"
-);
-reference_test!(
-    reference_fixtures_object_inheritance_puml,
-    "fixtures/object/inheritance.puml"
-);
-reference_test!(
-    reference_fixtures_packet_tcp_puml,
-    "fixtures/packet/tcp.puml"
-);
-reference_test!(
-    reference_fixtures_project_basic_puml,
-    "fixtures/project/basic.puml"
-);
-reference_test!(
-    reference_fixtures_regex_basic_puml,
-    "fixtures/regex/basic.puml"
-);
-reference_test!(
-    reference_fixtures_regex_alternation_puml,
-    "fixtures/regex/alternation.puml"
-);
-reference_test!(
-    reference_fixtures_regex_complex_puml,
-    "fixtures/regex/complex.puml"
-);
-reference_test!(
-    reference_fixtures_wire_basic_puml,
-    "fixtures/wire/basic.puml"
-);
-reference_test!(
-    reference_fixtures_wire_multi_puml,
-    "fixtures/wire/multi.puml"
-);
-reference_test!(
-    reference_fixtures_math_basic_puml,
-    "fixtures/math/basic.puml"
-);
-reference_test!(
-    reference_fixtures_latex_basic_puml,
-    "fixtures/latex/basic.puml"
-);
-reference_test!(
-    reference_fixtures_creole_basic_puml,
-    "fixtures/creole/basic.puml"
-);
 reference_test!(
     reference_fixtures_activity_a0002_puml,
     "fixtures/activity/a0002.puml"
@@ -757,6 +195,59 @@ reference_test!(
 reference_test!(
     reference_fixtures_activity_swimlane001_puml,
     "fixtures/activity/swimlane001.puml"
+);
+reference_test!(
+    reference_fixtures_activity_advanced_backward_puml,
+    "fixtures/activity_advanced/backward.puml"
+);
+reference_test!(
+    reference_fixtures_activity_advanced_break_puml,
+    "fixtures/activity_advanced/break.puml"
+);
+reference_test!(
+    reference_fixtures_activity_advanced_goto_label_puml,
+    "fixtures/activity_advanced/goto_label.puml"
+);
+reference_test!(
+    reference_fixtures_archimate_basic_puml,
+    "fixtures/archimate/basic.puml"
+);
+reference_test!(
+    reference_fixtures_archimate_layers_puml,
+    "fixtures/archimate/layers.puml"
+);
+reference_test!(
+    reference_fixtures_board_basic_puml,
+    "fixtures/board/basic.puml"
+);
+reference_test!(reference_fixtures_bpm_basic_puml, "fixtures/bpm/basic.puml");
+reference_test!(
+    reference_fixtures_bpm_goto_resume_merge_puml,
+    "fixtures/bpm/goto_resume_merge.puml"
+);
+reference_test!(
+    reference_fixtures_bpm_merge_without_colon_puml,
+    "fixtures/bpm/merge_without_colon.puml"
+);
+reference_test!(
+    reference_fixtures_bpm_simple_puml,
+    "fixtures/bpm/simple.puml"
+);
+reference_test!(
+    reference_fixtures_chart_bar_basic_puml,
+    "fixtures/chart/bar_basic.puml"
+);
+reference_test!(
+    reference_fixtures_chart_pie_basic_puml,
+    "fixtures/chart/pie_basic.puml"
+);
+reference_test!(
+    reference_fixtures_chart_single_series_puml,
+    "fixtures/chart/single_series.puml"
+);
+reference_test!(
+    reference_fixtures_chronology_basic_puml,
+    "fixtures/chronology/basic.puml"
 );
 reference_test!(
     reference_fixtures_class_a0005_puml,
@@ -851,9 +342,18 @@ reference_test!(
     "fixtures/component/subdiagram_theme_02.puml"
 );
 reference_test!(
+    reference_fixtures_component_svg0001_puml,
+    "fixtures/component/svg0001.puml"
+);
+reference_test!(
     reference_fixtures_component_xmi0001_puml,
     "fixtures/component/xmi0001.puml"
 );
+reference_test!(
+    reference_fixtures_creole_basic_puml,
+    "fixtures/creole/basic.puml"
+);
+reference_test!(reference_fixtures_def_basic_puml, "fixtures/def/basic.puml");
 reference_test!(
     reference_fixtures_dev_jaws_jaws1_puml,
     "fixtures/dev/jaws/jaws1.puml"
@@ -978,16 +478,19 @@ reference_test!(
     reference_fixtures_dev_newlinev2_activity_mono_multi_line_v2_puml,
     "fixtures/dev/newlinev2/activity_mono_multi_line_v2.puml"
 );
-// IGNORED: under Java stable v1.2026.2, `ditaa` writes raw PNG bytes even when
-// invoked with `--svg` / `-tsvg`. plantuml-little is intentionally SVG-only and
-// its public API returns `String`, so byte-exact parity against Java's binary
-// PNG payload is impossible without changing the product contract.
-#[ignore = "Java stable ditaa emits PNG bytes, not UTF-8 SVG"]
-#[test]
-fn reference_fixtures_ditaa_basic_puml() {
-    // intentionally empty — see ignore reason
-}
+reference_test!(
+    reference_fixtures_ditaa_basic_puml,
+    "fixtures/ditaa/basic.puml"
+);
 reference_test!(reference_fixtures_dot_basic_puml, "fixtures/dot/basic.puml");
+reference_test!(
+    reference_fixtures_ebnf_basic_puml,
+    "fixtures/ebnf/basic.puml"
+);
+reference_test!(
+    reference_fixtures_ebnf_expression_puml,
+    "fixtures/ebnf/expression.puml"
+);
 reference_test!(
     reference_fixtures_erd_chenmovie_puml,
     "fixtures/erd/chenmovie.puml"
@@ -1009,22 +512,47 @@ reference_test!(
     "fixtures/erd/weak001.puml"
 );
 reference_test!(
+    reference_fixtures_files_diagram_basic_puml,
+    "fixtures/files_diagram/basic.puml"
+);
+reference_test!(
+    reference_fixtures_files_diagram_nested_puml,
+    "fixtures/files_diagram/nested.puml"
+);
+reference_test!(
+    reference_fixtures_flow_basic_puml,
+    "fixtures/flow/basic.puml"
+);
+reference_test!(
+    reference_fixtures_flow_link_back_puml,
+    "fixtures/flow/link_back.puml"
+);
+reference_test!(
     reference_fixtures_gantt_a0003_puml,
     "fixtures/gantt/a0003.puml"
+);
+reference_test!(reference_fixtures_git_basic_puml, "fixtures/git/basic.puml");
+reference_test!(
+    reference_fixtures_git_branches_puml,
+    "fixtures/git/branches.puml"
+);
+reference_test!(reference_fixtures_hcl_basic_puml, "fixtures/hcl/basic.puml");
+reference_test!(
+    reference_fixtures_jcckit_basic_puml,
+    "fixtures/jcckit/basic.puml"
 );
 reference_test!(
     reference_fixtures_json_json_escaped_puml,
     "fixtures/json/json_escaped.puml"
 );
-// IGNORED: under Java stable v1.2026.2, `jcckit` writes raw PNG bytes even
-// when invoked with `--svg` / `-tsvg`. plantuml-little is intentionally
-// SVG-only and its public API returns `String`, so byte-exact parity against
-// Java's binary PNG payload is impossible without changing the product contract.
-#[ignore = "Java stable jcckit emits PNG bytes, not UTF-8 SVG"]
-#[test]
-fn reference_fixtures_jcckit_basic_puml() {
-    // intentionally empty — see ignore reason
-}
+reference_test!(
+    reference_fixtures_latex_basic_puml,
+    "fixtures/latex/basic.puml"
+);
+reference_test!(
+    reference_fixtures_math_basic_puml,
+    "fixtures/math/basic.puml"
+);
 reference_test!(
     reference_fixtures_mindmap_jaws12_puml,
     "fixtures/mindmap/jaws12.puml"
@@ -1040,6 +568,10 @@ reference_test!(
 reference_test!(
     reference_fixtures_misc_creole_font001_puml,
     "fixtures/misc/creole_font001.puml"
+);
+reference_test!(
+    reference_fixtures_misc_creole_img_puml,
+    "fixtures/misc/creole_img.puml"
 );
 reference_test!(
     reference_fixtures_misc_creole_mixed001_puml,
@@ -1058,6 +590,10 @@ reference_test!(
     "fixtures/misc/deployment_on_name.puml"
 );
 reference_test!(
+    reference_fixtures_misc_gradient_basic_puml,
+    "fixtures/misc/gradient_basic.puml"
+);
+reference_test!(
     reference_fixtures_misc_link_url_tooltip_04_puml,
     "fixtures/misc/link_url_tooltip_04.puml"
 );
@@ -1068,6 +604,10 @@ reference_test!(
 reference_test!(
     reference_fixtures_misc_meta_title_header_footer_puml,
     "fixtures/misc/meta_title_header_footer.puml"
+);
+reference_test!(
+    reference_fixtures_misc_openiconic_puml,
+    "fixtures/misc/openiconic.puml"
 );
 reference_test!(
     reference_fixtures_misc_skinparam_class001_puml,
@@ -1084,6 +624,10 @@ reference_test!(
 reference_test!(
     reference_fixtures_misc_skinparam_handwritten001_puml,
     "fixtures/misc/skinparam_handwritten001.puml"
+);
+reference_test!(
+    reference_fixtures_misc_skinparam_handwritten_seq_puml,
+    "fixtures/misc/skinparam_handwritten_seq.puml"
 );
 reference_test!(
     reference_fixtures_misc_skinparam_monochrome001_puml,
@@ -1390,9 +934,22 @@ reference_test!(
     "fixtures/object/fields.puml"
 );
 reference_test!(
+    reference_fixtures_object_inheritance_puml,
+    "fixtures/object/inheritance.puml"
+);
+reference_test!(
     reference_fixtures_object_map_puml,
     "fixtures/object/map.puml"
 );
+reference_test!(
+    reference_fixtures_packet_basic_puml,
+    "fixtures/packet/basic.puml"
+);
+reference_test!(
+    reference_fixtures_packet_tcp_puml,
+    "fixtures/packet/tcp.puml"
+);
+reference_test!(reference_fixtures_pie_basic_puml, "fixtures/pie/basic.puml");
 reference_test!(
     reference_fixtures_preprocessor_builtin_newline_puml,
     "fixtures/preprocessor/builtin_newline.puml"
@@ -1546,6 +1103,22 @@ reference_test!(
     "fixtures/preprocessor/teoztimelineissues_0009.puml"
 );
 reference_test!(
+    reference_fixtures_project_basic_puml,
+    "fixtures/project/basic.puml"
+);
+reference_test!(
+    reference_fixtures_regex_alternation_puml,
+    "fixtures/regex/alternation.puml"
+);
+reference_test!(
+    reference_fixtures_regex_basic_puml,
+    "fixtures/regex/basic.puml"
+);
+reference_test!(
+    reference_fixtures_regex_complex_puml,
+    "fixtures/regex/complex.puml"
+);
+reference_test!(
     reference_fixtures_salt_basic_puml,
     "fixtures/salt/basic.puml"
 );
@@ -1674,6 +1247,10 @@ reference_test!(
     "fixtures/sequence/test_0.puml"
 );
 reference_test!(
+    reference_fixtures_sequence_puma_basic_puml,
+    "fixtures/sequence_puma/basic.puml"
+);
+reference_test!(
     reference_fixtures_sprite_azureSVG_puml,
     "fixtures/sprite/azureSVG.puml"
 );
@@ -1701,14 +1278,10 @@ reference_test!(
     reference_fixtures_sprite_svg2GroupsInlineStyled_puml,
     "fixtures/sprite/svg2GroupsInlineStyled.puml"
 );
-// IGNORED: Java v1.2026.2 throws NullPointerException on this fixture
-// and the recorded reference is the Java error page (1094px tall stack trace).
-// Rust correctly renders the input but cannot match a Java crash output.
-#[ignore = "Java v1.2026.2 NPE on this fixture"]
-#[test]
-fn reference_fixtures_sprite_svg2GroupsWithStyle_puml() {
-    // intentionally empty — see ignore reason
-}
+reference_test!(
+    reference_fixtures_sprite_svg2GroupsWithStyle_puml,
+    "fixtures/sprite/svg2GroupsWithStyle.puml"
+);
 reference_test!(
     reference_fixtures_sprite_svgDiagonalGradientBLTR_puml,
     "fixtures/sprite/svgDiagonalGradientBLTR.puml"
@@ -1930,67 +1503,16 @@ reference_test!(
     "fixtures/wbs/wbs_direction.puml"
 );
 reference_test!(
+    reference_fixtures_wire_basic_puml,
+    "fixtures/wire/basic.puml"
+);
+reference_test!(
+    reference_fixtures_wire_multi_puml,
+    "fixtures/wire/multi.puml"
+);
+reference_test!(
     reference_fixtures_yaml_basic_puml,
     "fixtures/yaml/basic.puml"
 );
 
-reference_test!(
-    reference_fixtures_packet_basic_puml,
-    "fixtures/packet/basic.puml"
-);
-reference_test!(reference_fixtures_git_basic_puml, "fixtures/git/basic.puml");
-
-reference_test!(reference_fixtures_bpm_basic_puml, "fixtures/bpm/basic.puml");
-reference_test!(
-    reference_fixtures_bpm_goto_resume_merge_puml,
-    "fixtures/bpm/goto_resume_merge.puml"
-);
-reference_test!(
-    reference_fixtures_bpm_merge_without_colon_puml,
-    "fixtures/bpm/merge_without_colon.puml"
-);
-reference_test!(
-    reference_fixtures_bpm_simple_puml,
-    "fixtures/bpm/simple.puml"
-);
-reference_test!(reference_fixtures_def_basic_puml, "fixtures/def/basic.puml");
-
-// Total: 328 reference tests
-
-// ── Activity Advanced ──
-reference_test!(
-    reference_fixtures_activity_advanced_goto_label_puml,
-    "fixtures/activity_advanced/goto_label.puml"
-);
-reference_test!(
-    reference_fixtures_activity_advanced_backward_puml,
-    "fixtures/activity_advanced/backward.puml"
-);
-reference_test!(
-    reference_fixtures_activity_advanced_break_puml,
-    "fixtures/activity_advanced/break.puml"
-);
-
-// ── Creole Advanced ──
-reference_test!(
-    reference_fixtures_misc_creole_img_puml,
-    "fixtures/misc/creole_img.puml"
-);
-reference_test!(
-    reference_fixtures_misc_openiconic_puml,
-    "fixtures/misc/openiconic.puml"
-);
-
-// ── P4/P5/P6 tests ──
-reference_test!(
-    reference_fixtures_misc_skinparam_handwritten_seq_puml,
-    "fixtures/misc/skinparam_handwritten_seq.puml"
-);
-reference_test!(
-    reference_fixtures_sequence_puma_basic_puml,
-    "fixtures/sequence_puma/basic.puml"
-);
-reference_test!(
-    reference_fixtures_misc_gradient_basic_puml,
-    "fixtures/misc/gradient_basic.puml"
-);
+// Total: 342 reference tests

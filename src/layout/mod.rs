@@ -27,8 +27,6 @@ pub mod sequence_teoz;
 pub mod state;
 pub mod timing;
 pub mod usecase;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod wasm_backend;
 pub mod wbs;
 pub mod wire;
 

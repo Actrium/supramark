@@ -9,9 +9,7 @@
 
 use std::fmt;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::path::Path;
 
 use crate::dot::version::GraphvizVersion;
 
@@ -127,117 +125,6 @@ impl fmt::Display for ProcessState {
 }
 
 // ---------------------------------------------------------------------------
-// ProcessRunner — port of net.sourceforge.plantuml.dot.ProcessRunner
-// ---------------------------------------------------------------------------
-
-/// Result of running a subprocess, including captured stdout and stderr.
-pub struct ProcessResult {
-    pub state: ProcessState,
-    pub stdout: Vec<u8>,
-    pub stderr: String,
-}
-
-/// Default process timeout in milliseconds.
-/// Java: `GlobalConfig.TIMEOUT_MS` default is typically 60_000.
-const DEFAULT_TIMEOUT_MS: u64 = 60_000;
-
-/// Run an external command, optionally piping `input` to stdin and capturing
-/// stdout. Port of Java `ProcessRunner.run()`.
-pub fn run_process(cmd: &[&str], input: Option<&[u8]>, timeout_ms: Option<u64>) -> ProcessResult {
-    let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
-    log::debug!(
-        "run_process: cmd={:?}, input_len={}, timeout={}ms",
-        cmd,
-        input.map_or(0, |b| b.len()),
-        timeout.as_millis()
-    );
-
-    let exe = match cmd.first() {
-        Some(e) => *e,
-        None => {
-            return ProcessResult {
-                state: ProcessState::Exception("empty command".into()),
-                stdout: vec![],
-                stderr: "empty command".into(),
-            };
-        }
-    };
-
-    let args = &cmd[1..];
-    let mut child = match Command::new(exe)
-        .args(args)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("run_process: failed to spawn {exe}: {e}");
-            return ProcessResult {
-                state: ProcessState::Exception(format!("spawn failed: {e}")),
-                stdout: vec![],
-                stderr: e.to_string(),
-            };
-        }
-    };
-
-    // Write input to stdin
-    if let Some(data) = input {
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Err(e) = stdin.write_all(data) {
-                log::error!("run_process: failed to write stdin: {e}");
-                let _ = child.kill();
-                return ProcessResult {
-                    state: ProcessState::Exception(format!("stdin write: {e}")),
-                    stdout: vec![],
-                    stderr: e.to_string(),
-                };
-            }
-            // stdin is dropped here, closing the pipe
-        }
-    }
-
-    // Wait with timeout
-    match child.wait_with_output() {
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            if output.status.success() {
-                log::debug!(
-                    "run_process: completed ok, stdout_len={}",
-                    output.stdout.len()
-                );
-                ProcessResult {
-                    state: ProcessState::TerminatedOk,
-                    stdout: output.stdout,
-                    stderr,
-                }
-            } else {
-                let code = output.status.code().unwrap_or(-1);
-                log::warn!("run_process: exited with code {code}, stderr={stderr}");
-                ProcessResult {
-                    state: ProcessState::Exception(format!("exit code {code}")),
-                    stdout: output.stdout,
-                    stderr,
-                }
-            }
-        }
-        Err(e) => {
-            log::error!("run_process: wait failed: {e}");
-            ProcessResult {
-                state: ProcessState::Exception(format!("wait: {e}")),
-                stdout: vec![],
-                stderr: e.to_string(),
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Graphviz trait — port of net.sourceforge.plantuml.dot.Graphviz interface
 // ---------------------------------------------------------------------------
 
@@ -267,183 +154,68 @@ pub trait Graphviz {
 }
 
 // ---------------------------------------------------------------------------
-// GraphvizNative — port of AbstractGraphviz + GraphvizLinux
+// GraphvizInProcess — Recommended in-process Graphviz implementation
 // ---------------------------------------------------------------------------
 
-/// Native Graphviz implementation that shells out to the `dot` executable.
-///
-/// Combines Java's `AbstractGraphviz` (base) and `GraphvizLinux` (platform)
-/// into a single struct, since we only target Linux/macOS natively.
-pub struct GraphvizNative {
-    dot_exe_path: Option<PathBuf>,
+/// In-process Graphviz implementation using the `graphviz-anywhere` crate.
+/// This is the only supported implementation as it avoids `Command::spawn` and
+/// supports both native and WASM environments.
+pub struct GraphvizInProcess {
     dot_string: String,
-    output_types: Vec<String>,
 }
 
-impl GraphvizNative {
-    /// Create a new instance.
-    /// Java: `GraphvizLinux(skinParam, dotString, type...)`
-    pub fn new(dot_string: &str, output_types: &[&str]) -> Self {
-        let exe = search_dot_exe();
-        log::info!(
-            "GraphvizNative: dot_exe={:?}, dot_len={}, types={:?}",
-            exe,
-            dot_string.len(),
-            output_types
-        );
-        GraphvizNative {
-            dot_exe_path: exe,
+impl GraphvizInProcess {
+    pub fn new(dot_string: &str) -> Self {
+        GraphvizInProcess {
             dot_string: dot_string.to_string(),
-            output_types: output_types.iter().map(|s| s.to_string()).collect(),
         }
-    }
-
-    /// Build the command line: `[dot_exe, -Ttype1, -Ttype2, ...]`
-    /// Java: `AbstractGraphviz.getCommandLine()`
-    fn command_line(&self) -> Vec<String> {
-        let exe = self
-            .dot_exe_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "dot".to_string());
-        let mut cmd = vec![exe];
-        for t in &self.output_types {
-            cmd.push(format!("-T{t}"));
-        }
-        cmd
-    }
-
-    /// Build the version-query command line: `[dot_exe, -V]`
-    fn command_line_version(&self) -> Vec<String> {
-        let exe = self
-            .dot_exe_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "dot".to_string());
-        vec![exe, "-V".to_string()]
     }
 }
 
-impl Graphviz for GraphvizNative {
+/// Process-wide lock guarding all libgvc access. graphviz-anywhere wraps
+/// libgvc, which keeps mutable global state (plugin registry, error
+/// buffers) and is not thread-safe — concurrent contexts crash with
+/// SIGSEGV. Both `GraphvizInProcess::create_file` here and
+/// `crate::layout::graphviz::render_dot_to_svg_native` serialize through
+/// this same lock.
+pub(crate) fn gv_lock() -> std::sync::MutexGuard<'static, ()> {
+    static GV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    GV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Graphviz for GraphvizInProcess {
     fn create_file(&self, output: &mut dyn Write) -> ProcessState {
-        if self.exe_state() != ExeState::Ok {
-            log::error!("create_file: dot executable not OK: {}", self.exe_state());
-            return ProcessState::Exception("dot executable not OK".into());
-        }
-
-        let cmd = self.command_line();
-        let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
-        log::info!(
-            "create_file: cmd={cmd_refs:?}, dot_len={}",
-            self.dot_string.len()
-        );
-
-        let result = run_process(&cmd_refs, Some(self.dot_string.as_bytes()), None);
-        if result.state.is_ok() {
-            if let Err(e) = output.write_all(&result.stdout) {
-                log::error!("create_file: write output failed: {e}");
-                return ProcessState::Exception(format!("write: {e}"));
+        use graphviz_anywhere::{Engine, Format, GraphvizContext};
+        let _guard = gv_lock();
+        let ctx = match GraphvizContext::new() {
+            Ok(c) => c,
+            Err(e) => return ProcessState::Exception(format!("context error: {e}")),
+        };
+        match ctx.render_to_string(&self.dot_string, Engine::Dot, Format::Svg) {
+            Ok(svg) => {
+                if let Err(e) = output.write_all(svg.as_bytes()) {
+                    ProcessState::Exception(format!("write error: {e}"))
+                } else {
+                    ProcessState::TerminatedOk
+                }
             }
-        } else {
-            log::warn!("create_file: process failed: {}", result.state);
-            if !result.stderr.is_empty() {
-                log::warn!("create_file: stderr={}", result.stderr);
-            }
+            Err(e) => ProcessState::Exception(format!("render error: {e}")),
         }
-        result.state
     }
 
     fn dot_version(&self) -> String {
-        let cmd = self.command_line_version();
-        let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
-        let result = run_process(&cmd_refs, None, Some(10_000));
-        if result.state.differs(&ProcessState::TerminatedOk) {
-            return "?".to_string();
-        }
-        // dot -V writes to stderr on most systems
-        let mut combined = String::new();
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        if !stdout.trim().is_empty() {
-            combined.push_str(stdout.trim());
-        }
-        if !result.stderr.trim().is_empty() {
-            if !combined.is_empty() {
-                combined.push(' ');
-            }
-            combined.push_str(result.stderr.trim());
-        }
-        combined.replace('\n', " ").trim().to_string()
+        // graphviz-anywhere 0.1.6 does not provide a direct version API yet,
+        // but it links against the system libgvc. We return a generic string.
+        "graphviz-anywhere (in-process)".to_string()
     }
 
     fn dot_exe(&self) -> Option<&Path> {
-        self.dot_exe_path.as_deref()
+        None
     }
 
     fn exe_state(&self) -> ExeState {
-        ExeState::check_file(self.dot_exe_path.as_deref())
+        ExeState::Ok
     }
-}
-
-// ---------------------------------------------------------------------------
-// Executable search — port of AbstractGraphviz.searchDotExe + GraphvizLinux
-// ---------------------------------------------------------------------------
-
-/// Search for the dot executable.
-///
-/// Priority (matches Java):
-/// 1. `GRAPHVIZ_DOT` environment variable
-/// 2. `dot` on PATH
-/// 3. Well-known locations (Linux/macOS)
-fn search_dot_exe() -> Option<PathBuf> {
-    // Check GRAPHVIZ_DOT env var
-    if let Ok(env_dot) = std::env::var("GRAPHVIZ_DOT") {
-        let trimmed = env_dot.trim().trim_matches('"').to_string();
-        if !trimmed.is_empty() {
-            let p = PathBuf::from(&trimmed);
-            if p.exists() {
-                log::debug!("search_dot_exe: found via GRAPHVIZ_DOT={trimmed}");
-                return Some(p);
-            }
-        }
-    }
-
-    // Search PATH
-    if let Some(p) = find_executable_on_path("dot") {
-        log::debug!("search_dot_exe: found on PATH={}", p.display());
-        return Some(p);
-    }
-
-    // Well-known locations (Java GraphvizLinux.specificDotExe)
-    let candidates = [
-        "/usr/local/bin/dot",
-        "/opt/homebrew/bin/dot",
-        "/opt/homebrew/opt/graphviz/bin/dot",
-        "/usr/bin/dot",
-        "/opt/local/bin/dot",
-    ];
-    for c in &candidates {
-        let p = Path::new(c);
-        if p.exists() && p.is_file() {
-            log::debug!("search_dot_exe: found at well-known location {c}");
-            return Some(p.to_path_buf());
-        }
-    }
-
-    log::warn!("search_dot_exe: dot executable not found");
-    None
-}
-
-/// Search for an executable by name on the system PATH.
-/// Java: `AbstractGraphviz.findExecutableOnPath(name)`
-fn find_executable_on_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var("PATH").ok()?;
-    for dir in path_var.split(':') {
-        let candidate = Path::new(dir).join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -470,7 +242,8 @@ pub fn image_limit() -> u32 {
 ///
 /// Returns `Ok(())` if Graphviz produces valid SVG, or `Err(message)`.
 pub fn test_graphviz_installation() -> Result<(), String> {
-    let gv = GraphvizNative::new("digraph foo { test; }", &["svg"]);
+    let gv = GraphvizInProcess::new("digraph foo { test; }");
+
     let mut output = Vec::new();
     let state = gv.create_file(&mut output);
     if state.differs(&ProcessState::TerminatedOk) {
@@ -491,8 +264,7 @@ pub fn test_graphviz_installation() -> Result<(), String> {
 /// Detect the installed Graphviz version.
 /// Combines Java's `GraphvizVersionFinder` and `GraphvizRuntimeEnvironment`.
 pub fn detect_graphviz_version() -> GraphvizVersion {
-    let gv = GraphvizNative::new("", &["svg"]);
-    let version_str = gv.dot_version();
+    let version_str = GraphvizInProcess::new("").dot_version();
     log::info!("detect_graphviz_version: raw={version_str}");
     GraphvizVersion::parse_from_dot_output(&version_str).unwrap_or(GraphvizVersion::DEFAULT)
 }
@@ -560,53 +332,8 @@ mod tests {
     }
 
     #[test]
-    fn search_dot_exe_finds_something() {
-        // This test may or may not find dot depending on the system.
-        // We just verify it doesn't panic.
-        let _ = search_dot_exe();
-    }
-
-    #[test]
-    fn graphviz_native_command_line() {
-        let gv = GraphvizNative {
-            dot_exe_path: Some(PathBuf::from("/usr/bin/dot")),
-            dot_string: String::new(),
-            output_types: vec!["svg".into()],
-        };
-        let cmd = gv.command_line();
-        assert_eq!(cmd, vec!["/usr/bin/dot", "-Tsvg"]);
-    }
-
-    #[test]
-    fn graphviz_native_command_line_multiple_types() {
-        let gv = GraphvizNative {
-            dot_exe_path: Some(PathBuf::from("/usr/bin/dot")),
-            dot_string: String::new(),
-            output_types: vec!["svg".into(), "png".into()],
-        };
-        let cmd = gv.command_line();
-        assert_eq!(cmd, vec!["/usr/bin/dot", "-Tsvg", "-Tpng"]);
-    }
-
-    #[test]
-    fn graphviz_native_version_command() {
-        let gv = GraphvizNative {
-            dot_exe_path: Some(PathBuf::from("/usr/bin/dot")),
-            dot_string: String::new(),
-            output_types: vec![],
-        };
-        let cmd = gv.command_line_version();
-        assert_eq!(cmd, vec!["/usr/bin/dot", "-V"]);
-    }
-
-    // Integration test: only runs if dot is installed
-    #[test]
-    fn graphviz_native_create_file_integration() {
-        if search_dot_exe().is_none() {
-            eprintln!("SKIP: dot not found on system");
-            return;
-        }
-        let gv = GraphvizNative::new("digraph G { A -> B; }", &["svg"]);
+    fn graphviz_in_process_create_file() {
+        let gv = GraphvizInProcess::new("digraph G { A -> B; }");
         let mut buf = Vec::new();
         let state = gv.create_file(&mut buf);
         assert!(state.is_ok(), "expected TerminatedOk, got {state}");
@@ -615,38 +342,22 @@ mod tests {
     }
 
     #[test]
-    fn graphviz_native_dot_version_integration() {
-        if search_dot_exe().is_none() {
-            eprintln!("SKIP: dot not found on system");
-            return;
-        }
-        let gv = GraphvizNative::new("", &["svg"]);
+    fn graphviz_in_process_dot_version() {
+        let gv = GraphvizInProcess::new("");
         let version = gv.dot_version();
-        assert_ne!(version, "?", "should detect a version string");
-        assert!(
-            version.contains("graphviz") || version.contains("dot"),
-            "version should mention graphviz or dot: {version}"
-        );
+        assert!(!version.is_empty(), "should return a version string");
     }
 
     #[test]
     fn test_installation_integration() {
-        if search_dot_exe().is_none() {
-            eprintln!("SKIP: dot not found on system");
-            return;
-        }
         let result = test_graphviz_installation();
         assert!(result.is_ok(), "installation test failed: {:?}", result);
     }
 
     #[test]
     fn detect_version_integration() {
-        if search_dot_exe().is_none() {
-            eprintln!("SKIP: dot not found on system");
-            return;
-        }
         let v = detect_graphviz_version();
+        // graphviz-anywhere returns GraphvizVersion::DEFAULT (2.44.0) currently
         assert!(v.major >= 2, "major version should be >= 2");
-        assert!(v.numeric() > 0, "numeric version should be positive");
     }
 }

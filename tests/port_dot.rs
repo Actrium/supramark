@@ -589,228 +589,24 @@ mod debug_trace_tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// GraphvizLinux (native) — Java: GraphvizLinuxSkeletonTest
-// ---------------------------------------------------------------------------
-//
-// Java: GraphvizLinux(null, dotString, type...) — wraps Linux-specific dot binary.
-// Rust: GraphvizNative::new(dotString, types) — unified native implementation.
-
 #[cfg(test)]
-mod graphviz_linux_tests {
-    use plantuml_little::dot::graphviz::{Graphviz, GraphvizNative};
+mod graphviz_tests {
+    use plantuml_little::dot::graphviz::{Graphviz, GraphvizInProcess};
 
     #[test]
-    fn graphviz244_on_windows_is_false() {
-        // Java: assertFalse(g.graphviz244onWindows())
-        // Rust: GraphvizNative has no graphviz244onWindows() method.
-        // We verify the equivalent via ExeState::check_file: a non-existent path
-        // returns DoesNotExist, which is distinct from Ok.
-        use plantuml_little::dot::ExeState;
-        use std::path::Path;
-        let state =
-            ExeState::check_file(Some(Path::new("/nonexistent/dot_that_does_not_exist_xyz")));
-        assert_eq!(
-            state,
-            ExeState::DoesNotExist,
-            "non-existent exe path must be DoesNotExist"
-        );
-        assert_ne!(state, ExeState::Ok, "non-existent exe must not be Ok");
+    fn test_in_process_render() {
+        let gv = GraphvizInProcess::new("digraph G { A -> B }");
+        let mut buf = Vec::new();
+        let state = gv.create_file(&mut buf);
+        assert!(state.is_ok());
+        assert!(String::from_utf8_lossy(&buf).contains("<svg"));
     }
 
     #[test]
-    fn get_dot_string_returns_string_passed_at_construction() {
-        // Java: assertEquals("digraph G {}", g.getDotString())
-        // Rust: GraphvizNative::new stores dotString internally; no public getter.
-        // We test indirectly via exe_state() which always returns a valid ExeState variant.
-        use plantuml_little::dot::ExeState;
-        let gv = GraphvizNative::new("digraph G {}", &["svg"]);
-        let state = gv.exe_state();
-        let is_valid = matches!(
-            state,
-            ExeState::Ok
-                | ExeState::DoesNotExist
-                | ExeState::NullUndefined
-                | ExeState::IsADirectory
-                | ExeState::NotAFile
-                | ExeState::CannotBeRead
-        );
-        assert!(
-            is_valid,
-            "exe_state must be a recognized ExeState variant, got {:?}",
-            state
-        );
-    }
-
-    #[test]
-    fn construction_with_multiple_output_types() {
-        // Java: assertEquals(2, g.getType().size())
-        // Rust: output_types is private; verify the instance has a valid (non-Ok) exe
-        // state when dot is not installed, or Ok when it is — either way, not a panic.
-        use plantuml_little::dot::ExeState;
-        let gv = GraphvizNative::new("digraph{}", &["svg", "png"]);
-        let state = gv.exe_state();
-        let is_valid = matches!(
-            state,
-            ExeState::Ok
-                | ExeState::DoesNotExist
-                | ExeState::NullUndefined
-                | ExeState::IsADirectory
-                | ExeState::NotAFile
-                | ExeState::CannotBeRead
-        );
-        assert!(
-            is_valid,
-            "exe_state must be a recognized ExeState variant, got {:?}",
-            state
-        );
-    }
-
-    #[test]
-    fn exe_state_is_inspectable() {
-        // Java: assertNotNull(g.getDotExe()) / g.getExeState()
-        // Rust: GraphvizNative::exe_state() returns a valid ExeState variant.
-        use plantuml_little::dot::ExeState;
-        let gv = GraphvizNative::new("digraph{}", &["svg"]);
-        let state = gv.exe_state();
-        let is_valid = matches!(
-            state,
-            ExeState::Ok
-                | ExeState::DoesNotExist
-                | ExeState::NullUndefined
-                | ExeState::IsADirectory
-                | ExeState::NotAFile
-                | ExeState::CannotBeRead
-        );
-        assert!(
-            is_valid,
-            "exe_state must be a recognized ExeState variant, got {:?}",
-            state
-        );
-        // dot_exe() returns Some(path) when exe_state is Ok, None otherwise.
-        match state {
-            ExeState::Ok => assert!(gv.dot_exe().is_some(), "Ok state must have a path"),
-            ExeState::NullUndefined => {
-                assert!(gv.dot_exe().is_none(), "NullUndefined must have no path")
-            }
-            _ => {} // DoesNotExist etc. may or may not have a path stored
-        }
-    }
-
-    #[test]
-    #[ignore = "requires a real dot executable on PATH; integration test only"]
-    fn exe_state_is_ok_when_dot_is_on_path() {
-        // Java: Assume.assumeTrue(g.getDotExe().exists()); assertEquals(ExeState.OK, g.getExeState())
-        todo!()
-    }
-
-    #[test]
-    #[ignore = "requires a real dot executable on PATH; integration test only"]
-    fn dot_version_smoke_returns_non_empty_string() {
-        // Java: g.dotVersion() non-empty when dot exists
-        todo!()
-    }
-
-    #[test]
-    #[ignore = "gap: GraphvizNative has no public getDotString() / getType() accessors"]
-    fn get_type_returns_types_passed_at_construction() {
-        // Java: assertEquals("svg", types.get(0))
-        todo!()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ProcessRunner — Java: ProcessRunnerSkeletonTest
-// ---------------------------------------------------------------------------
-//
-// Java: new ProcessRunner(String[]), .run(byte[], OutputStream) -> ProcessState,
-//       .getOut(), .getError()
-// Rust: run_process(&[&str], Option<&[u8]>, Option<u64>) -> ProcessResult
-//       with .state, .stdout (Vec<u8>), .stderr (String).
-//
-// Java ProcessRunner is a stateful object; Rust run_process is a pure function.
-
-#[cfg(test)]
-mod process_runner_tests {
-    use plantuml_little::dot::graphviz::run_process;
-    use plantuml_little::dot::ProcessState;
-
-    #[test]
-    fn run_echo_terminates_successfully() {
-        // Java: assertFalse("expected TERMINATED_OK", state.differs(ProcessState.TERMINATED_OK()))
-        let result = run_process(&["/bin/echo", "plantuml"], None, None);
-        assert!(
-            result.state.is_ok(),
-            "expected TerminatedOk, got: {}",
-            result.state
-        );
-    }
-
-    #[test]
-    fn get_out_contains_echo_output_after_successful_run() {
-        // Java: assertTrue(out.contains("hello-plantuml"))
-        let result = run_process(&["/bin/echo", "hello-plantuml"], None, None);
-        let out = String::from_utf8_lossy(&result.stdout);
-        assert!(
-            out.contains("hello-plantuml"),
-            "expected 'hello-plantuml' in output, got: {out}"
-        );
-    }
-
-    #[test]
-    fn run_with_nonexistent_command_returns_exception_state() {
-        // Java: assertTrue("expected EXCEPTION state", state.differs(ProcessState.TERMINATED_OK()))
-        let result = run_process(&["/nonexistent/binary/that/does/not/exist"], None, None);
-        assert!(
-            result.state.differs(&ProcessState::TerminatedOk),
-            "expected non-TERMINATED_OK state, got: {}",
-            result.state
-        );
-    }
-
-    #[test]
-    fn error_contains_message_after_exception() {
-        // Java: assertNotNull(pr.getError()); assertTrue(pr.getError().length() > 0)
-        let result = run_process(&["/nonexistent/binary/that/does/not/exist"], None, None);
-        assert!(
-            !result.stderr.is_empty() || matches!(result.state, ProcessState::Exception(_)),
-            "expected error info after failed spawn"
-        );
-    }
-
-    #[test]
-    fn run_cat_with_stdin_input_echoes_back() {
-        // Java: assertEquals("hello from stdin", pr.getOut())
-        let input = b"hello from stdin".to_vec();
-        let result = run_process(&["/bin/cat"], Some(&input), None);
-        assert!(
-            result.state.is_ok(),
-            "cat should succeed, got: {}",
-            result.state
-        );
-        let out = String::from_utf8_lossy(&result.stdout);
-        assert_eq!(out.trim_end_matches('\n'), "hello from stdin");
-    }
-
-    #[test]
-    #[ignore = "gap: Rust run_process is a function, not a stateful object like Java ProcessRunner"]
-    fn constructor_accepts_non_null_cmd_array() {
-        // Java: new ProcessRunner(new String[]{"echo", "hello"}) is not null
-        // Rust: run_process is a free function; no ProcessRunner struct.
-        todo!()
-    }
-
-    #[test]
-    #[ignore = "gap: Rust run_process is a function, not a stateful object like Java ProcessRunner"]
-    fn get_error_is_null_before_run() {
-        // Java: assertNull(pr.getError()) — Rust ProcessResult is returned after run, no pre-run state.
-        todo!()
-    }
-
-    #[test]
-    #[ignore = "gap: Rust run_process is a function, not a stateful object like Java ProcessRunner"]
-    fn get_out_is_null_before_run() {
-        todo!()
+    fn test_dot_version() {
+        let gv = GraphvizInProcess::new("");
+        let version = gv.dot_version();
+        assert!(!version.is_empty());
     }
 }
 

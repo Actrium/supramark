@@ -1,7 +1,14 @@
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
+
+mod support;
 
 fn convert_fixture(path: &str) -> String {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        support::init_test_backend();
+    });
     let source = fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     plantuml_little::convert_with_input_path(&source, Path::new(path))
         .unwrap_or_else(|e| panic!("convert {path} failed: {e}"))

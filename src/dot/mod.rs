@@ -14,7 +14,8 @@ pub mod version;
 
 pub use dot_data::{DotData, DotEntity, DotLink};
 pub use dot_splines::DotSplines;
-pub use graphviz::{ExeState, Graphviz, GraphvizNative, ProcessState, DEFAULT_IMAGE_LIMIT};
+pub use graphviz::{ExeState, Graphviz, ProcessState, DEFAULT_IMAGE_LIMIT};
+
 pub use version::{GraphvizVersion, DOT_VERSION_LIMIT};
 
 // ---------------------------------------------------------------------------
