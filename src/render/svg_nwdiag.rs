@@ -22,12 +22,17 @@ pub fn render_nwdiag(
     _diagram: &NwdiagDiagram,
     layout: &NwdiagLayout,
     skin: &SkinParams,
+    body_offset: Option<(f64, f64)>,
 ) -> Result<String> {
     let mut buf = String::with_capacity(4096);
 
     let bg = skin.get_or("backgroundcolor", "#FFFFFF");
     let svg_w = ensure_visible_int(layout.width) as f64;
     let svg_h = ensure_visible_int(layout.height) as f64;
+    // When body_offset is provided, all coordinates are pre-shifted in f64 so
+    // that wrap_with_meta does not round-trip them through the SVG text
+    // (format → parse → add → format introduces a ±0.0001 last-digit drift).
+    let (bo_x, bo_y) = body_offset.unwrap_or((0.0, 0.0));
     write_svg_root_bg(&mut buf, svg_w, svg_h, "NWDIAG", bg);
 
     // The <title> element and visible title are handled by wrap_with_meta
@@ -43,8 +48,8 @@ pub fn render_nwdiag(
             r#"<text fill="{}" font-family="sans-serif" font-size="12" lengthAdjust="spacing" textLength="{}" x="{}" y="{}">{}</text>"#,
             TEXT_COLOR,
             fmt_coord(crate::font_metrics::text_width(&nl.name, "SansSerif", 12.0, false, false)),
-            fmt_coord(nl.x),
-            fmt_coord(nl.y),
+            fmt_coord(nl.x + bo_x),
+            fmt_coord(nl.y + bo_y),
             crate::klimt::svg::xml_escape(&nl.name),
         )
         .unwrap();
@@ -102,8 +107,8 @@ pub fn render_nwdiag(
                 r#"<text fill="{}" font-family="sans-serif" font-size="12" lengthAdjust="spacing" textLength="{}" x="{}" y="{}">{}</text>"#,
                 TEXT_COLOR,
                 fmt_coord(addr_w),
-                fmt_coord(actual_addr_x),
-                fmt_coord(nl.addr_y),
+                fmt_coord(actual_addr_x + bo_x),
+                fmt_coord(nl.addr_y + bo_y),
                 crate::klimt::svg::xml_escape(addr),
             )
             .unwrap();
@@ -120,8 +125,8 @@ pub fn render_nwdiag(
             tube.height as i32,
             LINE_COLOR,
             fmt_coord(tube.width),
-            fmt_coord(tube.x),
-            fmt_coord(tube.y),
+            fmt_coord(tube.x + bo_x),
+            fmt_coord(tube.y + bo_y),
         )
         .unwrap();
     }
@@ -134,10 +139,10 @@ pub fn render_nwdiag(
                     write!(
                         buf,
                         r#"<path d="M{},{} L{},{}" fill="none" style="stroke:{};stroke-width:1;"/>"#,
-                        fmt_coord(link.x),
-                        fmt_coord(link.y1),
-                        fmt_coord(link.x),
-                        fmt_coord(link.y2),
+                        fmt_coord(link.x + bo_x),
+                        fmt_coord(link.y1 + bo_y),
+                        fmt_coord(link.x + bo_x),
+                        fmt_coord(link.y2 + bo_y),
                         LINE_COLOR,
                     )
                     .unwrap();
@@ -150,8 +155,8 @@ pub fn render_nwdiag(
                         r#"<text fill="{}" font-family="sans-serif" font-size="11" lengthAdjust="spacing" textLength="{}" x="{}" y="{}">{}</text>"#,
                         TEXT_COLOR,
                         fmt_coord(text_w),
-                        fmt_coord(al.x),
-                        fmt_coord(al.y),
+                        fmt_coord(al.x + bo_x),
+                        fmt_coord(al.y + bo_y),
                         crate::klimt::svg::xml_escape(&al.text),
                     )
                     .unwrap();
@@ -169,8 +174,8 @@ pub fn render_nwdiag(
             fmt_coord(sb.rect_h),
             BOX_STROKE,
             fmt_coord(sb.rect_w),
-            fmt_coord(sb.rect_x),
-            fmt_coord(sb.rect_y),
+            fmt_coord(sb.rect_x + bo_x),
+            fmt_coord(sb.rect_y + bo_y),
         )
         .unwrap();
 
@@ -179,8 +184,8 @@ pub fn render_nwdiag(
             r#"<text fill="{}" font-family="sans-serif" font-size="12" lengthAdjust="spacing" textLength="{}" x="{}" y="{}">{}</text>"#,
             TEXT_COLOR,
             fmt_coord(crate::font_metrics::text_width(&sb.label, "SansSerif", 12.0, false, false)),
-            fmt_coord(sb.text_x),
-            fmt_coord(sb.text_y),
+            fmt_coord(sb.text_x + bo_x),
+            fmt_coord(sb.text_y + bo_y),
             crate::klimt::svg::xml_escape(&sb.label),
         )
         .unwrap();
@@ -242,7 +247,7 @@ mod tests {
     fn render_contains_svg_root() {
         let d = basic_diagram();
         let layout = layout_nwdiag(&d).unwrap();
-        let svg = render_nwdiag(&d, &layout, &SkinParams::default()).unwrap();
+        let svg = render_nwdiag(&d, &layout, &SkinParams::default(), None).unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("NWDIAG"));
     }
@@ -251,7 +256,7 @@ mod tests {
     fn render_contains_server_labels() {
         let d = basic_diagram();
         let layout = layout_nwdiag(&d).unwrap();
-        let svg = render_nwdiag(&d, &layout, &SkinParams::default()).unwrap();
+        let svg = render_nwdiag(&d, &layout, &SkinParams::default(), None).unwrap();
         // Server boxes should use resolved descriptions.
         assert!(svg.contains(">app<"));
         assert!(svg.contains(">db01<"));
@@ -262,7 +267,7 @@ mod tests {
     fn render_contains_network_tubes() {
         let d = basic_diagram();
         let layout = layout_nwdiag(&d).unwrap();
-        let svg = render_nwdiag(&d, &layout, &SkinParams::default()).unwrap();
+        let svg = render_nwdiag(&d, &layout, &SkinParams::default(), None).unwrap();
         // Two network tubes.
         assert!(svg.contains(&format!(r#"fill="{}""#, TUBE_FILL)));
     }
@@ -271,7 +276,7 @@ mod tests {
     fn render_contains_address_label() {
         let d = basic_diagram();
         let layout = layout_nwdiag(&d).unwrap();
-        let svg = render_nwdiag(&d, &layout, &SkinParams::default()).unwrap();
+        let svg = render_nwdiag(&d, &layout, &SkinParams::default(), None).unwrap();
         assert!(svg.contains("10.0.0.10"));
     }
 }

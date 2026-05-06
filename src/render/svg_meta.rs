@@ -725,10 +725,14 @@ pub(super) fn wrap_with_meta(
     // centering aligned to the unpadded body width.
     // Other diagram types (sequence, activity) bake the +1 into their layout
     // arithmetic already.
-    let get_final_dim_extra = if matches!(diagram_type, "CLASS" | "MINDMAP") {
-        1.0
-    } else {
-        0.0
+    let get_final_dim_extra = match diagram_type {
+        "CLASS" | "MINDMAP" => 1.0,
+        // Java NwDiagram LimitFinder span exceeds the raw layout maxX by ~1px
+        // (text/box rendering tracks slightly wider in AWT than in our
+        // DejaVu metrics). +1 keeps the canvas size matching Java while
+        // letting the title block centre on the un-padded layout width.
+        "NWDIAG" => 1.0,
+        _ => 0.0,
     };
     let canvas_w = ensure_visible_int(tb_w + get_final_dim_extra + doc_margin_right) as f64;
     let canvas_h =

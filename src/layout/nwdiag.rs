@@ -632,12 +632,12 @@ pub fn layout_nwdiag(diagram: &NwdiagDiagram) -> Result<NwdiagLayout> {
 
     // Java drawMe: ug.draw(UEmpty(1,1)) at (gridW + deltaX + margin, gridH + deltaY + margin)
     // from the body origin (which is at margin,margin from SVG origin).
-    // The LimitFinder maxX = margin + gridW + deltaX_gap + margin + 1 (UEmpty contrib).
-    // Java AWT font metrics are slightly wider than our DejaVu-based metrics,
-    // causing the LimitFinder to track ~1px more from text/box rendering.
-    // We compensate by using +2 instead of +1 to match the final viewport.
-    let body_w = MARGIN + grid_w + grid_x + MARGIN + 2.0;
-    let body_h = MARGIN + grid_h + grid_y + MARGIN + 2.0;
+    // The LimitFinder maxX is the body origin + UEmpty(1,1), i.e. one px past
+    // the right margin. The remaining canvas growth (Java AWT metrics being
+    // slightly wider than DejaVu) is absorbed by `get_final_dim_extra` in
+    // `wrap_with_meta`, leaving body_w usable for centring meta blocks.
+    let body_w = MARGIN + grid_w + grid_x + MARGIN + 1.0;
+    let body_h = MARGIN + grid_h + grid_y + MARGIN + 1.0;
 
     Ok(NwdiagLayout {
         title_height: 0.0,

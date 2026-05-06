@@ -246,6 +246,16 @@ pub fn render_with_source(
         None
     };
 
+    // Nwdiag bakes its body coordinates into absolute positions ahead of
+    // wrap_with_meta so the body offset can stay in f64 (avoiding the
+    // format→parse→add→format double-round that drifts ±0.0001 from Java
+    // when shifting y values through the SVG text).
+    let nwdiag_body_offset = if matches!(diagram, Diagram::Nwdiag(_)) && !meta.is_empty() {
+        Some(compute_meta_body_offset(meta, skin))
+    } else {
+        None
+    };
+
     // Class diagrams use the same offset_svg_coords post-shift path; for
     // a degenerated svek result (single entity, no edges/notes) we know the
     // offset upfront and can pre-shift the body, avoiding the
@@ -271,6 +281,7 @@ pub fn render_with_source(
         skin,
         activity_body_offset,
         class_body_offset,
+        nwdiag_body_offset,
     )?;
     set_default_font_family(None);
 
@@ -380,6 +391,7 @@ fn render_body(
     skin: &SkinParams,
     activity_body_offset: Option<(f64, f64)>,
     class_body_offset: Option<(f64, f64)>,
+    nwdiag_body_offset: Option<(f64, f64)>,
 ) -> Result<BodyResult> {
     match (diagram, layout) {
         (Diagram::Bpm(bd), DiagramLayout::Bpm(bl)) => {
@@ -525,11 +537,18 @@ fn render_body(
             })
         }
         (Diagram::Nwdiag(nd), DiagramLayout::Nwdiag(nl)) => {
-            super::svg_nwdiag::render_nwdiag(nd, nl, skin).map(|svg| BodyResult {
-                svg,
-                raw_body_dim: None,
-                body_pre_offset: false,
-                body_degenerated: false,
+            // Surface the un-padded body extent so wrap_with_meta can centre
+            // the title against Java's LimitFinder span (no integer rounding
+            // through the SVG header). When meta is present the body is
+            // pre-shifted in f64 to avoid format/parse round-off noise.
+            let raw_dim = Some((nl.width, nl.height));
+            super::svg_nwdiag::render_nwdiag(nd, nl, skin, nwdiag_body_offset).map(|svg| {
+                BodyResult {
+                    svg,
+                    raw_body_dim: raw_dim,
+                    body_pre_offset: nwdiag_body_offset.is_some(),
+                    body_degenerated: false,
+                }
             })
         }
         (Diagram::Salt(sd), DiagramLayout::Salt(sl)) => super::svg_salt::render_salt(sd, sl, skin)
@@ -1429,7 +1448,7 @@ mod tests {
     #[test]
     fn test_meta_title_can_expand_canvas_width() {
         let (d, l) = simple_diagram();
-        let body_result = render_body(&d, &l, &default_skin(), None, None).unwrap();
+        let body_result = render_body(&d, &l, &default_skin(), None, None, None).unwrap();
         let (body_w, _) = extract_dimensions(&body_result.svg);
         let meta = DiagramMeta {
             title: Some(
