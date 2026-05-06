@@ -4,7 +4,10 @@
 //! Font metric values match Java PlantUML exactly (same font files, same math:
 //! `raw_units / units_per_em * size`).
 
-use crate::font_data::{FontMeta, DEJAVU_MONO, DEJAVU_MONO_BOLD, DEJAVU_SANS, DEJAVU_SANS_BOLD};
+use crate::font_data::{
+    FontMeta, DEJAVU_MONO, DEJAVU_MONO_BOLD, DEJAVU_MONO_BOLD_OBLIQUE, DEJAVU_MONO_OBLIQUE,
+    DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_BOLD_OBLIQUE, DEJAVU_SANS_OBLIQUE,
+};
 
 // ── Font family resolution ──────────────────────────────────────────────
 
@@ -14,24 +17,26 @@ use crate::font_data::{FontMeta, DEJAVU_MONO, DEJAVU_MONO_BOLD, DEJAVU_SANS, DEJ
 /// fall back to Dialog (sans-serif) in Java AWT.
 /// For CSS `font-family` lists like "Courier New,monospace", we resolve based on
 /// the PRIMARY (first) name — Java AWT uses the first name for font lookup.
-fn resolve_face(family: &str, bold: bool) -> &'static FontMeta {
+///
+/// Italic variants resolve to the corresponding `*-Oblique.ttf` faces — DejaVu
+/// ships real italic glyphs whose horizontal advances differ slightly from
+/// plain (≈+0.15pt per `«…»` stereotype string). Reference SVGs are generated
+/// on systems where Java has the Oblique faces available, so we follow the
+/// same path here for byte-exact comparison.
+fn resolve_face(family: &str, bold: bool, italic: bool) -> &'static FontMeta {
     // Use the first name in a CSS comma-separated font-family list
     let primary = family.split(',').next().unwrap_or(family).trim();
     let p = primary.to_lowercase();
-    // Java logical font "Monospaced" and its alias "Courier" (without "New") map to mono.
-    // CSS generic "monospace" also maps to mono.
-    // "Courier New" is a physical font — uninstalled on reference machine → Dialog fallback.
     let is_mono = p == "monospaced" || p == "monospace" || p == "courier";
-    if is_mono {
-        if bold {
-            &DEJAVU_MONO_BOLD
-        } else {
-            &DEJAVU_MONO
-        }
-    } else if bold {
-        &DEJAVU_SANS_BOLD
-    } else {
-        &DEJAVU_SANS
+    match (is_mono, bold, italic) {
+        (true, false, false) => &DEJAVU_MONO,
+        (true, true, false) => &DEJAVU_MONO_BOLD,
+        (true, false, true) => &DEJAVU_MONO_OBLIQUE,
+        (true, true, true) => &DEJAVU_MONO_BOLD_OBLIQUE,
+        (false, false, false) => &DEJAVU_SANS,
+        (false, true, false) => &DEJAVU_SANS_BOLD,
+        (false, false, true) => &DEJAVU_SANS_OBLIQUE,
+        (false, true, true) => &DEJAVU_SANS_BOLD_OBLIQUE,
     }
 }
 
@@ -41,11 +46,11 @@ fn resolve_face(family: &str, bold: bool) -> &'static FontMeta {
 ///
 /// Computes `glyph_hor_advance / units_per_em * size`, matching Java's
 /// `font.getStringBounds(ch, frc).getWidth()` with `FRACTIONALMETRICS_ON`.
-pub fn char_width(ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
+pub fn char_width(ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
     if ch == '\n' || ch == '\r' {
         return 0.0;
     }
-    let face = resolve_face(family, bold);
+    let face = resolve_face(family, bold, italic);
     let upem = face.units_per_em as f64;
     if let Some(adv) = face.glyph_advance(ch as u32) {
         return adv as f64 / upem * size;
@@ -68,7 +73,7 @@ pub fn text_width(text: &str, family: &str, size: f64, bold: bool, italic: bool)
 ///
 /// Matches Java's `LineMetrics.getHeight()`.
 pub fn line_height(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false); // vertical metrics are style-independent
+    let face = resolve_face(family, false, false); // vertical metrics are style-independent
     let upem = face.units_per_em as f64;
     let asc = face.ascender as f64; // positive (hhea.ascender)
     let desc = face.descender.unsigned_abs() as f64; // make positive
@@ -79,7 +84,7 @@ pub fn line_height(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
 ///
 /// Matches Java's `LineMetrics.getAscent()`.
 pub fn ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false);
+    let face = resolve_face(family, false, false);
     face.ascender as f64 / face.units_per_em as f64 * size
 }
 
@@ -87,14 +92,14 @@ pub fn ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
 ///
 /// Matches Java's `LineMetrics.getDescent()` (positive value).
 pub fn descent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false);
+    let face = resolve_face(family, false, false);
     face.descender.unsigned_abs() as f64 / face.units_per_em as f64 * size
 }
 
 /// OS/2 typographic ascent. Used for DOT cluster label dimensions which match
 /// Java's `StringBounder.calculateDimension()` text block height.
 pub fn typo_ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false);
+    let face = resolve_face(family, false, false);
     let upem = face.units_per_em as f64;
     let typo_asc = face.typo_ascender as f64;
     typo_asc / upem * size
@@ -167,6 +172,34 @@ mod tests {
         let w_plain = char_width('W', "SansSerif", 12.0, false, false);
         let w_bold = char_width('W', "SansSerif", 12.0, true, false);
         assert!(w_bold > w_plain, "bold W should be wider");
+    }
+
+    #[test]
+    fn italic_uses_oblique_metrics() {
+        // DejaVu Sans Oblique has different per-glyph advances than the plain
+        // face for several glyphs (real italic, not synthetic shear). Java
+        // PlantUML on systems with the Oblique TTF returns the Oblique
+        // measurements from `getStringBounds`; we follow the same path so
+        // reference SVGs compare byte-exact.
+        //
+        // Java ground truth (FRACTIONALMETRICS_ON, DejaVu Sans Oblique 14pt):
+        //   getStringBounds("«archimate-node»")            = 128.3857
+        //   getStringBounds("«archimate-business-process»") = 213.6230
+        let w1 = text_width("«archimate-node»", "SansSerif", 14.0, false, true);
+        let w2 = text_width(
+            "«archimate-business-process»",
+            "SansSerif",
+            14.0,
+            false,
+            true,
+        );
+        assert!((w1 - 128.3857).abs() < 0.01, "italic w1={w1}");
+        assert!((w2 - 213.6230).abs() < 0.01, "italic w2={w2}");
+
+        // Plain face still returns its own (smaller) advances.
+        let p1 = text_width("«archimate-node»", "SansSerif", 14.0, false, false);
+        assert!((p1 - 128.2354).abs() < 0.01, "plain w1={p1}");
+        assert!(w1 > p1, "italic should differ from plain");
     }
 
     #[test]

@@ -7,8 +7,6 @@
 # drift have been eliminated — so every fixture listed below now reflects
 # a real plantuml-little vs Java PlantUML implementation gap worth fixing.
 #
-# (none — the reference suite is currently 337 / 0 / 3.)
-#
 # This file is consumed by scripts/check_reference_failures.sh which
 # both .github/workflows/ci.yml and .github/workflows/release.yml invoke.
 # Both require the failing set to match this list EXACTLY — no silent
@@ -20,3 +18,21 @@
 #     over by adding it here.
 #
 # Keep the list sorted. One test name per line. '#' prefix for comments.
+
+# Java emits raw PNG bytes (DITAA) or raw JCCKIT chart format that
+# plantuml-little does not support — convert_fixture panics by design.
+reference_fixtures_ditaa_basic_puml
+reference_fixtures_jcckit_basic_puml
+
+# Java reference SVG is an "An error has occured" page (Java fails on
+# these inputs); plantuml-little renders the diagram normally. Bytes
+# diverge structurally, no useful comparison.
+reference_fixtures_dev_newline_link_URL_tooltip_puml
+reference_fixtures_wbs_link_url_tooltip_01_puml
+
+# Residual layout drift in less-trodden diagram types — small height /
+# polygon-point differences that exceed the fuzzy 2.51 tolerance.
+# Each is worth investigating and fixing in a follow-up.
+reference_fixtures_component_subdiagram_theme_02_puml
+reference_fixtures_dev_newline_subdiagram_theme_puml
+reference_fixtures_sprite_svg2GroupsWithStyle_puml

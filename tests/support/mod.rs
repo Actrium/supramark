@@ -1,3 +1,4 @@
+pub mod svg_compare;
 pub mod wasm_backend;
 
 pub fn init_test_backend() {

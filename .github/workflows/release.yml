@@ -24,7 +24,7 @@ env:
 jobs:
   gate:
     name: Quality gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +83,7 @@ jobs:
 
   publish-crates-io:
     name: Publish to crates.io
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: gate
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +111,7 @@ jobs:
 
   publish-npm-web:
     name: Publish @kookyleo/plantuml-little-web to npm
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: gate
     steps:
       - uses: actions/checkout@v4

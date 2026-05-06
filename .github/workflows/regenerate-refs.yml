@@ -9,6 +9,13 @@ name: Regenerate reference SVGs
 # wrapper (scripts/wasm-dot-wrapper.sh → @kookyleo/graphviz-anywhere-web)
 # so Graphviz output is byte-identical to what the Rust suite sees.
 #
+# Runner is pinned to ubuntu-24.04 (noble) so the system fontconfig
+# stays stable across reruns. fonts-dejavu-extra is installed
+# alongside -core: it ships DejaVuSans-Oblique.ttf, which Java's
+# `Dialog.italic` resolves to. plantuml-little's Rust side embeds the
+# matching Oblique metric tables in src/font_data.rs (regenerated via
+# tools/gen_font_data.py), so italic strings compare byte-exact.
+#
 # Output: uploaded as `plantuml-reference-svgs` artifact. Download,
 # extract into tests/reference/, commit.
 
@@ -23,16 +30,19 @@ on:
 jobs:
   regenerate:
     name: Regenerate reference SVGs (Linux + DejaVu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install DejaVu fonts + Java runtime deps
+      - name: Install DejaVu fonts (core + extra for Oblique italic)
+        # fonts-dejavu-extra ships DejaVuSans-Oblique.ttf so Java's
+        # `Dialog.italic` resolves to real italic glyph metrics that
+        # match the Oblique tables baked into src/font_data.rs.
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-dejavu-core fontconfig
+          sudo apt-get install -y fonts-dejavu-core fonts-dejavu-extra fontconfig
           fc-cache -f
-          fc-list | grep -i dejavu | head -5
+          fc-list | grep -i dejavu | head -10
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -61,17 +71,39 @@ jobs:
         run: |
           cat > /tmp/FontProbe.java <<'EOF'
           import java.awt.*;
+          import java.awt.font.FontRenderContext;
           import java.awt.geom.Rectangle2D;
           import java.awt.image.BufferedImage;
           public class FontProbe {
             public static void main(String[] a) {
               BufferedImage img = new BufferedImage(1,1,BufferedImage.TYPE_INT_ARGB);
               Graphics2D g = img.createGraphics();
-              Font f = new Font("sans-serif", Font.BOLD, 14);
-              System.out.println("sans-serif resolves to: " + f.getFontName());
-              Rectangle2D r = f.getStringBounds("System in focus", g.getFontRenderContext());
-              System.out.printf("Width of 'System in focus' @14pt bold = %.4f%n", r.getWidth());
+              g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+              FontRenderContext frc = g.getFontRenderContext();
+
+              Font fb = new Font("sans-serif", Font.BOLD, 14);
+              System.out.println("sans-serif BOLD resolves to: " + fb.getFontName());
+              Rectangle2D r = fb.getStringBounds("System in focus", frc);
+              System.out.printf("Width of 'System in focus' @14pt bold (frac) = %.4f%n", r.getWidth());
               // Expect DejaVu Sans Bold => 125.xxx. If Helvetica/Arial => 110.
+
+              Font fi = new Font("sans-serif", Font.ITALIC, 14);
+              System.out.println("sans-serif ITALIC resolves to: " + fi.getFontName());
+              Rectangle2D ri = fi.getStringBounds("«archimate-node»", frc);
+              System.out.printf("italic 'archimate-node' (frac) = %.4f%n", ri.getWidth());
+              // Expect DejaVu Sans Oblique => 128.3857. Plain (no Oblique
+              // installed) gives 128.2354 and would mismatch the Rust side.
+
+              Font fp = new Font("sans-serif", Font.PLAIN, 14);
+              Rectangle2D rp = fp.getStringBounds("«archimate-node»", frc);
+              System.out.printf("plain 'archimate-node' (frac)  = %.4f%n", rp.getWidth());
+
+              System.out.println("java.version: " + System.getProperty("java.version"));
+              System.out.println("java.vendor:  " + System.getProperty("java.vendor"));
+              System.out.println("java.home:    " + System.getProperty("java.home"));
+
+              for (String s : GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames())
+                if (s.toLowerCase().contains("dejavu")) System.out.println("  family: " + s);
             }
           }
           EOF

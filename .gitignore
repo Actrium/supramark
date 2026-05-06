@@ -32,7 +32,6 @@ tmp_debug/
 # Dev scripts/patches
 patch_*.patch
 patch_*.py
-gen_font_data.py
 scripts/failures.json
 scripts/__pycache__/
 
@@ -45,3 +44,4 @@ scripts/__pycache__/
 # is pinned in tests/support/package.json + package-lock.json, so every
 # install produces the same node_modules — no reason to commit.
 tests/support/node_modules/
+tools/fonts/*.ttf
