@@ -10,6 +10,13 @@
 //! Source: V8 11.3 `__kernel_cos`, `__kernel_sin`,
 //! `__ieee754_rem_pio2` medium-branch. Verbatim translation.
 
+#![allow(
+    clippy::approx_constant,
+    clippy::eq_op,
+    clippy::excessive_precision,
+    clippy::useless_let_if_seq
+)]
+
 use std::f64;
 
 // High/low word extraction — V8's GET_HIGH_WORD / GET_LOW_WORD.

@@ -380,12 +380,6 @@ fn format_value(v: f64) -> String {
 /// Microsystems with Google modifications. Freely usable per the SunSoft
 /// licence preserved in the header comment of `ieee754.cc`. Apache-2 is
 /// compatible.
-#[allow(
-    clippy::approx_constant,
-    clippy::eq_op,
-    clippy::excessive_precision,
-    clippy::useless_let_if_seq
-)]
 use crate::math::v8_trig as v8_math;
 
 #[cfg(test)]
