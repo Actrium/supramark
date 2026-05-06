@@ -35,8 +35,7 @@ impl MathJaxRuntime {
             // Shim `console` — MathJax may call console.warn for unknown
             // macros / packages.  Silent no-ops keep stderr clean and avoid
             // ReferenceErrors during eval.
-            let console =
-                Object::new(ctx.clone()).map_err(|e| format!("alloc console: {e:?}"))?;
+            let console = Object::new(ctx.clone()).map_err(|e| format!("alloc console: {e:?}"))?;
             for name in ["log", "warn", "error", "info", "debug"] {
                 let f = Function::new(ctx.clone(), || {})
                     .map_err(|e| format!("alloc console.{name}: {e:?}"))?;
