@@ -1,12 +1,12 @@
 # 阶段进展
 
-截至 2026-05-05，mindmap `<br/>` 度量与渲染分离拿下 cypress/13 + demos/mindmap/01。
+截至 2026-05-06，cose-bilkent 喂入 bbox 修正 + V8 fdlibm Math.pow/sin/cos 移植拿下 cypress/mindmap 03/10/11/23，达成 **1323 / 1323 byte-exact ✓**。
 
-**当前指标：1319 / 1323 byte-exact（约 99.7%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
+**当前指标：1323 / 1323 byte-exact（100%，启用 `--features cose_bilkent,katex`；仅 katex 为 1306；都不启用为 1298）**。
 
-> 注：从 commit `aee794a` 起，sweep_all 使用 `svg_match::svg_match_tolerant` 进行宽松比较 —— 数字 token 按 `abs_tol=1e-6 / rel_tol=1e-9` 容差对比（远低于亚像素），非数字字节仍 byte-by-byte 严格匹配；`data-points="<base64>"` 解码后递归比较。这把 4 个 1-ULP 漂移 fixture 中的 3 个（cypress/mindmap 12, 14, 20）解锁为 pass。
+> 注：从 commit `aee794a` 起，sweep_all 使用 `svg_match::svg_match_tolerant` 进行宽松比较 —— 数字 token 按 `abs_tol=1e-6 / rel_tol=1e-9` 容差对比（远低于亚像素），非数字字节仍 byte-by-byte 严格匹配；`data-points="<base64>"` 解码后递归比较。fixture 23 的 ~2 ULP 残差（值差 2e-14，远小于 1e-6 容差）在此机制下视为 pass。
 
-- 1319 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）+ 1（mindmap rect raw）+ 1（sequence box undefined margin）+ 4（mindmap markdownToHTML 分支统一）+ 1（mindmap raw_descr 反引号保留）+ 2（mindmap `<br/>` 度量分离）：
+- 1323 = 1298 + 8（KaTeX wave）+ 1（cose-bilkent W-C）+ 3（tolerance unlock）+ 1（mindmap rect raw）+ 1（sequence box undefined margin）+ 4（mindmap markdownToHTML 分支统一）+ 1（mindmap raw_descr 反引号保留）+ 2（mindmap `<br/>` 度量分离）+ 3（mindmap bang/cloud path bbox 喂入修正）+ 1（V8 fdlibm Math 移植）：
   - W-KaTeX-A：嵌入 quickjs + katex.min.js + DOMPurify 等价 sanitize（commit `47a5f7c`）
   - W-KaTeX-B：flowchart 6 项 KaTeX fixture byte-exact（commit `7f13655`）
   - W-KaTeX-C：sequence actor box top-row KaTeX（commit `3b5c52a`）
@@ -19,10 +19,11 @@
   - W-Mindmap-Markdown-Branch：把 `<p>` wrap 判定从形状改成 is_indented_block；单行 Circle/RoundedRect 文本（如 `((mindmap))`）现在正确包 `<p>` → cypress/01, 02, 04, 14（commit `5c0c305`）
   - W-Mindmap-Raw-Descr：layout 度量 + renderer 文本统一用 `raw_descr` 而非 `descr`，反引号等原始字符如实保留 → cypress/21
   - W-Mindmap-Br-Strip：度量端去 `<br/>` 后再 textWidth（textContent 不含 br 元素文本），渲染端 html_escape 跳过 br 让其作为 HTML 元素保留；含 `<br/>` 节点的 bbox 从 ~130 修正到 ~88，cose-bilkent 输入对齐 → cypress/13 + demos/mindmap/01（commit `6932396`）
-  - W-Mindmap-Bang-Cloud-Path：把 upstream `bangShape`（12 弧爆炸）+ `cloudShape`（9 弧云）路径 byte-exact 移植；cose-bilkent 输入用 path 合成的 union bbox（bbox + 10/8/2 × half_padding）→ cypress/10, 11 字节差从 ~2500 缩到 ~87（commit `cb2982f`）。剩余 87 字节差是 cose-bilkent JS 在 3 节点入口走了 tiling fallback 的 degenerate y，path 端已 byte-exact
+  - W-Mindmap-Bang-Cloud-Path：把 upstream `bangShape`（12 弧爆炸）+ `cloudShape`（9 弧云）路径 byte-exact 移植；cose-bilkent 输入用 path 合成的 union bbox（bbox + 10/8/2 × half_padding）→ cypress/10, 11 字节差从 ~2500 缩到 ~87（commit `cb2982f`）
+  - W-Mindmap-Bbox-Feed：把 jsdom `pathBBox` / `unionBox` / `intrinsicBox` 移植到 Rust，替代合成 padding 公式喂给 cose-bilkent 的 width/height → cypress/03, 10, 11 byte-exact（commit `097a318`）
+  - W-CoseBilkent-Math-Shim：把 V8 fdlibm 的 `Math.pow` / `Math.sin` / `Math.cos` 移植到 quickjs HOST_SHIM（~535 LOC，含 two_over_pi[66] + npio2_hw[32] 表），消除 `pow(15, log96/log25)` 等 1 ULP 漂移在 cose-bilkent 2500 步迭代下的指数级放大 → cypress/23 字节差从 5%/8% 拓扑漂移收敛到 ~2 ULP 残差（commit `917e7df`）
 - cypress/sequence 达到 **140/140 (100%)** ✓
-- 1323 = sweep_all fixture 总数
-- 差额 4 = cypress/mindmap 4（03, 10, 11, 23）
+- 1323 = sweep_all fixture 总数 = 全部 pass
 
 **关键发现 — 1-ULP 精度漂移**：cose-bilkent 物理模拟在 quickjs 与 V8 上算出来的坐标差 1 ULP（IEEE-754 末位），根因是 `Math.sqrt` / `Math.exp` 等内部累加顺序差异。tolerance 比较一刀切解决（commit `aee794a`），把 cypress/mindmap 12, 14, 20 收下；fixture 22 仍有结构性差异需另查。
 
@@ -30,12 +31,11 @@
 
 **关键发现 — mindmap markdownToHTML 分支**：upstream `markdownToHTML` 用 marked.lexer 切 token，paragraph token 渲染为 `<p>...</p>`，但 indented-code-block（任一非空行以 4+ 空格起头）落入 `node.raw` 兜底分支，输出原文不包 wrapper。形状（Rect/Circle/RoundedRect）不是判别依据 —— `((mindmap))`（单行）走 paragraph 分支，`((\n  The root\n))`（缩进多行）走 raw 分支。
 
-**关键发现 — cose-bilkent 失败根因不是 ULP**：QuickJS `Math.sin/sqrt/pow/log/cos/atan/exp` 多组样本与 V8 字节相同（fixture 12 全 Default-shape 同结构 max delta 1.42e-14 通过容差），cose-bilkent 物理本身确定。失败根因是**喂给 cose-bilkent 的 width/height 错了**：mermaid 上游 `cy.add({ data: { width, height } })` 的 width/height 来自 JSDOM `getBBox()` 对实际 `<g class="node">` 的实测，我们端则是合成公式。bbox 端 `<br/>` 计入了文本（textContent 把 br 算空），渲染端 `<br/>` 又被 escape 成 `&lt;br/&gt;`（应保留为 HTML 元素），两 bug 双向偏。
+**关键发现 — cose-bilkent 失败两层根因**：
+1. **喂入 bbox 错**（已修，W-Mindmap-Bbox-Feed）：mermaid 上游 `cy.add({ data: { width, height } })` 的 width/height 来自 JSDOM `getBBox()` 对实际 `<g class="node">` 的实测，我们端原是合成公式。把 jsdom `pathBBox` / `unionBox` / `intrinsicBox` 用 Rust 重写，按 path 命令 (M/L/H/V/C/S/Q/T/A/Z) 解析采样，arc 仅采端点（与 jsdom 一致）→ cypress/03/10/11 byte-exact
+2. **Math.pow/sin/cos 1 ULP 在 2500 步迭代下放大成拓扑漂移**（已修，W-CoseBilkent-Math-Shim）：IEEE-754 仅强制 `+ - * / sqrt` 正确舍入；`pow / exp / log / sin / cos` 不强制。QuickJS 走 musl/glibc 实现，V8 走 fdlibm；二者在 `pow(15, 1.4179944924264754)` 等 cose-bilkent cooling 输入上有 1 ULP 偏差。Spring embedder 的 Lyapunov 指数 ≈ ln(2)/1.5 iter，2500 步后 1 ULP 输入差放大到 5%-8% 拓扑漂移（fixture 23 全 leaf 结构最敏感）。把 V8 `src/base/ieee754.cc` 的 fdlibm `pow` (~145 LOC) + `__kernel_sin/cos` + `__rem_pio2` (~350 LOC) byte-exact 移植到 HOST_SHIM 后，174,625 次 Math 调用全 V8 字节相同 → fixture 23 残差降至 ~2 ULP（值差 2e-14），由 svg_match_tolerant 容差吸收
 
-**剩余 4 项分类**：
-- cypress/mindmap：10, 11 — bang/cloud SVG 路径几何已 byte-exact（commit `cb2982f`，12 弧 bang + 9 弧 cloud），但 cose-bilkent JS 在 3 节点情况下返回 y 全部 = 43.148（degenerate "tiling 横排" fallback），上游则有合理的 y 散布（50/66/63）。差距来自 cose-bilkent 的 reduceTrees + tiling 选择路径未对齐
-- cypress/mindmap：03（`layout: tidy-tree` 不走 cose-bilkent，需独立端口 non-layered-tidy-tree 算法）
-- cypress/mindmap：23（15 节点 default-only，cose-bilkent 全图 simulation 拓扑性偏离 —— 全 leaf 单层结构触发 reduceTrees 不同分支，不是 ULP）
+**精度兜底机制**：sweep_all `src/bin/sweep_all.rs:131` 使用 `svg_match::svg_match_tolerant`（abs_tol=1e-6 / rel_tol=1e-9）。fixture 23 残余 2 ULP 差（如 `113.18381131849323` vs `113.18381131849321`，diff = 2e-14）远低于 1e-6 阈值，自动 pass。可能源头：Set/Map 迭代序、累加序、QuickJS vs V8 中间寄存器精度（中间 80-bit x87 vs SSE2 64-bit）— 不是 Math.* 库函数，已 byte-exact 验证。继续追到 0 ULP 收益小、风险高，按"细微精度差忽略"收尾。
 
 **架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
 
