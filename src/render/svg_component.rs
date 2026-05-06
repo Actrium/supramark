@@ -3120,15 +3120,19 @@ fn render_usecase_node(
 
     EllipseShape { cx, cy, rx, ry }.draw(sg, &DrawStyle::filled(bg, border, 0.5));
 
-    // Centered text
+    // Centered text. Vertical baseline derived from Java's TextBlockInEllipse
+    // pipeline (Footprint → ContainingEllipse → SEC → bigger(6) → translate
+    // (dx, dy - 2)). For the rectangular text Footprint the SEC center sits
+    // at the rect midpoint and `alpha` cancels, so the whole chain reduces to
+    // the closed form `baseline = cy + text_h/2 - 3.5`. See Java
+    // TextBlockInEllipse.java:79 + Footprint.java:134.
     let text = &node.name;
     let text_w = font_metrics::text_width(text, "SansSerif", FONT_SIZE, false, false);
     let text_x = cx - text_w / 2.0;
     let ascent = font_metrics::ascent("SansSerif", FONT_SIZE, false, false);
     let descent = font_metrics::descent("SansSerif", FONT_SIZE, false, false);
     let text_h = ascent + descent;
-    // Center text vertically in the ellipse
-    let text_y = cy - text_h / 2.0 + ascent;
+    let text_y = cy + text_h / 2.0 - 3.5;
 
     sg.push_raw(&format!(
         r#"<text fill="{font_color}" font-family="sans-serif" font-size="{FONT_SIZE}" lengthAdjust="spacing" textLength="{tl}" x="{tx}" y="{ty}">{text}</text>"#,
