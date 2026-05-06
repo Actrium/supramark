@@ -424,13 +424,22 @@ pub fn layout_wbs(wd: &WbsDiagram) -> Result<WbsLayout> {
 
     let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
     let (mut max_x, mut max_y) = (0.0_f64, 0.0_f64);
+    // Java `LimitFinder.drawRectangle` records `(x + width - 1, y + height - 1)`,
+    // so node/note rectangles contribute `bottom-1` / `right-1` to the LF max
+    // (see `klimt/drawing/LimitFinder.java` lines 175-178).  Without this -1 a
+    // rect-dominated diagram still yields the right Java-matching viewport
+    // because the +1 cancels with the `getFinalDimension` +1, but a
+    // line-dominated diagram (e.g. WBS link-tooltip cases where the Fork stub
+    // line extends beyond every box) loses 1px from the height.  Track bounds
+    // Java-style here so the formula can be expressed once at the bottom.
     for n in &nodes {
         min_x = min_x.min(n.x);
         min_y = min_y.min(n.y);
-        max_x = max_x.max(n.x + n.width);
-        max_y = max_y.max(n.y + n.height);
+        max_x = max_x.max(n.x + n.width - 1.0);
+        max_y = max_y.max(n.y + n.height - 1.0);
     }
-    // Include edge endpoints in bounds (e.g. Fork stub lines extend below nodes)
+    // Include edge endpoints in bounds (e.g. Fork stub lines extend below nodes).
+    // Java `LimitFinder.drawULine` records line endpoints verbatim — no -1.
     for e in &edges {
         max_x = max_x.max(e.from_x).max(e.to_x);
         max_y = max_y.max(e.from_y).max(e.to_y);
@@ -438,8 +447,8 @@ pub fn layout_wbs(wd: &WbsDiagram) -> Result<WbsLayout> {
     for n in &notes {
         min_x = min_x.min(n.x);
         min_y = min_y.min(n.y);
-        max_x = max_x.max(n.x + n.width);
-        max_y = max_y.max(n.y + n.height);
+        max_x = max_x.max(n.x + n.width - 1.0);
+        max_y = max_y.max(n.y + n.height - 1.0);
     }
 
     let sx = if min_x < MARGIN { MARGIN - min_x } else { 0.0 };
@@ -475,13 +484,21 @@ pub fn layout_wbs(wd: &WbsDiagram) -> Result<WbsLayout> {
         max_y += sy;
     }
 
+    // Java `ImageBuilder.getFinalDimension` returns
+    //   `LF_max + 1 + margin_left + margin_right` (resp. top/bottom).
+    // Our `max_x`/`max_y` already include the top/left margin offset (nodes are
+    // placed at `MARGIN`), so adding the bottom/right MARGIN once plus the +1
+    // from `getFinalDimension` yields the same value Java feeds into
+    // `SvgGraphics.ensureVisible`.  The renderer then applies
+    // `ensure_visible_int` (= Java's `(int)(x + 1)`), reproducing Java's
+    // compound `(int)(LF_max + 1 + margins + 1)` rounding byte-exactly.
     Ok(WbsLayout {
         nodes,
         edges,
         extra_links,
         notes,
-        width: max_x + MARGIN,
-        height: max_y + MARGIN,
+        width: max_x + MARGIN + 1.0,
+        height: max_y + MARGIN + 1.0,
     })
 }
 
