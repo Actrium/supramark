@@ -1674,6 +1674,11 @@ fn layout_class_diagram(cd: &ClassDiagram, skin: &crate::style::SkinParams) -> R
                 _ => (note_id.clone(), target_id, 1),
             };
             let no_constraint = matches!(note.position.as_str(), "left" | "right");
+            // Java: note↔entity link uses LinkType.goDashed() with LinkArg.noDisplay,
+            // which is NOT invisible (link.isInvis() == false). Smetana solves the
+            // spline normally; the renderer special-cases the opale rendering. We
+            // keep invisible=false so graphviz emits a real spline whose endpoints
+            // we can read for the connector apex (matching Java pp1/pp2).
             edges.push(LayoutEdge {
                 from,
                 to,
@@ -1689,7 +1694,7 @@ fn layout_class_diagram(cd: &ClassDiagram, skin: &crate::style::SkinParams) -> R
                 head_decoration: crate::svek::edge::LinkDecoration::None,
                 line_style: crate::svek::edge::LinkStyle::Dashed,
                 minlen,
-                invisible: true,
+                invisible: false,
                 is_opale: false,
                 no_constraint,
             });
@@ -1754,7 +1759,13 @@ fn layout_class_diagram(cd: &ClassDiagram, skin: &crate::style::SkinParams) -> R
 
     // Compute note layouts using graphviz positions for notes that participated
     // in the graphviz solve (GMN* nodes), falling back to entity-relative placement.
-    layout.notes = compute_note_layouts(&cd.notes, &layout.nodes, &name_to_id, &note_dot_ids);
+    layout.notes = compute_note_layouts(
+        &cd.notes,
+        &layout.nodes,
+        &layout.edges,
+        &name_to_id,
+        &note_dot_ids,
+    );
 
     // expand total_width / total_height to accommodate notes
     for note in &layout.notes {
@@ -1998,6 +2009,7 @@ fn estimate_class_note_size(text: &str) -> (f64, f64) {
 fn compute_note_layouts(
     notes: &[crate::model::ClassNote],
     nodes: &[graphviz::NodeLayout],
+    edges: &[graphviz::EdgeLayout],
     name_to_id: &HashMap<String, String>,
     note_dot_ids: &[String],
 ) -> Vec<graphviz::ClassNoteLayout> {
@@ -2097,6 +2109,40 @@ fn compute_note_layouts(
                 // Use graphviz-determined position (top-left corner)
                 let nx = gv_note.cx - gv_note.width / 2.0;
                 let ny = gv_note.cy - gv_note.height / 2.0;
+                // Java reads the connector apex (Opale `pp2`) from the SmetanaEdge
+                // spline endpoint on the entity side (force-translated by
+                // MagneticBorderNone). Look up the matching (note_id, target_id) edge
+                // and pick the spline endpoint adjacent to the entity node.
+                let note_dot_id = note_dot_ids.get(i).map(String::as_str).unwrap_or("");
+                let target_id = note
+                    .target
+                    .as_ref()
+                    .map(|t| {
+                        name_to_id
+                            .get(t)
+                            .cloned()
+                            .unwrap_or_else(|| sanitize_id(t))
+                    })
+                    .unwrap_or_default();
+                let entity_side_xy = edges
+                    .iter()
+                    .find(|e| {
+                        (e.from == note_dot_id && e.to == target_id)
+                            || (e.from == target_id && e.to == note_dot_id)
+                    })
+                    .and_then(|e| {
+                        if e.points.len() < 2 {
+                            return None;
+                        }
+                        // The entity-side endpoint is the spline endpoint adjacent
+                        // to the entity node: edge end if note→entity, edge start
+                        // if entity→note.
+                        if e.from == note_dot_id {
+                            e.points.last().copied()
+                        } else {
+                            e.points.first().copied()
+                        }
+                    });
                 // Compute connector to target entity
                 let conn = target_node.map(|nl| {
                     let note_right = nx + note_width;
@@ -2106,22 +2152,20 @@ fn compute_note_layouts(
                     let entity_right = nl.cx + nl.width / 2.0;
                     let entity_top = nl.cy - nl.height / 2.0;
                     let entity_bottom = nl.cy + nl.height / 2.0;
+                    let (apex_x, apex_y) = match (entity_side_xy, note.position.as_str()) {
+                        (Some(p), _) => p,
+                        (None, "left") => (entity_left, note_cy),
+                        (None, "right") => (entity_right, note_cy),
+                        (None, "top") => (nl.cx, entity_top - TOP_EAR_OFFSET),
+                        (None, "bottom") => (nl.cx, entity_bottom + BOTTOM_EAR_OFFSET),
+                        (None, _) => (entity_left, note_cy),
+                    };
                     match note.position.as_str() {
-                        "left" => (note_right, note_cy, entity_left, note_cy),
-                        "right" => (nx, note_cy, entity_right, note_cy),
-                        "top" => (
-                            note_cx,
-                            ny + note_height,
-                            nl.cx,
-                            entity_top - TOP_EAR_OFFSET,
-                        ),
-                        "bottom" => (
-                            note_cx,
-                            ny,
-                            nl.cx,
-                            entity_bottom + BOTTOM_EAR_OFFSET,
-                        ),
-                        _ => (note_right, note_cy, entity_left, note_cy),
+                        "left" => (note_right, note_cy, apex_x, apex_y),
+                        "right" => (nx, note_cy, apex_x, apex_y),
+                        "top" => (note_cx, ny + note_height, apex_x, apex_y),
+                        "bottom" => (note_cx, ny, apex_x, apex_y),
+                        _ => (note_right, note_cy, apex_x, apex_y),
                     }
                 });
                 (nx, ny, conn)
@@ -2399,7 +2443,7 @@ mod tests {
             target: Some("Foo".to_string()),
         }];
 
-        let result = compute_note_layouts(&notes, &nodes, &name_to_id, &[]);
+        let result = compute_note_layouts(&notes, &nodes, &[], &name_to_id, &[]);
         assert_eq!(result.len(), 1);
         let nl = &result[0];
         // note x should be past entity right edge + gap
@@ -2438,7 +2482,7 @@ mod tests {
             target: Some("Bar".to_string()),
         }];
 
-        let result = compute_note_layouts(&notes, &nodes, &name_to_id, &[]);
+        let result = compute_note_layouts(&notes, &nodes, &[], &name_to_id, &[]);
         assert_eq!(result.len(), 1);
         let nl = &result[0];
         let entity_left = 200.0 - 100.0 / 2.0; // 150
@@ -2474,7 +2518,7 @@ mod tests {
             target: None,
         }];
 
-        let result = compute_note_layouts(&notes, &nodes, &name_to_id, &[]);
+        let result = compute_note_layouts(&notes, &nodes, &[], &name_to_id, &[]);
         assert_eq!(result.len(), 1);
         assert!(
             result[0].connector.is_none(),
