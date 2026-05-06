@@ -151,6 +151,11 @@ pub struct LinkDescriptor {
     pub removed: bool,
     /// Whether this link is invisible (used for layout constraint only)
     pub invisible: bool,
+    /// Whether this link is rendered as an Opale connector ear instead of a
+    /// regular edge.  Java: `SvekEdge.setOpale(true)`.  When set, the edge is
+    /// laid out by Graphviz (so the spline endpoints are available) but is
+    /// not drawn — an ear polygon is drawn by the note instead.
+    pub is_opale: bool,
     /// Minimum edge length in DOT (minlen attribute). Default: use SvekEdge default.
     pub minlen: Option<u32>,
     /// Whether the link has a middle decoration (circle, diamond, etc.).
@@ -178,6 +183,7 @@ impl LinkDescriptor {
             to_port: None,
             removed: false,
             invisible: false,
+            is_opale: false,
             minlen: None,
             has_middle_decor: false,
             no_constraint: false,
@@ -468,6 +474,7 @@ impl GraphvizImageBuilder {
                 edge = edge.with_head_label(text, LabelDimension::new(w, h));
             }
             edge.is_invis = link.invisible;
+            edge.opale = link.is_opale;
             if link.no_constraint {
                 edge.is_constraint = false;
             }

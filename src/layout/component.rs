@@ -954,6 +954,7 @@ pub fn layout_component(
                 line_style: crate::svek::edge::LinkStyle::Normal,
                 minlen,
                 invisible: false,
+                is_opale: false,
                 no_constraint: false, // Java doesn't use constraint=false for component links
             }
         })
@@ -1176,7 +1177,15 @@ pub fn layout_component(
                 head_decoration: crate::svek::edge::LinkDecoration::None,
                 line_style: crate::svek::edge::LinkStyle::Dashed,
                 minlen,
-                invisible: true,
+                // Java: setOpale(true) — Graphviz lays out the spline so we
+                // can read its endpoints, but the edge itself is rendered as
+                // an Opale connector ear by `render_note`, not as a regular
+                // line. Keeping the link non-invisible matches Java exactly:
+                // wasm Graphviz emits a real Bezier path whose endpoints
+                // give us pp1 (note border) and pp2 (entity border) at
+                // sub-pixel precision.
+                invisible: false,
+                is_opale: true,
                 no_constraint,
             });
         }
@@ -1243,6 +1252,7 @@ pub fn layout_component(
                         line_style: crate::svek::edge::LinkStyle::Normal,
                         minlen: 1,
                         invisible: true,
+                        is_opale: false,
                         no_constraint: false,
                     });
                     head_branch = i;
@@ -1264,6 +1274,7 @@ pub fn layout_component(
                         line_style: crate::svek::edge::LinkStyle::Normal,
                         minlen: 0,
                         invisible: true,
+                        is_opale: false,
                         no_constraint: false,
                     });
                 }
@@ -1503,18 +1514,6 @@ pub fn layout_component(
         })
         .collect();
 
-    // Build map of graphviz-raw node centers (before render offset) for ear computation.
-    // Java Smetana uses integer-rounded node centers for edge routing; we replicate
-    // that to compute ear_tip_x matching Java's Opale connector position.
-    let graphviz_raw_centers: HashMap<String, (f64, f64)> = gl
-        .nodes
-        .iter()
-        .map(|nl| {
-            let entity_id = dot_to_id.get(&nl.id).cloned().unwrap_or(nl.id.clone());
-            (entity_id, (nl.cx, nl.cy))
-        })
-        .collect();
-
     let mut note_layouts = Vec::new();
     for (i, note) in cd.notes.iter().enumerate() {
         let note_id = format!("GMN{}", i);
@@ -1546,38 +1545,46 @@ pub fn layout_component(
             )
         };
 
-        // Compute ear tip from note position relative to target entity.
-        // Java Opale: the connector ear position comes from the Smetana edge path
-        // between note and entity. Smetana rounds node centers to integers internally,
-        // so the edge X is at the average of the rounded centers.
-        // The ear Y is near the entity boundary (spline entry/exit point).
+        // Compute ear tip from the Graphviz-laid-out spline that connects
+        // the note to its target entity (Java Opale: pp1/pp2 derive from
+        // the SmetanaEdge endpoints — the boundary contact points on each
+        // side of the spline).  The note->entity link is marked `is_opale`
+        // so Graphviz emits a real Bezier path; we read its endpoint nearest
+        // the target entity to obtain the ear-tip coordinates.
         let (ear_tip_y, ear_tip_x) = if let Some(ref target) = note.target {
-            if let Some(&(_tx, ty, _tw, th)) = node_positions.get(target) {
-                // Get graphviz-raw centers for integer rounding
-                let note_raw_cx = graphviz_raw_centers
-                    .get(&note_id)
-                    .map(|c| c.0)
-                    .unwrap_or(nx + nw / 2.0 - edge_offset_x);
-                let entity_raw_cx = graphviz_raw_centers
-                    .get(target)
-                    .map(|c| c.0)
-                    .unwrap_or(_tx + _tw / 2.0 - edge_offset_x);
-                // Java Smetana rounds node centers to integers for edge routing
-                let ear_x = (note_raw_cx.round() + entity_raw_cx.round()) / 2.0 + edge_offset_x;
-                match note.position.as_str() {
-                    "top" => {
-                        // Ear points down to target top; use entity top - small offset
-                        let ear_y = ty - 0.23;
-                        (Some(ear_y), Some(ear_x))
+            if let Some(&(_tx, _ty, _tw, _th)) = node_positions.get(target) {
+                let target_dot = if group_ids_in_edges.contains(target) {
+                    format!("{}_proxy", sanitize_id(target))
+                } else {
+                    id_to_dot
+                        .get(target)
+                        .cloned()
+                        .unwrap_or_else(|| sanitize_id(target))
+                };
+                // Locate the Graphviz spline for note->entity (or entity->note).
+                // The endpoint touching the entity is the ear-tip; the offset
+                // direction (top/bottom note) decides which endpoint to pick.
+                let spline_tip = gl.edges.iter().find_map(|e| {
+                    let (note_side_endpoint, entity_side_endpoint) =
+                        if e.from == note_id && e.to == target_dot {
+                            (e.spline_start, e.spline_end)
+                        } else if e.from == target_dot && e.to == note_id {
+                            (e.spline_end, e.spline_start)
+                        } else {
+                            return None;
+                        };
+                    let _ = note_side_endpoint; // pp1 reserved for future use
+                    entity_side_endpoint
+                });
+                if let Some((sx, sy)) = spline_tip {
+                    let ear_x = sx + edge_offset_x;
+                    let ear_y = sy + edge_offset_y;
+                    match note.position.as_str() {
+                        "top" | "bottom" => (Some(ear_y), Some(ear_x)),
+                        _ => (None, None),
                     }
-                    "bottom" => {
-                        // Ear points up to target bottom; Smetana spline enters
-                        // slightly past the boundary. The offset (~0.12) is smaller
-                        // than the top case (~0.23) due to edge routing asymmetry.
-                        let ear_y = ty + th + 0.123125;
-                        (Some(ear_y), Some(ear_x))
-                    }
-                    _ => (None, None),
+                } else {
+                    (None, None)
                 }
             } else {
                 (None, None)

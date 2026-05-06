@@ -78,6 +78,10 @@ pub struct LayoutEdge {
     pub line_style: crate::svek::edge::LinkStyle,
     pub minlen: u32,
     pub invisible: bool,
+    /// When true, the edge is laid out by Graphviz (so Bezier endpoints are
+    /// available) but is rendered as an Opale connector ear instead of a
+    /// regular line. Java: `SvekEdge.setOpale(true)`.
+    pub is_opale: bool,
     /// When true, set constraint=false in DOT (cross-axis direction hints).
     pub no_constraint: bool,
 }
@@ -179,6 +183,12 @@ pub struct EdgeLayout {
     pub points: Vec<(f64, f64)>,
     /// Arrow tip (SVG coordinates), parsed from "e,x,y ..."
     pub arrow_tip: Option<(f64, f64)>,
+    /// Spline start point in svek coordinates (post-YDelta, post-moveDelta).
+    /// For Opale connector ears, this is the contact point on the note border.
+    pub spline_start: Option<(f64, f64)>,
+    /// Spline end point in svek coordinates (post-YDelta, post-moveDelta).
+    /// For Opale connector ears, this is the contact point on the entity border.
+    pub spline_end: Option<(f64, f64)>,
     /// Raw SVG path d-string from Graphviz (with transform applied),
     /// preserving original M/C/L commands for faithful reproduction.
     pub raw_path_d: Option<String>,
@@ -735,6 +745,9 @@ pub fn layout_with_svek(graph: &LayoutGraph) -> Result<GraphLayout, Error> {
         if edge.invisible {
             ld.invisible = true;
         }
+        if edge.is_opale {
+            ld.is_opale = true;
+        }
         if edge.no_constraint {
             ld.no_constraint = true;
         }
@@ -885,6 +898,8 @@ pub fn layout_with_svek(graph: &LayoutGraph) -> Result<GraphLayout, Error> {
             };
             let mut points = Vec::new();
             let mut raw_path_d = None;
+            let mut spline_start: Option<(f64, f64)> = None;
+            let mut spline_end: Option<(f64, f64)> = None;
             if let Some(ref dp) = se.get_dot_path() {
                 for bez in &dp.beziers {
                     if points.is_empty() {
@@ -895,6 +910,10 @@ pub fn layout_with_svek(graph: &LayoutGraph) -> Result<GraphLayout, Error> {
                     points.push((bez.x2, bez.y2));
                 }
                 raw_path_d = Some(dp.to_upath().to_svg_path_d());
+                let sp = dp.start_point();
+                let ep = dp.end_point();
+                spline_start = Some((sp.x, sp.y));
+                spline_end = Some((ep.x, ep.y));
             }
             let parsed_edge = parsed_svg_edges_by_key
                 .get_mut(&(
@@ -910,6 +929,8 @@ pub fn layout_with_svek(graph: &LayoutGraph) -> Result<GraphLayout, Error> {
                     .as_ref()
                     .and_then(|edge| edge.arrow_tip)
                     .or_else(|| se.end_contact_point().map(|p| (p.x, p.y))),
+                spline_start,
+                spline_end,
                 raw_path_d: parsed_edge
                     .as_ref()
                     .and_then(|edge| edge.raw_path_d.clone())
@@ -1044,6 +1065,14 @@ pub fn layout_with_svek(graph: &LayoutGraph) -> Result<GraphLayout, Error> {
                 p.0 -= min_x;
                 p.1 -= min_y;
             }
+        }
+        if let Some(ref mut sp) = e.spline_start {
+            sp.0 -= min_x;
+            sp.1 -= min_y;
+        }
+        if let Some(ref mut ep) = e.spline_end {
+            ep.0 -= min_x;
+            ep.1 -= min_y;
         }
         // Java keeps head/tail label positions in pre-normalized Svek space.
         // They are translated later by SvekEdge.drawU() via moveDelta only.
@@ -1470,6 +1499,8 @@ fn parse_svg_edge(g: &str, tx: f64, ty: f64) -> Option<EdgeLayout> {
         to,
         points,
         arrow_tip,
+        spline_start: None,
+        spline_end: None,
         raw_path_d,
         arrow_polygon_points,
         label: None,
@@ -1804,6 +1835,7 @@ mod tests {
                 line_style: crate::svek::edge::LinkStyle::Normal,
                 minlen: 1,
                 invisible: false,
+                is_opale: false,
                 no_constraint: false,
             }],
             clusters: vec![],

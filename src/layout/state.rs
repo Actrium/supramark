@@ -1514,6 +1514,7 @@ fn layout_children_with_graphviz(
                 0
             },
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
         active_transitions.push(tr);
@@ -2374,6 +2375,7 @@ pub fn layout_state(diagram: &StateDiagram) -> Result<StateLayout> {
                 0
             },
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
     }
@@ -2422,6 +2424,7 @@ pub fn layout_state(diagram: &StateDiagram) -> Result<StateLayout> {
             line_style: crate::svek::edge::LinkStyle::Dashed,
             minlen,
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
     }

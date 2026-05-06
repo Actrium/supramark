@@ -3869,6 +3869,7 @@ fn layout_old_style_activity_graph(
             line_style: crate::svek::edge::LinkStyle::Normal,
             minlen: link.length.saturating_sub(1),
             invisible: false,
+            is_opale: false,
             no_constraint: false,
             tail_label_dimension: None,
             head_label_dimension: link

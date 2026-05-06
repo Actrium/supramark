@@ -1191,6 +1191,8 @@ mod tests {
                 to: "Bar".into(),
                 points: vec![(100.0, 90.0), (100.0, 160.0)],
                 arrow_tip: None,
+                spline_start: None,
+                spline_end: None,
                 raw_path_d: None,
                 arrow_polygon_points: None,
                 label: None,

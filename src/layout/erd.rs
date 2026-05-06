@@ -616,6 +616,7 @@ pub fn layout_erd(diagram: &ErdDiagram) -> Result<ErdLayout> {
             line_style: crate::svek::edge::LinkStyle::Normal,
             minlen: 2,
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
     }
@@ -638,6 +639,7 @@ pub fn layout_erd(diagram: &ErdDiagram) -> Result<ErdLayout> {
             line_style: crate::svek::edge::LinkStyle::Normal,
             minlen: 1,
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
     }
@@ -662,6 +664,7 @@ pub fn layout_erd(diagram: &ErdDiagram) -> Result<ErdLayout> {
             line_style: crate::svek::edge::LinkStyle::Normal,
             minlen: 1,
             invisible: false,
+            is_opale: false,
             no_constraint: false,
         });
         // ISA center → each child (Java: LinkArg length=3 → DOT minlen=2)
@@ -682,6 +685,7 @@ pub fn layout_erd(diagram: &ErdDiagram) -> Result<ErdLayout> {
                 line_style: crate::svek::edge::LinkStyle::Normal,
                 minlen: 2,
                 invisible: false,
+                is_opale: false,
                 no_constraint: false,
             });
         }
