@@ -6,37 +6,62 @@
 
 use crate::font_data::{
     FontMeta, DEJAVU_MONO, DEJAVU_MONO_BOLD, DEJAVU_MONO_BOLD_OBLIQUE, DEJAVU_MONO_OBLIQUE,
-    DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_BOLD_OBLIQUE, DEJAVU_SANS_OBLIQUE,
+    DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_BOLD_OBLIQUE, DEJAVU_SANS_OBLIQUE, DEJAVU_SERIF,
+    DEJAVU_SERIF_BOLD, DEJAVU_SERIF_BOLD_ITALIC, DEJAVU_SERIF_ITALIC,
 };
 
 // ── Font family resolution ──────────────────────────────────────────────
 
+/// Logical font family bucket.
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum FamilyKind {
+    Sans,
+    Mono,
+    Serif,
+}
+
+fn family_kind(family: &str) -> FamilyKind {
+    let primary = family.split(',').next().unwrap_or(family).trim();
+    let p = primary.to_lowercase();
+    if p == "monospaced" || p == "monospace" || p == "courier" {
+        FamilyKind::Mono
+    } else if p == "serif" {
+        // Only Java logical name "Serif" resolves to DejaVu Serif. Physical
+        // serifs ("Times", "Times New Roman", "Georgia") aren't installed on
+        // the Java reference machine and fall back to Dialog/Sans there.
+        FamilyKind::Serif
+    } else {
+        FamilyKind::Sans
+    }
+}
+
 /// Map a logical font family name to a canonical key.
-/// Java logical fonts: "SansSerif"/"Dialog"→ DejaVu Sans, "Monospaced"/"Courier"→ DejaVu Sans Mono.
+/// Java logical fonts: "SansSerif"/"Dialog"→ DejaVu Sans, "Monospaced"/"Courier"→ DejaVu Sans Mono,
+/// "Serif"→ DejaVu Serif (used by creole headings).
 /// Physical fonts not installed on the reference machine (e.g. "Courier New", "Arial")
 /// fall back to Dialog (sans-serif) in Java AWT.
 /// For CSS `font-family` lists like "Courier New,monospace", we resolve based on
 /// the PRIMARY (first) name — Java AWT uses the first name for font lookup.
 ///
-/// Italic variants resolve to the corresponding `*-Oblique.ttf` faces — DejaVu
-/// ships real italic glyphs whose horizontal advances differ slightly from
-/// plain (≈+0.15pt per `«…»` stereotype string). Reference SVGs are generated
-/// on systems where Java has the Oblique faces available, so we follow the
-/// same path here for byte-exact comparison.
+/// Italic variants resolve to the corresponding `*-Oblique.ttf` (Sans/Mono) or
+/// `*-Italic.ttf` (Serif) faces — DejaVu ships real italic glyphs whose
+/// horizontal advances differ slightly from plain. Reference SVGs are
+/// generated on systems where Java has the italic faces available, so we
+/// follow the same path here for byte-exact comparison.
 fn resolve_face(family: &str, bold: bool, italic: bool) -> &'static FontMeta {
-    // Use the first name in a CSS comma-separated font-family list
-    let primary = family.split(',').next().unwrap_or(family).trim();
-    let p = primary.to_lowercase();
-    let is_mono = p == "monospaced" || p == "monospace" || p == "courier";
-    match (is_mono, bold, italic) {
-        (true, false, false) => &DEJAVU_MONO,
-        (true, true, false) => &DEJAVU_MONO_BOLD,
-        (true, false, true) => &DEJAVU_MONO_OBLIQUE,
-        (true, true, true) => &DEJAVU_MONO_BOLD_OBLIQUE,
-        (false, false, false) => &DEJAVU_SANS,
-        (false, true, false) => &DEJAVU_SANS_BOLD,
-        (false, false, true) => &DEJAVU_SANS_OBLIQUE,
-        (false, true, true) => &DEJAVU_SANS_BOLD_OBLIQUE,
+    match (family_kind(family), bold, italic) {
+        (FamilyKind::Mono, false, false) => &DEJAVU_MONO,
+        (FamilyKind::Mono, true, false) => &DEJAVU_MONO_BOLD,
+        (FamilyKind::Mono, false, true) => &DEJAVU_MONO_OBLIQUE,
+        (FamilyKind::Mono, true, true) => &DEJAVU_MONO_BOLD_OBLIQUE,
+        (FamilyKind::Sans, false, false) => &DEJAVU_SANS,
+        (FamilyKind::Sans, true, false) => &DEJAVU_SANS_BOLD,
+        (FamilyKind::Sans, false, true) => &DEJAVU_SANS_OBLIQUE,
+        (FamilyKind::Sans, true, true) => &DEJAVU_SANS_BOLD_OBLIQUE,
+        (FamilyKind::Serif, false, false) => &DEJAVU_SERIF,
+        (FamilyKind::Serif, true, false) => &DEJAVU_SERIF_BOLD,
+        (FamilyKind::Serif, false, true) => &DEJAVU_SERIF_ITALIC,
+        (FamilyKind::Serif, true, true) => &DEJAVU_SERIF_BOLD_ITALIC,
     }
 }
 
@@ -72,8 +97,12 @@ pub fn text_width(text: &str, family: &str, size: f64, bold: bool, italic: bool)
 /// Line height = ascent + |descent| (leading is 0 for DejaVu fonts).
 ///
 /// Matches Java's `LineMetrics.getHeight()`.
-pub fn line_height(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false, false); // vertical metrics are style-independent
+///
+/// Vertical metrics are face-dependent — DejaVu Sans/Mono share asc=1901/desc=-483
+/// across plain and bold, but DejaVu Serif Bold/BoldItalic raise the ascender to
+/// 1923. Java picks the value from the actual rendered face, so we do too.
+pub fn line_height(family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    let face = resolve_face(family, bold, italic);
     let upem = face.units_per_em as f64;
     let asc = face.ascender as f64; // positive (hhea.ascender)
     let desc = face.descender.unsigned_abs() as f64; // make positive
@@ -83,23 +112,23 @@ pub fn line_height(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
 /// Font ascent (baseline to top of tallest glyph).
 ///
 /// Matches Java's `LineMetrics.getAscent()`.
-pub fn ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false, false);
+pub fn ascent(family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    let face = resolve_face(family, bold, italic);
     face.ascender as f64 / face.units_per_em as f64 * size
 }
 
 /// Font descent (baseline to bottom of lowest glyph).
 ///
 /// Matches Java's `LineMetrics.getDescent()` (positive value).
-pub fn descent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false, false);
+pub fn descent(family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    let face = resolve_face(family, bold, italic);
     face.descender.unsigned_abs() as f64 / face.units_per_em as f64 * size
 }
 
 /// OS/2 typographic ascent. Used for DOT cluster label dimensions which match
 /// Java's `StringBounder.calculateDimension()` text block height.
-pub fn typo_ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    let face = resolve_face(family, false, false);
+pub fn typo_ascent(family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    let face = resolve_face(family, bold, italic);
     let upem = face.units_per_em as f64;
     let typo_asc = face.typo_ascender as f64;
     typo_asc / upem * size

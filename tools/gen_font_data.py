@@ -19,6 +19,9 @@ Usage:
        /usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf \\
        /usr/share/fonts/truetype/dejavu/DejaVuSansMono-BoldOblique.ttf \\
        /usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf \\
+       /usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf \\
+       /usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf \\
+       /usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf \\
        tools/fonts/
     pip install fonttools
     python3 tools/gen_font_data.py
@@ -47,6 +50,9 @@ FONTS = [
     ("DEJAVU_MONO_OBLIQUE",        "DejaVuSansMono-Oblique.ttf"),
     ("DEJAVU_MONO_BOLD_OBLIQUE",   "DejaVuSansMono-BoldOblique.ttf"),
     ("DEJAVU_SERIF",               "DejaVuSerif.ttf"),
+    ("DEJAVU_SERIF_BOLD",          "DejaVuSerif-Bold.ttf"),
+    ("DEJAVU_SERIF_ITALIC",        "DejaVuSerif-Italic.ttf"),
+    ("DEJAVU_SERIF_BOLD_ITALIC",   "DejaVuSerif-BoldItalic.ttf"),
 ]
 
 
