@@ -1,4 +1,0 @@
-@startuml
-participant "[[http://www.address.com Line 1 Line 2]]" as MyComponent1
-participant "[[http://www.address.com Line 3\nLine 4]]" as MyComponent2
-@enduml

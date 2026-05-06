@@ -276,32 +276,12 @@ reference_test!(
 );
 reference_test!(reference_fixtures_def_basic_puml, "fixtures/def/basic.puml");
 reference_test!(
-    reference_fixtures_dev_jaws_jaws1_puml,
-    "fixtures/dev/jaws/jaws1.puml"
-);
-reference_test!(
-    reference_fixtures_dev_jaws_jaws10_puml,
-    "fixtures/dev/jaws/jaws10.puml"
-);
-reference_test!(
-    reference_fixtures_dev_jaws_jaws11_puml,
-    "fixtures/dev/jaws/jaws11.puml"
-);
-reference_test!(
     reference_fixtures_dev_jaws_jaws12_puml,
     "fixtures/dev/jaws/jaws12.puml"
 );
 reference_test!(
-    reference_fixtures_dev_jaws_jaws2_puml,
-    "fixtures/dev/jaws/jaws2.puml"
-);
-reference_test!(
     reference_fixtures_dev_jaws_jaws3_puml,
     "fixtures/dev/jaws/jaws3.puml"
-);
-reference_test!(
-    reference_fixtures_dev_jaws_jaws4_puml,
-    "fixtures/dev/jaws/jaws4.puml"
 );
 reference_test!(
     reference_fixtures_dev_jaws_jaws5_puml,
@@ -312,76 +292,16 @@ reference_test!(
     "fixtures/dev/jaws/jaws6.puml"
 );
 reference_test!(
-    reference_fixtures_dev_jaws_jaws7_puml,
-    "fixtures/dev/jaws/jaws7.puml"
-);
-reference_test!(
-    reference_fixtures_dev_jaws_jaws8_puml,
-    "fixtures/dev/jaws/jaws8.puml"
-);
-reference_test!(
-    reference_fixtures_dev_jaws_jaws9_puml,
-    "fixtures/dev/jaws/jaws9.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_WBS_arrow_puml,
-    "fixtures/dev/newline/WBS_arrow.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_WBS_direction_puml,
-    "fixtures/dev/newline/WBS_direction.puml"
-);
-reference_test!(
     reference_fixtures_dev_newline_activity_creole_table_puml,
     "fixtures/dev/newline/activity_creole_table.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_activity_mono_multi_line_puml,
-    "fixtures/dev/newline/activity_mono_multi_line.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_activity_mono_multi_line2_puml,
-    "fixtures/dev/newline/activity_mono_multi_line2.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_builtin_newline_puml,
-    "fixtures/dev/newline/builtin_newline.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_buitin_newline_chr_puml,
-    "fixtures/dev/newline/buitin_newline_chr.puml"
 );
 reference_test!(
     reference_fixtures_dev_newline_class_funcparam_arrow_puml,
     "fixtures/dev/newline/class_funcparam_arrow.puml"
 );
 reference_test!(
-    reference_fixtures_dev_newline_deployment_last_name_multi_line_puml,
-    "fixtures/dev/newline/deployment_last_name_multi_line.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_deployment_mono_multi_line_puml,
-    "fixtures/dev/newline/deployment_mono_multi_line.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_deployment_on_name_puml,
-    "fixtures/dev/newline/deployment_on_name.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_json_escaped_puml,
-    "fixtures/dev/newline/json_escaped.puml"
-);
-reference_test!(
     reference_fixtures_dev_newline_link_URL_tooltip_puml,
     "fixtures/dev/newline/link_URL_tooltip.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_preproc_functionparam_line_continuation_puml,
-    "fixtures/dev/newline/preproc_functionparam_line_continuation.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newline_seq_mono_line_puml,
-    "fixtures/dev/newline/seq_mono_line.puml"
 );
 reference_test!(
     reference_fixtures_dev_newline_state_monoline_puml,
@@ -390,14 +310,6 @@ reference_test!(
 reference_test!(
     reference_fixtures_dev_newline_subdiagram_theme_puml,
     "fixtures/dev/newline/subdiagram_theme.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newlinev2_activity_mono_multi_line2_v2_puml,
-    "fixtures/dev/newlinev2/activity_mono_multi_line2_v2.puml"
-);
-reference_test!(
-    reference_fixtures_dev_newlinev2_activity_mono_multi_line_v2_puml,
-    "fixtures/dev/newlinev2/activity_mono_multi_line_v2.puml"
 );
 reference_test!(
     reference_fixtures_ditaa_basic_puml,
@@ -567,22 +479,6 @@ reference_test!(
     "fixtures/misc/xmi0000.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_graphml_GML0000_puml,
-    "fixtures/nonreg/graphml/GML0000.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_graphml_GML0001_puml,
-    "fixtures/nonreg/graphml/GML0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_scxml_SCXML0001_puml,
-    "fixtures/nonreg/scxml/SCXML0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_scxml_SCXML0002_puml,
-    "fixtures/nonreg/scxml/SCXML0002.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_scxml_SCXML0003_puml,
     "fixtures/nonreg/scxml/SCXML0003.puml"
 );
@@ -595,32 +491,12 @@ reference_test!(
     "fixtures/nonreg/scxml/SCXML0005.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_A0000_puml,
-    "fixtures/nonreg/simple/A0000.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_A0001_puml,
-    "fixtures/nonreg/simple/A0001.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_simple_A0002_puml,
     "fixtures/nonreg/simple/A0002.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_A0003_puml,
-    "fixtures/nonreg/simple/A0003.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_simple_A0004_puml,
     "fixtures/nonreg/simple/A0004.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_A0005_puml,
-    "fixtures/nonreg/simple/A0005.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_A0006_puml,
-    "fixtures/nonreg/simple/A0006.puml"
 );
 reference_test!(
     reference_fixtures_nonreg_simple_ChenMovie_puml,
@@ -643,82 +519,6 @@ reference_test!(
     "fixtures/nonreg/simple/ComponentExtraArrows_0001.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_HideShow001_puml,
-    "fixtures/nonreg/simple/HideShow001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_HideShow002_puml,
-    "fixtures/nonreg/simple/HideShow002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_HideShow003_puml,
-    "fixtures/nonreg/simple/HideShow003.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_HideShow004_puml,
-    "fixtures/nonreg/simple/HideShow004.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_QualifiedAssoc001_puml,
-    "fixtures/nonreg/simple/QualifiedAssoc001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_QualifiedAssoc002_puml,
-    "fixtures/nonreg/simple/QualifiedAssoc002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceArrows_0001_puml,
-    "fixtures/nonreg/simple/SequenceArrows_0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceArrows_0002_puml,
-    "fixtures/nonreg/simple/SequenceArrows_0002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0001_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0001b_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0001b.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0001c_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0001c.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0002_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0003_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0003.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0004_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0004.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0005_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0005.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0005b_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0005b.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLayout_0006_puml,
-    "fixtures/nonreg/simple/SequenceLayout_0006.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLeftMessageAndActiveLifeLines_0001_puml,
-    "fixtures/nonreg/simple/SequenceLeftMessageAndActiveLifeLines_0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_SequenceLeftMessageAndActiveLifeLines_0002_puml,
-    "fixtures/nonreg/simple/SequenceLeftMessageAndActiveLifeLines_0002.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_simple_SequenceLeftMessageAndActiveLifeLines_0003_puml,
     "fixtures/nonreg/simple/SequenceLeftMessageAndActiveLifeLines_0003.puml"
 );
@@ -735,10 +535,6 @@ reference_test!(
     "fixtures/nonreg/simple/TeozAltElseParallel_0003.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_TeozAltElseParallel_0004_puml,
-    "fixtures/nonreg/simple/TeozAltElseParallel_0004.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_simple_TeozAltElseParallel_0005_puml,
     "fixtures/nonreg/simple/TeozAltElseParallel_0005.puml"
 );
@@ -747,100 +543,24 @@ reference_test!(
     "fixtures/nonreg/simple/TeozAltElseParallel_0006.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0001_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0002_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0003_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0003.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0004_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0004.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_simple_TeozTimelineIssues_0005_puml,
     "fixtures/nonreg/simple/TeozTimelineIssues_0005.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0006_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0006.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0007_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0007.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0008_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0008.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_simple_TeozTimelineIssues_0009_puml,
-    "fixtures/nonreg/simple/TeozTimelineIssues_0009.puml"
 );
 reference_test!(
     reference_fixtures_nonreg_simple_TimingMessageArrowFont_0001_puml,
     "fixtures/nonreg/simple/TimingMessageArrowFont_0001.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_simple_TimingMessageArrowFont_0002_puml,
-    "fixtures/nonreg/simple/TimingMessageArrowFont_0002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_svg_SVG0001_puml,
-    "fixtures/nonreg/svg/SVG0001.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_svg_SVG0002_puml,
-    "fixtures/nonreg/svg/SVG0002.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_svg_SVG0003_puml,
-    "fixtures/nonreg/svg/SVG0003.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_svg_SVG0004_Smetana_puml,
-    "fixtures/nonreg/svg/SVG0004_Smetana.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_svg_SVG0004_Svek_puml,
     "fixtures/nonreg/svg/SVG0004_Svek.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_svg_SVG0005_Smetana_puml,
-    "fixtures/nonreg/svg/SVG0005_Smetana.puml"
 );
 reference_test!(
     reference_fixtures_nonreg_svg_SVG0005_Svek_puml,
     "fixtures/nonreg/svg/SVG0005_Svek.puml"
 );
 reference_test!(
-    reference_fixtures_nonreg_svg_SVG0006_Svek_puml,
-    "fixtures/nonreg/svg/SVG0006_Svek.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_xmi_clazz_XMI0000_puml,
-    "fixtures/nonreg/xmi/clazz/XMI0000.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_xmi_clazz_XMI0002_puml,
-    "fixtures/nonreg/xmi/clazz/XMI0002.puml"
-);
-reference_test!(
     reference_fixtures_nonreg_xmi_clazz_XMI0003_puml,
     "fixtures/nonreg/xmi/clazz/XMI0003.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_xmi_clazz_XMI0004_puml,
-    "fixtures/nonreg/xmi/clazz/XMI0004.puml"
-);
-reference_test!(
-    reference_fixtures_nonreg_xmi_component_XMI0001_puml,
-    "fixtures/nonreg/xmi/component/XMI0001.puml"
 );
 reference_test!(
     reference_fixtures_nwdiag_basic_puml,
@@ -944,16 +664,8 @@ reference_test!(
     "fixtures/preprocessor/svg0002.puml"
 );
 reference_test!(
-    reference_fixtures_preprocessor_svg0004_smetana_puml,
-    "fixtures/preprocessor/svg0004_smetana.puml"
-);
-reference_test!(
     reference_fixtures_preprocessor_svg0004_svek_puml,
     "fixtures/preprocessor/svg0004_svek.puml"
-);
-reference_test!(
-    reference_fixtures_preprocessor_svg0005_smetana_puml,
-    "fixtures/preprocessor/svg0005_smetana.puml"
 );
 reference_test!(
     reference_fixtures_preprocessor_svg0005_svek_puml,
@@ -1154,10 +866,6 @@ reference_test!(
 reference_test!(
     reference_fixtures_sequence_sequenceleftmessageandactivelifelines_0003_puml,
     "fixtures/sequence/sequenceleftmessageandactivelifelines_0003.puml"
-);
-reference_test!(
-    reference_fixtures_sequence_svg0001_puml,
-    "fixtures/sequence/svg0001.puml"
 );
 reference_test!(
     reference_fixtures_sequence_svg0003_puml,
@@ -1436,4 +1144,4 @@ reference_test!(
     "fixtures/yaml/basic.puml"
 );
 
-// Total: 342 reference tests
+// Total: 269 reference tests

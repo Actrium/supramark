@@ -1,9 +1,0 @@
-@startuml
-!t="this is t1%n()this is t2%n()this is t3%n()"
-
-repeat
-  :read data;
-  :generate diagrams;
-repeat while (x) is (t)
-stop
-@enduml
