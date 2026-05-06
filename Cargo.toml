@@ -55,12 +55,13 @@ log = "0.4"
 env_logger = { version = "0.11", optional = true }
 regex = "1"
 # graphviz-anywhere — native Graphviz bindings for the non-wasm code
-# path. Requires a release that (a) fixes the size_t overflow in the C
-# wrapper on 64-bit targets, (b) builds with WITH_EXPAT=ON on
-# macOS/Linux so HTML labels render with correct geometry, and (c)
-# links the Linux .so with g++ so libstdc++ vtables resolve at runtime
-# on Ubuntu/Debian.
-graphviz-anywhere = "0.1.6"
+# path. 0.1.8+ auto-downloads the matching libgraphviz_api shared
+# library from the GitHub release, so consumers (and our own CI) need
+# no GRAPHVIZ_ANYWHERE_DIR / submodule / pre-installed dot. Earlier
+# releases additionally fixed (a) size_t overflow in the C wrapper on
+# 64-bit targets, (b) WITH_EXPAT=ON for HTML label geometry, and
+# (c) g++ linkage so libstdc++ vtables resolve on Ubuntu/Debian.
+graphviz-anywhere = "0.1.8"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 ureq = { version = "3", optional = true }
 url = "2"

@@ -20,8 +20,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Must stay in sync with the graphviz-anywhere version in Cargo.toml.
-  GRAPHVIZ_ANYWHERE_VERSION: v0.1.6
 
 jobs:
   gate:
@@ -45,9 +43,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libstdc++6 libexpat1 zlib1g fonts-dejavu-core fontconfig
           fc-cache -f
-
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
 
       - name: Install tests/support npm deps (for wasm backend)
         run: |
@@ -74,26 +69,16 @@ jobs:
 
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
 
       - name: Unit tests
         run: cargo test --lib
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
 
       - name: Integration tests
         run: cargo test --test integration
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
 
       - name: Reference tests (baseline-gated, wasm backend)
         run: ./scripts/check_reference_failures.sh
         env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
           PLANTUML_LITTLE_TEST_BACKEND: wasm
 
   publish-crates-io:
@@ -106,9 +91,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Publish to crates.io
-        # --no-verify: matches kookyleo/graphviz-anywhere's pattern. The gate
-        # job already ran the full test suite against a real build; verify
-        # here would just redo the native lib setup.
+        # --no-verify: the gate job already ran the full test suite against a
+        # real build; verify here would just redo the native lib download.
         #
         # Idempotent: treat "already exists on crates.io" as a no-op success
         # so re-pushing the same tag (e.g. to retry a sibling npm publish

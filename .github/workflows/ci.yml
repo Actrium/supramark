@@ -7,10 +7,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # graphviz-anywhere ships its native libgraphviz_api via a GitHub release
-  # per tag; consumers point GRAPHVIZ_ANYWHERE_DIR at the extracted tarball.
-  # Bump when updating the graphviz-anywhere dep in Cargo.toml.
-  GRAPHVIZ_ANYWHERE_VERSION: v0.1.6
 
 jobs:
   fmt:
@@ -34,11 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install runtime deps
         run: sudo apt-get update && sudo apt-get install -y libstdc++6 libexpat1 zlib1g
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
       - run: cargo clippy --all-targets -- -D warnings
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
 
   test-lib:
     name: Unit Tests
@@ -49,12 +41,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install runtime deps
         run: sudo apt-get update && sudo apt-get install -y libstdc++6 libexpat1 zlib1g
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
       - run: cargo test --lib
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
 
   test-reference:
     name: Reference Tests
@@ -71,8 +58,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libstdc++6 libexpat1 zlib1g fonts-dejavu-core fontconfig
           fc-cache -f
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
       - name: Install tests/support npm deps (for wasm backend)
         run: |
           cd tests/support
@@ -80,8 +65,6 @@ jobs:
       - name: Run reference tests with baseline check (wasm backend)
         run: ./scripts/check_reference_failures.sh
         env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
           PLANTUML_LITTLE_TEST_BACKEND: wasm
 
   test-integration:
@@ -93,12 +76,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install runtime deps
         run: sudo apt-get update && sudo apt-get install -y libstdc++6 libexpat1 zlib1g
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
       - run: cargo test --test integration
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
 
   build-release:
     name: Release Build
@@ -110,12 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install runtime deps
         run: sudo apt-get update && sudo apt-get install -y libstdc++6 libexpat1 zlib1g
-      - name: Install graphviz-anywhere native lib
-        uses: ./.github/actions/setup-graphviz-anywhere
       - run: cargo build --release
-        env:
-          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/.graphviz-anywhere
-          LD_LIBRARY_PATH: ${{ github.workspace }}/.graphviz-anywhere/lib
       - name: Binary size
         run: ls -lh target/release/plantuml-little
 
