@@ -47,7 +47,7 @@ jobs:
       - name: Install tests/support npm deps (for wasm backend)
         run: |
           cd tests/support
-          npm install
+          npm ci
 
       - name: Verify tag matches Cargo.toml + packages/web/package.json versions
         run: |

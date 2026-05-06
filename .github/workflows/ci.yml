@@ -61,7 +61,7 @@ jobs:
       - name: Install tests/support npm deps (for wasm backend)
         run: |
           cd tests/support
-          npm install
+          npm ci
       - name: Run reference tests with baseline check (wasm backend)
         run: ./scripts/check_reference_failures.sh
         env:
