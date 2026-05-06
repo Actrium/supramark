@@ -310,9 +310,41 @@ fn extract_number_at(s: &str, pos: usize) -> Option<(usize, usize, f64)> {
     s[start..end].parse::<f64>().ok().map(|v| (start, end, v))
 }
 
+/// Per-fixture numeric tolerance overrides.
+///
+/// Default fuzzy tolerance is `DEFAULT_FUZZY_TOLERANCE` (2.51pt) — wide enough
+/// to absorb residual sub-pixel rounding for fixtures whose root cause hasn't
+/// been tracked down. A few fixtures hit a *known* upstream limit and deserve
+/// a tighter, documented bound so any future regression past the known drift
+/// fails loudly:
+///
+/// - `json/json_escaped`, `yaml/basic`: Java's `SmetanaForJson` is a frozen
+///   ~2010-era graphviz port. `dot_position()` / `dot_splines()` make
+///   sub-pixel placement decisions that diverge from modern dot 2.43.0
+///   (which `graphviz-anywhere` wraps). Empirically the gap caps near
+///   0.50pt; we set the cap at 0.6pt so a real regression (e.g. layout bug
+///   pushing drift to 1pt) trips the test, while the known 0.05–0.50pt
+///   version-skew drift continues to pass. See
+///   `memory/project_smetana_blocker.md` for the structural diagnosis.
+const DEFAULT_FUZZY_TOLERANCE: f64 = 2.51;
+const PER_FIXTURE_TOLERANCE: &[(&str, f64)] = &[
+    ("tests/fixtures/json/json_escaped.puml", 0.6),
+    ("tests/fixtures/yaml/basic.puml", 0.6),
+];
+
+fn tolerance_for(path: &str) -> f64 {
+    for (fixture, tol) in PER_FIXTURE_TOLERANCE {
+        if path == *fixture {
+            return *tol;
+        }
+    }
+    DEFAULT_FUZZY_TOLERANCE
+}
+
 /// Compare actual against reference. Tolerates per-token numeric drift
-/// below ±2.51pt to absorb residual sub-pixel rounding / small layout
-/// offsets that have not yet been tracked down to a single root cause.
+/// below the (per-fixture) fuzzy tolerance to absorb residual sub-pixel
+/// rounding / small layout offsets that have not yet been tracked down
+/// to a single root cause.
 pub fn assert_exact_match(actual: &str, reference: &str, path: &str) {
     if actual == reference {
         return;
@@ -323,6 +355,7 @@ pub fn assert_exact_match(actual: &str, reference: &str, path: &str) {
         return;
     }
 
+    let tol = tolerance_for(path);
     let a_bytes = a.as_bytes();
     let r_bytes = r.as_bytes();
     let mut ai = 0usize;
@@ -349,7 +382,7 @@ pub fn assert_exact_match(actual: &str, reference: &str, path: &str) {
             }
         });
         if let (Some((a_start, a_end, a_val)), Some((r_start, r_end, r_val))) = (a_num, r_num) {
-            if (a_val - r_val).abs() < 2.51 {
+            if (a_val - r_val).abs() < tol {
                 ai = if a_end > ai {
                     a_end
                 } else if a_start < ai {
