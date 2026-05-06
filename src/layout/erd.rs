@@ -180,7 +180,13 @@ pub struct ErdIsaChildEdge {
 const FONT_SIZE: f64 = 14.0;
 const ENTITY_PADDING: f64 = 10.0;
 const ENTITY_MIN_WIDTH: f64 = 0.0;
-const ENTITY_HEIGHT: f64 = 36.2969;
+/// Entity rectangle height = title line_height + 2*MARGIN(5) + 2*MARGIN_LINE(5).
+/// Java EntityImageChenEntity.calculateDimension: dim.delta(MARGIN*2 + 2*MARGIN_LINE) where
+/// dim is the title TextBlock dimension. For SansSerif 14pt the line height is
+/// 16.296875 (DejaVu Sans hhea ascent+descent / upem * size), giving 36.296875.
+/// We must keep full precision because graphviz `pixelToInches` formats with 6 decimals,
+/// and rounding to 4 decimals here desyncs the DOT input from Java's pipeline.
+const ENTITY_HEIGHT: f64 = 36.296875;
 /// Java MARGIN constant from IEntityImage (used for diamond calculation)
 const JAVA_ENTITY_MARGIN: f64 = 5.0;
 const MARGIN: f64 = 7.0;
