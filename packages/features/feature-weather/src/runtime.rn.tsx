@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ImageBackground, Image } from 'react-native';
 import type { ContainerRNRenderArgs } from '@supramark/core';
 import type { WeatherData } from './feature.js';
 
@@ -16,72 +16,152 @@ import type { WeatherData } from './feature.js';
  */
 function getMockWeather(location: string, units: 'metric' | 'imperial' = 'metric') {
   const hash = location.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const baseTemp = 15 + (hash % 20);
-  const temp = units === 'imperial' ? Math.round(baseTemp * 1.8 + 32) : baseTemp;
+  const baseTemp = 12 + (hash % 15);
+  const lowTempC = baseTemp - (2 + (hash % 3));
+  const highTempC = baseTemp + (2 + ((hash >> 1) % 4));
+  const lowTemp = units === 'imperial' ? Math.round(lowTempC * 1.8 + 32) : lowTempC;
+  const highTemp = units === 'imperial' ? Math.round(highTempC * 1.8 + 32) : highTempC;
   const unit = units === 'imperial' ? '°F' : '°C';
 
-  const conditions = ['☀️', '☁️', '🌧️'] as const;
-  const condition = conditions[hash % 3];
+  const conditions = [
+    { icon: '☀', text: '晴', secondaryText: '阳光充足' },
+    { icon: '☁', text: '多云', secondaryText: '云量较多' },
+    { icon: '☂', text: '阵雨', secondaryText: '短时有雨' },
+    { icon: '☈', text: '雷阵雨并伴有冰雹', secondaryText: '对流天气明显' },
+  ] as const;
+  const condition = conditions[hash % conditions.length];
 
-  const humidity = 40 + (hash % 40);
   const wind = 5 + (hash % 20);
-  const windUnit = units === 'imperial' ? 'mph' : 'km/h';
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const;
+  const month = (hash % 12) + 1;
+  const day = (hash % 28) + 1;
 
-  return { temp, unit, condition, humidity, wind, windUnit };
+  // 按风速区间生成更接近卡片文案的风力等级。
+  const windLevel = wind < 10 ? '<3级' : wind < 18 ? '3-4级' : '4-5级';
+
+  return {
+    lowTemp,
+    highTemp,
+    unit,
+    conditionIcon: condition.icon,
+    conditionText: condition.text,
+    conditionSecondaryText: condition.secondaryText,
+    windLevel,
+    weekday: weekdays[hash % weekdays.length],
+    dateLabel: `${month}/${day}`,
+  };
 }
 
 const localStyles = StyleSheet.create({
   container: {
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 12,
-    backgroundColor: '#667eea',
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 12,
+    backgroundColor: '#f5f7ff',
+    minWidth: '70%',
   },
-  header: {
+  content: {
+    paddingTop: 32,
+    paddingHorizontal: 24,
+    paddingBottom: 28,
+    alignItems: 'center',
+  },
+  weekday: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#252525',
+  },
+  date: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#252525',
+  },
+  summary: {
+    marginTop: 14,
+    fontSize: 12,
+    color: '#565656',
+    textAlign: 'center',
+  },
+  primaryIcon: {
+    marginTop: 18,
+    fontSize: 16,
+    color: '#252525',
+  },
+  range: {
+    marginTop: 28,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2F54EB',
+  },
+  secondaryIcon: {
+    marginTop: 18,
+    fontSize: 16,
+    color: '#252525',
+  },
+  secondarySummary: {
+    marginTop: 14,
+    fontSize: 12,
+    color: '#565656',
+    textAlign: 'center',
+  },
+  windLevel: {
+    marginTop: 14,
+    fontSize: 12,
+    color: '#565656',
+    textAlign: 'center',
+  },
+  footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 14,
+    columnGap: 2,
+    backgroundColor: '#E9F0FC',
   },
-  location: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-  },
-  format: {
-    fontSize: 10,
-    color: 'white',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  main: {
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
   },
-  icon: {
-    fontSize: 48,
+  locationIcon: {
+    width: 13.2,
+    height: 16.2,
   },
-  temp: {
-    fontSize: 48,
-    fontWeight: '300',
-    color: 'white',
+  location: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#252525',
   },
-  unit: {
-    fontSize: 24,
-    color: 'white',
-  },
-  details: {
+  unitSwitch: {
     flexDirection: 'row',
-    gap: 16,
-    marginTop: 12,
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#b8cef8',
+    width: 78,
+    height: 24,
   },
-  detail: {
+  unitOption: {
+    width: 39,
+    alignItems: 'center',
+  },
+  unitOptionActive: {
+    width: 39,
+    borderRadius: 12,
+    backgroundColor: '#5b7bf5',
+  },
+  unitOptionText: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '500',
+    lineHeight: 24,
+    color: '#252525',
+  },
+  unitOptionTextActive: {
+    color: '#ffffff',
   },
   error: {
     backgroundColor: '#ffebee',
@@ -110,12 +190,79 @@ const localStyles = StyleSheet.create({
   },
 });
 
+const unitOptions = [
+  { key: 'metric', label: '°C' },
+  { key: 'imperial', label: '°F' },
+] as const;
+const weatherBackground = require('../icons/weather-bg.png');
+const locationIcon = require('../icons/location.png');
+
+type UnitType = 'metric' | 'imperial';
+
+type WeatherCardProps = {
+  location: string;
+  initialUnits: UnitType;
+};
+
+function WeatherCard({ location, initialUnits }: WeatherCardProps) {
+  // 组件内部维护当前单位，点击开关时只切换展示状态。
+  const [currentUnits, setCurrentUnits] = React.useState<UnitType>(initialUnits);
+
+  const weather = getMockWeather(location, currentUnits);
+
+  return (
+    <View style={localStyles.container}>
+      <ImageBackground source={weatherBackground} resizeMode="cover" style={localStyles.content}>
+        <Text style={localStyles.weekday}>{weather.weekday}</Text>
+        <Text style={localStyles.date}>{weather.dateLabel}</Text>
+        <Text style={localStyles.summary}>{weather.conditionText}</Text>
+        <Text style={localStyles.primaryIcon}>{weather.conditionIcon}</Text>
+        <Text style={localStyles.range}>
+          {weather.lowTemp}
+          {weather.unit}/{weather.highTemp}
+          {weather.unit}
+        </Text>
+        <Text style={localStyles.secondaryIcon}>{weather.conditionIcon}</Text>
+        <Text style={localStyles.secondarySummary}>{weather.conditionSecondaryText}</Text>
+        <Text style={localStyles.windLevel}>{weather.windLevel}</Text>
+      </ImageBackground>
+      <View style={localStyles.footer}>
+        <View style={localStyles.locationRow}>
+          <Image source={locationIcon} style={localStyles.locationIcon} />
+          <Text style={localStyles.location} numberOfLines={1} ellipsizeMode="tail">
+            {location}
+          </Text>
+        </View>
+        <View style={localStyles.unitSwitch}>
+          {unitOptions.map(option => {
+            const selected = currentUnits === option.key;
+
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => setCurrentUnits(option.key)}
+                style={[localStyles.unitOption, selected && localStyles.unitOptionActive]}
+              >
+                <Text
+                  style={[localStyles.unitOptionText, selected && localStyles.unitOptionTextActive]}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 /**
  * RN 渲染器 for :::weather
  */
 export function renderWeatherContainerRN({ node, key }: ContainerRNRenderArgs): React.ReactNode {
   const data = (node?.data ?? {}) as WeatherData;
-  const { format, location, units = 'metric', parseError, rawConfig } = data;
+  const { location, units = 'metric', parseError, rawConfig } = data;
 
   // 解析错误时显示错误信息
   if (parseError) {
@@ -138,28 +285,5 @@ export function renderWeatherContainerRN({ node, key }: ContainerRNRenderArgs): 
     );
   }
 
-  // 获取模拟天气数据
-  const weather = getMockWeather(location, units);
-
-  return (
-    <View key={key} style={localStyles.container}>
-      <View style={localStyles.header}>
-        <Text style={localStyles.location}>{location}</Text>
-        <Text style={localStyles.format}>{format.toUpperCase()}</Text>
-      </View>
-      <View style={localStyles.main}>
-        <Text style={localStyles.icon}>{weather.condition}</Text>
-        <Text style={localStyles.temp}>
-          {weather.temp}
-          <Text style={localStyles.unit}>{weather.unit}</Text>
-        </Text>
-      </View>
-      <View style={localStyles.details}>
-        <Text style={localStyles.detail}>💧 {weather.humidity}%</Text>
-        <Text style={localStyles.detail}>
-          💨 {weather.wind} {weather.windUnit}
-        </Text>
-      </View>
-    </View>
-  );
+  return <WeatherCard key={key} location={location} initialUnits={units} />;
 }
