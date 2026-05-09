@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::font_data::DEJAVU_SERIF;
+use crate::font_metrics;
 use crate::model::flow::{FlowDiagram, FlowDirection};
 use crate::{Error, Result};
 
@@ -270,37 +270,24 @@ fn move_point(center: (f64, f64), width: f64, height: f64, direction: FlowDirect
     }
 }
 
-fn serif_text_width(text: &str, size: f64) -> f64 {
-    text.chars().map(|c| serif_char_width(c, size)).sum()
-}
+// These helpers historically reached into `crate::font_data::DEJAVU_SERIF`
+// directly to compute glyph_advance / ascender / descender / units_per_em.
+// They now route through the same `Metrics` trait the rest of the crate
+// uses, which dispatches to the impl picked by the `metrics-*` Cargo
+// features. With the default `metrics-static-dejavu` the output is
+// byte-identical to the previous direct table lookups (the static impl
+// applies the same `advance / units_per_em * size` formula).
 
-fn serif_char_width(ch: char, size: f64) -> f64 {
-    if ch == '\n' || ch == '\r' {
-        return 0.0;
-    }
-    let face = &DEJAVU_SERIF;
-    let upem = face.units_per_em as f64;
-    if let Some(adv) = face.glyph_advance(ch as u32) {
-        return adv as f64 / upem * size;
-    }
-    // Fallback: use space advance for unmapped characters
-    if let Some(sp_adv) = face.glyph_advance(' ' as u32) {
-        return sp_adv as f64 / upem * size;
-    }
-    size * 0.6
+fn serif_text_width(text: &str, size: f64) -> f64 {
+    font_metrics::text_width(text, "Serif", size, false, false)
 }
 
 fn serif_ascent(size: f64) -> f64 {
-    let face = &DEJAVU_SERIF;
-    face.ascender as f64 / face.units_per_em as f64 * size
+    font_metrics::ascent("Serif", size, false, false)
 }
 
 fn serif_line_height(size: f64) -> f64 {
-    let face = &DEJAVU_SERIF;
-    let upem = face.units_per_em as f64;
-    let asc = face.ascender as f64;
-    let desc = face.descender.unsigned_abs() as f64;
-    (asc + desc) / upem * size
+    font_metrics::line_height("Serif", size, false, false)
 }
 
 #[cfg(test)]

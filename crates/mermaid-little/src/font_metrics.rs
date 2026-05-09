@@ -1,5 +1,4 @@
-//! Thin wrapper around [`font_metrics::Metrics`] using the static
-//! DejaVu range tables.
+//! Thin wrapper around [`font_metrics_core::Metrics`].
 //!
 //! mermaid-little preserves a few mermaid-specific behaviours on top
 //! of the shared metrics impl:
@@ -14,14 +13,68 @@
 //!   the rendered glyph runs are bold; the `false, false` defaults
 //!   are deliberate.
 //!
-//! Internally each function delegates to
-//! [`font_metrics::static_dejavu::StaticDejaVuMetrics`] for the
-//! underlying calculation.
+//! Internally each function delegates to a compile-time-selected
+//! `&'static dyn Metrics` provider; the active impl is picked by
+//! mutually-exclusive Cargo features:
+//!
+//! - `metrics-static-dejavu` (default) — byte-exact parity with the
+//!   *_byte_exact.rs reference suites.
+//! - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
+//!   parsed font (defaults to font-metrics's embedded DejaVu Latin
+//!   subset).
+//! - `metrics-host-callback` (wasm32 only) — defer measurement to a
+//!   JS-side `globalThis.supramark.measureText` bridge so layer-1
+//!   layout sees the exact widths the host browser / RN-Skia will
+//!   render with.
 
-use font_metrics_core::static_dejavu::StaticDejaVuMetrics;
 use font_metrics_core::Metrics;
 
-const M: StaticDejaVuMetrics = StaticDejaVuMetrics;
+/// Compile-time-selected `Metrics` provider. Exactly one of the
+/// `metrics-*` Cargo features must be enabled; the default
+/// (`metrics-static-dejavu`) preserves byte-exact parity for the
+/// *_byte_exact.rs reference suites.
+#[inline]
+fn metrics_provider() -> &'static dyn Metrics {
+    #[cfg(feature = "metrics-static-dejavu")]
+    {
+        static M: font_metrics_core::static_dejavu::StaticDejaVuMetrics =
+            font_metrics_core::static_dejavu::StaticDejaVuMetrics;
+        return &M;
+    }
+
+    #[cfg(all(
+        not(feature = "metrics-static-dejavu"),
+        feature = "metrics-host-callback",
+        target_arch = "wasm32",
+    ))]
+    {
+        static M: font_metrics_core::host_callback::HostCallbackMetrics =
+            font_metrics_core::host_callback::HostCallbackMetrics;
+        return &M;
+    }
+
+    #[cfg(all(
+        not(feature = "metrics-static-dejavu"),
+        not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
+        feature = "metrics-ttf-parser",
+    ))]
+    {
+        use std::sync::OnceLock;
+        static M: OnceLock<font_metrics_core::ttf_parser::TtfParserMetrics<'static>> =
+            OnceLock::new();
+        return M.get_or_init(|| {
+            font_metrics_core::ttf_parser::TtfParserMetrics::default_latin()
+                .expect("default Latin TTF subset failed to parse")
+        });
+    }
+
+    #[cfg(not(any(
+        feature = "metrics-static-dejavu",
+        feature = "metrics-ttf-parser",
+        feature = "metrics-host-callback",
+    )))]
+    compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-static-dejavu for byte-exact parity, metrics-ttf-parser for native dynamic, or metrics-host-callback for wasm host-bridge");
+}
 
 /// Width of a single character (typographic horizontal advance).
 ///
@@ -29,7 +82,7 @@ const M: StaticDejaVuMetrics = StaticDejaVuMetrics;
 /// Java's `font.getStringBounds(ch, frc).getWidth()` with
 /// `FRACTIONALMETRICS_ON`.
 pub fn char_width(ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-    M.char_width(ch, family, size, bold, italic)
+    metrics_provider().char_width(ch, family, size, bold, italic)
 }
 
 /// Total width of a text string (sum of character advances).
@@ -46,9 +99,9 @@ pub fn char_width(ch: char, family: &str, size: f64, bold: bool, italic: bool) -
 /// UTF-8, so they are unaffected.
 pub fn text_width(text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
     if let Some(recovered) = recover_mangled_utf8(text) {
-        return M.text_width(&recovered, family, size, bold, italic);
+        return metrics_provider().text_width(&recovered, family, size, bold, italic);
     }
-    M.text_width(text, family, size, bold, italic)
+    metrics_provider().text_width(text, family, size, bold, italic)
 }
 
 /// Detect strings that look like UTF-8 bytes mis-cast to `char` and
@@ -84,25 +137,25 @@ fn recover_mangled_utf8(text: &str) -> Option<String> {
 /// mermaid-specific: vertical metrics intentionally ignore
 /// bold / italic — see module docs.
 pub fn line_height(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    M.line_height(family, size, false, false)
+    metrics_provider().line_height(family, size, false, false)
 }
 
 /// Distance from baseline to top of the tallest glyph
 /// (`LineMetrics.getAscent()`).
 pub fn ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    M.ascent(family, size, false, false)
+    metrics_provider().ascent(family, size, false, false)
 }
 
 /// Distance from baseline to bottom of the lowest glyph
 /// (positive value, `LineMetrics.getDescent()`).
 pub fn descent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    M.descent(family, size, false, false)
+    metrics_provider().descent(family, size, false, false)
 }
 
 /// OS/2 typographic ascent — used for DOT cluster label dimensions
 /// matching Java's `StringBounder.calculateDimension()`.
 pub fn typo_ascent(family: &str, size: f64, _bold: bool, _italic: bool) -> f64 {
-    M.typo_ascent(family, size, false, false)
+    metrics_provider().typo_ascent(family, size, false, false)
 }
 
 #[cfg(test)]

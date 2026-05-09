@@ -16,15 +16,18 @@
 pub mod config;
 pub mod detect;
 pub mod error;
-// Static DejaVu range tables come from the shared `font-metrics`
-// crate behind the `static-fixtures` feature. Until 2026-05-09
-// mermaid-little carried a hand-vendored copy of plantuml-little's
-// tables anchored at commit b32d6aa; that duplication is now
-// eliminated. Re-export under the historical `crate::font_data` path
-// so any remaining call sites that reach for `crate::font_data::...`
-// keep resolving (the new `crate::font_metrics` module here delegates
-// to font-metrics's `StaticDejaVuMetrics` impl of the `Metrics`
-// trait — production migration to a dynamic impl will follow).
+// Static DejaVu range tables live in the shared `font-metrics` crate
+// behind the `static-fixtures` feature, which is itself gated by this
+// crate's `metrics-static-dejavu` Cargo feature (default ON). Until
+// 2026-05-09 mermaid-little carried a hand-vendored copy of
+// plantuml-little's tables anchored at commit b32d6aa; that
+// duplication is now eliminated. Re-export under the historical
+// `crate::font_data` path is kept as a safety net for any future
+// caller that needs raw face tables (the `Metrics` trait covers all
+// current uses — `crate::font_metrics` is the right import). Builds
+// that disable the default in favour of `metrics-ttf-parser` /
+// `metrics-host-callback` lose this re-export.
+#[cfg(feature = "metrics-static-dejavu")]
 pub use font_metrics_core::static_dejavu::font_data;
 pub mod font_metrics;
 #[cfg(feature = "katex")]

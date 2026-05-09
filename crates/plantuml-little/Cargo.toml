@@ -43,26 +43,38 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [features]
-default = ["cli", "remote"]
+default = ["cli", "remote", "metrics-static-dejavu"]
 # CLI front-end (env_logger + main.rs). Disabled automatically on wasm32.
 cli = ["dep:env_logger"]
 # Remote-resource fetching via ureq (themes, images).
 # Disabled automatically on wasm32 where ureq cannot link.
 remote = ["dep:ureq"]
 
+# Metrics-impl selection. Exactly one of the three should be enabled
+# per build; defaulting to static-dejavu preserves the byte-exact Java
+# parity that the 268+ reference SVG tests in tests/ rely on. Wasm /
+# native production builds that prefer dynamic measurement (so layer-1
+# layout uses the same fonts the host browser/RN actually renders with)
+# should set default-features = false and pick one of the dynamic
+# variants instead.
+metrics-static-dejavu = ["font_metrics_core/static-fixtures"]
+metrics-ttf-parser = []
+metrics-host-callback = []
+
 [dependencies]
-# Shared font metrics. plantuml-little still drives its main code
-# path off the byte-exact static DejaVu tables (gated behind the
-# `static-fixtures` feature) so the 268+ Java-byte-equal SVG
-# reference tests keep passing. The TtfParser / HostCallback impls
-# in font-metrics will replace this once the dynamic main path
-# lands; until then this dep stays on `static-fixtures`.
+# Shared font metrics. The `metrics-*` Cargo features above pick
+# which `Metrics` impl `crate::font_metrics` routes through; the
+# default (`metrics-static-dejavu`) flips on font-metrics's
+# `static-fixtures` feature, preserving byte-exact Java parity for
+# the 268+ reference SVG tests. The TtfParser / HostCallback impls
+# (always compiled into font-metrics) become reachable when the
+# corresponding `metrics-*` feature is selected instead.
 #
 # Imported as `font_metrics_core` (via `package =`) because plantuml-
 # little's own `crate::font_metrics` wrapper module would otherwise
 # shadow the dep in the crate-root namespace, breaking
 # `pub use font_metrics::static_dejavu::*` in src/lib.rs.
-font_metrics_core = { package = "font-metrics", path = "../font-metrics", version = "0.1", features = ["static-fixtures"] }
+font_metrics_core = { package = "font-metrics", path = "../font-metrics", version = "0.1" }
 thiserror = "1"
 log = "0.4"
 env_logger = { version = "0.11", optional = true }
