@@ -1,0 +1,209 @@
+{
+  "graph": {
+    "name": "",
+    "isFolderOnly": false,
+    "ast": {
+      "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-1:0:7",
+      "nodes": [
+        {
+          "map_key": {
+            "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:6:6",
+            "edges": [
+              {
+                "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:6:6",
+                "src": {
+                  "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:1:1",
+                  "path": [
+                    {
+                      "unquoted_string": {
+                        "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:1:1",
+                        "value": [
+                          {
+                            "string": "A",
+                            "raw_string": "A"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "src_arrow": "",
+                "dst": {
+                  "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:5:5-0:6:6",
+                  "path": [
+                    {
+                      "unquoted_string": {
+                        "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:5:5-0:6:6",
+                        "value": [
+                          {
+                            "string": "B",
+                            "raw_string": "B"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "dst_arrow": ">"
+              }
+            ],
+            "primary": {},
+            "value": {}
+          }
+        }
+      ]
+    },
+    "root": {
+      "id": "",
+      "id_val": "",
+      "attributes": {
+        "label": {
+          "value": ""
+        },
+        "labelDimensions": {
+          "width": 0,
+          "height": 0
+        },
+        "style": {},
+        "iconStyle": {},
+        "near_key": null,
+        "shape": {
+          "value": ""
+        },
+        "direction": {
+          "value": ""
+        },
+        "constraint": null
+      },
+      "zIndex": 0
+    },
+    "edges": [
+      {
+        "index": 0,
+        "isCurve": false,
+        "src_arrow": false,
+        "dst_arrow": true,
+        "references": [
+          {
+            "map_key_edge_index": 0
+          }
+        ],
+        "attributes": {
+          "label": {
+            "value": ""
+          },
+          "labelDimensions": {
+            "width": 0,
+            "height": 0
+          },
+          "style": {},
+          "iconStyle": {},
+          "near_key": null,
+          "shape": {
+            "value": ""
+          },
+          "direction": {
+            "value": ""
+          },
+          "constraint": null
+        },
+        "zIndex": 0
+      }
+    ],
+    "objects": [
+      {
+        "id": "A",
+        "id_val": "A",
+        "references": [
+          {
+            "key": {
+              "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:1:1",
+              "path": [
+                {
+                  "unquoted_string": {
+                    "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:0:0-0:1:1",
+                    "value": [
+                      {
+                        "string": "A",
+                        "raw_string": "A"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "key_path_index": 0,
+            "map_key_edge_index": 0
+          }
+        ],
+        "attributes": {
+          "label": {
+            "value": "A"
+          },
+          "labelDimensions": {
+            "width": 0,
+            "height": 0
+          },
+          "style": {},
+          "iconStyle": {},
+          "near_key": null,
+          "shape": {
+            "value": "rectangle"
+          },
+          "direction": {
+            "value": ""
+          },
+          "constraint": null
+        },
+        "zIndex": 0
+      },
+      {
+        "id": "B",
+        "id_val": "B",
+        "references": [
+          {
+            "key": {
+              "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:5:5-0:6:6",
+              "path": [
+                {
+                  "unquoted_string": {
+                    "range": "d2/testdata/d2oracle/TestDelete/flat_reserved.d2,0:5:5-0:6:6",
+                    "value": [
+                      {
+                        "string": "B",
+                        "raw_string": "B"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "key_path_index": 0,
+            "map_key_edge_index": 0
+          }
+        ],
+        "attributes": {
+          "label": {
+            "value": "B"
+          },
+          "labelDimensions": {
+            "width": 0,
+            "height": 0
+          },
+          "style": {},
+          "iconStyle": {},
+          "near_key": null,
+          "shape": {
+            "value": "rectangle"
+          },
+          "direction": {
+            "value": ""
+          },
+          "constraint": null
+        },
+        "zIndex": 0
+      }
+    ]
+  },
+  "err": "<nil>"
+}

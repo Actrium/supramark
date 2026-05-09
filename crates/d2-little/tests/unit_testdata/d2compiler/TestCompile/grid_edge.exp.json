@@ -1,0 +1,11 @@
+{
+  "graph": null,
+  "err": {
+    "errs": [
+      {
+        "range": "d2/testdata/d2compiler/TestCompile/grid_edge.d2,6:0:57-6:12:69",
+        "errmsg": "d2/testdata/d2compiler/TestCompile/grid_edge.d2:7:1: edge from grid diagram \"hey\" cannot enter itself"
+      }
+    ]
+  }
+}

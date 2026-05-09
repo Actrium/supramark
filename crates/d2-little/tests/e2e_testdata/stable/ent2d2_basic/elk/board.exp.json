@@ -1,0 +1,1080 @@
+{
+  "name": "",
+  "config": {
+    "sketch": false,
+    "themeID": 0,
+    "darkThemeID": null,
+    "pad": null,
+    "center": null,
+    "layoutEngine": null
+  },
+  "isFolderOnly": false,
+  "fontFamily": "SourceSansPro",
+  "monoFontFamily": "SourceCodePro",
+  "shapes": [
+    {
+      "id": "User",
+      "type": "sql_table",
+      "pos": {
+        "x": 376,
+        "y": 110
+      },
+      "width": 280,
+      "height": 144,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "parent_id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 80,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "foreign_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "spouse_id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 85,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "foreign_key"
+          ],
+          "reference": ""
+        }
+      ],
+      "label": "User",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 49,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    },
+    {
+      "id": "Pet",
+      "type": "sql_table",
+      "pos": {
+        "x": 12,
+        "y": 573
+      },
+      "width": 194,
+      "height": 108,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "owner_id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 78,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "foreign_key"
+          ],
+          "reference": ""
+        }
+      ],
+      "label": "Pet",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 35,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    },
+    {
+      "id": "Card",
+      "type": "sql_table",
+      "pos": {
+        "x": 226,
+        "y": 573
+      },
+      "width": 194,
+      "height": 108,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "owner_id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 78,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "foreign_key"
+          ],
+          "reference": ""
+        }
+      ],
+      "label": "Card",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 49,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    },
+    {
+      "id": "Post",
+      "type": "sql_table",
+      "pos": {
+        "x": 440,
+        "y": 573
+      },
+      "width": 222,
+      "height": 144,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "text",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 33,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "string",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 48,
+            "labelHeight": 26
+          },
+          "constraint": null,
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "author_id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 81,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "foreign_key"
+          ],
+          "reference": ""
+        }
+      ],
+      "label": "Post",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 47,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    },
+    {
+      "id": "Metadata",
+      "type": "sql_table",
+      "pos": {
+        "x": 682,
+        "y": 573
+      },
+      "width": 146,
+      "height": 108,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "age",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 30,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": null,
+          "reference": ""
+        }
+      ],
+      "label": "Metadata",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 100,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    },
+    {
+      "id": "Info",
+      "type": "sql_table",
+      "pos": {
+        "x": 848,
+        "y": 573
+      },
+      "width": 308,
+      "height": 108,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N1",
+      "stroke": "N7",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": [
+        {
+          "name": {
+            "label": "id",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 15,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "int",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 23,
+            "labelHeight": 26
+          },
+          "constraint": [
+            "primary_key"
+          ],
+          "reference": ""
+        },
+        {
+          "name": {
+            "label": "content",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 66,
+            "labelHeight": 26
+          },
+          "type": {
+            "label": "json.RawMessage",
+            "fontSize": 0,
+            "fontFamily": "",
+            "language": "",
+            "color": "",
+            "italic": false,
+            "bold": false,
+            "underline": false,
+            "labelWidth": 149,
+            "labelHeight": 26
+          },
+          "constraint": null,
+          "reference": ""
+        }
+      ],
+      "label": "Info",
+      "fontSize": 20,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 42,
+      "labelHeight": 31,
+      "zIndex": 0,
+      "level": 1,
+      "primaryAccentColor": "B2",
+      "secondaryAccentColor": "AA2",
+      "neutralAccentColor": "N2"
+    }
+  ],
+  "connections": [
+    {
+      "id": "(User <-> User)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "User",
+      "dstArrow": "cf-one",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "spouse",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 48,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 411,
+          "y": 254
+        },
+        {
+          "x": 411,
+          "y": 342
+        },
+        {
+          "x": 288,
+          "y": 342
+        },
+        {
+          "x": 288,
+          "y": 22
+        },
+        {
+          "x": 469.3330078125,
+          "y": 22
+        },
+        {
+          "x": 469.3330078125,
+          "y": 110
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> User)[1]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "User",
+      "dstArrow": "cf-many",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "children/parent/ancestor",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 167,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 446,
+          "y": 254
+        },
+        {
+          "x": 446,
+          "y": 352
+        },
+        {
+          "x": 228,
+          "y": 352
+        },
+        {
+          "x": 228,
+          "y": 12
+        },
+        {
+          "x": 562.666015625,
+          "y": 12
+        },
+        {
+          "x": 562.666015625,
+          "y": 110
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> Pet)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "Pet",
+      "dstArrow": "cf-many",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "pets/owner",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 77,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 481,
+          "y": 254
+        },
+        {
+          "x": 481,
+          "y": 392
+        },
+        {
+          "x": 109,
+          "y": 392
+        },
+        {
+          "x": 109,
+          "y": 573
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> Card)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "Card",
+      "dstArrow": "cf-one",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "card/owner",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 78,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 516,
+          "y": 254
+        },
+        {
+          "x": 516,
+          "y": 442
+        },
+        {
+          "x": 323,
+          "y": 442
+        },
+        {
+          "x": 323,
+          "y": 573
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> Post)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "Post",
+      "dstArrow": "cf-many",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "posts/author",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 88,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 551,
+          "y": 254
+        },
+        {
+          "x": 551,
+          "y": 573
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> Metadata)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "Metadata",
+      "dstArrow": "cf-many",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "metadata/user",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 101,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 586,
+          "y": 254
+        },
+        {
+          "x": 586,
+          "y": 442
+        },
+        {
+          "x": 755,
+          "y": 442
+        },
+        {
+          "x": 755,
+          "y": 573
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(User <-> Info)[0]",
+      "src": "User",
+      "srcArrow": "cf-one-required",
+      "dst": "Info",
+      "dstArrow": "cf-many",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "info/user",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 60,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 621,
+          "y": 254
+        },
+        {
+          "x": 621,
+          "y": 392
+        },
+        {
+          "x": 1002,
+          "y": 392
+        },
+        {
+          "x": 1002,
+          "y": 573
+        }
+      ],
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    }
+  ],
+  "root": {
+    "id": "",
+    "type": "",
+    "pos": {
+      "x": 0,
+      "y": 0
+    },
+    "width": 0,
+    "height": 0,
+    "opacity": 0,
+    "strokeDash": 0,
+    "strokeWidth": 0,
+    "borderRadius": 0,
+    "fill": "N7",
+    "stroke": "",
+    "animated": false,
+    "shadow": false,
+    "3d": false,
+    "multiple": false,
+    "double-border": false,
+    "tooltip": "",
+    "link": "",
+    "icon": null,
+    "iconPosition": "",
+    "blend": false,
+    "fields": null,
+    "methods": null,
+    "columns": null,
+    "label": "",
+    "fontSize": 0,
+    "fontFamily": "",
+    "language": "",
+    "color": "",
+    "italic": false,
+    "bold": false,
+    "underline": false,
+    "labelWidth": 0,
+    "labelHeight": 0,
+    "zIndex": 0,
+    "level": 0
+  }
+}

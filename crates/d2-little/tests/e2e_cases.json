@@ -1,0 +1,552 @@
+[
+  {
+    "name": "empty",
+    "script": "",
+    "category": "sanity"
+  },
+  {
+    "name": "basic",
+    "script": "a -> b",
+    "category": "sanity"
+  },
+  {
+    "name": "1 to 2",
+    "script": "a -> b\na -> c",
+    "category": "sanity"
+  },
+  {
+    "name": "child to child",
+    "script": "a.b -> c.d",
+    "category": "sanity"
+  },
+  {
+    "name": "connection label",
+    "script": "a -> b: hello",
+    "category": "sanity"
+  },
+  {
+    "name": "legend_with_near_key",
+    "script": "direction: right\n\n\t\t\t\tx -> y: {\n\t\t\t\t\tstyle.stroke: green\n\t\t\t\t}\n\n\t\t\t\ty -> z: {\n\t\t\t\t\tstyle.stroke: red\n\t\t\t\t}\n\n\t\t\t\tlegend: {\n\t\t\t\t\tnear: bottom-center\n\t\t\t\t\tcolor1: foo {\n\t\t\t\t\t\tshape: text\n\t\t\t\t\t\tstyle.font-color: green\n\t\t\t\t\t}\n\n\t\t\t\t\tcolor2: bar {\n\t\t\t\t\t\tshape: text\n\t\t\t\t\t\tstyle.font-color: red\n\t\t\t\t\t}\n\t\t\t\t}",
+    "category": "stable"
+  },
+  {
+    "name": "near_keys_for_container",
+    "script": "title: |md\n  # Service-Cluster Provisioning (\"Outside view\")\n| {near: top-center}",
+    "category": "stable"
+  },
+  {
+    "name": "near_keys_for_container",
+    "script": "x: {\n\t\t\t\t\tnear: top-left\n\t\t\t\t\ta -> b\n\t\t\t\t\tc -> d\n\t\t\t\t}\n\t\t\t\ty: {\n\t\t\t\t\tnear: top-right\n\t\t\t\t\ta -> b\n\t\t\t\t\tc -> d\n\t\t\t\t}\n\t\t\t\tz: {\n\t\t\t\t\tnear: bottom-center\n\t\t\t\t\ta -> b\n\t\t\t\t\tc -> d\n\t\t\t\t}\n\n\t\t\t\ta: {\n\t\t\t\t\tnear: top-center\n\t\t\t\t\tb: {\n\t\t\t\t\t\tc\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tb: {\n\t\t\t\t\tnear: bottom-right\n\t\t\t\t\ta: {\n\t\t\t\t\t\tc: {\n\t\t\t\t\t\t\td\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}",
+    "category": "stable"
+  },
+  {
+    "name": "class_and_sqlTable_border_radius",
+    "script": "a: {\n\t\t\t\t\tshape: sql_table\n\t\t\t\t\tid: int {constraint: primary_key}\n\t\t\t\t\tdisk: int {constraint: foreign_key}\n\n\t\t\t\t\tjson: jsonb  {constraint: unique}\n\t\t\t\t\tlast_updated: timestamp with time zone\n\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tfill: red\n\t\t\t\t\t\tborder-radius: 10\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tb: {\n\t\t\t\t\tshape: class\n\n\t\t\t\t\tfield: \"[]string\"\n\t\t\t\t\tmethod(a uint64): (x, y int)\n\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 10\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tc: {\n\t\t\t\t\tshape: class\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 5\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\td: {\n\t\t\t\t\tshape: sql_table\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 5\n\t\t\t\t\t}\n\t\t\t\t}",
+    "category": "stable"
+  },
+  {
+    "name": "elk_border_radius",
+    "script": "a -> b\n\t\t\t\ta -> c: {\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 0\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\ta -> e: {\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 5\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\ta -> f: {\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 10\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\ta -> g: {\n\t\t\t\t\tstyle: {\n\t\t\t\t\t\tborder-radius: 20\n\t\t\t\t\t}\n\t\t\t\t}",
+    "category": "stable"
+  },
+  {
+    "name": "elk_container_height",
+    "script": "i can not see the title: {\n  shape: cylinder\n  x\n}",
+    "category": "stable"
+  },
+  {
+    "name": "elk_shim",
+    "script": "network: {\n  cell tower: {\n\t\tsatellites: {\n\t\t\tshape: stored_data\n      style.multiple: true\n      width: 140\n\t\t}\n\n\t\ttransmitter: {\n      width: 140\n    }\n\n\t\tsatellites -> transmitter: send {\n\t\t}\n\t\tsatellites -> transmitter: send {\n\t\t}\n\t\tsatellites -> transmitter: send {\n\t\t}\n  }\n\n  # long label to expand\n  online portal: ONLINE PORTALLLL {\n    ui: { shape: hexagon }\n  }\n\n  data processor: {\n    storage: {\n      shape: cylinder\n      style.multiple: true\n    }\n  }\n\n  cell tower.transmitter -> data processor.storage: phone logs\n}\n\nuser: {\n  shape: person\n  width: 130\n}\n\nuser -> network.cell tower: make call\nuser -> network.online portal.ui: access {\n  style.stroke-dash: 3\n}\n\napi server -> network.online portal.ui: display\napi server -> logs: persist\nlogs: { shape: page; style.multiple: true }\n\nnetwork.data processor -> api server",
+    "category": "stable"
+  },
+  {
+    "name": "edge-label-overflow",
+    "script": "student -> committee chair: Apply for appeal\nstudent <- committee chair: Deny. Need more information\ncommittee chair -> committee: Accept appeal",
+    "category": "stable"
+  },
+  {
+    "name": "mono-edge",
+    "script": "direction: right\nx -> y: hi { style.font: mono }",
+    "category": "stable"
+  },
+  {
+    "name": "bold-mono",
+    "script": "not bold mono.style.font: mono\nnot bold mono.style.bold: false\nbold mono.style.font: mono",
+    "category": "stable"
+  },
+  {
+    "name": "mono-font",
+    "script": "satellites: SATELLITES {\n  shape: stored_data\n  style: {\n    font: mono\n    fill: white\n    stroke: black\n    multiple: true\n  }\n}\n\ntransmitter: TRANSMITTER {\n  style: {\n    font: mono\n    fill: white\n    stroke: black\n  }\n}\n\nsatellites -> transmitter: SEND {\n  style.stroke: black\n  style.font: mono\n}\nsatellites -> transmitter: SEND {\n  style.stroke: black\n  style.font: mono\n}\nsatellites -> transmitter: SEND {\n  style.stroke: black\n  style.font: mono\n}",
+    "category": "stable"
+  },
+  {
+    "name": "connected_container",
+    "script": "a.b -> c.d -> f.h.g",
+    "category": "stable"
+  },
+  {
+    "name": "circular_dependency",
+    "script": "a -> b -> c -> b -> a",
+    "category": "stable"
+  },
+  {
+    "name": "all_shapes",
+    "script": "rectangle: {shape: \"rectangle\"}\nsquare: {shape: \"square\"}\npage: {shape: \"page\"}\nparallelogram: {shape: \"parallelogram\"}\ndocument: {shape: \"document\"}\ncylinder: {shape: \"cylinder\"}\nqueue: {shape: \"queue\"}\npackage: {shape: \"package\"}\nstep: {shape: \"step\"}\ncallout: {shape: \"callout\"}\nstored_data: {shape: \"stored_data\"}\nperson: {shape: \"person\"}\ndiamond: {shape: \"diamond\"}\noval: {shape: \"oval\"}\ncircle: {shape: \"circle\"}\nhexagon: {shape: \"hexagon\"}\ncloud: {shape: \"cloud\"}\n\nrectangle -> square -> page\nparallelogram -> document -> cylinder\nqueue -> package -> step\ncallout -> stored_data -> person\ndiamond -> oval -> circle\nhexagon -> cloud",
+    "category": "stable"
+  },
+  {
+    "name": "all_shapes_multiple",
+    "script": "rectangle: {shape: \"rectangle\"}\nsquare: {shape: \"square\"}\npage: {shape: \"page\"}\nparallelogram: {shape: \"parallelogram\"}\ndocument: {shape: \"document\"}\ncylinder: {shape: \"cylinder\"}\nqueue: {shape: \"queue\"}\npackage: {shape: \"package\"}\nstep: {shape: \"step\"}\ncallout: {shape: \"callout\"}\nstored_data: {shape: \"stored_data\"}\nperson: {shape: \"person\"}\ndiamond: {shape: \"diamond\"}\noval: {shape: \"oval\"}\ncircle: {shape: \"circle\"}\nhexagon: {shape: \"hexagon\"}\ncloud: {shape: \"cloud\"}\n\nrectangle -> square -> page\nparallelogram -> document -> cylinder\nqueue -> package -> step\ncallout -> stored_data -> person\ndiamond -> oval -> circle\nhexagon -> cloud\n\nrectangle.style.multiple: true\nsquare.style.multiple: true\npage.style.multiple: true\nparallelogram.style.multiple: true\ndocument.style.multiple: true\ncylinder.style.multiple: true\nqueue.style.multiple: true\npackage.style.multiple: true\nstep.style.multiple: true\ncallout.style.multiple: true\nstored_data.style.multiple: true\nperson.style.multiple: true\ndiamond.style.multiple: true\noval.style.multiple: true\ncircle.style.multiple: true\nhexagon.style.multiple: true\ncloud.style.multiple: true",
+    "category": "stable"
+  },
+  {
+    "name": "all_shapes_shadow",
+    "script": "rectangle: {shape: \"rectangle\"}\nsquare: {shape: \"square\"}\npage: {shape: \"page\"}\nparallelogram: {shape: \"parallelogram\"}\ndocument: {shape: \"document\"}\ncylinder: {shape: \"cylinder\"}\nqueue: {shape: \"queue\"}\npackage: {shape: \"package\"}\nstep: {shape: \"step\"}\ncallout: {shape: \"callout\"}\nstored_data: {shape: \"stored_data\"}\nperson: {shape: \"person\"}\ndiamond: {shape: \"diamond\"}\noval: {shape: \"oval\"}\ncircle: {shape: \"circle\"}\nhexagon: {shape: \"hexagon\"}\ncloud: {shape: \"cloud\"}\n\nrectangle -> square -> page\nparallelogram -> document -> cylinder\nqueue -> package -> step\ncallout -> stored_data -> person\ndiamond -> oval -> circle\nhexagon -> cloud\n\nrectangle.style.shadow: true\nsquare.style.shadow: true\npage.style.shadow: true\nparallelogram.style.shadow: true\ndocument.style.shadow: true\ncylinder.style.shadow: true\nqueue.style.shadow: true\npackage.style.shadow: true\nstep.style.shadow: true\ncallout.style.shadow: true\nstored_data.style.shadow: true\nperson.style.shadow: true\ndiamond.style.shadow: true\noval.style.shadow: true\ncircle.style.shadow: true\nhexagon.style.shadow: true\ncloud.style.shadow: true",
+    "category": "stable"
+  },
+  {
+    "name": "square_3d",
+    "script": "rectangle: {shape: \"rectangle\"}\nsquare: {shape: \"square\"}\n\nrectangle -> square\n\nrectangle.style.3d: true\nsquare.style.3d: true",
+    "category": "stable"
+  },
+  {
+    "name": "hexagon_3d",
+    "script": "hexagon: {shape: \"hexagon\"}\nhexagon.style.3d: true",
+    "category": "stable"
+  },
+  {
+    "name": "3d_fill_and_stroke",
+    "script": "hexagon: {\n  shape: hexagon\n  style.3d: true\n  style.fill: honeydew\n}\n\n\nrect: {\n  shape: rectangle\n  style.3d: true\n  style.fill: honeydew\n}\n\nsquare: {\n  shape: square\n  style.3d: true\n  style.fill: honeydew\n}\nhexagon -> square -> rect",
+    "category": "stable"
+  },
+  {
+    "name": "container_edges",
+    "script": "a -> g.b -> d.h.c\nd -> g.e -> f -> g -> d.h",
+    "category": "stable"
+  },
+  {
+    "name": "one_three_one_container",
+    "script": "top2.start -> a\ntop2.start -> b\ntop2.start -> c\na -> bottom.end\nb -> bottom.end\nc -> bottom.end",
+    "category": "stable"
+  },
+  {
+    "name": "straight_hierarchy_container",
+    "script": "a\nc\nb\n\nl1: {\n\tb\n\ta\n\tc\n}\n\nb -> l1.b\na -> l1.a\nc -> l1.c\n\nl2c1: {\n\ta\n}\nl1.a -> l2c1.a\n\nl2c3: {\n\tc\n}\nl1.c -> l2c3.c\n\nl2c2: {\n\tb\n}\nl1.b -> l2c2.b\n\nl3c1: {\n\ta\n\tb\n}\nl2c1.a -> l3c1.a\nl2c2.b -> l3c1.b\n\nl3c2: {\n\tc\n}\nl2c3.c -> l3c2.c\n\nl4: {\n\tc1: {\n\t\ta\n\t}\n\tc2: {\n\t\tb\n\t}\n\tc3: {\n\t\tc\n\t}\n}\nl3c1.a -> l4.c1.a\nl3c1.b -> l4.c2.b\nl3c2.c -> l4.c3.c",
+    "category": "stable"
+  },
+  {
+    "name": "different_subgraphs",
+    "script": "a -> tree\na -> and\na -> nodes\nand -> some\ntree -> more\ntree -> many\n\nthen -> here\nhere -> you\nhave -> hierarchy\nthen -> hierarchy\n\nfinally -> another\nanother -> of\nnesting -> trees\nfinally -> trees\nfinally: {\n\ta -> tree\n\tinside -> a\n\ttree -> hierarchy\n\ta -> root\n}",
+    "category": "stable"
+  },
+  {
+    "name": "binary_tree",
+    "script": "a -> b\na -> c\nb -> d\nb -> e\nc -> f\nc -> g\nd -> h\nd -> i\ne -> j\ne -> k\nf -> l\nf -> m\ng -> n\ng -> o",
+    "category": "stable"
+  },
+  {
+    "name": "dense",
+    "script": "a-> b\nc -> b\nd-> e\nf-> e\nb-> f\nb-> g\ng-> f\nb-> h\nb-> i\nb-> d\nj-> c\nj-> a\nb-> j\ni-> k\nd-> l\nl-> e\nm-> l\nm-> n\nn-> i\nd-> n\nf-> n\nb-> o\np-> l\ne-> q",
+    "category": "stable"
+  },
+  {
+    "name": "multiple_trees",
+    "script": "a-> b\na-> c\na-> d\na-> e\na-> f\ng-> a\na-> h\ni-> b\nj-> b\nk-> g\nl-> g\nc-> m\nc-> n\nd-> o\nd-> p\ne-> q\ne-> r\np-> s\nf-> t\nf-> u\nv-> h\nw-> h",
+    "category": "stable"
+  },
+  {
+    "name": "one_container_loop",
+    "script": "a.b-> c\nd-> c\ne-> c\nf-> d\na-> e\ng-> f\na.h-> g",
+    "category": "stable"
+  },
+  {
+    "name": "large_arch",
+    "script": "a\nb\nc\nd\ne\nf\ng\nh\ni\ni.j\ni.j.k\ni.j.l\ni.m\ni.n\ni.o\ni.o.p\nq\nr\nr.s\nr.s.t\nr.s.u.v\nr.s.w\nr.s.x\nr.s.y\nr.z\nr.aa\nr.bb\nr.bb.cc\nr.bb.dd\nr.ee\nr.ff\nr.gg\n\ni.j.k-> i.m\ni.j.l-> i.o.p\nq-> i.m\ni.m-> q\ni.n-> q\ni.m-> c\ni.m-> d\ni.m-> g\ni.m-> f\nd-> e\nr.s.x-> r.s.t\nr.s.x-> r.s.w\nr.gg-> r.s.t\nr.s.u.v-> r.z\nr.aa-> r.s.t\nr.s.w-> i.m\nr.s.t-> g\nr.s.t-> h\nr.ee -> r.ff",
+    "category": "stable"
+  },
+  {
+    "name": "n22_e32",
+    "script": "a-> b\nc-> a\nd-> a\nd-> b\nd-> e\ne-> f\nf-> b\nc-> f\ng-> c\ng-> h\nh-> i\ni-> j\nj-> k\nk-> e\nj-> f\nl-> m\nn-> l\nn-> l\nn-> m\nn-> o\no-> p\np-> m\nn-> p\nq-> n\nq-> r\nr-> s\ns-> t\nt-> u\nu-> o\nt-> p\nc-> t\ns-> a\nu-> a",
+    "category": "stable"
+  },
+  {
+    "name": "chaos2",
+    "script": "aa: {\n\tbb: {\n\t\tcc:  {\n\t\t\tdd: {\n\t\t\t\tshape: rectangle\n\t\t\t\tee: {shape: text}\n\t\t\t\tff\n\t\t\t}\n\t\t\tgg: {shape: text}\n\t\t\thh\n\t\t\tdd.ee -- gg: '11'\n\t\t\tgg -- hh: '22'\n\t\t}\n\t\tii: {\n\t\t\tshape: package\n\t\t\tjj: {shape: diamond}\n\t\t}\n\t\tii -> cc.dd\n\t\tkk: {shape: circle}\n\t}\n\tll\n\tmm: {shape: cylinder}\n\tll <-> bb: '33'\n\tmm -> bb.cc: '44'\n\tmm->ll\n\tmm <-> bb: '55'\n\tll <-> bb.cc.gg\n\tmm <- bb.ii: '66'\n\tbb.cc <- ll: '77'\n\tnn: {shape: text}\n\too\n\tbb.ii <-> ll: '88'\n}",
+    "category": "stable"
+  },
+  {
+    "name": "us_map",
+    "script": "AL -- FL -- GA -- MS -- TN\nAK\nAZ -- CA -- NV -- NM -- UT\nAR -- LA -- MS -- MO -- OK -- TN -- TX\nCA -- NV -- OR\nCO -- KS -- NE -- NM -- OK -- UT -- WY\nCT -- MA -- NY -- RI\nDE -- MD -- NJ -- PA\nFL -- GA\nGA -- NC -- SC -- TN\nHI\nID -- MT -- NV -- OR -- UT -- WA -- WY\nIL -- IN -- IA -- MI -- KY -- MO -- WI\nIN -- KY -- MI -- OH\nIA -- MN -- MO -- NE -- SD -- WI\nKS -- MO -- NE -- OK\nKY -- MO -- OH -- TN -- VA -- WV\nLA -- MS -- TX\nME -- NH\nMD -- PA -- VA -- WV\nMA -- NH -- NY -- RI -- VT\nMI -- MN -- OH -- WI\nMN -- ND -- SD -- WI\nMS -- TN\nMO -- NE -- OK -- TN\nMT -- ND -- SD -- WY\nNE -- SD -- WY\nNV -- OR -- UT\nNH -- VT\nNJ -- NY -- PA\nNM -- OK -- TX\nNY -- PA -- RI -- VT\nNC -- SC -- TN -- VA\nND -- SD\nOH -- PA -- WV\nOK -- TX\nOR -- WA\nPA -- WV\nSD -- WY\nTN -- VA\nUT -- WY\nVA -- WV",
+    "category": "stable"
+  },
+  {
+    "name": "investigate",
+    "script": "aa.shape: step\nbb.shape: step\ncc.shape: step\naa -- bb -- cc\n\naa -> dd.ee: 1\nbb -> ff.gg: 2\ncc -> dd.hh: 3\n\ndd.ee.shape: diamond\ndd.ee -> ii\n\nii -- jj -> kk\n\nll.mm.shape: circle\nff.mm.shape: circle\nkk -> ff.mm: 4\nff.mm -> ll.mm: 5\nll.mm -> nn.oo: 6\n\nff.gg.shape: diamond\nff.gg -> ff.pp -> ll.qq -> ll.rr\n\ndd.hh.shape: diamond\ndd.hh -> ss.tt -> uu.vv\n\nkk -> ww\nuu.vv -> ww\nww -> rm\n\nww: {\n\tshape: queue\n\ticon: https://icons.terrastruct.com/essentials/time.svg\n}\n\nrm -> nn.xx\nll.rr -> yy.zz\n\nrm -> yy.zz\nyy.zz.shape: queue\nyy.zz.icon: https://icons.terrastruct.com/essentials/time.svg\n\nyy.zz -> yy.ab -> nn.ac -> ad\n\nad.style.fill: red\nad.shape: parallelogram\n\nnn.shape: cylinder\n\nww -> ff.gg",
+    "category": "stable"
+  },
+  {
+    "name": "multiline_text",
+    "script": "hey: this\\ngoes\\nmultiple lines",
+    "category": "stable"
+  },
+  {
+    "name": "markdown",
+    "script": "hey: |md\n# Every frustum longs to be a cone\n\n- A continuing flow of paper is sufficient to continue the flow of paper\n- Please remain calm, it's no use both of us being hysterical at the same time\n- Visits always give pleasure: if not on arrival, then on the departure\n\n*Festivity Level 1*: Your guests are chatting amiably with each other.\n\ntest ~~strikethrough~~ test\n|\n\nx -> hey -> y",
+    "category": "stable"
+  },
+  {
+    "name": "md_fontsize_10",
+    "script": "hey: |md\n# Every frustum longs to be a cone\n\n- A continuing flow of paper is sufficient to continue the flow of paper\n- Please remain calm, it's no use both of us being hysterical at the same time\n- Visits always give pleasure: if not on arrival, then on the departure\n\n*Festivity Level 1*: Your guests are chatting amiably with each other.\n\ntest ~~strikethrough~~ test\n|\n\nhey.style.font-size: 10\n\nx -> hey -> y",
+    "category": "stable"
+  },
+  {
+    "name": "font_sizes_containers_large",
+    "script": "ninety nine: {\n\tstyle.font-size: 99\n\tsixty four: {\n\t\tstyle.font-size: 64\n\t\tthirty two:{\n\t\t\tstyle.font-size: 32\n\t\t\tsixteen: {\n\t\t\t\tstyle.font-size: 16\n\t\t\t\teight: {\n\t\t\t\t\tstyle.font-size: 8\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "font_sizes_containers_large_right",
+    "script": "direction: right\n\nninety nine: {\n\tstyle.font-size: 99\n\tsixty four: {\n\t\tstyle.font-size: 64\n\t\tthirty two:{\n\t\t\tstyle.font-size: 32\n\t\t\tsixteen: {\n\t\t\t\tstyle.font-size: 16\n\t\t\t\teight: {\n\t\t\t\t\tstyle.font-size: 8\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "lone_h1",
+    "script": "\nmd: |md\n\n# Markdown: Syntax\n\n|\na -> md -> b\n",
+    "category": "stable"
+  },
+  {
+    "name": "giant_markdown_test",
+    "script": "\nmd: |md\n# Markdown: Syntax\n\n- [Overview](#overview)\n  - [Philosophy](#philosophy)\n  - [Inline HTML](#html)\n  - [Automatic Escaping for Special Characters](#autoescape)\n- [Block Elements](#block)\n  - [Paragraphs and Line Breaks](#p)\n  - [Headers](#header)\n  - [Blockquotes](#blockquote)\n  - [Lists](#list)\n  - [Code Blocks](#precode)\n  - [Horizontal Rules](#hr)\n- [Span Elements](#span)\n  - [Links](#link)\n  - [Emphasis](#em)\n  - [Code](#code)\n  - [Images](#img)\n- [Miscellaneous](#misc)\n  - [Backslash Escapes](#backslash)\n  - [Automatic Links](#autolink)\n\n**Note:** This document is itself written using Markdown; you\ncan [see the source for it by adding '.text' to the URL](/projects/markdown/syntax.text).\n\n---\n\n## Overview\n\n### Philosophy\n\nMarkdown is intended to be as easy-to-read and easy-to-write as is feasible.\n\nReadability, however, is emphasized above all else. A Markdown-formatted\ndocument should be publishable as-is, as plain text, without looking\nlike it's been marked up with tags or formatting instructions. While\nMarkdown's syntax has been influenced by several existing text-to-HTML\nfilters -- including [Setext](http://docutils.sourceforge.net/mirror/setext.html), [atx](http://www.aaronsw.com/2002/atx/), [Textile](http://textism.com/tools/textile/), [reStructuredText](http://docutils.sourceforge.net/rst.html),\n[Grutatext](http://www.triptico.com/software/grutatxt.html), and [EtText](http://ettext.taint.org/doc/) -- the single biggest source of\ninspiration for Markdown's syntax is the format of plain text email.\n\n## Block Elements\n\n### Paragraphs and Line Breaks\n\nA paragraph is simply one or more consecutive lines of text, separated\nby one or more blank lines. (A blank line is any line that looks like a\nblank line -- a line containing nothing but spaces or tabs is considered\nblank.) Normal paragraphs should not be indented with spaces or tabs.\n\nThe implication of the \"one or more consecutive lines of text\" rule is\nthat Markdown supports \"hard-wrapped\" text paragraphs. This differs\nsignificantly from most other text-to-HTML formatters (including Movable\nType's \"Convert Line Breaks\" option) which translate every line break\nend a line with two or more spaces, then type return.\n\n### Headers\n\nMarkdown supports two styles of headers, [Setext] [1] and [atx] [2].\n\nOptionally, you may \"close\" atx-style headers. This is purely\ncosmetic -- you can use this if you think it looks better. The\nclosing hashes don't even need to match the number of hashes\nused to open the header. (The number of opening hashes\ndetermines the header level.)\n\n### Blockquotes\n\nfamiliar with quoting passages of text in an email message, then you\nknow how to create a blockquote in Markdown. It looks best if you hard\n\n> This is a blockquote with two paragraphs. Lorem ipsum dolor sit amet,\n> consectetuer adipiscing elit. Aliquam hendrerit mi posuere lectus.\n> Vestibulum enim wisi, viverra nec, fringilla in, laoreet vitae, risus.\n>\n> Donec sit amet nisl. Aliquam semper ipsum sit amet velit. Suspendisse\n> id sem consectetuer libero luctus adipiscing.\n\nline of a hard-wrapped paragraph:\n\n> This is a blockquote with two paragraphs. Lorem ipsum dolor sit amet,\n> consectetuer adipiscing elit. Aliquam hendrerit mi posuere lectus.\n> Vestibulum enim wisi, viverra nec, fringilla in, laoreet vitae, risus.\n\n> Donec sit amet nisl. Aliquam semper ipsum sit amet velit. Suspendisse\n> id sem consectetuer libero luctus adipiscing.\n\nBlockquotes can be nested (i.e. a blockquote-in-a-blockquote) by\n\n> This is the first level of quoting.\n>\n> > This is nested blockquote.\n>\n> Back to the first level.\n\nBlockquotes can contain other Markdown elements, including headers, lists,\nand code blocks:\n\n> ## This is a header.\n>\n> 1.  This is the first list item.\n> 2.  This is the second list item.\n>\n> Here's some example code:\n>\n>     return shell_exec(\"echo $input  $markdown_script\");\n\nAny decent text editor should make email-style quoting easy. For\nexample, with BBEdit, you can make a selection and choose Increase\nQuote Level from the Text menu.\n\n### Lists\n\nMarkdown supports ordered (numbered) and unordered (bulleted) lists.\n\nUnordered lists use asterisks, pluses, and hyphens -- interchangably\n-- as list markers:\n\n- Red\n- Green\n- Blue\n\nis equivalent to:\n\n- Red\n- Green\n- Blue\n\nand:\n\n- Red\n- Green\n- Blue\n\nOrdered lists use numbers followed by periods:\n\n1.  Bird\n2.  McHale\n3.  Parish\n\nIt's important to note that the actual numbers you use to mark the\nlist have no effect on the HTML output Markdown produces. The HTML\nMarkdown produces from the above list is:\n\nIf you instead wrote the list in Markdown like this:\n\n1.  Bird\n1.  McHale\n1.  Parish\n\nor even:\n\n3. Bird\n1. McHale\n1. Parish\n\nyou'd get the exact same HTML output. The point is, if you want to,\nyou can use ordinal numbers in your ordered Markdown lists, so that\nthe numbers in your source match the numbers in your published HTML.\nBut if you want to be lazy, you don't have to.\n\nTo make lists look nice, you can wrap items with hanging indents:\n\n- Lorem ipsum dolor sit amet, consectetuer adipiscing elit.\n  Aliquam hendrerit mi posuere lectus. Vestibulum enim wisi,\n  viverra nec, fringilla in, laoreet vitae, risus.\n- Donec sit amet nisl. Aliquam semper ipsum sit amet velit.\n  Suspendisse id sem consectetuer libero luctus adipiscing.\n\nBut if you want to be lazy, you don't have to:\n\n- Lorem ipsum dolor sit amet, consectetuer adipiscing elit.\n  Aliquam hendrerit mi posuere lectus. Vestibulum enim wisi,\n  viverra nec, fringilla in, laoreet vitae, risus.\n- Donec sit amet nisl. Aliquam semper ipsum sit amet velit.\n  Suspendisse id sem consectetuer libero luctus adipiscing.\n\nList items may consist of multiple paragraphs. Each subsequent\nparagraph in a list item must be indented by either 4 spaces\nor one tab:\n\n1.  This is a list item with two paragraphs. Lorem ipsum dolor\n    sit amet, consectetuer adipiscing elit. Aliquam hendrerit\n    mi posuere lectus.\n\n    Vestibulum enim wisi, viverra nec, fringilla in, laoreet\n    vitae, risus. Donec sit amet nisl. Aliquam semper ipsum\n    sit amet velit.\n\n2.  Suspendisse id sem consectetuer libero luctus adipiscing.\n\nIt looks nice if you indent every line of the subsequent\nparagraphs, but here again, Markdown will allow you to be\nlazy:\n\n- This is a list item with two paragraphs.\n\n      This is the second paragraph in the list item. You're\n\n  only required to indent the first line. Lorem ipsum dolor\n  sit amet, consectetuer adipiscing elit.\n\n- Another item in the same list.\n\ndelimiters need to be indented:\n\n- A list item with a blockquote:\n\n  > This is a blockquote\n  > inside a list item.\n\nTo put a code block within a list item, the code block needs\nto be indented _twice_ -- 8 spaces or two tabs:\n\n- A list item with a code block:\n\n### Code Blocks\n\nPre-formatted code blocks are used for writing about programming or\nmarkup source code. Rather than forming normal paragraphs, the lines\nof a code block are interpreted literally. Markdown wraps a code block\n\nTo produce a code block in Markdown, simply indent every line of the\nblock by at least 4 spaces or 1 tab.\n\nThis is a normal paragraph:\n\n    This is a code block.\n\nHere is an example of AppleScript:\n\n    tell application \"Foo\"\n        beep\n    end tell\n\nA code block continues until it reaches a line that is not indented\n(or the end of the article).\n\nare automatically converted into HTML entities. This makes it very\neasy to include example HTML source code using Markdown -- just paste\nit and indent it, and Markdown will handle the hassle of encoding the\nampersands and angle brackets. For example, this:\n\nRegular Markdown syntax is not processed within code blocks. E.g.,\nasterisks are just literal asterisks within a code block. This means\nit's also easy to use Markdown to write about Markdown's own syntax.\n\n## Span Elements\n\n### Links\n\nMarkdown supports two style of links: _inline_ and _reference_.\n\nIn both styles, the link text is delimited by [square brackets].\n\nTo create an inline link, use a set of regular parentheses immediately\nafter the link text's closing square bracket. Inside the parentheses,\nput the URL where you want the link to point, along with an _optional_\ntitle for the link, surrounded in quotes. For example:\n\nThis is [an example](http://example.com/) inline link.\n\n[This link](http://example.net/) has no title attribute.\n\n### Emphasis\n\n_single asterisks_\n\n_single underscores_\n\n**double asterisks**\n\n**double underscores**\n\n### Code\n\nUnlike a pre-formatted code block, a code span indicates code within a\nnormal paragraph. For example:\n\n|\na -> md -> b\n",
+    "category": "stable"
+  },
+  {
+    "name": "code_snippet",
+    "script": "hey: |go\n// RegisterHash registers a function that returns a new instance of the given\n// hash function. This is intended to be called from the init function in\n// packages that implement hash functions.\nfunc RegisterHash(h Hash, f func() hash.Hash) {\n\tif h >= maxHash {\n\t\tpanic(\"crypto: RegisterHash of unknown hash function\")\n\t}\n\thashes[h] = f\n}\n|\nx -> hey -> y",
+    "category": "stable"
+  },
+  {
+    "name": "arrowhead_adjustment",
+    "script": "a <-> b: {\n\t\t\t\tstyle.stroke-width: 6\n\t\t\t\tstyle.stroke-dash: 4\n\t\t\t\tsource-arrowhead: {\n\t\t\t\t  shape: arrow\n\t\t\t\t}\n\t\t\t  }\n\n\t\t\t  c -> b: {\n\t\t\t\tstyle.stroke-width: 7\n\t\t\t\tstyle.stroke: \"#20222a\"\n\t\t\t  }\n\t\t\t  c.style.stroke-width: 7\n\t\t\t  c.style.stroke: \"#b2350d\"\n\t\t\t  c.shape: document\n\t\t\t  b.style.stroke-width: 8\n\t\t\t  b.style.stroke: \"#0db254\"\n\t\t\t  a.style.border-radius: 10\n\t\t\t  a.style.stroke-width: 8\n\t\t\t  a.style.stroke: \"#2bc3d8\"\n\t\t\t  Oval: \"\" {\n\t\t\t\tshape: oval\n\t\t\t\tstyle.stroke-width: 6\n\t\t\t\tstyle.stroke: \"#a1a4af\"\n\t\t\t  }\n\t\t\t  a <-> Oval: {\n\t\t\t\tstyle.stroke-width: 6\n\t\t\t\tsource-arrowhead: {\n\t\t\t\t  shape: diamond\n\t\t\t\t}\n\t\t\t\ttarget-arrowhead: * {\n\t\t\t\t  shape: diamond\n\t\t\t\t  style.filled: true\n\t\t\t\t}\n\t\t\t  }\n\t\t\t  c -- a: {style.stroke-width: 7}\n\t\t\t  Oval <-> c",
+    "category": "stable"
+  },
+  {
+    "name": "md_code_inline",
+    "script": "md: |md\n`code`\n|\na -> md -> b\n",
+    "category": "stable"
+  },
+  {
+    "name": "md_code_block_fenced",
+    "script": "md: |md\n```\n{\n\tfenced: \"block\",\n\tof: \"json\",\n}\n```\n|\na -> md -> b\n",
+    "category": "stable"
+  },
+  {
+    "name": "md_code_block_indented",
+    "script": "md: |md\na line of text and an\n\n\t{\n\t\tindented: \"block\",\n\t\tof: \"json\",\n\t}\n\n|\na -> md -> b",
+    "category": "stable"
+  },
+  {
+    "name": "class",
+    "script": "manager: BatchManager {\n  shape: class\n  -num: int\n  -timeout: int\n  -pid\n\n  +getStatus(): Enum\n  +getJobs(): \"Job[]\"\n  +setTimeout(seconds int)\n}",
+    "category": "stable"
+  },
+  {
+    "name": "class_underline",
+    "script": "manager: BatchManager {\n  shape: class\n  -num: int {\n    style.underline: true\n  }\n  -timeout: int\n  -pid\n\n  +getStatus(): Enum {\n    style.underline: true\n  }\n  +getJobs(): \"Job[]\"\n  +setTimeout(seconds int)\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sql_tables",
+    "script": "direction: left\n\nusers: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n\tname: string\n\temail: string\n\tpassword: string\n\tlast_login: datetime\n}\n\nproducts: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n\tprice: decimal\n\tsku: string\n\tname: string\n}\n\norders: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n\tuser_id: int { constraint: foreign_key }\n\tproduct_id: int { constraint: foreign_key }\n}\n\nshipments: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n\torder_id: int { constraint: foreign_key }\n\ttracking_number: string\n\tstatus: string\n}\n\norders.user_id -> users.id\norders.product_id -> products.id\nshipments.order_id -> orders.id",
+    "category": "stable"
+  },
+  {
+    "name": "sql_table_row_connections",
+    "script": "direction: left\n\na: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n}\n\nb: {\n\tshape: sql_table\n\tid: int { constraint: primary_key }\n\ta_1: int { constraint: foreign_key }\n\ta_2: int { constraint: foreign_key }\n}\n\nb.a_1 -> a.id\nb.a_2 -> a.id",
+    "category": "stable"
+  },
+  {
+    "name": "images",
+    "script": "a: {\n  shape: image\n  icon: https://icons.terrastruct.com/essentials/004-picture.svg\n}\n\nb: {\n  shape: image\n  icon: https://icons.terrastruct.com/essentials/004-picture.svg\n}\na -> b",
+    "category": "stable"
+  },
+  {
+    "name": "icon-containers",
+    "script": "vpc: VPC 1 10.1.0.0./16 {\n  icon: https://icons.terrastruct.com/aws%2F_Group%20Icons%2FVirtual-private-cloud-VPC_light-bg.svg\n\tstyle: {\n\t  stroke: green\n\t\tfont-color: green\n\t\tfill: white\n\t}\n  az: Availability Zone A {\n\t\tstyle: {\n\t\t\tstroke: blue\n\t\t\tfont-color: blue\n\t\t\tstroke-dash: 3\n\t\t\tfill: white\n\t\t}\n\t\tfirewall: Firewall Subnet A {\n\t\t\ticon: https://icons.terrastruct.com/aws%2FNetworking%20&%20Content%20Delivery%2FAmazon-Route-53_Hosted-Zone_light-bg.svg\n\t\t\tstyle: {\n\t\t\t\tstroke: purple\n\t\t\t\tfont-color: purple\n\t\t\t\tfill: \"#e1d5e7\"\n\t\t\t}\n\t\t\tec2: EC2 Instance {\n\t\t\t\ticon: https://icons.terrastruct.com/aws%2FCompute%2F_Instance%2FAmazon-EC2_C4-Instance_light-bg.svg\n\t\t\t}\n\t\t}\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "arrowhead_labels",
+    "script": "a -> b: To err is human, to moo bovine {\n\tsource-arrowhead: 1\n\ttarget-arrowhead: * {\n\t\tshape: diamond\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "stylish",
+    "script": "x: {\n  style: {\n    opacity: 0.6\n    fill: orange\n    stroke: \"#53C0D8\"\n    stroke-width: 5\n    shadow: true\n  }\n}\n\ny: {\n  style: {\n    stroke-dash: 5\n    opacity: 0.6\n    fill: red\n    3d: true\n    stroke: black\n  }\n}\n\nx -> y: in style {\n  style: {\n    stroke: green\n    opacity: 0.5\n    stroke-width: 2\n    stroke-dash: 5\n\tfill: lavender\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "md_2space_newline",
+    "script": "\nmarkdown: {\n  md: |md\nLorem ipsum dolor sit amet, consectetur adipiscing elit,  \nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n|\n}\n",
+    "category": "stable"
+  },
+  {
+    "name": "md_backslash_newline",
+    "script": "markdown: {\n  md: |md\nLorem ipsum dolor sit amet, consectetur adipiscing elit,\\\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n|\n}",
+    "category": "stable"
+  },
+  {
+    "name": "font_colors",
+    "script": "alpha: {\n\tstyle.font-color: '#4A6FF3'\n}\nbeta: {\n\tstyle.font-color: red\n}\nalpha -> beta: gamma {\n\tstyle.font-color: green\n}\nc: |md\n  colored\n| {\n  style.font-color: blue\n}",
+    "category": "stable"
+  },
+  {
+    "name": "latex",
+    "script": "a: |latex\n\\Huge{\\frac{\\alpha g^2}{\\omega^5} e^{[ -0.74\\bigl\\{\\frac{\\omega U_\\omega 19.5}{g}\\bigr\\}^{\\!-4}\\,]}}\n|\nb: |latex\ne = mc^2\n|\nz: |latex\ngibberish\\; math:\\sum_{i=0}^\\infty i^2\n|\nz -> a\nz -> b\na -> c\nb -> c\nsugar -> c\nc: mixed together\nc -> solution: we get\nLinear program: {\n  formula: |latex\n    \\min_{ \\mathclap{\\substack{ x \\in \\mathbb{R}^n \\ x \\geq 0 \\ Ax \\leq b }}} c^T x\n  |\n}",
+    "category": "stable"
+  },
+  {
+    "name": "direction",
+    "script": "a -> b -> c -> d -> e\nb: {\n  direction: right\n  1 -> 2 -> 3 -> 4 -> 5\n\n  2: {\n    direction: up\n    a -> b -> c -> d -> e\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "transparent_3d",
+    "script": "cube: {\n\tstyle: {\n\t\t3d: true\n\t\topacity: 0.5\n\t\tfill: orange\n\t\tstroke: \"#53C0D8\"\n\t\tstroke-width: 7\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "font_sizes",
+    "script": "size XS.style.font-size: 13\nsize S.style.font-size: 14\nsize M.style.font-size: 16\nsize L.style.font-size: 20\nsize XL.style.font-size: 24\nsize XXL.style.font-size: 28\nsize XXXL.style.font-size: 32\n\ncustom 8.style.font-size: 8\ncustom 12.style.font-size: 12\ncustom 18.style.font-size: 18\ncustom 21.style.font-size: 21\ncustom 64.style.font-size: 64\n\ncustom 8 -> size XS: custom 10 {\n\tstyle.font-size: 10\n}\nsize S -> size M: custom 15 {\n\tstyle.font-size: 15\n}\nsize XXXL -> custom 64: custom 48 {\n\tstyle.font-size: 48\n\tstyle.fill: lavender\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_simple",
+    "script": "shape: sequence_diagram\nalice: \"Alice\\nline\\nbreaker\" {\n    shape: person\n    style.stroke: red\n}\nbob: \"Bob\" {\n    shape: person\n    style.stroke-width: 5\n}\ndb: {\n    shape: cylinder\n}\nqueue: {\n    shape: queue\n}\nservice: \"an\\nodd\\nservice\\nwith\\na\\nname\\nin\\nmultiple lines\"\n\nalice -> bob: \"Authentication Request\"\nbob -> service: \"make request for something that is quite far away and requires a really long label to take all the space between the objects\"\nservice -> db: \"validate credentials\"\ndb -> service: {\n    style.stroke-dash: 4\n}\nservice -> bob: {\n    style.stroke-dash: 4\n}\nbob -> alice: \"Authentication Response\"\nalice -> bob: \"Another authentication Request\"\nbob -> queue: \"do it later\"\nqueue -> bob: \"stored\" {\n    style.stroke-dash: 3\n    style.stroke-width: 5\n    style.stroke: green\n}\n\nbob -> alice: \"Another authentication Response\"",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_span",
+    "script": "shape: sequence_diagram\n\nscorer.t -> itemResponse.t: getItem()\nscorer.t <- itemResponse.t: item\n\nscorer.t -> item.t1: getRubric()\nscorer.t <- item.t1: rubric\n\nscorer.t -> essayRubric.t: applyTo(essayResp)\nitemResponse -> essayRubric.t.c\nessayRubric.t.c -> concept.t: match(essayResponse)\nscorer <- essayRubric.t: score\n\nscorer.t -> itemOutcome.t1: new\nscorer.t -> item.t2: getNormalMinimum()\nscorer.t -> item.t3: getNormalMaximum()\n\nscorer.t -> itemOutcome.t2: setScore(score)\nscorer.t -> itemOutcome.t3: setFeedback(missingConcepts)",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_nested_span",
+    "script": "shape: sequence_diagram\n\nscorer: {\n    style.stroke: red\n    style.stroke-width: 5\n}\n\nscorer.abc: {\n    style.fill: yellow\n    style.stroke-width: 7\n}\n\nscorer -> itemResponse.a: {\n    style.stroke-width: 10\n}\nitemResponse.a -> item.a.b\nitem.a.b -> essayRubric.a.b.c\nessayRubric.a.b.c -> concept.a.b.c.d\nitem.a -> essayRubric.a.b\nconcept.a.b.c.d -> itemOutcome.a.b.c.d.e\n\nscorer.abc -> item.a\n\nitemOutcome.a.b.c.d.e -> scorer\nscorer -> itemResponse.c",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagrams",
+    "script": "a_shape.shape: circle\na_sequence: {\n    shape: sequence_diagram\n\n    scorer.t -> itemResponse.t: getItem()\n    scorer.t <- itemResponse.t: item\n\n    scorer.t -> item.t1: getRubric()\n    scorer.t <- item.t1: rubric\n\n    scorer.t -> essayRubric.t: applyTo(essayResp)\n    itemResponse -> essayRubric.t.c\n    essayRubric.t.c -> concept.t: match(essayResponse)\n    scorer <- essayRubric.t: score\n\n    scorer.t <-> itemOutcome.t1: new\n    scorer.t <-> item.t2: getNormalMinimum()\n    scorer.t -> item.t3: getNormalMaximum()\n\n    scorer.t -- itemOutcome.t2: setScore(score)\n    scorer.t -- itemOutcome.t3: setFeedback(missingConcepts)\n}\n\nanother: {\n    sequence: {\n        shape: sequence_diagram\n\n\t\t# scoped edges\n        scorer.t -> itemResponse.t: getItem()\n        scorer.t <- itemResponse.t: item\n\n        scorer.t -> item.t1: getRubric()\n        scorer.t <- item.t1: rubric\n\n        scorer.t -> essayRubric.t: applyTo(essayResp)\n        itemResponse -> essayRubric.t.c\n        essayRubric.t.c -> concept.t: match(essayResponse)\n        scorer <- essayRubric.t: score\n\n        scorer.t -> itemOutcome.t1: new\n        scorer.t <-> item.t2: getNormalMinimum()\n        scorer.t -> item.t3: getNormalMaximum()\n\n        scorer.t -> itemOutcome.t2: setScore(score)\n        scorer.t -> itemOutcome.t3: setFeedback(missingConcepts)\n    }\n}\n\na_shape -> a_sequence\na_shape -> another.sequence\na_sequence -> sequence\nanother.sequence <-> finally.sequence\na_shape -- finally\n\n\nfinally: {\n    shape: queue\n    sequence: {\n        shape: sequence_diagram\n\t\t# items appear in this order\n        scorer {\n\t\t\t\t\tstyle.stroke: red\n\t\t\t\t\tstyle.stroke-dash: 2\n\t\t\t\t}\n        concept {\n\t\t\t\t\tstyle.stroke-width: 6\n\t\t\t\t}\n        essayRubric\n        item\n        itemOutcome\n        itemResponse\n    }\n}\n\n# full path edges\nfinally.sequence.itemResponse.a -> finally.sequence.item.a.b\nfinally.sequence.item.a.b -> finally.sequence.essayRubric.a.b.c\nfinally.sequence.essayRubric.a.b.c -> finally.sequence.concept.a.b.c.d\nfinally.sequence.item.a -> finally.sequence.essayRubric.a.b\nfinally.sequence.concept.a.b.c.d -> finally.sequence.itemOutcome.a.b.c.d.e\nfinally.sequence.scorer.abc -> finally.sequence.item.a\nfinally.sequence.itemOutcome.a.b.c.d.e -> finally.sequence.scorer\nfinally.sequence.scorer -> finally.sequence.itemResponse.c",
+    "category": "stable"
+  },
+  {
+    "name": "number_connections",
+    "script": "1 -> 2\nfoo baz: Foo Baz\n\nfoo baz -> hello",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_all_shapes",
+    "script": "shape: sequence_diagram\n\na: \"a label\" {\n    shape: callout\n}\nb: \"b\\nlabels\" {\n    shape: circle\n}\nc: \"a class\" {\n    shape: class\n    +public() bool\n    -private() int\n}\nd: \"cloudyyyy\" {\n    shape: cloud\n}\ne: |go\n    a := 5\n    b := a + 7\n    fmt.Printf(\"%d\", b)\n|\nf: \"cyl\" {\n    shape: cylinder\n}\ng: \"dia\" {\n    shape: diamond\n}\nh: \"docs\" {\n    shape: document\n}\ni: \"six corners\" {\n    shape: hexagon\n}\nj: \"a random icon\" {\n    shape: image\n    icon: https://icons.terrastruct.com/essentials/004-picture.svg\n}\nk: \"over\" {\n    shape: oval\n}\nl: \"pack\" {\n    shape: package\n}\nm: \"docs page\" {\n    shape: page\n}\nn: \"too\\nhard\\to say\" {\n    shape: parallelogram\n}\no: \"single\\nperson\" {\n    shape: person\n}\np: \"a queue\" {\n    shape: queue\n}\nq: \"a square\" {\n    shape: square\n}\nr: \"a step at a time\" {\n    shape: step\n}\ns: \"data\" {\n    shape: stored_data\n}\n\nt: \"users\" {\n    shape: sql_table\n    id: int\n    name: varchar\n}\n\na -> b: |go\n    result := callThisFunction(obj, 5)\n|\nb <-> c: \"mid\" {\n    source-arrowhead: \"this side\" {\n        shape: diamond\n    }\n    target-arrowhead: \"other side\" {\n        shape: triangle\n    }\n}\nc -> d\nd -> e\ne -> f\nf -> g\ng -> h\nh -> i\ni -> j\nj -> k\nk -> l\nl -> m\nm -> n\nn -> o\no -> p\np -> q\nq -> r\nr -> s\ns -> t",
+    "category": "stable"
+  },
+  {
+    "name": "self-referencing",
+    "script": "x -> x -> x -> y\nz -> y\nz -> z: hello",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_self_edges",
+    "script": "shape: sequence_diagram\na -> a: a self edge here\na -> b: between actors\nb -> b.1: to descendant\nb.1 -> b.1.2: to deeper descendant\nb.1.2 -> b: to parent\nb -> a.1.2: actor\na.1 -> b.3",
+    "category": "stable"
+  },
+  {
+    "name": "icon-label",
+    "script": "ww: {\n  label: hello\n  icon: https://icons.terrastruct.com/essentials/time.svg\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_note",
+    "script": "shape: sequence_diagram\na; b; c; d\na -> b\na.explanation\na.another explanation\nb -> c\nb.\"Some one who believes imaginary things\\n appear right before your i's.\"\nc -> b: okay\nd.\"The earth is like a tiny grain of sand, only much, much heavier\"",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_groups",
+    "script": "shape: sequence_diagram\na;b;c;d\na -> b\nggg: {\n\ta -> b: lala\n}\ngroup 1: {\n  b -> c\n\tc -> b: ey\n  nested guy: {\n    c -> b: okay\n  }\n  b.t1 -> c.t1\n  b.t1.t2 -> c.t1\n  c.t1 -> b.t1\n}\ngroup b: {\n  b -> c\n\tc.\"what would arnold say\"\n  c -> b: okay\n}\nchoo: {\n  d.\"this note\"\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_nested_groups",
+    "script": "shape: sequence_diagram\n\na; b; c\n\nthis is a message group: {\n    a -> b\n    and this is a nested message group: {\n        a -> b\n        what about more nesting: {\n            a -> b\n\t\t\t\t\t\tcrazy town: {\n\t\t\t\t\t\t\t\ta.\"a note\"\n\t\t\t\t\t\t\t\ta -> b\n\t\t\t\t\t\t\twhoa: {\n\t\t\t\t\t\t\t\t\ta -> b\n\t\t\t\t\t\t\t}\n            }\n        }\n    }\n}\n\nalt: {\n    case 1: {\n        b -> c\n    }\n    case 2: {\n        b -> c\n    }\n    case 3: {\n        b -> c\n    }\n    case 4: {\n        b -> c\n    }\n}\n\nb.note: \"a note here to remember that padding must consider notes too\"\na.note: \"just\\na\\nlong\\nnote\\nhere\"\nc: \"just an actor\"",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_real",
+    "script": "How this is rendered: {\n  shape: sequence_diagram\n\n\tCLI; d2ast; d2compiler; d2layout; d2exporter; d2themes; d2renderer; d2sequencelayout; d2dagrelayout\n\n  CLI -> d2ast: \"'How this is rendered: {...}'\"\n  d2ast -> CLI: tokenized AST\n  CLI -> d2compiler: compile AST\n  d2compiler.\"measurements also take place\"\n  d2compiler -> CLI: objects and edges\n  CLI -> d2layout.layout: run layout engines\n  d2layout.layout -> d2sequencelayout: run engine on shape: sequence_diagram, temporarily remove\n  only if root is not sequence: {\n    d2layout.layout -> d2dagrelayout: run core engine on rest\n  }\n  d2layout.layout <- d2sequencelayout: add back in sequence diagrams\n  d2layout -> CLI: diagram with correct positions and dimensions\n  CLI -> d2exporter: export diagram with chosen theme and renderer\n  d2exporter.export -> d2themes: get theme styles\n  d2exporter.export -> d2renderer: render to SVG\n  d2exporter.export -> CLI: resulting SVG\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_actor_distance",
+    "script": "shape: sequence_diagram\na: \"an actor with a really long label that will break everything\"\nc: \"an\\nactor\\nwith\\na\\nreally\\nlong\\nlabel\\nthat\\nwill\\nbreak\\neverything\"\nd: \"simple\"\ne: \"a short one\"\nb: \"far away\"\nf: \"what if there were no labels between this actor and the previous one\"\na -> b: \"short\"\na -> b: \"long label for testing purposes and it must be really, really long\"\nc -> d: \"short\"\na -> d: \"this should span many actors lifelines so we know how it will look like when redering a long label over many actors\"\nd -> e: \"long label for testing purposes and it must be really, really long\"\na -> f",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_long_note",
+    "script": "shape: sequence_diagram\na -> b\nb.note: \"a note here to remember that padding must consider notes too\"\na.note: \"just\\na\\nlong\\nnote\\nhere\"",
+    "category": "stable"
+  },
+  {
+    "name": "sequence_diagram_distance",
+    "script": "shape: sequence_diagram\nalice -> bob: what does it mean to be well-adjusted\nbob -> alice: The ability to play bridge or golf as if they were games",
+    "category": "stable"
+  },
+  {
+    "name": "markdown_stroke_fill",
+    "script": "container.md: |md\n# a header\n\na line of text and an\n\n\t{\n\t\tindented: \"block\",\n\t\tof: \"json\",\n\t}\n\nwalk into a bar.\n| {\n\tstyle.font-color: darkorange\n}\n\ncontainer -> no container\n\nno container: |md\nthey did it in style\n|\n\nno container.style: {\n\tfont-color: red\n\tfill: \"#CEEDEE\"\n}",
+    "category": "stable"
+  },
+  {
+    "name": "overlapping_image_container_labels",
+    "script": "root: {\n\tshape: image\n\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n}\n\nroot -> container.root\n\ncontainer: {\n\troot: {\n\t\tshape: image\n\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t}\n\n\tleft2: {\n\t\troot: {\n\t\t\tshape: image\n\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t}\n\t\tinner: {\n\t\t\tleft2: {\n\t\t\t\tshape: image\n\t\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t\t}\n\t\t\tright: {\n\t\t\t\tshape: image\n\t\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t\t}\n\t\t}\n\t\troot -> inner.left2: {\n\t\t\tlabel: to inner left2\n\t\t}\n\t\troot -> inner.right: {\n\t\t\tlabel: to inner right\n\t\t}\n\t}\n\n\tright: {\n\t\troot: {\n\t\t\tshape: image\n\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t}\n\t\tinner: {\n\t\t\tleft2: {\n\t\t\t\tshape: image\n\t\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t\t}\n\t\t\tright: {\n\t\t\t\tshape: image\n\t\t\t\ticon: https://icons.terrastruct.com/essentials/004-picture.svg\n\t\t\t}\n\t\t}\n\t\troot -> inner.left2: {\n\t\t\tlabel: to inner left2\n\t\t}\n\t\troot -> inner.right: {\n\t\t\tlabel: to inner right\n\t\t}\n\t}\n\n\troot -> left2.root: {\n\t\tlabel: to left2 container root\n\t}\n\n\troot -> right.root: {\n\t\tlabel: to right container root\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "constant_near_stress",
+    "script": "x -> y\nThe top of the mountain: { shape: text; near: top-center }\nJoe: { shape: person; near: center-left }\nDonald: { shape: person; near: center-right }\nbottom: |md\n\t# Cats, no less liquid than their shadows, offer no angles to the wind.\n\n  If we can't fix it, it ain't broke.\n\n  Dieters live life in the fasting lane.\n| { near: bottom-center }\ni am top left: { shape: text; near: top-left }\ni am top right: { shape: text; near: top-right }\ni am bottom left: { shape: text; near: bottom-left }\ni am bottom right: { shape: text; near: bottom-right }",
+    "category": "stable"
+  },
+  {
+    "name": "md_mixed",
+    "script": "example: {\n  explanation: |md\n    *one* __two__ three!\n  |\n}",
+    "category": "stable"
+  },
+  {
+    "name": "constant_near_title",
+    "script": "title: |md\n  # A winning strategy\n| { near: top-center }\n\npoll the people -> results\nresults -> unfavorable -> poll the people\nresults -> favorable -> will of the people",
+    "category": "stable"
+  },
+  {
+    "name": "text_font_sizes",
+    "script": "bear: { shape: text; style.font-size: 22; style.bold: true }\nmama bear: { shape: text; style.font-size: 28; style.italic: true }\npapa bear: { shape: text; style.font-size: 32; style.underline: true }\nmama bear -> bear\npapa bear -> bear",
+    "category": "stable"
+  },
+  {
+    "name": "basic-tooltips",
+    "script": "x: { tooltip: Total abstinence is easier than perfect moderation }\ny: { tooltip: Gee, I feel kind of LIGHT in the head now,\\nknowing I can't make my satellite dish PAYMENTS! }\nx -> y",
+    "category": "stable"
+  },
+  {
+    "name": "links",
+    "script": "x: { link: https://d2lang.com }\n\t\t\ty: { link: https://terrastruct.com; tooltip: Gee, I feel kind of LIGHT in the head now,\\nknowing I can't make my satellite dish PAYMENTS! }\nx -> y",
+    "category": "stable"
+  },
+  {
+    "name": "unnamed_only_width",
+    "script": "class2 -> users -> code -> package -> no width\n\nclass2: \"\" {\n\tshape: class\n\t-num: int\n\t-timeout: int\n\t-pid\n\n\t+getStatus(): Enum\n\t+getJobs(): \"Job[]\"\n\t+setTimeout(seconds int)\n}\n\nusers: \"\" {\n\tshape: sql_table\n\tid: int\n\tname: string\n\temail: string\n\tpassword: string\n\tlast_login: datetime\n}\n\ncode: |go\n    a := 5\n    b := a + 7\n    fmt.Printf(\"%d\", b)\n|\n\npackage: \"\" { shape: package }\nno width: \"\"\n\n\nclass2.width: 512\nusers.width: 512\ncode.width: 512\npackage.width: 512",
+    "category": "stable"
+  },
+  {
+    "name": "unnamed_only_height",
+    "script": "class2 -> users -> code -> package -> no height\n\nclass2: \"\" {\n\tshape: class\n\t-num: int\n\t-timeout: int\n\t-pid\n\n\t+getStatus(): Enum\n\t+getJobs(): \"Job[]\"\n\t+setTimeout(seconds int)\n}\n\nusers: \"\" {\n\tshape: sql_table\n\tid: int\n\tname: string\n\temail: string\n\tpassword: string\n\tlast_login: datetime\n}\n\ncode: |go\n    a := 5\n    b := a + 7\n    fmt.Printf(\"%d\", b)\n|\n\npackage: \"\" { shape: package }\nno height: \"\"\n\n\nclass2.height: 512\nusers.height: 512\ncode.height: 512\npackage.height: 512",
+    "category": "stable"
+  },
+  {
+    "name": "crow_foot_arrowhead",
+    "script": "a1 <-> b1: {\n\tstyle.stroke-width: 1\n\tsource-arrowhead: {\n\t\tshape: cf-many\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many\n\t}\n}\na2 <-> b2: {\n\tstyle.stroke-width: 3\n\tsource-arrowhead: {\n\t\tshape: cf-many\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many\n\t}\n}\na3 <-> b3: {\n\tstyle.stroke-width: 6\n\tsource-arrowhead: {\n\t\tshape: cf-many\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many\n\t}\n}\n\nc1 <-> d1: {\n\tstyle.stroke-width: 1\n\tsource-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n}\nc2 <-> d2: {\n\tstyle.stroke-width: 3\n\tsource-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n}\nc3 <-> d3: {\n\tstyle.stroke-width: 6\n\tsource-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n}\n\ne1 <-> f1: {\n\tstyle.stroke-width: 1\n\tsource-arrowhead: {\n\t\tshape: cf-one\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one\n\t}\n}\ne2 <-> f2: {\n\tstyle.stroke-width: 3\n\tsource-arrowhead: {\n\t\tshape: cf-one\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one\n\t}\n}\ne3 <-> f3: {\n\tstyle.stroke-width: 6\n\tsource-arrowhead: {\n\t\tshape: cf-one\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one\n\t}\n}\n\ng1 <-> h1: {\n\tstyle.stroke-width: 1\n\tsource-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n}\ng2 <-> h2: {\n\tstyle.stroke-width: 3\n\tsource-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n}\ng3 <-> h3: {\n\tstyle.stroke-width: 6\n\tsource-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one-required\n\t}\n}\n\nc <-> d <-> f: {\n\tstyle.stroke-width: 1\n\tstyle.stroke: \"orange\"\n\tsource-arrowhead: {\n\t\tshape: cf-many-required\n\t}\n\ttarget-arrowhead: {\n\t\tshape: cf-one\n\t}\n}",
+    "category": "stable"
+  },
+  {
+    "name": "circle_arrowhead",
+    "script": "a <-> b: circle {\n  source-arrowhead: {\n    shape: circle\n  }\n  target-arrowhead: {\n    shape: circle\n  }\n}\n\nc <-> d: filled-circle {\n  source-arrowhead: {\n    shape: circle\n    style.filled: true\n  }\n  target-arrowhead: {\n    shape: circle\n    style.filled: true\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "box_arrowhead",
+    "script": "a <-> b: box {\n  source-arrowhead: {\n    shape: box\n  }\n  target-arrowhead: {\n    shape: box\n  }\n}\n  \nc <-> d: filled-box {\n  source-arrowhead: {\n    shape: box\n\tstyle.filled: true\n  }\n  target-arrowhead: {\n    shape: box\n\tstyle.filled: true\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "animated",
+    "script": "your love life will be -> happy: { style.animated: true }\nyour love life will be -> harmonious: { style.animated: true }\n\nboredom <- immortality: { style.animated: true }\n\nFriday <-> Monday: { style.animated: true }\n\nInsomnia -- Sleep: { style.animated: true }\nInsomnia -- Wake: {\n\tstyle: {\n\t\tanimated: true\n\t\tstroke-width: 2\n\t}\n}\n\nInsomnia -- Dream: {\n\tstyle: {\n\t\tanimated: true\n\t\tstroke-width: 8\n\t}\n}\n\nListen <-> Talk: {\n\tstyle.animated: true\n\tsource-arrowhead.shape: cf-one\n\ttarget-arrowhead.shape: diamond\n\tlabel: hear\n}",
+    "category": "stable"
+  },
+  {
+    "name": "dagre-container",
+    "script": "a: {\n  a\n  b\n  c\n}\n\nb: {\n  a\n  b\n  c\n}\n\na -> b",
+    "category": "stable"
+  },
+  {
+    "name": "sql_table_tooltip_animated",
+    "script": "direction: left\n\nx: {\n  shape: sql_table\n\ty { constraint: primary_key }\n\ttooltip: I like turtles\n}\n\na: {\n  shape: sql_table\n\tb { constraint: foreign_key }\n}\n\na.b <-> x.y: {\n  style.animated: true\n    source-arrowhead: {\n      shape: cf-many\n    }\n  target-arrowhead: {\n      shape: cf-one\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sql_table_column_styles",
+    "script": "Humor in the Court: {\n  shape: sql_table\n\tCould you see him from where you were standing?: \"I could see his head.\"\n\tAnd where was his head?: Just above his shoulders.\n  style.fill: red\n  style.stroke: lightgray\n  style.font-color: orange\n  style.font-size: 20\n}\n\nHumor in the Court2: {\n  shape: sql_table\n\tCould you see him from where you were standing?: \"I could see his head.\"\n\tAnd where was his head?: Just above his shoulders.\n  style.fill: red\n  style.stroke: lightgray\n  style.font-color: orange\n  style.font-size: 30\n}\n\nmanager: BatchManager {\n  shape: class\n\tstyle.font-size: 20\n\n  -num: int\n  -timeout: int\n  -pid\n\n  +getStatus(): Enum\n  +getJobs(): \"Job[]\"\n  +setTimeout(seconds int)\n}\n\nmanager2: BatchManager {\n  shape: class\n\tstyle.font-size: 30\n\n  -num: int\n  -timeout: int\n  -pid\n\n  +getStatus(): Enum\n  +getJobs(): \"Job[]\"\n  +setTimeout(seconds int)\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sql_table_constraints_width",
+    "script": "a: {\n\tshape: sql_table\n\tx: INT {constraint: unique}\n}\n\nb: {\n\tshape: sql_table\n\tx: INT {constraint: [primary_key; foreign_key]}\n}\n\nc: {\n\tshape: sql_table\n\tx: INT {constraint: [foreign_key; unique]}\n}\n\nd: {\n\tshape: sql_table\n\tx: INT {constraint: [primary_key; foreign_key; unique]}\n}\ne: {\n\tshape: sql_table\n\tx: INT {constraint: [no_abbrev; foreign_key; hello]}\n\ty: string\n\tz: STRING {constraint: yo}\n}\nf: {\n\tshape: sql_table\n\tx: INT\n}",
+    "category": "stable"
+  },
+  {
+    "name": "near-alone",
+    "script": "x: {\n\tnear: top-center\n}\ny: {\n\tnear: bottom-center\n}\nz: {\n\tnear: center-left\n}",
+    "category": "stable"
+  },
+  {
+    "name": "classes",
+    "script": "classes: {\n  dragon_ball: {\n    label: \"\"\n    shape: circle\n    style.fill: orange\n\t\tstyle.stroke-width: 0\n\t\twidth: 50\n  }\n  path: {\n    label: \"then\"\n    style.stroke-width: 4\n  }\n}\nnostar: { class: dragon_ball }\n1star: { label: \"*\"; class: dragon_ball }\n2star: { label: \"**\"; class: dragon_ball }\n\nnostar -> 1star: { class: path }\n1star -> 2star: { class: path }",
+    "category": "stable"
+  },
+  {
+    "name": "array-classes",
+    "script": "classes: {\n  button: {\n\t  style.border-radius: 999\n\t\tstyle.stroke: black\n\t}\n  success: {\n\t  style.fill: \"#90EE90\"\n\t}\n  error: {\n\t  style.fill: \"#EA9999\"\n\t}\n}\nyay: Successful { class: [button; success] }\nnay: Failure { class: [button; error] }",
+    "category": "stable"
+  },
+  {
+    "name": "border-radius",
+    "script": "x: {\n\tstyle.border-radius: 4\n}\ny: {\n\tstyle.border-radius: 10\n}\nmultiple2: {\n\tstyle.border-radius: 6\n\tstyle.multiple: true\n}\ndouble: {\n\tstyle.border-radius: 6\n\tstyle.double-border: true\n}\nthree-dee: {\n\tstyle.border-radius: 6\n\tstyle.3d: true\n}",
+    "category": "stable"
+  },
+  {
+    "name": "border-radius-pill-shape",
+    "script": "x: {\n\tstyle.border-radius: 999\n}\ny: {\n\tstyle.border-radius: 999\n}\nmultiple2: {\n\tstyle.border-radius: 999\n\tstyle.multiple: true\n}\ndouble: {\n\tstyle.border-radius: 999\n\tstyle.double-border: true\n}\nthree-dee: {\n\tstyle.border-radius: 999\n\tstyle.3d: true\n}",
+    "category": "stable"
+  },
+  {
+    "name": "cycle-order",
+    "script": "direction: right\nclasses: {\n  group: {\n    style: {\n      fill: transparent\n      stroke-dash: 5\n    }\n  }\n  icon: {\n    shape: image\n    height: 70\n    width: 70\n  }\n}\n\nPlan -> Code -> Build -> Test -> Check -> Release -> Deploy -> Operate -> Monitor -> Plan\n\nPlan: {\n  class: group\n  ClickUp: {\n    class: icon\n    icon: https://avatars.githubusercontent.com/u/27873294?s=200&v=4\n  }\n}\nCode: {\n  class: group\n  Git: {\n    class: icon\n    icon: https://icons.terrastruct.com/dev%2Fgit.svg\n  }\n}\nBuild: {\n  class: group\n  Docker: {\n    class: icon\n    icon: https://icons.terrastruct.com/dev%2Fdocker.svg\n  }\n}\nTest: {\n  class: group\n  Playwright: {\n    class: icon\n    icon: https://playwright.dev/img/playwright-logo.svg\n  }\n}\nCheck: {\n  class: group\n  TruffleHog: {\n    class: icon\n    icon: https://avatars.githubusercontent.com/u/79229934?s=200&v=4\n  }\n}\nRelease: {\n  class: group\n  Github Action: {\n    class: icon\n    icon: https://icons.terrastruct.com/dev%2Fgithub.svg\n  }\n}\nDeploy: {\n  class: group\n  \"AWS Copilot\": {\n    class: icon\n    icon: https://icons.terrastruct.com/aws%2FDeveloper%20Tools%2FAWS-CodeDeploy.svg\n  }\n}\nOperate: {\n  class: group\n  \"AWS ECS\": {\n    class: icon\n    icon: https://icons.terrastruct.com/aws%2FCompute%2FAWS-Fargate.svg\n  }\n}\nMonitor: {\n  class: group\n  Grafana: {\n    class: icon\n    icon: https://avatars.githubusercontent.com/u/7195757?s=200&v=4\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "sequence-inter-span-self",
+    "script": "shape: sequence_diagram\na: A\nb: B\n\na.sp1 -> b: foo\na.sp1 -> a.sp2: redirect\na.sp2 -> b: bar",
+    "category": "stable"
+  },
+  {
+    "name": "people",
+    "script": "a.shape: person\nb.shape: person\nc.shape: person\nd.shape: person\ne.shape: person\nf.shape: person\ng.shape: person\n\na: -\nb: --\nc: ----\nd: --------\ne: ----------------\nf: --------------------------------\ng: ----------------------------------------------------------------\n\n1.shape: person\n2.shape: person\n3.shape: person\n4.shape: person\n5.shape: person\n\n1.width: 16\n2.width: 64\n3.width: 128\n4.width: 512\n\n# entering both width and height overrides aspect ratio limit\n5.height: 256\n5.width: 32",
+    "category": "stable"
+  },
+  {
+    "name": "ovals",
+    "script": "a.shape: oval\nb.shape: oval\nc.shape: oval\nd.shape: oval\ne.shape: oval\nf.shape: oval\ng.shape: oval\n\na: -\nb: --\nc: ----\nd: --------\ne: ----------------\nf: --------------------------------\ng: ----------------------------------------------------------------\n\n1.shape: oval\n2.shape: oval\n3.shape: oval\n4.shape: oval\n5.shape: oval\n\n1.width: 16\n2.width: 64\n3.width: 128\n4.width: 512\n\n# entering both width and height overrides aspect ratio limit\n5.height: 256\n5.width: 32",
+    "category": "stable"
+  },
+  {
+    "name": "complex-layers",
+    "script": "desc: Multi-layer diagram of a home.\n\nwindow: {\n  style.double-border: true\n}\nroof\ngarage\n\nlayers: {\n  window: {\n    blinds\n    glass\n  }\n  roof: {\n    shingles\n    starlink\n    utility hookup\n  }\n  garage: {\n    tools\n    vehicles\n  }\n  repair: {\n    desc: How to repair a home.\n\n    steps: {\n      1: {\n        find contractors: {\n          craigslist\n          facebook\n        }\n      }\n      2: {\n        find contractors -> solicit quotes\n      }\n      3: {\n        obtain quotes -> negotiate\n      }\n      4: {\n        negotiate -> book the best bid\n      }\n    }\n  }\n}\n\nscenarios: {\n  storm: {\n    water\n    rain\n    thunder\n  }\n}",
+    "category": "stable"
+  },
+  {
+    "name": "label-near",
+    "script": "direction: right\nx -> y\n\nx: worker {\n  label.near: top-center\n  icon: https://icons.terrastruct.com/essentials%2F005-programmer.svg\n  icon.near: outside-top-right\n}\n\ny: profits {\n  label.near: bottom-right\n  icon: https://icons.terrastruct.com/essentials%2Fprofits.svg\n  icon.near: outside-bottom-center\n}",
+    "category": "stable"
+  },
+  {
+    "name": "shebang-codeblock",
+    "script": "\"test.sh\": {\n  someid: |sh\n    #!/usr/bin/env bash\n    echo testing\n  |\n}",
+    "category": "stable"
+  }
+]

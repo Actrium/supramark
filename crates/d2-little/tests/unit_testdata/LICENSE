@@ -1,0 +1,20 @@
+Copyright 2022 Terrastruct Inc.
+Copyright 2026 kookyleo <kookyleo@gmail.com>
+
+The unit-test fixtures in this directory (`d2compiler/`, `d2exporter/`,
+`d2ir/`, `d2oracle/`, `d2parser/`) are derived from the upstream Go
+reference implementation at:
+
+    https://github.com/terrastruct/d2
+        (paths: d2compiler/testdata/, d2exporter/testdata/,
+                d2ir/testdata/, d2oracle/testdata/, d2parser/testdata/)
+
+The upstream project is licensed under the Mozilla Public License,
+Version 2.0. These fixtures therefore remain under MPL-2.0 per MPL
+§3.3 (Larger Work) and §3.4 (Notices). The full MPL-2.0 text is at
+the root of this repository in `LICENSE`, and is also available at:
+
+    https://mozilla.org/MPL/2.0/
+
+Modifications made in this project (regenerated snapshots, additional
+coverage cases, etc.) are likewise distributed under MPL-2.0.

@@ -1,0 +1,53 @@
+{
+  "name": "@kookyleo/d2-little-web",
+  "version": "0.7.2",
+  "description": "wasm-bindgen wrapper for d2-little — run D2 diagrams → SVG in the browser",
+  "type": "module",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kookyleo/d2-little.git",
+    "directory": "packages/web"
+  },
+  "homepage": "https://github.com/kookyleo/d2-little",
+  "bugs": {
+    "url": "https://github.com/kookyleo/d2-little/issues"
+  },
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/d2_little_web.d.ts",
+      "import": "./dist/wasm/d2_little_web.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build:wasm": "wasm-pack build --target bundler --out-dir dist/wasm --out-name d2_little_web && rm -f dist/wasm/package.json dist/wasm/.gitignore dist/wasm/README.md",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:wasm && npm run build:ts",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "d2",
+    "diagram",
+    "svg",
+    "wasm",
+    "web"
+  ]
+}

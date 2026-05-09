@@ -1,0 +1,165 @@
+{
+  "graph": {
+    "name": "",
+    "isFolderOnly": false,
+    "ast": {
+      "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-3:0:77",
+      "nodes": [
+        {
+          "map_key": {
+            "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-2:1:76",
+            "key": {
+              "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-0:3:3",
+              "path": [
+                {
+                  "unquoted_string": {
+                    "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-0:3:3",
+                    "value": [
+                      {
+                        "string": "hey",
+                        "raw_string": "hey"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "primary": {
+              "double_quoted_string": {
+                "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:5:5-0:7:7",
+                "value": null
+              }
+            },
+            "value": {
+              "map": {
+                "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:8:8-2:1:76",
+                "nodes": [
+                  {
+                    "map_key": {
+                      "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,1:2:12-1:64:74",
+                      "key": {
+                        "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,1:2:12-1:6:16",
+                        "path": [
+                          {
+                            "unquoted_string": {
+                              "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,1:2:12-1:6:16",
+                              "value": [
+                                {
+                                  "string": "icon",
+                                  "raw_string": "icon"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      "primary": {},
+                      "value": {
+                        "unquoted_string": {
+                          "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,1:8:18-1:64:74",
+                          "value": [
+                            {
+                              "string": "https://icons.terrastruct.com/essentials/004-picture.svg",
+                              "raw_string": "https://icons.terrastruct.com/essentials/004-picture.svg"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "root": {
+      "id": "",
+      "id_val": "",
+      "attributes": {
+        "label": {
+          "value": ""
+        },
+        "labelDimensions": {
+          "width": 0,
+          "height": 0
+        },
+        "style": {},
+        "iconStyle": {},
+        "near_key": null,
+        "shape": {
+          "value": ""
+        },
+        "direction": {
+          "value": ""
+        },
+        "constraint": null
+      },
+      "zIndex": 0
+    },
+    "edges": null,
+    "objects": [
+      {
+        "id": "hey",
+        "id_val": "hey",
+        "references": [
+          {
+            "key": {
+              "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-0:3:3",
+              "path": [
+                {
+                  "unquoted_string": {
+                    "range": "d2/testdata/d2compiler/TestCompile/basic_icon.d2,0:0:0-0:3:3",
+                    "value": [
+                      {
+                        "string": "hey",
+                        "raw_string": "hey"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "key_path_index": 0,
+            "map_key_edge_index": -1
+          }
+        ],
+        "attributes": {
+          "label": {
+            "value": ""
+          },
+          "labelDimensions": {
+            "width": 0,
+            "height": 0
+          },
+          "style": {},
+          "icon": {
+            "Scheme": "https",
+            "Opaque": "",
+            "User": null,
+            "Host": "icons.terrastruct.com",
+            "Path": "/essentials/004-picture.svg",
+            "RawPath": "",
+            "OmitHost": false,
+            "ForceQuery": false,
+            "RawQuery": "",
+            "Fragment": "",
+            "RawFragment": ""
+          },
+          "iconStyle": {},
+          "near_key": null,
+          "shape": {
+            "value": "rectangle"
+          },
+          "direction": {
+            "value": ""
+          },
+          "constraint": null
+        },
+        "zIndex": 0
+      }
+    ]
+  },
+  "err": null
+}

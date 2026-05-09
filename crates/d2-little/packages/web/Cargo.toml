@@ -1,0 +1,28 @@
+[package]
+name = "d2-little-web"
+version = "0.7.2"
+edition = "2024"
+license = "MPL-2.0"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "wasm-bindgen wrapper for d2-little — run D2 diagrams → SVG in the browser"
+homepage = "https://github.com/kookyleo/d2-little"
+repository = "https://github.com/kookyleo/d2-little"
+keywords = ["d2", "diagram", "svg", "wasm", "web"]
+categories = ["wasm", "graphics"]
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# wasm-opt default args don't include --enable-bulk-memory, but rustc now
+# emits memory.copy / memory.fill instructions for wasm32 (raised baseline).
+# Pass both feature flags through so optimisation doesn't reject the input.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
+[dependencies]
+d2-little = { path = "../.." }
+wasm-bindgen = "0.2"

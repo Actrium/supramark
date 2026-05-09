@@ -1,0 +1,108 @@
+{
+  "graph": {
+    "name": "",
+    "isFolderOnly": false,
+    "ast": {
+      "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-1:0:38",
+      "nodes": [
+        {
+          "map_key": {
+            "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-0:37:37",
+            "key": {
+              "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-0:37:37",
+              "path": [
+                {
+                  "double_quoted_string": {
+                    "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-0:37:37",
+                    "value": [
+                      {
+                        "string": "github.com/terrastruct/d2parser.git",
+                        "raw_string": "github.com/terrastruct/d2parser.git"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "primary": {},
+            "value": {}
+          }
+        }
+      ]
+    },
+    "root": {
+      "id": "",
+      "id_val": "",
+      "attributes": {
+        "label": {
+          "value": ""
+        },
+        "labelDimensions": {
+          "width": 0,
+          "height": 0
+        },
+        "style": {},
+        "iconStyle": {},
+        "near_key": null,
+        "shape": {
+          "value": ""
+        },
+        "direction": {
+          "value": ""
+        },
+        "constraint": null
+      },
+      "zIndex": 0
+    },
+    "edges": null,
+    "objects": [
+      {
+        "id": "\"github.com/terrastruct/d2parser.git\"",
+        "id_val": "github.com/terrastruct/d2parser.git",
+        "references": [
+          {
+            "key": {
+              "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-0:37:37",
+              "path": [
+                {
+                  "double_quoted_string": {
+                    "range": "d2/testdata/d2oracle/TestDelete/shape_class.d2,0:0:0-0:37:37",
+                    "value": [
+                      {
+                        "string": "github.com/terrastruct/d2parser.git",
+                        "raw_string": "github.com/terrastruct/d2parser.git"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "key_path_index": 0,
+            "map_key_edge_index": -1
+          }
+        ],
+        "attributes": {
+          "label": {
+            "value": "github.com/terrastruct/d2parser.git"
+          },
+          "labelDimensions": {
+            "width": 0,
+            "height": 0
+          },
+          "style": {},
+          "iconStyle": {},
+          "near_key": null,
+          "shape": {
+            "value": "rectangle"
+          },
+          "direction": {
+            "value": ""
+          },
+          "constraint": null
+        },
+        "zIndex": 0
+      }
+    ]
+  },
+  "err": "<nil>"
+}

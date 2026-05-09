@@ -1,0 +1,57 @@
+[workspace]
+members = [".", "packages/web"]
+resolver = "3"
+
+[package]
+name = "d2-little"
+version = "0.7.2"
+edition = "2024"
+license = "MPL-2.0"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Lightweight D2 → SVG converter: a pure-Rust port of the d2lang pipeline (parser → IR → graph → dagre layout → SVG)."
+homepage = "https://github.com/kookyleo/d2-little"
+repository = "https://github.com/kookyleo/d2-little"
+readme = "README.md"
+keywords = ["d2", "diagram", "svg", "dagre", "layout"]
+categories = ["graphics", "visualization"]
+exclude = [
+    "target/",
+    "tests/e2e_testdata/",
+    "tests/unit_testdata/",
+    "tests/fixtures/",
+    "examples/",
+    "scripts/",
+    "run_e2e.sh",
+    "SVG_E2E_MIGRATION_CHECKLIST.md",
+    ".github/",
+]
+
+[dependencies]
+# d2-ir / d2-graph / d2-themes JSON round-trip and diagram_bytes use serde.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# d2-compiler / d2-textmeasure XML parsing (d2-latex MathJax output, etc).
+roxmltree = "0.20"
+# d2-chroma syntax highlighting.
+fancy-regex = "0.14"
+# d2-textmeasure.
+ttf-parser = "0.21"
+unicode-segmentation = "1"
+unicode-width = "0.1"
+markdown = "1"
+regex = "1"
+# d2-svg-path.
+base32 = "0.5"
+# d2-fonts embeds WOFF-as-base64 into SVG.
+base64 = "0.22"
+# d2-chroma / d2-sketch / d2-sequence / d2-grid / dagre tracing.
+log = "0.4"
+
+[dev-dependencies]
+# tests/flate_round_trip.rs validates our deflate against miniz_oxide.
+flate2 = "1"
+# Default LaTeX backend used by the test harness — the production crate has
+# no JS-engine dependency.  Web/RN/CLI embedders inject their own renderer
+# via `latex::set_engine()`, calling into the host's available JS engine
+# (browser V8, Hermes, JSC, etc.).
+rquickjs = "0.11.0"

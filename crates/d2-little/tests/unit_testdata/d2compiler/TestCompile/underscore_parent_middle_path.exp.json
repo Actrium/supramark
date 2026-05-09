@@ -1,0 +1,11 @@
+{
+  "graph": null,
+  "err": {
+    "errs": [
+      {
+        "range": "d2/testdata/d2compiler/TestCompile/underscore_parent_middle_path.d2,2:4:10-2:5:11",
+        "errmsg": "d2/testdata/d2compiler/TestCompile/underscore_parent_middle_path.d2:3:5: parent \"_\" can only be used in the beginning of paths, e.g. \"_.x\""
+      }
+    ]
+  }
+}

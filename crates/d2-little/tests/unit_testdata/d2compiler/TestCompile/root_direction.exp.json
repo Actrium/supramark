@@ -1,0 +1,71 @@
+{
+  "graph": {
+    "name": "",
+    "isFolderOnly": true,
+    "ast": {
+      "range": "d2/testdata/d2compiler/TestCompile/root_direction.d2,0:0:0-0:16:16",
+      "nodes": [
+        {
+          "map_key": {
+            "range": "d2/testdata/d2compiler/TestCompile/root_direction.d2,0:0:0-0:16:16",
+            "key": {
+              "range": "d2/testdata/d2compiler/TestCompile/root_direction.d2,0:0:0-0:9:9",
+              "path": [
+                {
+                  "unquoted_string": {
+                    "range": "d2/testdata/d2compiler/TestCompile/root_direction.d2,0:0:0-0:9:9",
+                    "value": [
+                      {
+                        "string": "direction",
+                        "raw_string": "direction"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "primary": {},
+            "value": {
+              "unquoted_string": {
+                "range": "d2/testdata/d2compiler/TestCompile/root_direction.d2,0:11:11-0:16:16",
+                "value": [
+                  {
+                    "string": "right",
+                    "raw_string": "right"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "root": {
+      "id": "",
+      "id_val": "",
+      "attributes": {
+        "label": {
+          "value": ""
+        },
+        "labelDimensions": {
+          "width": 0,
+          "height": 0
+        },
+        "style": {},
+        "iconStyle": {},
+        "near_key": null,
+        "shape": {
+          "value": ""
+        },
+        "direction": {
+          "value": "right"
+        },
+        "constraint": null
+      },
+      "zIndex": 0
+    },
+    "edges": null,
+    "objects": null
+  },
+  "err": null
+}

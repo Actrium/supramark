@@ -1,0 +1,26 @@
+Copyright 2022 Terrastruct Inc.
+Copyright 2026 kookyleo <kookyleo@gmail.com>
+
+The test fixtures in this directory (and its subdirectories — `stable/`,
+`txtar/`, `regression/`, `themes/`, `measured/`, `sanity/`, `root/`,
+`files/`, `patterns/`, `todo/`, `unicode/`, `asciitxtar/`) are derived
+from the upstream Go reference implementation:
+
+    https://github.com/terrastruct/d2  (path: e2etests/testdata/)
+
+The upstream project is licensed under the Mozilla Public License,
+Version 2.0. These fixtures therefore remain under MPL-2.0 per MPL
+§3.3 (Larger Work) and §3.4 (Notices). The full MPL-2.0 text is at the
+root of this repository in `LICENSE`, and is also available at:
+
+    https://mozilla.org/MPL/2.0/
+
+Modifications made in this project (regenerated `.exp.svg` snapshots,
+additional coverage cases, etc.) are likewise distributed under
+MPL-2.0 to preserve file-level compatibility with the upstream
+corpus.
+
+The rest of this repository (Rust source outside vendored `src/dagre/`
+and `src/sketch/rough.rs`) is also MPL-2.0. See the root `LICENSE` and
+the project `README.md` "Attribution" section for a full breakdown of
+third-party material.

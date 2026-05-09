@@ -1,0 +1,1121 @@
+{
+  "name": "",
+  "config": {
+    "sketch": false,
+    "themeID": 0,
+    "darkThemeID": null,
+    "pad": null,
+    "center": null,
+    "layoutEngine": null
+  },
+  "isFolderOnly": false,
+  "fontFamily": "SourceSansPro",
+  "monoFontFamily": "SourceCodePro",
+  "shapes": [
+    {
+      "id": "network",
+      "type": "rectangle",
+      "pos": {
+        "x": 7,
+        "y": 227
+      },
+      "width": 398,
+      "height": 1188,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B4",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "network",
+      "fontSize": 28,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 96,
+      "labelHeight": 36,
+      "labelPosition": "OUTSIDE_TOP_CENTER",
+      "zIndex": 0,
+      "level": 1
+    },
+    {
+      "id": "network.cell tower",
+      "type": "rectangle",
+      "pos": {
+        "x": 127,
+        "y": 268
+      },
+      "width": 248,
+      "height": 313,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "cell tower",
+      "fontSize": 24,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 99,
+      "labelHeight": 31,
+      "labelPosition": "OUTSIDE_TOP_CENTER",
+      "zIndex": 0,
+      "level": 2
+    },
+    {
+      "id": "network.cell tower.satellites",
+      "type": "stored_data",
+      "pos": {
+        "x": 176,
+        "y": 308
+      },
+      "width": 140,
+      "height": 61,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "AA5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": true,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "satellites",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 65,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 3
+    },
+    {
+      "id": "network.cell tower.transmitter",
+      "type": "rectangle",
+      "pos": {
+        "x": 176,
+        "y": 490
+      },
+      "width": 140,
+      "height": 61,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B6",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "transmitter",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 83,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 3
+    },
+    {
+      "id": "network.online portal",
+      "type": "rectangle",
+      "pos": {
+        "x": 37,
+        "y": 1256
+      },
+      "width": 119,
+      "height": 129,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "ONLINE PORTALLLL",
+      "fontSize": 24,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 198,
+      "labelHeight": 31,
+      "labelPosition": "OUTSIDE_TOP_CENTER",
+      "zIndex": 0,
+      "level": 2
+    },
+    {
+      "id": "network.online portal.ui",
+      "type": "hexagon",
+      "pos": {
+        "x": 67,
+        "y": 1286
+      },
+      "width": 59,
+      "height": 69,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "N5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "ui",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 14,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 3
+    },
+    {
+      "id": "network.data processor",
+      "type": "rectangle",
+      "pos": {
+        "x": 167,
+        "y": 732
+      },
+      "width": 169,
+      "height": 188,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "data processor",
+      "fontSize": 24,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 150,
+      "labelHeight": 31,
+      "labelPosition": "OUTSIDE_TOP_CENTER",
+      "zIndex": 0,
+      "level": 2
+    },
+    {
+      "id": "network.data processor.storage",
+      "type": "cylinder",
+      "pos": {
+        "x": 197,
+        "y": 772
+      },
+      "width": 99,
+      "height": 118,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "AA5",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": true,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "storage",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 54,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 3
+    },
+    {
+      "id": "user",
+      "type": "person",
+      "pos": {
+        "x": 80,
+        "y": 0
+      },
+      "width": 130,
+      "height": 87,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B3",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "user",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 32,
+      "labelHeight": 21,
+      "labelPosition": "OUTSIDE_BOTTOM_CENTER",
+      "zIndex": 0,
+      "level": 1
+    },
+    {
+      "id": "api server",
+      "type": "rectangle",
+      "pos": {
+        "x": 477,
+        "y": 1040
+      },
+      "width": 116,
+      "height": 66,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "B6",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": false,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "api server",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 71,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 1
+    },
+    {
+      "id": "logs",
+      "type": "page",
+      "pos": {
+        "x": 499,
+        "y": 1277
+      },
+      "width": 73,
+      "height": 87,
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "borderRadius": 0,
+      "fill": "AB4",
+      "stroke": "B1",
+      "animated": false,
+      "shadow": false,
+      "3d": false,
+      "multiple": true,
+      "double-border": false,
+      "tooltip": "",
+      "link": "",
+      "icon": null,
+      "iconPosition": "",
+      "blend": false,
+      "fields": null,
+      "methods": null,
+      "columns": null,
+      "label": "logs",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N1",
+      "italic": false,
+      "bold": true,
+      "underline": false,
+      "labelWidth": 28,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "zIndex": 0,
+      "level": 1
+    }
+  ],
+  "connections": [
+    {
+      "id": "network.cell tower.(satellites -> transmitter)[0]",
+      "src": "network.cell tower.satellites",
+      "srcArrow": "none",
+      "dst": "network.cell tower.transmitter",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "send",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 33,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 222,
+          "y": 369
+        },
+        {
+          "x": 182.8000030517578,
+          "y": 417.3999938964844
+        },
+        {
+          "x": 182.8000030517578,
+          "y": 441.70001220703125
+        },
+        {
+          "x": 222,
+          "y": 490.5
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "network.cell tower.(satellites -> transmitter)[1]",
+      "src": "network.cell tower.satellites",
+      "srcArrow": "none",
+      "dst": "network.cell tower.transmitter",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "send",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 33,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 246,
+          "y": 369
+        },
+        {
+          "x": 246,
+          "y": 417.3999938964844
+        },
+        {
+          "x": 246,
+          "y": 441.70001220703125
+        },
+        {
+          "x": 246,
+          "y": 490.5
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "network.cell tower.(satellites -> transmitter)[2]",
+      "src": "network.cell tower.satellites",
+      "srcArrow": "none",
+      "dst": "network.cell tower.transmitter",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "send",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 33,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 270,
+          "y": 369
+        },
+        {
+          "x": 317.20001220703125,
+          "y": 417.3999938964844
+        },
+        {
+          "x": 317.20001220703125,
+          "y": 441.70001220703125
+        },
+        {
+          "x": 270,
+          "y": 490.5
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "network.(cell tower.transmitter -> data processor.storage)[0]",
+      "src": "network.cell tower.transmitter",
+      "srcArrow": "none",
+      "dst": "network.data processor.storage",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "phone logs",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 74,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 246,
+          "y": 551
+        },
+        {
+          "x": 246,
+          "y": 591
+        },
+        {
+          "x": 246,
+          "y": 613.0999755859375
+        },
+        {
+          "x": 246,
+          "y": 631.25
+        },
+        {
+          "x": 246,
+          "y": 649.4000244140625
+        },
+        {
+          "x": 246,
+          "y": 730
+        },
+        {
+          "x": 246,
+          "y": 762
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(user -> network.cell tower)[0]",
+      "src": "user",
+      "srcArrow": "none",
+      "dst": "network.cell tower",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "make call",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 64,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 187,
+          "y": 87
+        },
+        {
+          "x": 234.1999969482422,
+          "y": 135.39999389648438
+        },
+        {
+          "x": 246,
+          "y": 212.8000030517578
+        },
+        {
+          "x": 246,
+          "y": 232
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(user -> network.online portal.ui)[0]",
+      "src": "user",
+      "srcArrow": "none",
+      "dst": "network.online portal.ui",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 3,
+      "strokeWidth": 2,
+      "stroke": "B2",
+      "borderRadius": 10,
+      "label": "access",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 44,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 115,
+          "y": 87
+        },
+        {
+          "x": 82.80000305175781,
+          "y": 135.39999389648438
+        },
+        {
+          "x": 74.75,
+          "y": 159.60000610351562
+        },
+        {
+          "x": 74.75,
+          "y": 177.75
+        },
+        {
+          "x": 74.75,
+          "y": 195.89999389648438
+        },
+        {
+          "x": 74.75,
+          "y": 218
+        },
+        {
+          "x": 74.75,
+          "y": 233
+        },
+        {
+          "x": 74.75,
+          "y": 248
+        },
+        {
+          "x": 74.75,
+          "y": 274.1000061035156
+        },
+        {
+          "x": 74.75,
+          "y": 298.25
+        },
+        {
+          "x": 74.75,
+          "y": 322.3999938964844
+        },
+        {
+          "x": 74.75,
+          "y": 356.70001220703125
+        },
+        {
+          "x": 74.75,
+          "y": 384
+        },
+        {
+          "x": 74.75,
+          "y": 411.29998779296875
+        },
+        {
+          "x": 74.75,
+          "y": 447.70001220703125
+        },
+        {
+          "x": 74.75,
+          "y": 475
+        },
+        {
+          "x": 74.75,
+          "y": 502.29998779296875
+        },
+        {
+          "x": 74.75,
+          "y": 536.5999755859375
+        },
+        {
+          "x": 74.75,
+          "y": 560.75
+        },
+        {
+          "x": 74.75,
+          "y": 584.9000244140625
+        },
+        {
+          "x": 74.75,
+          "y": 613.0999755859375
+        },
+        {
+          "x": 74.75,
+          "y": 631.25
+        },
+        {
+          "x": 74.75,
+          "y": 649.4000244140625
+        },
+        {
+          "x": 74.75,
+          "y": 673.5999755859375
+        },
+        {
+          "x": 74.75,
+          "y": 691.75
+        },
+        {
+          "x": 74.75,
+          "y": 709.9000244140625
+        },
+        {
+          "x": 74.75,
+          "y": 743.7999877929688
+        },
+        {
+          "x": 74.75,
+          "y": 776.5
+        },
+        {
+          "x": 74.75,
+          "y": 809.2000122070312
+        },
+        {
+          "x": 74.75,
+          "y": 852.7999877929688
+        },
+        {
+          "x": 74.75,
+          "y": 885.5
+        },
+        {
+          "x": 74.75,
+          "y": 918.2000122070312
+        },
+        {
+          "x": 74.75,
+          "y": 950
+        },
+        {
+          "x": 74.75,
+          "y": 965
+        },
+        {
+          "x": 74.75,
+          "y": 980
+        },
+        {
+          "x": 74.75,
+          "y": 1006.5999755859375
+        },
+        {
+          "x": 74.75,
+          "y": 1031.5
+        },
+        {
+          "x": 74.75,
+          "y": 1056.4000244140625
+        },
+        {
+          "x": 74.75,
+          "y": 1091.699951171875
+        },
+        {
+          "x": 74.75,
+          "y": 1119.75
+        },
+        {
+          "x": 74.75,
+          "y": 1147.800048828125
+        },
+        {
+          "x": 77.5999984741211,
+          "y": 1238.800048828125
+        },
+        {
+          "x": 89,
+          "y": 1286
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(api server -> network.online portal.ui)[0]",
+      "src": "api server",
+      "srcArrow": "none",
+      "dst": "network.online portal.ui",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "display",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 48,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 477.5,
+          "y": 1086.5
+        },
+        {
+          "x": 192.6999969482422,
+          "y": 1150.5
+        },
+        {
+          "x": 118.4000015258789,
+          "y": 1238.800048828125
+        },
+        {
+          "x": 106,
+          "y": 1286
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(api server -> logs)[0]",
+      "src": "api server",
+      "srcArrow": "none",
+      "dst": "logs",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "persist",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 46,
+      "labelHeight": 21,
+      "labelPosition": "INSIDE_MIDDLE_CENTER",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 535.25,
+          "y": 1105.5
+        },
+        {
+          "x": 535.25,
+          "y": 1154.300048828125
+        },
+        {
+          "x": 535.2000122070312,
+          "y": 1235
+        },
+        {
+          "x": 535,
+          "y": 1267
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    },
+    {
+      "id": "(network.data processor -> api server)[0]",
+      "src": "network.data processor",
+      "srcArrow": "none",
+      "dst": "api server",
+      "dstArrow": "triangle",
+      "opacity": 1,
+      "strokeDash": 0,
+      "strokeWidth": 2,
+      "stroke": "B1",
+      "borderRadius": 10,
+      "label": "",
+      "fontSize": 16,
+      "fontFamily": "DEFAULT",
+      "language": "",
+      "color": "N2",
+      "italic": true,
+      "bold": false,
+      "underline": false,
+      "labelWidth": 0,
+      "labelHeight": 0,
+      "labelPosition": "",
+      "labelPercentage": 0,
+      "link": "",
+      "route": [
+        {
+          "x": 246,
+          "y": 920
+        },
+        {
+          "x": 246,
+          "y": 976
+        },
+        {
+          "x": 292.20001220703125,
+          "y": 1003
+        },
+        {
+          "x": 477,
+          "y": 1055
+        }
+      ],
+      "isCurve": true,
+      "animated": false,
+      "tooltip": "",
+      "icon": null,
+      "zIndex": 0
+    }
+  ],
+  "root": {
+    "id": "",
+    "type": "",
+    "pos": {
+      "x": 0,
+      "y": 0
+    },
+    "width": 0,
+    "height": 0,
+    "opacity": 0,
+    "strokeDash": 0,
+    "strokeWidth": 0,
+    "borderRadius": 0,
+    "fill": "N7",
+    "stroke": "",
+    "animated": false,
+    "shadow": false,
+    "3d": false,
+    "multiple": false,
+    "double-border": false,
+    "tooltip": "",
+    "link": "",
+    "icon": null,
+    "iconPosition": "",
+    "blend": false,
+    "fields": null,
+    "methods": null,
+    "columns": null,
+    "label": "",
+    "fontSize": 0,
+    "fontFamily": "",
+    "language": "",
+    "color": "",
+    "italic": false,
+    "bold": false,
+    "underline": false,
+    "labelWidth": 0,
+    "labelHeight": 0,
+    "zIndex": 0,
+    "level": 0
+  }
+}
