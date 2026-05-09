@@ -1,0 +1,33 @@
+[package]
+name = "dagre"
+version = "0.1.1"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "A Rust port of dagre - directed graph layout using the Sugiyama method"
+repository = "https://github.com/kookyleo/dagre-rs"
+keywords = ["graph", "layout", "dagre", "sugiyama", "diagram"]
+categories = ["algorithms", "visualization"]
+
+# Upstream this crate ports from. Cross-validation reference data (see
+# cross-validate/reference_data.json) is generated against this exact commit.
+# Update together with reference_data.json's _meta block.
+[package.metadata.upstream]
+project = "@dagrejs/dagre"
+repository = "https://github.com/dagrejs/dagre"
+version = "3.0.1-pre"
+commit = "4713b59bfa05af56cf58aa01e2027adf5d2dcf88"
+commit_short = "4713b59"
+
+[dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+default = ["json"]
+json = ["serde", "serde_json"]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

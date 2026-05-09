@@ -1,0 +1,2601 @@
+{
+  "_meta": {
+    "upstream": "@dagrejs/dagre",
+    "version": "3.0.1-pre",
+    "commit": "4713b59bfa05af56cf58aa01e2027adf5d2dcf88",
+    "generated_at": "2026-04-30T07:06:10.458Z",
+    "generator": "cross-validate/generate_reference.mjs"
+  },
+  "cases": [
+    {
+      "name": "single_node",
+      "opts": {
+        "width": 50,
+        "height": 100
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 50,
+          "width": 50,
+          "height": 100,
+          "rank": 0,
+          "order": 0
+        }
+      },
+      "edges": [],
+      "graph": {
+        "width": 50,
+        "height": 100
+      }
+    },
+    {
+      "name": "two_nodes",
+      "opts": {
+        "width": 75,
+        "height": 350
+      },
+      "nodes": {
+        "a": {
+          "x": 37.5,
+          "y": 50,
+          "width": 50,
+          "height": 100,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 37.5,
+          "y": 250,
+          "width": 75,
+          "height": 200,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 37.5,
+              "y": 100
+            },
+            {
+              "x": 37.5,
+              "y": 125
+            },
+            {
+              "x": 37.5,
+              "y": 150
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 75,
+        "height": 350
+      }
+    },
+    {
+      "name": "diamond",
+      "opts": {
+        "width": 150,
+        "height": 250
+      },
+      "nodes": {
+        "a": {
+          "x": 75,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 125,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 1
+        },
+        "c": {
+          "x": 25,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        },
+        "d": {
+          "x": 75,
+          "y": 225,
+          "width": 50,
+          "height": 50,
+          "rank": 4,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 100,
+              "y": 50
+            },
+            {
+              "x": 125,
+              "y": 75
+            },
+            {
+              "x": 125,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "c",
+          "points": [
+            {
+              "x": 50,
+              "y": 50
+            },
+            {
+              "x": 25,
+              "y": 75
+            },
+            {
+              "x": 25,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "d",
+          "points": [
+            {
+              "x": 125,
+              "y": 150
+            },
+            {
+              "x": 125,
+              "y": 175
+            },
+            {
+              "x": 100,
+              "y": 200
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "d",
+          "points": [
+            {
+              "x": 25,
+              "y": 150
+            },
+            {
+              "x": 25,
+              "y": 175
+            },
+            {
+              "x": 50,
+              "y": 200
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 150,
+        "height": 250
+      }
+    },
+    {
+      "name": "chain_5",
+      "opts": {
+        "width": 30,
+        "height": 300
+      },
+      "nodes": {
+        "a": {
+          "x": 15,
+          "y": 10,
+          "width": 30,
+          "height": 20,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 15,
+          "y": 80,
+          "width": 30,
+          "height": 20,
+          "rank": 2,
+          "order": 0
+        },
+        "c": {
+          "x": 15,
+          "y": 150,
+          "width": 30,
+          "height": 20,
+          "rank": 4,
+          "order": 0
+        },
+        "d": {
+          "x": 15,
+          "y": 220,
+          "width": 30,
+          "height": 20,
+          "rank": 6,
+          "order": 0
+        },
+        "e": {
+          "x": 15,
+          "y": 290,
+          "width": 30,
+          "height": 20,
+          "rank": 8,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 15,
+              "y": 20
+            },
+            {
+              "x": 15,
+              "y": 45
+            },
+            {
+              "x": 15,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 15,
+              "y": 90
+            },
+            {
+              "x": 15,
+              "y": 115
+            },
+            {
+              "x": 15,
+              "y": 140
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "d",
+          "points": [
+            {
+              "x": 15,
+              "y": 160
+            },
+            {
+              "x": 15,
+              "y": 185
+            },
+            {
+              "x": 15,
+              "y": 210
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "d",
+          "w": "e",
+          "points": [
+            {
+              "x": 15,
+              "y": 230
+            },
+            {
+              "x": 15,
+              "y": 255
+            },
+            {
+              "x": 15,
+              "y": 280
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 30,
+        "height": 300
+      }
+    },
+    {
+      "name": "edge_label",
+      "opts": {
+        "width": 80,
+        "height": 170
+      },
+      "nodes": {
+        "a": {
+          "x": 40,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 40,
+          "y": 145,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 40,
+              "y": 50
+            },
+            {
+              "x": 40,
+              "y": 85
+            },
+            {
+              "x": 40,
+              "y": 120
+            }
+          ],
+          "x": 40,
+          "y": 85
+        }
+      ],
+      "graph": {
+        "width": 80,
+        "height": 170
+      }
+    },
+    {
+      "name": "cycle",
+      "opts": {
+        "width": 55,
+        "height": 160
+      },
+      "nodes": {
+        "a": {
+          "x": 15,
+          "y": 10,
+          "width": 30,
+          "height": 20,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 40,
+          "y": 80,
+          "width": 30,
+          "height": 20,
+          "rank": 2,
+          "order": 1
+        },
+        "c": {
+          "x": 15,
+          "y": 150,
+          "width": 30,
+          "height": 20,
+          "rank": 4,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 22.143,
+              "y": 20
+            },
+            {
+              "x": 40,
+              "y": 45
+            },
+            {
+              "x": 40,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 40,
+              "y": 90
+            },
+            {
+              "x": 40,
+              "y": 115
+            },
+            {
+              "x": 22.143,
+              "y": 140
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "a",
+          "points": [
+            {
+              "x": 7.857,
+              "y": 140
+            },
+            {
+              "x": -10,
+              "y": 115
+            },
+            {
+              "x": -10,
+              "y": 80
+            },
+            {
+              "x": -10,
+              "y": 45
+            },
+            {
+              "x": 7.857,
+              "y": 20
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 55,
+        "height": 160
+      }
+    },
+    {
+      "name": "disconnected",
+      "opts": {
+        "width": 110,
+        "height": 90
+      },
+      "nodes": {
+        "a": {
+          "x": 15,
+          "y": 10,
+          "width": 30,
+          "height": 20,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 15,
+          "y": 80,
+          "width": 30,
+          "height": 20,
+          "rank": 2,
+          "order": 0
+        },
+        "c": {
+          "x": 95,
+          "y": 10,
+          "width": 30,
+          "height": 20,
+          "rank": 0,
+          "order": 1
+        },
+        "d": {
+          "x": 95,
+          "y": 80,
+          "width": 30,
+          "height": 20,
+          "rank": 2,
+          "order": 1
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 15,
+              "y": 20
+            },
+            {
+              "x": 15,
+              "y": 45
+            },
+            {
+              "x": 15,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "d",
+          "points": [
+            {
+              "x": 95,
+              "y": 20
+            },
+            {
+              "x": 95,
+              "y": 45
+            },
+            {
+              "x": 95,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 110,
+        "height": 90
+      }
+    },
+    {
+      "name": "lr_direction",
+      "opts": {
+        "rankdir": "LR",
+        "width": 150,
+        "height": 50
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 125,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 50,
+              "y": 25
+            },
+            {
+              "x": 75,
+              "y": 25
+            },
+            {
+              "x": 100,
+              "y": 25
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 150,
+        "height": 50
+      }
+    },
+    {
+      "name": "bt_direction",
+      "opts": {
+        "rankdir": "BT",
+        "width": 50,
+        "height": 150
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 25,
+              "y": 100
+            },
+            {
+              "x": 25,
+              "y": 75
+            },
+            {
+              "x": 25,
+              "y": 50
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 50,
+        "height": 150
+      }
+    },
+    {
+      "name": "rl_direction",
+      "opts": {
+        "rankdir": "RL",
+        "width": 150,
+        "height": 50
+      },
+      "nodes": {
+        "a": {
+          "x": 125,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 100,
+              "y": 25
+            },
+            {
+              "x": 75,
+              "y": 25
+            },
+            {
+              "x": 50,
+              "y": 25
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 150,
+        "height": 50
+      }
+    },
+    {
+      "name": "custom_sep",
+      "opts": {
+        "nodesep": 100,
+        "ranksep": 80,
+        "edgesep": 30,
+        "width": 200,
+        "height": 180
+      },
+      "nodes": {
+        "a": {
+          "x": 100,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 175,
+          "y": 155,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 1
+        },
+        "c": {
+          "x": 25,
+          "y": 155,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 125,
+              "y": 46.667
+            },
+            {
+              "x": 175,
+              "y": 90
+            },
+            {
+              "x": 175,
+              "y": 130
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "c",
+          "points": [
+            {
+              "x": 75,
+              "y": 46.667
+            },
+            {
+              "x": 25,
+              "y": 90
+            },
+            {
+              "x": 25,
+              "y": 130
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 200,
+        "height": 180
+      }
+    },
+    {
+      "name": "self_loop",
+      "opts": {
+        "width": 160,
+        "height": 150
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 25,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 25,
+              "y": 50
+            },
+            {
+              "x": 25,
+              "y": 75
+            },
+            {
+              "x": 25,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "a",
+          "points": [
+            {
+              "x": 50,
+              "y": 15.385
+            },
+            {
+              "x": 90,
+              "y": 0
+            },
+            {
+              "x": 100,
+              "y": 0
+            },
+            {
+              "x": 110,
+              "y": 25
+            },
+            {
+              "x": 100,
+              "y": 50
+            },
+            {
+              "x": 90,
+              "y": 50
+            },
+            {
+              "x": 50,
+              "y": 34.615
+            }
+          ],
+          "x": 140,
+          "y": 25
+        }
+      ],
+      "graph": {
+        "width": 160,
+        "height": 150
+      }
+    },
+    {
+      "name": "long_edge",
+      "opts": {
+        "width": 80,
+        "height": 250
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 55,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 1
+        },
+        "c": {
+          "x": 25,
+          "y": 225,
+          "width": 50,
+          "height": 50,
+          "rank": 4,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 40,
+              "y": 50
+            },
+            {
+              "x": 55,
+              "y": 75
+            },
+            {
+              "x": 55,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "c",
+          "points": [
+            {
+              "x": 10,
+              "y": 50
+            },
+            {
+              "x": -5,
+              "y": 75
+            },
+            {
+              "x": -5,
+              "y": 125
+            },
+            {
+              "x": -5,
+              "y": 175
+            },
+            {
+              "x": 10,
+              "y": 200
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 55,
+              "y": 150
+            },
+            {
+              "x": 55,
+              "y": 175
+            },
+            {
+              "x": 40,
+              "y": 200
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 80,
+        "height": 250
+      }
+    },
+    {
+      "name": "fan_out",
+      "opts": {
+        "width": 400,
+        "height": 130
+      },
+      "nodes": {
+        "root": {
+          "x": 200,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "n0": {
+          "x": 380,
+          "y": 115,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 4
+        },
+        "n1": {
+          "x": 290,
+          "y": 115,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 3
+        },
+        "n2": {
+          "x": 200,
+          "y": 115,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 2
+        },
+        "n3": {
+          "x": 110,
+          "y": 115,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 1
+        },
+        "n4": {
+          "x": 20,
+          "y": 115,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "root",
+          "w": "n0",
+          "points": [
+            {
+              "x": 225,
+              "y": 31.944
+            },
+            {
+              "x": 380,
+              "y": 75
+            },
+            {
+              "x": 380,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "root",
+          "w": "n1",
+          "points": [
+            {
+              "x": 225,
+              "y": 38.889
+            },
+            {
+              "x": 290,
+              "y": 75
+            },
+            {
+              "x": 290,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "root",
+          "w": "n2",
+          "points": [
+            {
+              "x": 200,
+              "y": 50
+            },
+            {
+              "x": 200,
+              "y": 75
+            },
+            {
+              "x": 200,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "root",
+          "w": "n3",
+          "points": [
+            {
+              "x": 175,
+              "y": 38.889
+            },
+            {
+              "x": 110,
+              "y": 75
+            },
+            {
+              "x": 110,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "root",
+          "w": "n4",
+          "points": [
+            {
+              "x": 175,
+              "y": 31.944
+            },
+            {
+              "x": 20,
+              "y": 75
+            },
+            {
+              "x": 20,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 400,
+        "height": 130
+      }
+    },
+    {
+      "name": "margins",
+      "opts": {
+        "marginx": 20,
+        "marginy": 30,
+        "width": 90,
+        "height": 210
+      },
+      "nodes": {
+        "a": {
+          "x": 45,
+          "y": 55,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 45,
+          "y": 155,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 45,
+              "y": 80
+            },
+            {
+              "x": 45,
+              "y": 105
+            },
+            {
+              "x": 45,
+              "y": 130
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 90,
+        "height": 210
+      }
+    },
+    {
+      "name": "varied_sizes",
+      "opts": {
+        "width": 200,
+        "height": 260
+      },
+      "nodes": {
+        "small": {
+          "x": 100,
+          "y": 10,
+          "width": 20,
+          "height": 20,
+          "rank": 0,
+          "order": 0
+        },
+        "medium": {
+          "x": 137.5,
+          "y": 90,
+          "width": 80,
+          "height": 40,
+          "rank": 2,
+          "order": 1
+        },
+        "large": {
+          "x": 100,
+          "y": 210,
+          "width": 200,
+          "height": 100,
+          "rank": 4,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "small",
+          "w": "medium",
+          "points": [
+            {
+              "x": 110,
+              "y": 19.333
+            },
+            {
+              "x": 137.5,
+              "y": 45
+            },
+            {
+              "x": 137.5,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "small",
+          "w": "large",
+          "points": [
+            {
+              "x": 90,
+              "y": 19.333
+            },
+            {
+              "x": 62.5,
+              "y": 45
+            },
+            {
+              "x": 62.5,
+              "y": 90
+            },
+            {
+              "x": 62.5,
+              "y": 135
+            },
+            {
+              "x": 75,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "medium",
+          "w": "large",
+          "points": [
+            {
+              "x": 137.5,
+              "y": 110
+            },
+            {
+              "x": 137.5,
+              "y": 135
+            },
+            {
+              "x": 125,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 200,
+        "height": 260
+      }
+    },
+    {
+      "name": "parallel_edges",
+      "opts": {
+        "width": 50,
+        "height": 150
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 25,
+          "y": 125,
+          "width": 50,
+          "height": 50,
+          "rank": 2,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 30,
+              "y": 50
+            },
+            {
+              "x": 35,
+              "y": 75
+            },
+            {
+              "x": 30,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 20,
+              "y": 50
+            },
+            {
+              "x": 15,
+              "y": 75
+            },
+            {
+              "x": 20,
+              "y": 100
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 50,
+        "height": 150
+      }
+    },
+    {
+      "name": "complex",
+      "opts": {
+        "width": 310,
+        "height": 270
+      },
+      "nodes": {
+        "a": {
+          "x": 155,
+          "y": 15,
+          "width": 40,
+          "height": 30,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 245,
+          "y": 95,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 1
+        },
+        "c": {
+          "x": 65,
+          "y": 95,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 0
+        },
+        "d": {
+          "x": 290,
+          "y": 175,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 3
+        },
+        "e": {
+          "x": 200,
+          "y": 175,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 2
+        },
+        "f": {
+          "x": 110,
+          "y": 175,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 1
+        },
+        "g": {
+          "x": 20,
+          "y": 175,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 0
+        },
+        "h": {
+          "x": 155,
+          "y": 255,
+          "width": 40,
+          "height": 30,
+          "rank": 6,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 175,
+              "y": 23.889
+            },
+            {
+              "x": 245,
+              "y": 55
+            },
+            {
+              "x": 245,
+              "y": 80
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "c",
+          "points": [
+            {
+              "x": 135,
+              "y": 23.889
+            },
+            {
+              "x": 65,
+              "y": 55
+            },
+            {
+              "x": 65,
+              "y": 80
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "d",
+          "points": [
+            {
+              "x": 261.875,
+              "y": 110
+            },
+            {
+              "x": 290,
+              "y": 135
+            },
+            {
+              "x": 290,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "e",
+          "points": [
+            {
+              "x": 228.125,
+              "y": 110
+            },
+            {
+              "x": 200,
+              "y": 135
+            },
+            {
+              "x": 200,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "f",
+          "points": [
+            {
+              "x": 81.875,
+              "y": 110
+            },
+            {
+              "x": 110,
+              "y": 135
+            },
+            {
+              "x": 110,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "c",
+          "w": "g",
+          "points": [
+            {
+              "x": 48.125,
+              "y": 110
+            },
+            {
+              "x": 20,
+              "y": 135
+            },
+            {
+              "x": 20,
+              "y": 160
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "d",
+          "w": "h",
+          "points": [
+            {
+              "x": 290,
+              "y": 190
+            },
+            {
+              "x": 290,
+              "y": 215
+            },
+            {
+              "x": 175,
+              "y": 249.074
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "e",
+          "w": "h",
+          "points": [
+            {
+              "x": 200,
+              "y": 190
+            },
+            {
+              "x": 200,
+              "y": 215
+            },
+            {
+              "x": 171.875,
+              "y": 240
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "f",
+          "w": "h",
+          "points": [
+            {
+              "x": 110,
+              "y": 190
+            },
+            {
+              "x": 110,
+              "y": 215
+            },
+            {
+              "x": 138.125,
+              "y": 240
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "g",
+          "w": "h",
+          "points": [
+            {
+              "x": 20,
+              "y": 190
+            },
+            {
+              "x": 20,
+              "y": 215
+            },
+            {
+              "x": 135,
+              "y": 249.074
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 310,
+        "height": 270
+      }
+    },
+    {
+      "name": "compound",
+      "opts": {
+        "width": 220,
+        "height": 200
+      },
+      "nodes": {
+        "a": {
+          "x": 60,
+          "y": 50,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 1
+        },
+        "b": {
+          "x": 160,
+          "y": 50,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 2
+        },
+        "c": {
+          "x": 110,
+          "y": 175,
+          "width": 50,
+          "height": 50,
+          "rank": 4,
+          "order": 0
+        },
+        "group": {
+          "x": 110,
+          "y": 50,
+          "width": 220,
+          "height": 100
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "c",
+          "points": [
+            {
+              "x": 60,
+              "y": 75
+            },
+            {
+              "x": 60,
+              "y": 100
+            },
+            {
+              "x": 60,
+              "y": 125
+            },
+            {
+              "x": 85,
+              "y": 150
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 160,
+              "y": 75
+            },
+            {
+              "x": 160,
+              "y": 100
+            },
+            {
+              "x": 160,
+              "y": 125
+            },
+            {
+              "x": 135,
+              "y": 150
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 220,
+        "height": 200
+      }
+    },
+    {
+      "name": "minlen",
+      "opts": {
+        "width": 50,
+        "height": 250
+      },
+      "nodes": {
+        "a": {
+          "x": 25,
+          "y": 25,
+          "width": 50,
+          "height": 50,
+          "rank": 0,
+          "order": 0
+        },
+        "b": {
+          "x": 25,
+          "y": 225,
+          "width": 50,
+          "height": 50,
+          "rank": 6,
+          "order": 0
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 25,
+              "y": 50
+            },
+            {
+              "x": 25,
+              "y": 75
+            },
+            {
+              "x": 25,
+              "y": 100
+            },
+            {
+              "x": 25,
+              "y": 125
+            },
+            {
+              "x": 25,
+              "y": 150
+            },
+            {
+              "x": 25,
+              "y": 175
+            },
+            {
+              "x": 25,
+              "y": 200
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 50,
+        "height": 250
+      }
+    },
+    {
+      "name": "compound_single_leaf_tb",
+      "opts": {
+        "width": 120,
+        "height": 100
+      },
+      "nodes": {
+        "a": {
+          "x": 60,
+          "y": 50,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 1
+        },
+        "g": {
+          "x": 60,
+          "y": 50,
+          "width": 120,
+          "height": 100
+        }
+      },
+      "edges": [],
+      "graph": {
+        "width": 120,
+        "height": 100
+      }
+    },
+    {
+      "name": "compound_single_leaf_lr",
+      "opts": {
+        "rankdir": "LR",
+        "width": 100,
+        "height": 120
+      },
+      "nodes": {
+        "a": {
+          "x": 50,
+          "y": 60,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 1
+        },
+        "g": {
+          "x": 50,
+          "y": 60,
+          "width": 100,
+          "height": 120
+        }
+      },
+      "edges": [],
+      "graph": {
+        "width": 100,
+        "height": 120
+      }
+    },
+    {
+      "name": "compound_chain_tb",
+      "opts": {
+        "width": 120,
+        "height": 300
+      },
+      "nodes": {
+        "a": {
+          "x": 60,
+          "y": 50,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 1
+        },
+        "b": {
+          "x": 60,
+          "y": 150,
+          "width": 50,
+          "height": 50,
+          "rank": 3,
+          "order": 1
+        },
+        "c": {
+          "x": 60,
+          "y": 250,
+          "width": 50,
+          "height": 50,
+          "rank": 5,
+          "order": 1
+        },
+        "g": {
+          "x": 60,
+          "y": 150,
+          "width": 120,
+          "height": 300
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 60,
+              "y": 75
+            },
+            {
+              "x": 60,
+              "y": 100
+            },
+            {
+              "x": 60,
+              "y": 125
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 60,
+              "y": 175
+            },
+            {
+              "x": 60,
+              "y": 200
+            },
+            {
+              "x": 60,
+              "y": 225
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 120,
+        "height": 300
+      }
+    },
+    {
+      "name": "compound_chain_lr",
+      "opts": {
+        "rankdir": "LR",
+        "width": 300,
+        "height": 120
+      },
+      "nodes": {
+        "a": {
+          "x": 50,
+          "y": 60,
+          "width": 50,
+          "height": 50,
+          "rank": 1,
+          "order": 1
+        },
+        "b": {
+          "x": 150,
+          "y": 60,
+          "width": 50,
+          "height": 50,
+          "rank": 3,
+          "order": 1
+        },
+        "c": {
+          "x": 250,
+          "y": 60,
+          "width": 50,
+          "height": 50,
+          "rank": 5,
+          "order": 1
+        },
+        "g": {
+          "x": 150,
+          "y": 60,
+          "width": 300,
+          "height": 120
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 75,
+              "y": 60
+            },
+            {
+              "x": 100,
+              "y": 60
+            },
+            {
+              "x": 125,
+              "y": 60
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 175,
+              "y": 60
+            },
+            {
+              "x": 200,
+              "y": 60
+            },
+            {
+              "x": 225,
+              "y": 60
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 300,
+        "height": 120
+      }
+    },
+    {
+      "name": "compound_nested_tb",
+      "opts": {
+        "width": 150,
+        "height": 290
+      },
+      "nodes": {
+        "a": {
+          "x": 75,
+          "y": 65,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 2
+        },
+        "b": {
+          "x": 75,
+          "y": 145,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 2
+        },
+        "c": {
+          "x": 75,
+          "y": 250,
+          "width": 40,
+          "height": 30,
+          "rank": 7,
+          "order": 1
+        },
+        "inner": {
+          "x": 75,
+          "y": 105,
+          "width": 110,
+          "height": 160
+        },
+        "outer": {
+          "x": 75,
+          "y": 145,
+          "width": 150,
+          "height": 290
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 75,
+              "y": 80
+            },
+            {
+              "x": 75,
+              "y": 105
+            },
+            {
+              "x": 75,
+              "y": 130
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 75,
+              "y": 160
+            },
+            {
+              "x": 75,
+              "y": 185
+            },
+            {
+              "x": 75,
+              "y": 210
+            },
+            {
+              "x": 75,
+              "y": 235
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 150,
+        "height": 290
+      }
+    },
+    {
+      "name": "compound_nested_lr",
+      "opts": {
+        "rankdir": "LR",
+        "width": 320,
+        "height": 140
+      },
+      "nodes": {
+        "a": {
+          "x": 70,
+          "y": 70,
+          "width": 40,
+          "height": 30,
+          "rank": 2,
+          "order": 2
+        },
+        "b": {
+          "x": 160,
+          "y": 70,
+          "width": 40,
+          "height": 30,
+          "rank": 4,
+          "order": 2
+        },
+        "c": {
+          "x": 275,
+          "y": 70,
+          "width": 40,
+          "height": 30,
+          "rank": 7,
+          "order": 1
+        },
+        "inner": {
+          "x": 115,
+          "y": 70,
+          "width": 180,
+          "height": 100
+        },
+        "outer": {
+          "x": 160,
+          "y": 70,
+          "width": 320,
+          "height": 140
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 90,
+              "y": 70
+            },
+            {
+              "x": 115,
+              "y": 70
+            },
+            {
+              "x": 140,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "b",
+          "w": "c",
+          "points": [
+            {
+              "x": 180,
+              "y": 70
+            },
+            {
+              "x": 205,
+              "y": 70
+            },
+            {
+              "x": 230,
+              "y": 70
+            },
+            {
+              "x": 255,
+              "y": 70
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 320,
+        "height": 140
+      }
+    },
+    {
+      "name": "compound_cross_cluster_tb",
+      "opts": {
+        "width": 120,
+        "height": 210
+      },
+      "nodes": {
+        "a": {
+          "x": 60,
+          "y": 40,
+          "width": 50,
+          "height": 30,
+          "rank": 1,
+          "order": 1
+        },
+        "b": {
+          "x": 60,
+          "y": 170,
+          "width": 50,
+          "height": 30,
+          "rank": 5,
+          "order": 1
+        },
+        "g1": {
+          "x": 60,
+          "y": 40,
+          "width": 120,
+          "height": 80
+        },
+        "g2": {
+          "x": 60,
+          "y": 170,
+          "width": 120,
+          "height": 80
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 60,
+              "y": 55
+            },
+            {
+              "x": 60,
+              "y": 80
+            },
+            {
+              "x": 60,
+              "y": 105
+            },
+            {
+              "x": 60,
+              "y": 130
+            },
+            {
+              "x": 60,
+              "y": 155
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 120,
+        "height": 210
+      }
+    },
+    {
+      "name": "compound_cross_cluster_lr",
+      "opts": {
+        "rankdir": "LR",
+        "width": 250,
+        "height": 100
+      },
+      "nodes": {
+        "a": {
+          "x": 50,
+          "y": 50,
+          "width": 50,
+          "height": 30,
+          "rank": 1,
+          "order": 1
+        },
+        "b": {
+          "x": 200,
+          "y": 50,
+          "width": 50,
+          "height": 30,
+          "rank": 5,
+          "order": 1
+        },
+        "g1": {
+          "x": 50,
+          "y": 50,
+          "width": 100,
+          "height": 100
+        },
+        "g2": {
+          "x": 200,
+          "y": 50,
+          "width": 100,
+          "height": 100
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "b",
+          "points": [
+            {
+              "x": 75,
+              "y": 50
+            },
+            {
+              "x": 100,
+              "y": 50
+            },
+            {
+              "x": 125,
+              "y": 50
+            },
+            {
+              "x": 150,
+              "y": 50
+            },
+            {
+              "x": 175,
+              "y": 50
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 250,
+        "height": 100
+      }
+    },
+    {
+      "name": "compound_empty_inner",
+      "opts": {
+        "width": 160,
+        "height": 80
+      },
+      "nodes": {
+        "a": {
+          "x": 55,
+          "y": 40,
+          "width": 40,
+          "height": 30,
+          "rank": 1,
+          "order": 1
+        },
+        "inner_empty": {
+          "x": 125,
+          "y": 40,
+          "rank": 1,
+          "order": 2
+        },
+        "outer": {
+          "x": 80,
+          "y": 40,
+          "width": 160,
+          "height": 80
+        }
+      },
+      "edges": [],
+      "graph": {
+        "width": 160,
+        "height": 80
+      }
+    },
+    {
+      "name": "compound_fork_join",
+      "opts": {
+        "width": 200,
+        "height": 240
+      },
+      "nodes": {
+        "a": {
+          "x": 100,
+          "y": 15,
+          "width": 40,
+          "height": 30,
+          "rank": 0,
+          "order": 0
+        },
+        "l": {
+          "x": 145,
+          "y": 120,
+          "width": 40,
+          "height": 30,
+          "rank": 3,
+          "order": 2
+        },
+        "r": {
+          "x": 55,
+          "y": 120,
+          "width": 40,
+          "height": 30,
+          "rank": 3,
+          "order": 1
+        },
+        "z": {
+          "x": 100,
+          "y": 225,
+          "width": 40,
+          "height": 30,
+          "rank": 6,
+          "order": 0
+        },
+        "g": {
+          "x": 100,
+          "y": 120,
+          "width": 200,
+          "height": 80
+        }
+      },
+      "edges": [
+        {
+          "v": "a",
+          "w": "l",
+          "points": [
+            {
+              "x": 116.875,
+              "y": 30
+            },
+            {
+              "x": 145,
+              "y": 55
+            },
+            {
+              "x": 145,
+              "y": 80
+            },
+            {
+              "x": 145,
+              "y": 105
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "a",
+          "w": "r",
+          "points": [
+            {
+              "x": 83.125,
+              "y": 30
+            },
+            {
+              "x": 55,
+              "y": 55
+            },
+            {
+              "x": 55,
+              "y": 80
+            },
+            {
+              "x": 55,
+              "y": 105
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "l",
+          "w": "z",
+          "points": [
+            {
+              "x": 145,
+              "y": 135
+            },
+            {
+              "x": 145,
+              "y": 160
+            },
+            {
+              "x": 145,
+              "y": 185
+            },
+            {
+              "x": 116.875,
+              "y": 210
+            }
+          ],
+          "x": null,
+          "y": null
+        },
+        {
+          "v": "r",
+          "w": "z",
+          "points": [
+            {
+              "x": 55,
+              "y": 135
+            },
+            {
+              "x": 55,
+              "y": 160
+            },
+            {
+              "x": 55,
+              "y": 185
+            },
+            {
+              "x": 83.125,
+              "y": 210
+            }
+          ],
+          "x": null,
+          "y": null
+        }
+      ],
+      "graph": {
+        "width": 200,
+        "height": 240
+      }
+    }
+  ]
+}
