@@ -10,7 +10,12 @@
 //!
 //! Regenerate them only when bumping `src/katex/vendor/katex.min.js`.
 
-#![cfg(feature = "katex")]
+#![cfg(all(feature = "katex", feature = "metrics-static-dejavu"))]
+// Compiled only with both `katex` and `metrics-static-dejavu` — the
+// byte-exact baselines under `tests/katex_baselines/` were captured
+// against the upstream npm `katex` package output and assume the
+// static DejaVu fixtures drive any text measurement that flows
+// through the rendered HTML/MathML.
 
 use mermaid_little::katex::render;
 

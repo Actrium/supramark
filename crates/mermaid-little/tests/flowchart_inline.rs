@@ -1,3 +1,4 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! Flowchart integration tests — parse → layout → render, comparing
 //! against reference SVGs for structural soundness (not byte-exact
 //! yet; see module-level commentary in `src/render/svg_flowchart.rs`).
@@ -5,6 +6,11 @@
 //! This file deliberately stays independent of `tests/wave1_e2e.rs`
 //! and friends so that parser / layout / renderer churn doesn't
 //! cascade across the existing sweeps.
+//!
+//! Compiled only with `metrics-static-dejavu` — several tests below
+//! (`flowchart_134_isolated_cluster_dom_order_is_byte_exact`, the byte
+//! sweep, etc.) assert byte-exact equality against upstream reference
+//! SVGs, which only holds with the static DejaVu fixtures.
 
 use mermaid_little::layout::flowchart as fcl;
 use mermaid_little::parser::flowchart as fcp;

@@ -75,6 +75,22 @@ by accepting upstream's version. If upstream takes a different shape
   ```
 - **No CLA** — kookyleo owns it.
 
+## supramark-side metrics-* feature flags
+
+The crate exposes a `metrics-{static-dejavu, ttf-parser, host-callback,
+ffi-callback}` family — the `Metrics` impl `crate::font_metrics` routes
+through is selected at compile time and the family is mutually exclusive.
+The crate's own default feature set deliberately includes NONE of them:
+production consumers (e.g. `mermaid-little-web`) must
+`default-features = false` and explicitly opt into one platform impl,
+so the choice is visible in the consumer's `Cargo.toml`. A `[dev-dependencies]`
+self-cycle flips on `metrics-static-dejavu` so `cargo test` keeps running
+the `*_byte_exact.rs` reference suites unchanged. The `metrics-static-dejavu`
+impl is a regression-test fixture (byte parity with upstream Mermaid on
+DejaVu) and is NOT recommended for production. `metrics-ffi-callback`
+is reserved for the planned React-Native native-FFI wrapper; enabling it
+today fires a `compile_error!` because no impl ships yet.
+
 ## Outstanding
 - Land the `packages/web/` patch upstream so this section can shrink to
   "no local patches".

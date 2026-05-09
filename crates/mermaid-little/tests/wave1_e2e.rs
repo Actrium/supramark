@@ -1,3 +1,9 @@
+#![cfg(feature = "metrics-static-dejavu")]
+// Compiled only with `metrics-static-dejavu` — Wave-1 end-to-end checks
+// diff Rust SVG output against upstream Mermaid reference SVGs, which
+// only matches when the layout pipeline runs against the static DejaVu
+// fixtures.
+
 use mermaid_little::convert_with_id;
 use std::fs;
 use std::path::PathBuf;

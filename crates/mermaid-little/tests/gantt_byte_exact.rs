@@ -1,5 +1,10 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! Byte-exact parity tests for every gantt reference SVG under
 //! `tests/reference/ext_fixtures/{cypress,demos}/gantt/`.
+//!
+//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Mermaid's reference SVGs only holds when the layout pipeline runs
+//! against the static DejaVu fixtures.
 
 fn render_fixture(source: &str, id: &str) -> String {
     mermaid_little::convert_with_id(source, id).expect("convert")

@@ -31,15 +31,22 @@ wasm-opt = false
 # the usual sense. graphviz-anywhere installs its own wasm JS bridge
 # automatically when compiled for wasm32.
 #
-# `metrics-host-callback` is selected explicitly because the default
-# feature set was disabled above; the metrics-* family is mutually
-# exclusive and exactly one impl must be active. The host-callback impl
-# defers every text measurement to `globalThis.supramark.measureText`,
-# which the host installs before the wasm runs. This keeps Layer-1
-# layout consistent with the host's actual font rendering and drops the
-# 22K-LOC static range tables from the wasm bundle. The host can install
-# the default canvas-backed bridge via
-# `installHostMetricsBridge()` from `@supramark/engines/host-bridge`,
-# or supply its own `globalThis.supramark.measureText` first.
+# The parent crate's default feature set excludes ALL `metrics-*`
+# impls (the family is mutually exclusive and the choice is too
+# load-bearing to be implicit), so production wasm explicitly selects
+# `metrics-host-callback` here. This is the canonical pattern for
+# downstream consumers: `default-features = false` plus one platform
+# impl. The host-callback impl defers every text measurement to
+# `globalThis.supramark.measureText`, which the host installs before
+# the wasm runs. This keeps Layer-1 layout consistent with the host's
+# actual font rendering and drops the 22K-LOC static range tables from
+# the wasm bundle. The host can install the default canvas-backed
+# bridge via `installHostMetricsBridge()` from
+# `@supramark/engines/host-bridge`, or supply its own
+# `globalThis.supramark.measureText` first.
+#
+# The future React-Native FFI wrapper will use the sibling
+# `metrics-ffi-callback` feature (currently a stub that fires a
+# `compile_error!` until the impl lands).
 plantuml-little = { path = "../..", default-features = false, features = ["metrics-host-callback"] }
 wasm-bindgen = "0.2"

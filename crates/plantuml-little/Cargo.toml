@@ -40,26 +40,50 @@ name = "plantuml-little"
 path = "src/main.rs"
 # The CLI depends on std::process, env_logger, and on-disk file I/O, which
 # are not available on wasm32. Compile the library only on that target.
-required-features = ["cli"]
+# `metrics-static-dejavu` is auto-selected because the CLI must ship a
+# concrete metrics impl; the byte-exact-with-Java DejaVu tables are the
+# safest default for a standalone tool.
+required-features = ["cli", "metrics-static-dejavu"]
 
 [features]
-default = ["cli", "remote", "metrics-static-dejavu"]
+default = ["cli", "remote"]
 # CLI front-end (env_logger + main.rs). Disabled automatically on wasm32.
 cli = ["dep:env_logger"]
 # Remote-resource fetching via ureq (themes, images).
 # Disabled automatically on wasm32 where ureq cannot link.
 remote = ["dep:ureq"]
 
-# Metrics-impl selection. Exactly one of the three should be enabled
-# per build; defaulting to static-dejavu preserves the byte-exact Java
-# parity that the 268+ reference SVG tests in tests/ rely on. Wasm /
-# native production builds that prefer dynamic measurement (so layer-1
-# layout uses the same fonts the host browser/RN actually renders with)
-# should set default-features = false and pick one of the dynamic
-# variants instead.
+# Metrics-impl selection. The metrics-* family is mutually exclusive —
+# exactly one impl must be active per build. The default feature set
+# above deliberately selects NONE: production consumers MUST set
+# `default-features = false` and explicitly pick one of the platform
+# impls below, so the choice is visible in the consumer's Cargo.toml
+# rather than implicit. `cargo test` here is unblocked by a dev-dep on
+# `plantuml-little` itself (see [dev-dependencies]) that flips on
+# `metrics-static-dejavu` so the existing 268+ byte-equal-with-Java
+# reference SVG suite keeps running unchanged.
+#
+# - `metrics-static-dejavu` — byte-equal Java FontMetrics fixtures on
+#   DejaVu Sans / Mono / Serif. **Test-fixture only.** Used by the
+#   regression suite to verify the layout pipeline reproduces upstream
+#   Java SVG bytes exactly. Not recommended for production: real hosts
+#   render with their own font stack, not DejaVu.
+# - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
+#   parsed font (defaults to font-metrics's embedded DejaVu Latin
+#   subset). Native production builds that want dynamic metrics
+#   without browser/RN bridging.
+# - `metrics-host-callback` — defer measurement to a JS-side bridge
+#   via `wasm-bindgen` extern. Used by the `plantuml-little-web` wasm
+#   wrapper so layer-1 layout sees the exact widths the host browser
+#   / RN-Skia will render with.
+# - `metrics-ffi-callback` — reserved for the planned React-Native
+#   native-FFI wrapper that will install a JS-side bridge through an
+#   `extern "C"` callback. No impl yet; enabling this feature today
+#   triggers a compile_error in `src/font_metrics.rs`.
 metrics-static-dejavu = ["font_metrics_core/static-fixtures"]
 metrics-ttf-parser = []
 metrics-host-callback = []
+metrics-ffi-callback = []
 
 [dependencies]
 # Shared font metrics. The `metrics-*` Cargo features above pick
@@ -96,6 +120,13 @@ url = "2"
 flate2 = { version = "1", features = ["rust_backend"], default-features = false }
 serde_json = "1"
 base64 = "0.22"
+
+[dev-dependencies]
+# Self-cycle so `cargo test` auto-enables `metrics-static-dejavu` —
+# the byte-equal-with-Java reference suite under `tests/` requires
+# the static DejaVu fixtures. Production consumers explicitly opt
+# into one of the `metrics-*` impls instead (see [features] above).
+plantuml-little = { path = ".", features = ["metrics-static-dejavu"] }
 
 [profile.release]
 opt-level = "z"

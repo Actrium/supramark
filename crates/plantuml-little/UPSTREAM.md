@@ -62,6 +62,23 @@
   conflict — keep ours (no inner workspace).
 - **No CLA** — kookyleo owns it.
 
+## supramark-side metrics-* feature flags
+
+The crate exposes a `metrics-{static-dejavu, ttf-parser, host-callback,
+ffi-callback}` family — the `Metrics` impl `crate::font_metrics` routes
+through is selected at compile time and the family is mutually exclusive.
+The crate's own default feature set deliberately includes NONE of them:
+production consumers (e.g. `plantuml-little-web`) must
+`default-features = false` and explicitly opt into one platform impl,
+so the choice is visible in the consumer's `Cargo.toml`. A `[dev-dependencies]`
+self-cycle flips on `metrics-static-dejavu` so `cargo test` keeps running
+the 268+ byte-equal-with-Java reference SVG suite unchanged. The
+`metrics-static-dejavu` impl is a regression-test fixture (byte parity
+with Java FontMetrics on DejaVu) and is NOT recommended for production.
+`metrics-ffi-callback` is reserved for the planned React-Native native-FFI
+wrapper; enabling it today fires a `compile_error!` because no impl ships
+yet.
+
 ## Outstanding
 - Once `mermaid-little` lands in step 4, both will share the in-tree
   `graphviz-anywhere` (mermaid-little uses it for layout via the same

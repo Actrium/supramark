@@ -1,9 +1,14 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! Byte-exact parity tests for every xychart reference SVG under
 //! `tests/reference/ext_fixtures/{cypress,demos}/xychart/`.
 //!
 //! Each test reads the corresponding `.mmd` fixture, runs the full
 //! parser → layout → render pipeline, and compares against the
 //! reference output byte-for-byte.
+//!
+//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Mermaid's reference SVGs only holds when the layout pipeline runs
+//! against the static DejaVu fixtures.
 
 use mermaid_little::layout::xychart as layout_mod;
 use mermaid_little::parser::xychart as parser_mod;

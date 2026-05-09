@@ -24,10 +24,13 @@ exclude = [
 [[bin]]
 name = "mermaid-little"
 path = "src/main.rs"
-required-features = ["cli"]
+# `metrics-static-dejavu` is auto-selected because the CLI must ship a
+# concrete metrics impl; the byte-exact-with-upstream DejaVu tables are
+# the safest default for a standalone tool.
+required-features = ["cli", "metrics-static-dejavu"]
 
 [features]
-default = ["cli", "metrics-static-dejavu"]
+default = ["cli"]
 cli = ["dep:env_logger"]
 # Embed QuickJS + KaTeX for byte-exact LaTeX math rendering. Required for
 # CLI / test parity with mermaid's `forceLegacyMathML: true` reference
@@ -43,16 +46,37 @@ katex = ["dep:rquickjs"]
 # rquickjs without DOM polyfills.
 cose_bilkent = ["dep:rquickjs"]
 
-# Metrics-impl selection. Exactly one of the three should be enabled
-# per build; defaulting to static-dejavu preserves the byte-exact
-# parity that the *_byte_exact.rs reference suites rely on. Wasm /
-# native production builds that prefer dynamic measurement (so layer-1
-# layout uses the same fonts the host browser/RN actually renders with)
-# should set default-features = false and pick one of the dynamic
-# variants instead.
+# Metrics-impl selection. The metrics-* family is mutually exclusive —
+# exactly one impl must be active per build. The default feature set
+# above deliberately selects NONE: production consumers MUST set
+# `default-features = false` and explicitly pick one of the platform
+# impls below, so the choice is visible in the consumer's Cargo.toml
+# rather than implicit. `cargo test` here is unblocked by a dev-dep on
+# `mermaid-little` itself (see [dev-dependencies]) that flips on
+# `metrics-static-dejavu` so the existing *_byte_exact.rs reference
+# suites keep running unchanged.
+#
+# - `metrics-static-dejavu` — byte-equal upstream-Mermaid fixtures on
+#   DejaVu Sans / Mono / Serif. **Test-fixture only.** Used by the
+#   regression suite to verify the layout pipeline reproduces upstream
+#   SVG bytes exactly. Not recommended for production: real hosts
+#   render with their own font stack, not DejaVu.
+# - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
+#   parsed font (defaults to font-metrics's embedded DejaVu Latin
+#   subset). Native production builds that want dynamic metrics
+#   without browser/RN bridging.
+# - `metrics-host-callback` — defer measurement to a JS-side bridge
+#   via `wasm-bindgen` extern. Used by the `mermaid-little-web` wasm
+#   wrapper so layer-1 layout sees the exact widths the host browser
+#   / RN-Skia will render with.
+# - `metrics-ffi-callback` — reserved for the planned React-Native
+#   native-FFI wrapper that will install a JS-side bridge through an
+#   `extern "C"` callback. No impl yet; enabling this feature today
+#   triggers a compile_error in `src/font_metrics.rs`.
 metrics-static-dejavu = ["font_metrics_core/static-fixtures"]
 metrics-ttf-parser = []
 metrics-host-callback = []
+metrics-ffi-callback = []
 
 [dependencies]
 # Shared font metrics. The `metrics-*` Cargo features above pick
@@ -101,6 +125,11 @@ libm = "0.2"
 [dev-dependencies]
 # SVG parser used by the structural-diff evaluator under `tests/eval/`.
 roxmltree = "0.20"
+# Self-cycle so `cargo test` auto-enables `metrics-static-dejavu` —
+# the *_byte_exact.rs reference suites under `tests/` require the
+# static DejaVu fixtures. Production consumers explicitly opt into
+# one of the `metrics-*` impls instead (see [features] above).
+mermaid-little = { path = ".", features = ["metrics-static-dejavu"] }
 
 [profile.release]
 opt-level = "z"

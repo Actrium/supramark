@@ -1,4 +1,9 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! Byte-exact treemap fixtures — mirrors `wave1_e2e.rs` pattern.
+//!
+//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Mermaid's reference SVGs only holds when the layout pipeline runs
+//! against the static DejaVu fixtures.
 
 use mermaid_little::convert_with_id;
 use std::fs;

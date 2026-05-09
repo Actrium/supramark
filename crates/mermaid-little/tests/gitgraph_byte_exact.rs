@@ -1,3 +1,4 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! gitGraph byte-exact test harness.
 //!
 //! Runs the fixtures in `tests/ext_fixtures/{cypress,demos}/gitGraph`
@@ -6,6 +7,10 @@
 //!
 //! Fixtures requiring features not yet ported are listed in
 //! `tests/known_ignored.txt` and skipped here.
+//!
+//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Mermaid's reference SVGs only holds when the layout pipeline runs
+//! against the static DejaVu fixtures.
 
 use mermaid_little::convert_with_id;
 use std::fs;

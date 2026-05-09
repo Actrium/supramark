@@ -26,6 +26,10 @@
 //!   JS-side `globalThis.supramark.measureText` bridge so layer-1
 //!   layout sees the exact widths the host browser / RN-Skia will
 //!   render with.
+//! - `metrics-ffi-callback` — reserved for the planned React-Native
+//!   native-FFI wrapper that will install a JS-side bridge through
+//!   an `extern "C"` callback. No impl yet; enabling the feature
+//!   today fires a `compile_error!` so the gap is visible.
 
 use font_metrics_core::Metrics;
 
@@ -68,10 +72,19 @@ fn metrics_provider() -> &'static dyn Metrics {
         });
     }
 
+    #[cfg(all(
+        not(feature = "metrics-static-dejavu"),
+        not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
+        not(feature = "metrics-ttf-parser"),
+        feature = "metrics-ffi-callback",
+    ))]
+    compile_error!("metrics-ffi-callback impl is reserved for the future React-Native FFI wrapper; not yet implemented. See crates/mermaid-little/UPSTREAM.md.");
+
     #[cfg(not(any(
         feature = "metrics-static-dejavu",
         feature = "metrics-ttf-parser",
         feature = "metrics-host-callback",
+        feature = "metrics-ffi-callback",
     )))]
     compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-static-dejavu for byte-exact parity, metrics-ttf-parser for native dynamic, or metrics-host-callback for wasm host-bridge");
 }

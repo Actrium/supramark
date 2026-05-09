@@ -1,7 +1,12 @@
+#![cfg(feature = "metrics-static-dejavu")]
 //! State diagram byte-exact test harness.
 //!
 //! Runs fixtures in `tests/ext_fixtures/cypress/state` through the Rust
 //! pipeline and diffs against the matching reference SVG.
+//!
+//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Mermaid's reference SVGs only holds when the layout pipeline runs
+//! against the static DejaVu fixtures.
 
 use mermaid_little::convert_with_id;
 use std::fs;
