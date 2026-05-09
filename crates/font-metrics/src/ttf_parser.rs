@@ -83,6 +83,35 @@ impl<'a> TtfParserMetrics<'a> {
     }
 }
 
+impl TtfParserMetrics<'static> {
+    /// Construct a [`TtfParserMetrics`] backed by an embedded DejaVu
+    /// Latin subset (Sans / Sans-Bold / Mono / Mono-Bold), covering
+    /// U+0020-U+007F and U+00A0-U+00FF. Each face is bundled via
+    /// `include_bytes!`, so the returned value owns no external buffer
+    /// and has `'static` lifetime.
+    ///
+    /// The subset weighs roughly 130 KB total (about 5x smaller than
+    /// the full DejaVu set) and is intended as a zero-config fallback
+    /// for callers that don't want to source their own TTFs. For
+    /// non-Latin scripts or custom fonts, use
+    /// [`TtfParserMetrics::from_sans`] with the desired byte buffer.
+    ///
+    /// The DejaVu fonts are released under the Bitstream Vera Fonts
+    /// Copyright + Public Domain dual licence; see
+    /// `crates/font-metrics/assets/` and the repo-root `REUSE.toml`
+    /// for attribution.
+    pub fn default_latin() -> Result<Self, ttf_parser::FaceParsingError> {
+        const SANS: &[u8] = include_bytes!("../assets/dejavu-sans-latin.ttf");
+        const SANS_BOLD: &[u8] = include_bytes!("../assets/dejavu-sans-bold-latin.ttf");
+        const MONO: &[u8] = include_bytes!("../assets/dejavu-mono-latin.ttf");
+        const MONO_BOLD: &[u8] = include_bytes!("../assets/dejavu-mono-bold-latin.ttf");
+        Self::from_sans(SANS)?
+            .with_sans_bold(SANS_BOLD)?
+            .with_mono(MONO)?
+            .with_mono_bold(MONO_BOLD)
+    }
+}
+
 impl<'a> Metrics for TtfParserMetrics<'a> {
     fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
         if ch == '\n' || ch == '\r' {
@@ -134,5 +163,19 @@ impl<'a> Metrics for TtfParserMetrics<'a> {
         let typo = face.typographic_ascender().unwrap_or_else(|| face.ascender());
         let _ = italic;
         typo as f64 / face.units_per_em() as f64 * size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_latin_basic_smoke() {
+        let m = TtfParserMetrics::default_latin().expect("Latin TTF parse");
+        let w = m.text_width("Hello", "sans-serif", 14.0, false, false);
+        assert!(w > 20.0 && w < 50.0, "expected ~31px, got {}", w);
+        let h = m.line_height("sans-serif", 14.0, false, false);
+        assert!(h > 12.0 && h < 22.0, "expected ~16px, got {}", h);
     }
 }

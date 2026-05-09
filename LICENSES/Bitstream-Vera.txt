@@ -1,0 +1,1 @@
+See https://dejavu-fonts.github.io/License.html for the canonical DejaVu fonts licence (Bitstream Vera + Public Domain).
