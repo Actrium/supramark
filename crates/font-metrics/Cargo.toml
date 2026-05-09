@@ -1,0 +1,33 @@
+[package]
+name = "font-metrics"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+# Apache-2.0 OR MIT for the Rust wrapper code (Rust-ecosystem standard
+# dual licence). The static range tables in src/font_data.rs are a
+# derived work of DejaVu (Bitstream Vera + Public Domain dual);
+# downstream consumers redistributing the binary should preserve the
+# DejaVu attribution. See REUSE.toml for the SPDX block and the
+# upstream DejaVu copyright at https://dejavu-fonts.github.io/.
+license = "Apache-2.0 OR MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Shared static font metric tables (DejaVu Sans / Mono / Serif) used by plantuml-little and mermaid-little for Java/JS-parity SVG layout."
+homepage = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/kookyleo/supramark"
+keywords = ["font", "metrics", "dejavu", "svg", "diagram"]
+categories = ["graphics", "text-processing"]
+exclude = ["tests/"]
+
+# Phase 1 of the font-metrics extraction. Currently exposes only the
+# static range tables previously living in plantuml-little/src/font_data.rs
+# (and hand-vendored into mermaid-little/src/font_data.rs).
+# Phase 2 will introduce a Metrics trait + TtfParserMetrics +
+# HostCallbackMetrics for runtime font flexibility; Phase 3 brings
+# d2-little into the same trait.
+
+[dependencies]
+# Intentionally none. font_data.rs is pure static lookup tables.
+
+[lib]
+name = "font_metrics"
+path = "src/lib.rs"

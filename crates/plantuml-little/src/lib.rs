@@ -12,11 +12,11 @@ pub mod abel;
 pub mod decoration;
 pub mod dot;
 pub mod error;
-// Static DejaVu range tables now live in the shared `little-font-metrics`
+// Static DejaVu range tables now live in the shared `font-metrics`
 // crate. Re-export under the historical `crate::font_data` path so
 // internal call sites (~150 throughout layout/, render/, skin/) keep
 // resolving without per-call-site edits.
-pub use little_font_metrics::font_data;
+pub use font_metrics::font_data;
 pub mod font_metrics;
 pub mod klimt;
 pub mod layout;

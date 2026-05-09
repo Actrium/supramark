@@ -46,8 +46,8 @@ cose_bilkent = ["dep:rquickjs"]
 [dependencies]
 # Shared static DejaVu range tables (was crate::font_data; previously
 # hand-vendored from plantuml-little @ commit b32d6aa, now centralised
-# in little-font-metrics so a single update reaches both sister crates).
-little-font-metrics = { path = "../little-font-metrics", version = "0.1" }
+# in font-metrics so a single update reaches both sister crates).
+font-metrics = { path = "../font-metrics", version = "0.1" }
 thiserror = "1"
 log = "0.4"
 env_logger = { version = "0.11", optional = true }

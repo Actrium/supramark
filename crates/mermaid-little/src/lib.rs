@@ -16,13 +16,13 @@
 pub mod config;
 pub mod detect;
 pub mod error;
-// Static DejaVu range tables come from the shared `little-font-metrics`
+// Static DejaVu range tables come from the shared `font-metrics`
 // crate. Until 2026-05-09 mermaid-little carried a hand-vendored copy
 // of plantuml-little's tables anchored at commit b32d6aa; that
 // duplication is now eliminated. Re-export under the historical
 // `crate::font_data` path so internal call sites (font_metrics.rs etc.)
 // keep resolving without per-call-site edits.
-pub use little_font_metrics::font_data;
+pub use font_metrics::font_data;
 pub mod font_metrics;
 #[cfg(feature = "katex")]
 pub mod katex;

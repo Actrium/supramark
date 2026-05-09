@@ -123,20 +123,27 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "CC0-1.0"
 
-# ── crates/little-font-metrics — first-party shared-dep extraction ─────
-# Static DejaVu range tables previously colocated in plantuml-little were
-# moved here on 2026-05-09 so plantuml-little and mermaid-little can
-# share a single source of truth (eliminating the manual vendor that
-# lived in crates/mermaid-little/src/font_data.rs). The data is a
-# derived work of DejaVu (Bitstream Vera) range tables generated offline
-# by plantuml-little/tools/gen_font_data.py; we keep the same multi-OR
-# licence string plantuml-little carried so downstream relicensing
-# choices stay identical.
+# ── crates/font-metrics — first-party shared-dep extraction ────────────
+# Static DejaVu range tables previously colocated in plantuml-little
+# were moved here on 2026-05-09 so plantuml-little and mermaid-little
+# can share a single source of truth (eliminating the manual vendor
+# that lived in crates/mermaid-little/src/font_data.rs).
+#
+# Code (Cargo.toml, src/lib.rs): Apache-2.0 OR MIT (Rust-ecosystem dual
+# licence; matches the rest of supramark's first-party crates).
+# Data (src/font_data.rs): a derived work of DejaVu Sans / Mono / Serif
+# range tables generated offline by
+# crates/plantuml-little/tools/gen_font_data.py; the underlying DejaVu
+# fonts are released under the Bitstream Vera Fonts Copyright + Public
+# Domain dual licence (https://dejavu-fonts.github.io/). The Bitstream
+# Vera licence requires preservation of the copyright notice on
+# binary-redistributed derivatives; downstream consumers shipping the
+# compiled tables must keep that attribution intact.
 [[annotations]]
-path = "crates/little-font-metrics/**"
+path = "crates/font-metrics/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
-SPDX-License-Identifier = "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT"
+SPDX-License-Identifier = "Apache-2.0 OR MIT"
 
 # ── crates/plantuml-little — subtree-merged from kookyleo/plantuml-little ──
 # Upstream declares a 5-way OR licence:

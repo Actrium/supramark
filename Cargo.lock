@@ -350,6 +350,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "font-metrics"
+version = "0.1.0"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -622,10 +626,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "little-font-metrics"
-version = "0.1.0"
-
-[[package]]
 name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -652,9 +652,9 @@ version = "11.14.0-1"
 dependencies = [
  "dagre",
  "env_logger",
+ "font-metrics",
  "json5",
  "libm",
- "little-font-metrics",
  "log",
  "regex",
  "roxmltree",
@@ -751,8 +751,8 @@ dependencies = [
  "base64",
  "env_logger",
  "flate2",
+ "font-metrics",
  "graphviz-anywhere",
- "little-font-metrics",
  "log",
  "regex",
  "serde_json",
