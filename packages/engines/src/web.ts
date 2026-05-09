@@ -1,6 +1,7 @@
 import echartsFactory from './echarts';
 import { createDiagramEngine } from './engine';
 import { GRAPHVIZ_LAYOUT_ENGINES, pickGraphvizDiagramOptions } from './graphviz';
+import { installHostMetricsBridge } from './host-bridge.js';
 import type {
   DiagramEngineOptions,
   DiagramRenderFn,
@@ -119,7 +120,12 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
     };
   }
 
-  // 3. Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
+  // 3. Install the host text-metrics bridge before loading the wasm so the
+  //    wasm's metrics-host-callback impl can resolve `supramark.measureText`
+  //    on first render. Idempotent.
+  installHostMetricsBridge();
+
+  // 4. Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
   //    the `import * from '*.wasm'` side effect, so no separate init call is
   //    needed. Some builds still ship a default `init()` — probe defensively.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

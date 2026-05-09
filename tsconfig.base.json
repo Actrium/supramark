@@ -30,6 +30,7 @@
       "@supramark/engines/vega-lite": ["packages/engines/src/vega-lite/index.ts"],
       "@supramark/engines/web": ["packages/engines/src/web.ts"],
       "@supramark/engines/rn": ["packages/engines/src/rn.ts"],
+      "@supramark/engines/host-bridge": ["packages/engines/src/host-bridge.ts"],
 
       "@supramark/web": ["packages/renderers/web/src/index.ts"],
       "@supramark/web/createSupramark": ["packages/renderers/web/src/createSupramark.tsx"],

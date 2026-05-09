@@ -57,6 +57,10 @@
     "./rn": {
       "types": "./src/rn.ts",
       "default": "./src/rn.ts"
+    },
+    "./host-bridge": {
+      "types": "./src/host-bridge.ts",
+      "default": "./src/host-bridge.ts"
     }
   },
   "license": "Apache-2.0",

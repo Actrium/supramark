@@ -31,13 +31,15 @@ wasm-opt = false
 # the usual sense. graphviz-anywhere installs its own wasm JS bridge
 # automatically when compiled for wasm32.
 #
-# `metrics-static-dejavu` is selected explicitly because the default
+# `metrics-host-callback` is selected explicitly because the default
 # feature set was disabled above; the metrics-* family is mutually
-# exclusive and exactly one impl must be active. Static-DejaVu keeps
-# the wasm bundle byte-equivalent to native builds (the 22K-LOC range
-# tables compress well in wasm). Hosts that want layer-1 layout to
-# match their own renderer should rebuild with
-# `--features metrics-host-callback` and install
-# `globalThis.supramark.measureText` before invoking the wasm.
-plantuml-little = { path = "../..", default-features = false, features = ["metrics-static-dejavu"] }
+# exclusive and exactly one impl must be active. The host-callback impl
+# defers every text measurement to `globalThis.supramark.measureText`,
+# which the host installs before the wasm runs. This keeps Layer-1
+# layout consistent with the host's actual font rendering and drops the
+# 22K-LOC static range tables from the wasm bundle. The host can install
+# the default canvas-backed bridge via
+# `installHostMetricsBridge()` from `@supramark/engines/host-bridge`,
+# or supply its own `globalThis.supramark.measureText` first.
+plantuml-little = { path = "../..", default-features = false, features = ["metrics-host-callback"] }
 wasm-bindgen = "0.2"

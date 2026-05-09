@@ -1,3 +1,5 @@
+import { installHostMetricsBridge } from '../host-bridge.js';
+
 let renderFn: ((code: string, options?: Record<string, unknown>) => Promise<string> | string) | null =
   null;
 
@@ -256,6 +258,11 @@ async function ensureLoaded(): Promise<
   (code: string, options?: Record<string, unknown>) => Promise<string> | string
 > {
   if (renderFn) return renderFn;
+
+  // Install the host text-metrics bridge before loading the wasm so the
+  // wasm's metrics-host-callback impl can resolve `supramark.measureText`
+  // on first render. Idempotent.
+  installHostMetricsBridge();
 
   // mermaid-little-web is a wasm-bindgen wrapper around the
   // Rust crate `mermaid-little`. It produces SVG without DOM, headless
