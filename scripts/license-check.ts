@@ -2,17 +2,17 @@
 /**
  * License compliance check for the supramark super-monorepo.
  *
- * Two responsibilities:
+ * Three responsibilities:
  *   1. Every package.json under workspace declares `license` with an
  *      SPDX expression we know about.
- *   2. The declared license is on the allow-list documented in
+ *   2. Every workspace-member Cargo.toml declares `license` with an
+ *      SPDX expression we know about (cargo-deny covers transitive
+ *      Rust dep auditing; this only validates first-party crate
+ *      manifests).
+ *   3. The declared license is on the allow-list documented in
  *      `docs/architecture/LICENSE_COMPATIBILITY.md` and `deny.toml`.
  *
- * Step 1 of the merge plan only enforces (1) + (2) on first-party
- * packages. Transitive node_modules scanning (via license-checker) and
- * cargo-deny on the rust workspace land in steps 2-4 once Cargo.toml
- * exists. This file is the reference implementation; CI runs it as part
- * of `bun run quality`.
+ * CI runs this as part of `bun run quality`.
  */
 
 import fs from 'node:fs';
@@ -55,6 +55,25 @@ const KNOWN_NON_DEFAULT: Record<string, string> = {
   '@kookyleo/d2-little-web': 'MPL-2.0',
 };
 
+// ── Skip patterns ──────────────────────────────────────────────────────
+// Paths we deliberately do not enforce SPDX on, with the reason. Each
+// entry is matched against the path relative to repo root.
+const SKIP_PATTERNS: Array<{ matcher: (p: string) => boolean; reason: string }> = [
+  {
+    // React Native's lib/commonjs/ and lib/module/ stubs are
+    // {"type":"commonjs"} / {"type":"module"} sentinels, used purely for
+    // module-resolution. They are not packages.
+    matcher: p => /\/lib\/(commonjs|module)\/package\.json$/.test(p),
+    reason: 'RN module-resolution stub, not a publishable package',
+  },
+  {
+    // Upstream graphviz-anywhere's RN example app omits a license
+    // field. Tracked for upstream patch-back via crates/graphviz-anywhere/UPSTREAM.md.
+    matcher: p => p === 'crates/graphviz-anywhere/examples/react-native/package.json',
+    reason: 'upstream-merged; private demo app, license patch tracked in UPSTREAM.md',
+  },
+];
+
 // ── Workspace discovery ────────────────────────────────────────────────
 const ROOT = process.cwd();
 
@@ -69,9 +88,9 @@ interface PackageJson {
   private?: boolean;
 }
 
-function findPackageJsons(): string[] {
+function findManifests(filename: 'package.json' | 'Cargo.toml'): string[] {
   const found: string[] = [];
-  const skip = new Set(['node_modules', '.git', 'dist', 'build', 'coverage']);
+  const skip = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', 'target']);
 
   function walk(dir: string, depth: number): void {
     if (depth > 6) return;
@@ -86,7 +105,7 @@ function findPackageJsons(): string[] {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, depth + 1);
-      } else if (entry.isFile() && entry.name === 'package.json') {
+      } else if (entry.isFile() && entry.name === filename) {
         found.push(full);
       }
     }
@@ -94,6 +113,50 @@ function findPackageJsons(): string[] {
 
   walk(ROOT, 0);
   return found.sort();
+}
+
+// Minimal Cargo.toml parser — we only need `[package]` name + license,
+// which are flat string scalars. Avoids pulling in a TOML dependency.
+function readCargoPackage(p: string): { name?: string; license?: string; isWorkspaceOnly: boolean } {
+  const text = fs.readFileSync(p, 'utf-8');
+  const lines = text.split('\n');
+  let inPackage = false;
+  let inOtherSection = false;
+  let name: string | undefined;
+  let license: string | undefined;
+  let sawPackage = false;
+
+  for (const raw of lines) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+    const sectionMatch = line.match(/^\[(.+?)\]$/);
+    if (sectionMatch) {
+      const section = sectionMatch[1];
+      inPackage = section === 'package';
+      inOtherSection = !inPackage;
+      if (inPackage) sawPackage = true;
+      continue;
+    }
+    if (inPackage) {
+      const kv = line.match(/^(\w[\w-]*)\s*=\s*(.+)$/);
+      if (!kv) continue;
+      const key = kv[1];
+      let value = kv[2].trim();
+      // Strip surrounding quotes (single or double).
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (key === 'name') name = value;
+      else if (key === 'license') license = value;
+    } else if (!inOtherSection) {
+      // Pre-section content (rare); ignore.
+    }
+  }
+
+  return { name, license, isWorkspaceOnly: !sawPackage };
 }
 
 function isAllowed(license: string): boolean {
@@ -107,10 +170,11 @@ function isAllowed(license: string): boolean {
 
 // ── Main ───────────────────────────────────────────────────────────────
 const issues: string[] = [];
-const seen: Array<{ path: string; name: string; license: string }> = [];
+const seen: Array<{ path: string; name: string; license: string; kind: 'npm' | 'cargo' }> = [];
 
-for (const pkgPath of findPackageJsons()) {
+for (const pkgPath of findManifests('package.json')) {
   const rel = path.relative(ROOT, pkgPath);
+  if (SKIP_PATTERNS.some(s => s.matcher(rel))) continue;
   let pkg: PackageJson;
   try {
     pkg = readJson<PackageJson>(pkgPath);
@@ -134,13 +198,48 @@ for (const pkgPath of findPackageJsons()) {
     continue;
   }
 
-  seen.push({ path: rel, name, license: pkg.license });
+  seen.push({ path: rel, name, license: pkg.license, kind: 'npm' });
+}
+
+for (const cargoPath of findManifests('Cargo.toml')) {
+  const rel = path.relative(ROOT, cargoPath);
+  let pkg: { name?: string; license?: string; isWorkspaceOnly: boolean };
+  try {
+    pkg = readCargoPackage(cargoPath);
+  } catch (e) {
+    issues.push(`${rel}: failed to parse Cargo.toml (${(e as Error).message})`);
+    continue;
+  }
+
+  // Skip virtual workspaces (e.g. supramark root, the inner shadowed
+  // workspace inside crates/graphviz-anywhere/) — they have no
+  // [package] section to audit.
+  if (pkg.isWorkspaceOnly) continue;
+
+  const name = pkg.name ?? '<unnamed>';
+
+  if (!pkg.license) {
+    issues.push(`${rel} (${name}): missing "license" field in [package]`);
+    continue;
+  }
+
+  if (!isAllowed(pkg.license)) {
+    issues.push(
+      `${rel} (${name}): license "${pkg.license}" is not on the allow-list. ` +
+        `Update docs/architecture/LICENSE_COMPATIBILITY.md and deny.toml first.`
+    );
+    continue;
+  }
+
+  seen.push({ path: rel, name, license: pkg.license, kind: 'cargo' });
 }
 
 // Surface known non-default licenses (informational, not a violation).
 const nonDefault = seen.filter(p => p.license !== 'Apache-2.0');
 
-console.log(`\n📋 License audit · ${seen.length} package.json files\n`);
+const npmCount = seen.filter(p => p.kind === 'npm').length;
+const cargoCount = seen.filter(p => p.kind === 'cargo').length;
+console.log(`\n📋 License audit · ${npmCount} package.json + ${cargoCount} Cargo.toml manifests\n`);
 
 if (nonDefault.length > 0) {
   console.log('  Non-default-license packages:');
@@ -163,4 +262,4 @@ if (issues.length > 0) {
   process.exit(1);
 }
 
-console.log(`✅ All ${seen.length} packages declare an allow-listed license.\n`);
+console.log(`✅ All ${seen.length} manifests declare an allow-listed license.\n`);

@@ -7,14 +7,18 @@ on:
     branches: [main, develop]
 
 jobs:
-  # License compliance — REUSE-spec scan; every file must trace to an SPDX id.
-  # cargo-deny activates in step 2, once the first Rust crate lands.
+  # License compliance — REUSE spec + cargo-deny over the Rust workspace.
+  # The workspace-internal SPDX field check runs in the test job
+  # (`bun run license:check`); this job covers REUSE-spec headers and
+  # the Rust dependency graph.
   license:
     name: License Compliance
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: false  # Graphviz upstream is intentionally not pulled
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -26,7 +30,18 @@ jobs:
 
       - name: REUSE lint
         run: reuse lint
-        continue-on-error: true  # step 1: warn-only; tighten when sub-trees merge
+        continue-on-error: true  # warn-only until per-file SPDX headers land
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo-deny check
+        run: cargo deny check
 
   # Code quality checks and tests
   test:

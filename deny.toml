@@ -64,7 +64,12 @@ exceptions = []
 # would pull in unwanted GPL-* / SSPL deps once we have a real graph.
 [bans]
 multiple-versions = "warn"
+# Wildcard versions ("*") are forbidden for crates.io deps — they would
+# accept any breaking change. Path-based and git deps with "*" are still
+# fine because they're locked to a specific source tree (this is what
+# `crates/graphviz-anywhere/examples/rust/Cargo.toml` uses).
 wildcards = "deny"
+allow-wildcard-paths = true
 highlight = "all"
 
 # ── Sources ─────────────────────────────────────────────────────────────

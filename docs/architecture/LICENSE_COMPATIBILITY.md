@@ -21,24 +21,25 @@
 | `@supramark/cli` | `Apache-2.0` | 自有 | |
 | `@supramark/web` / `rn` | `Apache-2.0` | 自有 | |
 | `@supramark/feature-*` | `Apache-2.0` | 自有 | |
-| `crates/dagre` → crate `dagre` | `MIT` | dagre.js (Chris Pettitt, MIT) | 完整端口 |
+| `crates/dagre` → crate `dagre` | `Apache-2.0` | dagre.js (Chris Pettitt, MIT) | 完整端口；reimplementation, not fork → 维护者选了 Apache-2.0 |
 | `crates/d2-little` → crate `d2-little` | `MPL-2.0` | terrastruct/d2 (MPL-2.0) | 纯 Rust 端口；MPL 是文件级 copyleft，可 link |
 | `crates/d2-little/web-wasm` → npm `@kookyleo/d2-little-web` | `MPL-2.0` | 同上 | |
 | `crates/mermaid-little` → crate `mermaid-little` | `MIT` | mermaid-js (MIT) | 纯 Rust 重写 |
 | `crates/mermaid-little/web-wasm` → npm `@kookyleo/mermaid-little-web` | `MIT` | 同上 | step 4 新发 |
 | `crates/plantuml-little` → crate `plantuml-little` | **`LGPL-3.0-or-later`** | PlantUML (GPL-3 / LGPL-3) | reimplementation；目标 byte-exact parity；以 dynamic link 方式被消费 |
 | `crates/plantuml-little/web-wasm` → npm `@kookyleo/plantuml-little-web` | `LGPL-3.0-or-later` | 同上 | feature-plantuml README 顶部高亮 |
-| `crates/graphviz-anywhere/native-c` | **`EPL-1.0`** | Graphviz (EPL-1.0 / CPL-1.0) | 不发布；只作为 link 目标；与 Apache 文件目录隔离 |
-| `crates/graphviz-anywhere/core` (Rust wrapper) | `Apache-2.0 OR MIT` | 自有 | 双协议给生态最大灵活性 |
-| `crates/graphviz-anywhere/web-wasm` → npm `@kookyleo/graphviz-anywhere-web` | `EPL-1.0` | 含 wasm 形式的 Graphviz | |
-| `crates/graphviz-anywhere/rn-bridge` → npm `@kookyleo/graphviz-anywhere-rn` | `EPL-1.0` | 含 RN 形式的 Graphviz | |
+| `crates/graphviz-anywhere/graphviz/` (submodule) | **`EPL-1.0`** | Graphviz (EPL-1.0 / CPL-1.0) | 不发布；只作为 link 目标；与 Apache 文件目录隔离；目前是空目录占位（待 step 4 装回 submodule） |
+| `crates/graphviz-anywhere/packages/rust` (Rust wrapper) | `Apache-2.0` | 自有 | 包名 `graphviz-anywhere`，独立发 crate |
+| `crates/graphviz-anywhere/packages/rust/prebuilt/` | `EPL-1.0` | Graphviz 编译产物 | 仅在 release build 时填充；运行时 link 边界 |
+| `crates/graphviz-anywhere/packages/web` → npm `@kookyleo/graphviz-anywhere-web` | `Apache-2.0`（JS 源码）；wasm 产物 `EPL-1.0` 衍生 | 含 wasm 形式的 Graphviz | |
+| `crates/graphviz-anywhere/packages/react-native` → npm `@kookyleo/graphviz-anywhere-rn` | `Apache-2.0` | RN bridge | |
 | `crates/vison-core` | `Apache-2.0` | 自有 | |
 | `packages/vison-{web,rn}` | `Apache-2.0` | 自有 | |
 
 ## 3. 兼容性分析
 
 ### 3.1 Apache-2.0 ⇆ MIT / BSD / ISC
-完全兼容。可以在任意方向相互依赖，且不传染。这是 supramark 主体（Apache）+ dagre / mermaid-little（MIT）的关系。
+完全兼容。可以在任意方向相互依赖，且不传染。这是 supramark 主体 + dagre（已 Apache-2.0；reimplementation 自 MIT 上游）+ mermaid-little（MIT 上游）的关系。
 
 ### 3.2 Apache-2.0 ⇆ MPL-2.0（d2-little）
 单向兼容。MPL-2.0 是**文件级** copyleft：修改 MPL 文件时该文件必须保持 MPL，但可以 link 到 Apache 工程而不传染。**可被 supramark 安全消费**；但若我方向 d2-little 的 `.rs` 文件添加新代码，那些行属 MPL-2.0。

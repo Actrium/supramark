@@ -1,0 +1,32 @@
+# Supramark super-monorepo · Rust workspace root.
+#
+# This file is the single source of truth for all Rust crates in the
+# repository. Sub-tree merges (per ADR-003 in
+# docs/architecture/LICENSE_COMPATIBILITY.md) bring in upstream history
+# under crates/<name>/; their inner [workspace] declarations are
+# replaced by membership listed below — see each
+# crates/<name>/UPSTREAM.md for the rationale.
+#
+# Run `cargo metadata --format-version=1` from the repo root to enumerate
+# all workspace members. CI runs `cargo deny check` against this graph.
+
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/dagre",
+    "crates/graphviz-anywhere/packages/rust",
+    "crates/graphviz-anywhere/examples/rust",
+]
+
+# Crates we deliberately keep outside the unified workspace:
+#   - none yet. Native FFI / wasm sub-crates land in step 2+ and will be
+#     added here once merged.
+exclude = []
+
+# Shared lints, edition defaults, and metadata go under
+# `[workspace.package]` / `[workspace.lints]` once we have multiple
+# first-party crates worth aligning. Until then, keep this minimal so
+# upstream-merged crates continue to resolve their own settings.
+[workspace.metadata.supramark]
+plan = "docs/architecture/LICENSE_COMPATIBILITY.md"

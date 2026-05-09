@@ -10,6 +10,9 @@ coverage/
 dist/
 build/
 
+# Rust
+target/
+
 # Generated documentation
 **/docs/api/
 

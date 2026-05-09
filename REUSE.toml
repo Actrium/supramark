@@ -72,3 +72,63 @@ path = "packages/renderers/output/wasm/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "@viz-js/viz contributors"
 SPDX-License-Identifier = "MIT"
+
+# ── crates/dagre — subtree-merged from kookyleo/dagre-rs ───────────────
+# Apache-2.0 wrapper; reimplementation of dagre.js (MIT). See
+# crates/dagre/UPSTREAM.md.
+[[annotations]]
+path = "crates/dagre/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Cross-validation reference data — generated from upstream dagre.js
+# fixtures. Treat as data (not source). dagre.js is MIT.
+[[annotations]]
+path = "crates/dagre/cross-validate/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "dagre.js contributors (cross-validation data)"
+SPDX-License-Identifier = "MIT"
+
+# ── crates/graphviz-anywhere — subtree-merged from kookyleo/graphviz-anywhere ──
+# Wrapper code is Apache-2.0. The Graphviz C library being wrapped is
+# EPL-1.0 — see crates/graphviz-anywhere/UPSTREAM.md for boundary rules.
+[[annotations]]
+path = "crates/graphviz-anywhere/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Upstream Graphviz source (registered as a git submodule, currently
+# empty). When populated, every file under here belongs to the upstream
+# Graphviz project and carries EPL-1.0 / CPL-1.0.
+[[annotations]]
+path = "crates/graphviz-anywhere/graphviz/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Graphviz contributors"
+SPDX-License-Identifier = "EPL-1.0"
+
+# Built Graphviz binaries dropped here by the Rust crate's build.rs.
+# They are derivative works of upstream Graphviz → EPL-1.0.
+[[annotations]]
+path = "crates/graphviz-anywhere/packages/rust/prebuilt/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Graphviz contributors"
+SPDX-License-Identifier = "EPL-1.0"
+
+# Pre-built wasm bundle (Graphviz compiled to wasm + JS glue produced by
+# Emscripten). Contains both EPL-1.0 derivative code (compiled Graphviz)
+# and Apache-2.0 JS glue from upstream graphviz-anywhere — treated as
+# the more restrictive EPL-1.0 for the bundle as a whole.
+[[annotations]]
+path = "crates/graphviz-anywhere/packages/web/dist/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Graphviz contributors and graphviz-anywhere contributors"
+SPDX-License-Identifier = "EPL-1.0"
+
+# Build noise that should not gate compliance.
+[[annotations]]
+path = "crates/graphviz-anywhere/wasm-build.log"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"
