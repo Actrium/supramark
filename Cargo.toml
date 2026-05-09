@@ -21,6 +21,8 @@ members = [
     "crates/plantuml-little/packages/web",
     "crates/d2-little",
     "crates/d2-little/packages/web",
+    "crates/mermaid-little",
+    "crates/mermaid-little/packages/web",
 ]
 
 # Crates we deliberately keep outside the unified workspace:
@@ -36,7 +38,7 @@ exclude = []
 plan = "docs/architecture/LICENSE_COMPATIBILITY.md"
 
 # ── Path overrides ─────────────────────────────────────────────────────
-# plantuml-little and (future) mermaid-little declare their dependency on
+# plantuml-little and mermaid-little declare their dependency on
 # `graphviz-anywhere` against crates.io. Inside this monorepo we want
 # them to consume the in-tree copy at crates/graphviz-anywhere/packages/rust
 # so a single native build (links = "graphviz_api") satisfies all
@@ -44,3 +46,11 @@ plan = "docs/architecture/LICENSE_COMPATIBILITY.md"
 # crates would both claim the same `links` key.
 [patch.crates-io]
 graphviz-anywhere = { path = "crates/graphviz-anywhere/packages/rust" }
+
+# mermaid-little declares `dagre` against its upstream git repo
+# (https://github.com/kookyleo/dagre-rs.git, branch = main). Inside the
+# super-monorepo we want it resolved to the in-tree subtree at
+# crates/dagre instead — a single dagre crate compiles into the workspace,
+# and cargo-deny does not flag a git source we never end up fetching.
+[patch."https://github.com/kookyleo/dagre-rs.git"]
+dagre = { path = "crates/dagre" }

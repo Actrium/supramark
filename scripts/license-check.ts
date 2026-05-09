@@ -80,6 +80,13 @@ const SKIP_PATTERNS: Array<{ matcher: (p: string) => boolean; reason: string }> 
     matcher: p => p === 'crates/plantuml-little/tests/support/package.json',
     reason: 'upstream-merged; private test helper, license patch tracked in UPSTREAM.md',
   },
+  {
+    // Same pattern as plantuml-little: private deterministic reference
+    // SVG generator. Not published. Tracked in
+    // crates/mermaid-little/UPSTREAM.md.
+    matcher: p => p === 'crates/mermaid-little/tests/support/package.json',
+    reason: 'upstream-merged; private test helper, license patch tracked in UPSTREAM.md',
+  },
 ];
 
 // ── Workspace discovery ────────────────────────────────────────────────

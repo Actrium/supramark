@@ -257,19 +257,44 @@ async function ensureLoaded(): Promise<
 > {
   if (renderFn) return renderFn;
 
-  try {
-    const mod = await import('beautiful-mermaid');
-    const anyMod = mod as Record<string, unknown>;
-    renderFn = (anyMod.renderMermaid ??
-      anyMod.renderMermaidSVG ??
-      anyMod.renderMermaidSync) as typeof renderFn;
-    if (!renderFn) {
-      throw new Error('beautiful-mermaid did not expose a render function');
+  // mermaid-little-web is a wasm-bindgen wrapper around the
+  // Rust crate `mermaid-little`. It produces SVG without DOM, headless
+  // browsers, or the upstream JS Mermaid bundle. The wasm initialises
+  // as a side effect of the ESM import (`import * as wasm from "./*.wasm"`).
+  // Some wasm-bindgen builds still ship a default `init()` — probe
+  // defensively so a re-init does not throw.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod: any = await import('@kookyleo/mermaid-little-web' as string);
+
+  const init =
+    (typeof mod.default === 'function' && mod.default) ||
+    (typeof mod.init === 'function' && mod.init) ||
+    null;
+  if (init) {
+    try {
+      await init();
+    } catch {
+      // Already initialised via the module-import side effect — ignore.
     }
-    return renderFn;
-  } catch (err) {
-    throw new Error(`Failed to load beautiful-mermaid: ${String(err)}`);
   }
+
+  const convert =
+    (typeof mod.convert === 'function' && mod.convert) ||
+    (typeof mod.render === 'function' && mod.render) ||
+    null;
+  if (!convert) {
+    throw new Error(
+      '`@kookyleo/mermaid-little-web` is missing a convert / render entry. ' +
+        'Did `bun run build:wasm` complete?'
+    );
+  }
+
+  renderFn = (code: string) => {
+    // Underlying wasm `convert(code)` is synchronous; await tolerates
+    // both sync and async returns.
+    return convert(code);
+  };
+  return renderFn;
 }
 
 export async function renderMermaidSvg(

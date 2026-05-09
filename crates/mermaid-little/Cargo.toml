@@ -63,7 +63,12 @@ regex = "1"
 # Hierarchical directed graph layout. Pinned to a kookyleo fork until
 # dagre-rs has a published release that exposes intersectPolygon /
 # intersectRect helpers required by mermaid's edge-endpoint clipping.
-dagre = { git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
+# Patched in supramark super-monorepo: the workspace-root [patch] block
+# redirects this git source to crates/dagre. The `version = "0.1"`
+# constraint is added so cargo-deny does not flag a wildcard public
+# dependency. Tracked for upstream contribution in
+# crates/mermaid-little/UPSTREAM.md.
+dagre = { version = "0.1", git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
 # Pure-Rust port of fdlibm. Used by the venn layout to match V8's
 # Math.* (acos/atan2/sqrt/sin/cos) byte-for-byte — V8 ships fdlibm too,
 # so routing all venn FP through libm eliminates ULP-level drift in the

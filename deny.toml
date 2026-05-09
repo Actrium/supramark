@@ -91,4 +91,12 @@ allow-git = []
 [advisories]
 version = 2
 yanked = "warn"
-ignore = []
+ignore = [
+    # serde_yml v0.0.12 is unsound + unmaintained (segfault risk in
+    # Serializer.emitter; archived upstream). Pulled by mermaid-little
+    # for Mermaid frontmatter `--- yaml ---` blocks. Recommended
+    # alternatives: serde_norway / serde_yaml_ng.
+    # Tracking: open issue at kookyleo/mermaid-little to migrate.
+    # Remove this entry after mermaid-little drops the dep.
+    "RUSTSEC-2025-0068",
+]

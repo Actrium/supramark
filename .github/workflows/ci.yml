@@ -72,6 +72,19 @@ jobs:
       - name: License compliance (workspace SPDX)
         run: bun run license:check
 
+      - name: Setup Rust toolchain (for wasm builds)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Build in-tree wasm packages
+        run: bun run build:wasm
+
       - name: Run tests
         run: bun run test:core -- --coverage
 

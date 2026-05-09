@@ -8,3 +8,11 @@ packages:
   - 'packages/features/containers/*'
   - 'packages/features/diagrams/*'
   - 'examples/*'
+  # Vendored wasm-bindgen wrapper packages from subtree-merged crates.
+  # Resolves @kookyleo/{plantuml,d2,mermaid}-little-web and
+  # @kookyleo/graphviz-anywhere-{web,rn} to in-tree paths instead of
+  # the npm registry — keeping supramark self-contained.
+  # The wrappers ship source-only; run `bun run build:wasm` (which
+  # invokes wasm-pack + tsc per package) before consuming them.
+  - 'crates/*/packages/web'
+  - 'crates/*/packages/react-native'

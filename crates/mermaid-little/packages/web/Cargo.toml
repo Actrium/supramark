@@ -1,0 +1,35 @@
+[package]
+name = "mermaid-little-web"
+version = "11.14.0-1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "wasm-bindgen wrapper for mermaid-little — run Mermaid → SVG in the browser"
+homepage = "https://github.com/kookyleo/mermaid-little"
+repository = "https://github.com/kookyleo/mermaid-little"
+keywords = ["mermaid", "mmd", "svg", "wasm", "web"]
+categories = ["wasm", "graphics"]
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# wasm-opt default args don't include --enable-bulk-memory, but rustc now
+# emits memory.copy / memory.fill instructions for wasm32 (since Rust
+# 1.82 raised the baseline feature set). Pass both feature flags through
+# to wasm-opt so optimisation doesn't reject the input.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
+[dependencies]
+# Depend on the root crate as a library with the CLI feature disabled.
+# katex and cose_bilkent stay off in the default wasm build — they
+# embed QuickJS for byte-exact JS interop and are not strictly needed
+# for the common diagram families. Hosts that want them must build
+# this wasm with `--features katex,cose_bilkent`.
+mermaid-little = { path = "../..", default-features = false }
+wasm-bindgen = "0.2"

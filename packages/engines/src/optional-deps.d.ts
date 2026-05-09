@@ -1,18 +1,16 @@
-declare module 'beautiful-mermaid' {
-  export function renderMermaid(
-    code: string,
-    options?: Record<string, unknown>
-  ): Promise<string> | string;
+declare module '@kookyleo/mermaid-little-web' {
+  /** wasm-bindgen default async initialiser. */
+  const init: (input?: unknown) => Promise<unknown>;
+  export default init;
 
-  export function renderMermaidSVG(
-    code: string,
-    options?: Record<string, unknown>
-  ): Promise<string> | string;
+  /** Convert Mermaid source to an SVG string. */
+  export function convert(mmd: string): Promise<string> | string;
 
-  export function renderMermaidSync(
-    code: string,
-    options?: Record<string, unknown>
-  ): Promise<string> | string;
+  /** Same as `convert`, but with an explicit diagram id (mirrors mermaid's render(id, src)). */
+  export function convertWithId(mmd: string, id: string): Promise<string> | string;
+
+  /** Compiled wasm version (CARGO_PKG_VERSION at build time). */
+  export function version(): string;
 }
 
 declare module 'mathjax-full/js/mathjax.js' {

@@ -1,0 +1,28 @@
+# Workspace-local cargo settings.
+#
+# Why this file exists:
+#   Many devs set `rustflags = ["-C", "link-arg=-fuse-ld=mold"]` in their
+#   global `~/.cargo/config.toml` because mold accelerates native linking
+#   substantially. But that flag is unsupported by `rust-lld` (the linker
+#   for the wasm32 target), so wasm-pack builds fail with
+#       rust-lld: error: unknown argument: -fuse-ld=mold
+#
+#   Cargo merges global config with workspace config, and target-specific
+#   sections take precedence over `[build]`. Setting an empty rustflags
+#   for wasm32-unknown-unknown here neutralises the global mold flag for
+#   wasm builds without affecting native targets.
+
+# A workspace-level [build] override fully replaces a lower-priority
+# global [build].rustflags (cargo never merges rustflags sources). With
+# no [build].rustflags here, cargo for native targets falls back to the
+# global file's value, while wasm32 picks up the empty target-specific
+# array below. (Empty `[]` is a SET value in cargo's resolution, not
+# "use the default" — that's what neutralises the mold flag.)
+#
+# Belt-and-suspenders: also set target.cfg rustflags in case the
+# per-triple value alone is overridden by a more specific source.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "opt-level=3"]
+
+[target.'cfg(target_arch = "wasm32")']
+rustflags = ["-C", "opt-level=3"]

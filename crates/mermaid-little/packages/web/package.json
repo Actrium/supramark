@@ -1,0 +1,53 @@
+{
+  "name": "@kookyleo/mermaid-little-web",
+  "version": "11.14.0-1",
+  "description": "wasm-bindgen wrapper for mermaid-little — run Mermaid → SVG in the browser",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kookyleo/mermaid-little.git",
+    "directory": "packages/web"
+  },
+  "homepage": "https://github.com/kookyleo/mermaid-little",
+  "bugs": {
+    "url": "https://github.com/kookyleo/mermaid-little/issues"
+  },
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/mermaid_little_web.d.ts",
+      "import": "./dist/wasm/mermaid_little_web.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build:wasm": "wasm-pack build --target bundler --out-dir dist/wasm --out-name mermaid_little_web && rm -f dist/wasm/package.json dist/wasm/.gitignore dist/wasm/README.md",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:wasm && npm run build:ts",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "mermaid",
+    "mmd",
+    "svg",
+    "wasm",
+    "diagram"
+  ]
+}

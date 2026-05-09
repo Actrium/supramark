@@ -182,3 +182,21 @@ path = ["crates/d2-little/mathjax.js", "crates/d2-little/setup.js", "crates/d2-l
 precedence = "aggregate"
 SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
 SPDX-License-Identifier = "MPL-2.0"
+
+# ── crates/mermaid-little — subtree-merged from kookyleo/mermaid-little ──
+# MIT throughout. The packages/web/ subdirectory is a supramark-side
+# downstream patch (see crates/mermaid-little/UPSTREAM.md); it carries
+# the same MIT licence as the rest of the sub-tree.
+[[annotations]]
+path = "crates/mermaid-little/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
+SPDX-License-Identifier = "MIT"
+
+# Vendored dagre-d3-es tarball — used only as a parity reference, not
+# as a runtime dep. Upstream dagre-d3-es is MIT.
+[[annotations]]
+path = "crates/mermaid-little/dagre-d3-es-7.0.14.tgz"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "dagre-d3-es contributors"
+SPDX-License-Identifier = "MIT"
