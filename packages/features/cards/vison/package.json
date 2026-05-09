@@ -1,0 +1,58 @@
+{
+  "name": "@supramark/feature-card-vison",
+  "version": "0.1.0",
+  "description": "Supramark Feature: render :::vison container blocks as Vison cards (JSON visual description spec for AI chat UIs).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./runtime.web": {
+      "types": "./src/runtime.web.tsx",
+      "import": "./src/runtime.web.tsx",
+      "default": "./src/runtime.web.tsx"
+    },
+    "./runtime.rn": {
+      "types": "./src/runtime.rn.tsx",
+      "import": "./src/runtime.rn.tsx",
+      "default": "./src/runtime.rn.tsx"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "@supramark/core": "*",
+    "react": ">=18.0.0",
+    "@kookyleo/vison-web": "workspace:*",
+    "@kookyleo/vison-rn": "workspace:*",
+    "react-native": ">=0.72.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-native": { "optional": true },
+    "@kookyleo/vison-web": { "optional": true },
+    "@kookyleo/vison-rn": { "optional": true }
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "keywords": [
+    "supramark",
+    "feature",
+    "card",
+    "vison",
+    "ai-chat"
+  ]
+}

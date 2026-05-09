@@ -1,0 +1,46 @@
+{
+  "name": "@kookyleo/vison-web",
+  "version": "0.1.0",
+  "description": "React Web renderer for Vison — JSON visual description spec for AI chat UIs",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kookyleo/vison.git",
+    "directory": "vison-renderers/web"
+  },
+  "homepage": "https://github.com/kookyleo/vison",
+  "author": "kookyleo <kookyleo@gmail.com>",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-markdown": ">=9.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "keywords": [
+    "vison",
+    "ai-chat",
+    "renderer",
+    "react",
+    "web"
+  ]
+}

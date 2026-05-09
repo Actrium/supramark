@@ -23,6 +23,7 @@ members = [
     "crates/d2-little/packages/web",
     "crates/mermaid-little",
     "crates/mermaid-little/packages/web",
+    "crates/vison/vison-core",
 ]
 
 # Crates we deliberately keep outside the unified workspace:

@@ -7,6 +7,7 @@ packages:
   - 'packages/features/main/*'
   - 'packages/features/containers/*'
   - 'packages/features/diagrams/*'
+  - 'packages/features/cards/*'
   - 'examples/*'
   # Vendored wasm-bindgen wrapper packages from subtree-merged crates.
   # Resolves @kookyleo/{plantuml,d2,mermaid}-little-web and
@@ -16,3 +17,8 @@ packages:
   # invokes wasm-pack + tsc per package) before consuming them.
   - 'crates/*/packages/web'
   - 'crates/*/packages/react-native'
+  # vison's renderers live one directory deeper than the *-little
+  # convention. Explicit globs because there is no shared parent path
+  # that selects only these two without sweeping in unrelated things.
+  - 'crates/vison/vison-renderers/web'
+  - 'crates/vison/vison-renderers/rn'

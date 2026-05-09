@@ -200,3 +200,15 @@ path = "crates/mermaid-little/dagre-d3-es-7.0.14.tgz"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "dagre-d3-es contributors"
 SPDX-License-Identifier = "MIT"
+
+# ── crates/vison — subtree-merged from kookyleo/vison ──────────────────
+# MIT throughout. Includes vison-core (Rust) + vison-renderers
+# (TypeScript Web/RN). The supramark side adds a LICENSE file +
+# Cargo.toml metadata + per-renderer package.json — all under the same
+# MIT licence; tracked for upstream contribution in
+# crates/vison/UPSTREAM.md.
+[[annotations]]
+path = "crates/vison/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
+SPDX-License-Identifier = "MIT"

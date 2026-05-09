@@ -2,6 +2,13 @@
 name = "vison-core"
 version = "0.1.0"
 edition = "2021"
+# `license` and `description` added by supramark super-monorepo merge;
+# upstream README declares MIT but no LICENSE / Cargo metadata yet.
+# Tracked for upstream contribution in crates/vison/UPSTREAM.md.
+license = "MIT"
+description = "Vison — JSON visual description spec for AI chat UIs (validator + parser + CLI)"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+repository = "https://github.com/kookyleo/vison"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

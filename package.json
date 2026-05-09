@@ -11,7 +11,9 @@
     "packages/features/*/*",
     "examples/*",
     "crates/*/packages/web",
-    "crates/*/packages/react-native"
+    "crates/*/packages/react-native",
+    "crates/vison/vison-renderers/web",
+    "crates/vison/vison-renderers/rn"
   ],
   "scripts": {
     "build": "bun run --workspaces build",
