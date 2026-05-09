@@ -22,7 +22,7 @@
 
 pub mod font_data;
 
-use crate::Metrics;
+use crate::{Measured, Metrics};
 use font_data::{
     FontMeta, DEJAVU_MONO, DEJAVU_MONO_BOLD, DEJAVU_MONO_BOLD_OBLIQUE, DEJAVU_MONO_OBLIQUE,
     DEJAVU_SANS, DEJAVU_SANS_BOLD, DEJAVU_SANS_BOLD_OBLIQUE, DEJAVU_SANS_OBLIQUE, DEJAVU_SERIF,
@@ -101,6 +101,14 @@ fn resolve_face(family: &str, bold: bool, italic: bool) -> &'static FontMeta {
 pub struct StaticDejaVuMetrics;
 
 impl Metrics for StaticDejaVuMetrics {
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
+        Measured {
+            width: self.text_width(text, family, size, bold, italic),
+            ascent: self.ascent(family, size, bold, italic),
+            descent: self.descent(family, size, bold, italic),
+        }
+    }
+
     /// Computes `glyph_hor_advance / units_per_em * size`, matching
     /// Java's `font.getStringBounds(ch, frc).getWidth()` with
     /// `FRACTIONALMETRICS_ON`.

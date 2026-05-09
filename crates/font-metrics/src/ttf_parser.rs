@@ -22,7 +22,7 @@
 //! around as a `static-fixtures` test-only build for upstream-byte-
 //! equal regression tests.
 
-use crate::Metrics;
+use crate::{Measured, Metrics};
 use ttf_parser::Face;
 
 /// Dynamic [`Metrics`] backed by `ttf-parser`.
@@ -113,6 +113,14 @@ impl TtfParserMetrics<'static> {
 }
 
 impl<'a> Metrics for TtfParserMetrics<'a> {
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
+        Measured {
+            width: self.text_width(text, family, size, bold, italic),
+            ascent: self.ascent(family, size, bold, italic),
+            descent: self.descent(family, size, bold, italic),
+        }
+    }
+
     fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
         if ch == '\n' || ch == '\r' {
             return 0.0;

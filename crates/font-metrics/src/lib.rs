@@ -48,6 +48,19 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+/// Measurement of a text run in a given font, in CSS pixels.
+///
+/// Mirrors the host canvas API's `measureText` return shape:
+/// `width` from `TextMetrics.width`, `ascent` from
+/// `actualBoundingBoxAscent`, `descent` from `actualBoundingBoxDescent`.
+/// Other backends derive these from glyph metrics.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Measured {
+    pub width: f64,
+    pub ascent: f64,
+    pub descent: f64,
+}
+
 /// Font metrics consumed by SVG diagram layout.
 ///
 /// All measurements are in the same "user units" the size argument
@@ -59,6 +72,17 @@
 /// implementation chooses how to map family names to actual faces;
 /// see the implementation docs for the resolution table.
 pub trait Metrics {
+    /// Measure a single line of text in the given font.
+    ///
+    /// This is the host's single source of truth: width + ascent + descent
+    /// from one call. The 6 historical helpers (`text_width`, `line_height`,
+    /// `ascent`, `descent`, etc.) are derivable from this and will be
+    /// removed once caller code migrates (R2 onward).
+    ///
+    /// Pre-condition: `text` should not contain newlines — multi-line
+    /// layout is the caller's responsibility (split + per-line measure).
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured;
+
     /// Width of a single character (typographic horizontal advance).
     /// Returns `0.0` for `\n` and `\r`.
     fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64;

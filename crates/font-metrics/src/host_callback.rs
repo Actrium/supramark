@@ -33,7 +33,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use crate::Metrics;
+use crate::{Measured, Metrics};
 use js_sys::{Object, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsValue;
@@ -74,7 +74,7 @@ struct MeasuredBox {
 }
 
 impl HostCallbackMetrics {
-    fn measure(&self, text: &str, family: &str, size: f64, bold: bool) -> MeasuredBox {
+    fn measure_box(&self, text: &str, family: &str, size: f64, bold: bool) -> MeasuredBox {
         match js_measure_text(family, text, size, bold) {
             Ok(value) => parse_box(&value, size).unwrap_or_else(|| fallback_box(text, size)),
             Err(_) => fallback_box(text, size),
@@ -110,6 +110,16 @@ fn fallback_box(text: &str, size: f64) -> MeasuredBox {
 }
 
 impl Metrics for HostCallbackMetrics {
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, _italic: bool) -> Measured {
+        // Single bridge call returns width + ascent + descent — the host's natural shape.
+        let m = self.measure_box(text, family, size, bold);
+        Measured {
+            width: m.width,
+            ascent: m.ascent,
+            descent: m.descent,
+        }
+    }
+
     fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
         if ch == '\n' || ch == '\r' {
             return 0.0;
@@ -117,24 +127,24 @@ impl Metrics for HostCallbackMetrics {
         // Build a 1-char string without allocating when possible.
         let mut buf = [0u8; 4];
         let s: &str = ch.encode_utf8(&mut buf);
-        self.measure(s, family, size, bold).width
+        self.measure_box(s, family, size, bold).width
     }
 
     fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure(text, family, size, bold).width
+        self.measure_box(text, family, size, bold).width
     }
 
     fn line_height(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        let m = self.measure("M", family, size, bold);
+        let m = self.measure_box("M", family, size, bold);
         m.ascent + m.descent
     }
 
     fn ascent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure("M", family, size, bold).ascent
+        self.measure_box("M", family, size, bold).ascent
     }
 
     fn descent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure("M", family, size, bold).descent
+        self.measure_box("M", family, size, bold).descent
     }
 
     fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
