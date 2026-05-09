@@ -10,8 +10,6 @@
 //! [`d2_go_emulation`] and slot into the same trait without touching call
 //! sites in `lib.rs` / `target.rs` / `svg_render`.
 
-use std::any::Any;
-
 use crate::fonts::Font;
 
 pub mod d2_go_emulation;
@@ -34,16 +32,38 @@ const H6_EM: f64 = 0.85;
 
 /// Abstract text-measurement interface used by the d2 pipeline.
 ///
-/// The trait carries an [`Any`] supertrait so the markdown helper layer
-/// (currently only the byte-equal Go engine) can downcast to its concrete
-/// implementation. Once additional backends are introduced, the markdown
-/// helpers will move to a trait-only contract.
-pub trait TextMetrics: Any {
+/// Backends provide the low-level glyph-width primitives (`measure*`,
+/// `space_width`, `scale_unicode`) plus the high-level markdown layout entry
+/// (`measure_markdown`). The default `measure_markdown` impl returns an
+/// error so backends without markdown support fail loudly without panicking;
+/// the byte-equal Go engine overrides it.
+pub trait TextMetrics {
     fn measure(&mut self, font: Font, s: &str) -> (i32, i32);
     fn measure_mono(&mut self, font: Font, s: &str) -> (i32, i32);
     fn measure_precise(&mut self, font: Font, s: &str) -> (f64, f64);
     fn line_height_factor(&self) -> f64;
     fn set_line_height_factor(&mut self, value: f64);
+
+    /// Width of the space glyph in the supplied font, in pixels.
+    fn space_width(&mut self, font: Font) -> f64;
+
+    /// CJK width-fallback heuristic: replace the measured Latin-fallback
+    /// width with `space_width(mono) * unicode_width` for non-1-cell
+    /// graphemes. Returns the corrected width.
+    fn scale_unicode(&mut self, w: f64, font: Font, s: &str) -> f64;
+
+    /// Measure a markdown blob and return the rendered (width, height) in
+    /// pixels. Default impl returns an error; backends with markdown
+    /// support override.
+    fn measure_markdown(
+        &mut self,
+        _md_text: &str,
+        _font_family: Option<crate::fonts::FontFamily>,
+        _mono_font_family: Option<crate::fonts::FontFamily>,
+        _font_size: i32,
+    ) -> Result<(i32, i32), String> {
+        Err("measure_markdown not implemented for this backend".to_string())
+    }
 }
 
 /// Construct the default text-measurement backend (currently the byte-equal
@@ -72,8 +92,8 @@ pub fn header_to_font_size(base_font_size: i32, header: &str) -> i32 {
 
 /// Measure a markdown blob and return the rendered (width, height) in pixels.
 ///
-/// The measurement currently dispatches to [`D2GoEmulationRuler`] only.
-/// Other backends will be plumbed in as the trait grows.
+/// Thin shim that dispatches to the trait method on `metrics`; backends
+/// decide whether they support markdown layout.
 pub fn measure_markdown(
     md_text: &str,
     metrics: &mut dyn TextMetrics,
@@ -81,19 +101,5 @@ pub fn measure_markdown(
     mono_font_family: Option<crate::fonts::FontFamily>,
     font_size: i32,
 ) -> Result<(i32, i32), String> {
-    let any_ref: &mut dyn Any = metrics;
-    let ruler = any_ref
-        .downcast_mut::<D2GoEmulationRuler>()
-        .ok_or_else(|| {
-            "measure_markdown currently requires D2GoEmulationRuler; future \
-             backends will register their own markdown path"
-                .to_string()
-        })?;
-    d2_go_emulation::measure_markdown_inner(
-        md_text,
-        ruler,
-        font_family,
-        mono_font_family,
-        font_size,
-    )
+    metrics.measure_markdown(md_text, font_family, mono_font_family, font_size)
 }

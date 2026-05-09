@@ -1119,6 +1119,24 @@ impl TextMetrics for D2GoEmulationRuler {
     fn set_line_height_factor(&mut self, value: f64) {
         self.line_height_factor = value;
     }
+
+    fn space_width(&mut self, font: Font) -> f64 {
+        D2GoEmulationRuler::space_width(self, font)
+    }
+
+    fn scale_unicode(&mut self, w: f64, font: Font, s: &str) -> f64 {
+        D2GoEmulationRuler::scale_unicode(self, w, font, s)
+    }
+
+    fn measure_markdown(
+        &mut self,
+        md_text: &str,
+        font_family: Option<FontFamily>,
+        mono_font_family: Option<FontFamily>,
+        font_size: i32,
+    ) -> Result<(i32, i32), String> {
+        measure_markdown_inner(md_text, self, font_family, mono_font_family, font_size)
+    }
 }
 
 // ---------------------------------------------------------------------------
