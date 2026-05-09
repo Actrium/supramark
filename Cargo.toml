@@ -17,6 +17,10 @@ members = [
     "crates/dagre",
     "crates/graphviz-anywhere/packages/rust",
     "crates/graphviz-anywhere/examples/rust",
+    "crates/plantuml-little",
+    "crates/plantuml-little/packages/web",
+    "crates/d2-little",
+    "crates/d2-little/packages/web",
 ]
 
 # Crates we deliberately keep outside the unified workspace:
@@ -30,3 +34,13 @@ exclude = []
 # upstream-merged crates continue to resolve their own settings.
 [workspace.metadata.supramark]
 plan = "docs/architecture/LICENSE_COMPATIBILITY.md"
+
+# ── Path overrides ─────────────────────────────────────────────────────
+# plantuml-little and (future) mermaid-little declare their dependency on
+# `graphviz-anywhere` against crates.io. Inside this monorepo we want
+# them to consume the in-tree copy at crates/graphviz-anywhere/packages/rust
+# so a single native build (links = "graphviz_api") satisfies all
+# consumers. Without this patch, cargo refuses to resolve because two
+# crates would both claim the same `links` key.
+[patch.crates-io]
+graphviz-anywhere = { path = "crates/graphviz-anywhere/packages/rust" }

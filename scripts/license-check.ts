@@ -49,7 +49,8 @@ const ALLOWED_EXPRESSIONS = new Set<string>([
 // monorepo default. Listed for traceability — actual enforcement happens
 // when these are introduced (steps 2-4).
 const KNOWN_NON_DEFAULT: Record<string, string> = {
-  '@kookyleo/plantuml-little-web': 'LGPL-3.0-or-later',
+  '@kookyleo/plantuml-little-web':
+    'GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT',
   '@kookyleo/graphviz-anywhere-web': 'EPL-1.0',
   '@kookyleo/graphviz-anywhere-rn': 'EPL-1.0',
   '@kookyleo/d2-little-web': 'MPL-2.0',
@@ -71,6 +72,13 @@ const SKIP_PATTERNS: Array<{ matcher: (p: string) => boolean; reason: string }> 
     // field. Tracked for upstream patch-back via crates/graphviz-anywhere/UPSTREAM.md.
     matcher: p => p === 'crates/graphviz-anywhere/examples/react-native/package.json',
     reason: 'upstream-merged; private demo app, license patch tracked in UPSTREAM.md',
+  },
+  {
+    // Private test-only helper inside plantuml-little. Not published;
+    // upstream omits the license field. Tracked in
+    // crates/plantuml-little/UPSTREAM.md for patch-back.
+    matcher: p => p === 'crates/plantuml-little/tests/support/package.json',
+    reason: 'upstream-merged; private test helper, license patch tracked in UPSTREAM.md',
   },
 ];
 
@@ -165,6 +173,16 @@ function isAllowed(license: string): boolean {
   // Tolerate "(A OR B)" parenthesised SPDX forms.
   const stripped = license.replace(/[()]/g, '').trim();
   if (ALLOWED_EXPRESSIONS.has(stripped)) return true;
+  // SPDX `OR` disjunction: downstream may pick any single operand. The
+  // expression as a whole is acceptable iff at least one operand is on
+  // the allow-list. Accepts mixes like
+  //   "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT"
+  // — even though GPL-3.0-or-later alone would be rejected, the
+  // consumer can take the Apache or MIT branch.
+  if (/\bOR\b/.test(stripped)) {
+    const operands = stripped.split(/\s+OR\s+/).map(s => s.trim());
+    if (operands.some(op => ALLOWED_LICENSES.has(op))) return true;
+  }
   return false;
 }
 

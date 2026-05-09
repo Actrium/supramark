@@ -53,6 +53,13 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "CC-BY-4.0",
+    # Community Data License Agreement Permissive 2.0 — used by
+    # webpki-roots, transitively pulled by plantuml-little's default
+    # "remote" feature (ureq → rustls). Permissive, distributable,
+    # safe for data + libraries. supramark's wasm consumption disables
+    # the remote feature, so this only matters for native builds /
+    # cargo-deny graph audits.
+    "CDLA-Permissive-2.0",
 ]
 
 # Confidence below this threshold means cargo-deny couldn't reliably

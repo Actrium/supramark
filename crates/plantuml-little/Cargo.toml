@@ -1,5 +1,6 @@
-[workspace]
-members = [".", "packages/web"]
+# Inner [workspace] removed during supramark super-monorepo merge —
+# all members are now listed by the root /Cargo.toml. See UPSTREAM.md
+# for the rationale and how to re-apply on upstream sync.
 
 [package]
 name = "plantuml-little"

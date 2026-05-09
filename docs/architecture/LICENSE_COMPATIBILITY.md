@@ -26,8 +26,8 @@
 | `crates/d2-little/web-wasm` → npm `@kookyleo/d2-little-web` | `MPL-2.0` | 同上 | |
 | `crates/mermaid-little` → crate `mermaid-little` | `MIT` | mermaid-js (MIT) | 纯 Rust 重写 |
 | `crates/mermaid-little/web-wasm` → npm `@kookyleo/mermaid-little-web` | `MIT` | 同上 | step 4 新发 |
-| `crates/plantuml-little` → crate `plantuml-little` | **`LGPL-3.0-or-later`** | PlantUML (GPL-3 / LGPL-3) | reimplementation；目标 byte-exact parity；以 dynamic link 方式被消费 |
-| `crates/plantuml-little/web-wasm` → npm `@kookyleo/plantuml-little-web` | `LGPL-3.0-or-later` | 同上 | feature-plantuml README 顶部高亮 |
+| `crates/plantuml-little` → crate `plantuml-little` | **`GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT`** | PlantUML (GPL-3 / LGPL-3) | 上游主动选择 5-way OR 多协议；reimplementation，目标 byte-exact parity；supramark 以 Apache-2.0 分支消费 |
+| `crates/plantuml-little/packages/web` → npm `@kookyleo/plantuml-little-web` | 同上（5-way OR） | 同上 | npm 发布时仍保留 OR 表达式；下游可选择最宽松分支 |
 | `crates/graphviz-anywhere/graphviz/` (submodule) | **`EPL-1.0`** | Graphviz (EPL-1.0 / CPL-1.0) | 不发布；只作为 link 目标；与 Apache 文件目录隔离；目前是空目录占位（待 step 4 装回 submodule） |
 | `crates/graphviz-anywhere/packages/rust` (Rust wrapper) | `Apache-2.0` | 自有 | 包名 `graphviz-anywhere`，独立发 crate |
 | `crates/graphviz-anywhere/packages/rust/prebuilt/` | `EPL-1.0` | Graphviz 编译产物 | 仅在 release build 时填充；运行时 link 边界 |
@@ -44,13 +44,14 @@
 ### 3.2 Apache-2.0 ⇆ MPL-2.0（d2-little）
 单向兼容。MPL-2.0 是**文件级** copyleft：修改 MPL 文件时该文件必须保持 MPL，但可以 link 到 Apache 工程而不传染。**可被 supramark 安全消费**；但若我方向 d2-little 的 `.rs` 文件添加新代码，那些行属 MPL-2.0。
 
-### 3.3 Apache-2.0 ⇆ LGPL-3.0-or-later（plantuml-little）⚠️
-有条件兼容。LGPL 允许通过 dynamic link / wasm import 方式被非 LGPL 工程使用，被使用方不被传染。但：
+### 3.3 Apache-2.0 ⇆ plantuml-little（5-way OR 多协议）✅
+**完全兼容（升级）**。upstream 维护者主动选择了 `GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT` 五选一。supramark 以 **Apache-2.0** 分支消费，**完全无传染**：
 
-- `@supramark/feature-plantuml` 通过 `import('@kookyleo/plantuml-little-web')` 动态加载 wasm，属于"独立可替换组件"，符合 LGPL 例外。
-- `@supramark/core`、`@supramark/engines` 不能 transitive depend on 任何 LGPL 包。
-- 终端用户若要静态链接 / 嵌入 plantuml-little，需要遵守 LGPL 条款（提供再链接能力）。
-- README 顶部高亮：`feature-plantuml` 引入了 LGPL-3.0-or-later 依赖，请商业用户评估。
+- `@supramark/feature-plantuml` 在 Apache-2.0 路径下使用 `@kookyleo/plantuml-little-web`，与 supramark 主体协议一致。
+- 终端用户也可自由选择任一选项（包括最严格的 GPL 或最宽松的 MIT）。
+- 这条路线比 ADR-001 当初设想的 LGPL-only 更宽松，对商业用户友好。
+
+历史决策记录见 ADR-001 修订条目。
 
 ### 3.4 Apache-2.0 ⇆ EPL-1.0（graphviz-anywhere）⚠️
 有摩擦。EPL-1.0 与 Apache-2.0 的 patent grant 条款不完全兼容（EPL 1.0 早于 Apache 2.0 的 patent grant 设计）。对策：
@@ -68,14 +69,31 @@
 
 ## 4. 决策记录（ADR-style）
 
-### ADR-001 · plantuml-little 走 LGPL-3.0-or-later
-**Date:** 2026-05-09
-**Context:** PlantUML 上游为 GPL-3 / LGPL-3。plantuml-little 是 reimplementation 而非 fork，目标 byte-exact SVG parity v1.2026.2，意味着可能与上游有 metric/常数对齐。三个候选：MIT（最宽松）、LGPL-3.0-or-later（中间）、GPL-3.0-or-later（最保守）。
-**Decision:** **LGPL-3.0-or-later**。
-**Why:** MIT 路线在"byte-exact parity"语义下法律风险偏高；GPL 的传染性会让 npm/wasm 商业用户不敢碰。LGPL 是平衡点：以 dynamic link / wasm import 方式被消费时不传染主仓，对 plantuml-little 自身的修改保持 LGPL 贡献回流的对称性。
-**Consequences:** `@supramark/feature-plantuml` 顶部 README 必须高亮 LGPL 属性；`@supramark/core` / `engines` 不允许 transitive 引入。
+### ADR-001 · plantuml-little 协议路线（修订）
+**Original date:** 2026-05-09
+**Revised:** 2026-05-09 (when subtree-merging step 3 surfaced upstream's actual licence choice)
+
+**Context:** PlantUML 上游为 GPL-3 / LGPL-3。plantuml-little 是 reimplementation 而非 fork，目标 byte-exact SVG parity v1.2026.2。
+
+**Original decision:** LGPL-3.0-or-later，作为 GPL 与 MIT 之间的平衡点。
+
+**Revised decision:** **采纳 upstream 实际选择的 5-way OR 多协议**：
+`GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT`
+
+**Why revised:** subtree 合并时发现 `crates/plantuml-little/Cargo.toml#package.license` 上游主动声明了 5 选 1 多协议（远比我们设想的 LGPL-only 宽松）。upstream 维护者已经在源头解决了 reimplementation 与商业友好性的紧张关系——supramark 直接以 Apache-2.0 分支消费即可，无须自行收紧。
+
+**Consequences:**
+- supramark 整体 Apache-2.0 链路保留。
+- `@supramark/feature-plantuml` 不再需要在 README 顶部高亮 LGPL 警告；只需声明依赖在 Apache 分支下使用。
+- license-check.ts 的 OR 解析支持「任一 operand 命中 allow-list 即放行」。
+- ADR 不删除原决策记录，保留为历史足迹。
 
 ### ADR-002 · dagre / graphviz-anywhere 保持独立发布
+
+### ADR-002 · dagre / graphviz-anywhere 保持独立发布
+
+(原 ADR-002 内容；编号未变，下移因 ADR-001 增加 revision 段落)
+
 **Date:** 2026-05-09
 **Context:** `dagre` 与 `graphviz-anywhere` 对 supramark 之外的用户也有价值。是全部 internalize 为 `@supramark/*` 还是保持原 `@kookyleo/*` 名独立发布？
 **Decision:** 独立发布。
