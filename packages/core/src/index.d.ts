@@ -48,4 +48,3 @@ export { presetDefault, presetGFM } from './plugin.js';
 export { LRUCache, createCacheKey, simpleHash, type LRUCacheOptions } from './cache.js';
 export type { SupramarkNode } from './ast.js';
 export { validateFeature as coreValidateFeature } from './feature.js';
-//# sourceMappingURL=index.d.ts.map

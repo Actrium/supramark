@@ -152,10 +152,12 @@ export interface SupramarkCodeNode extends SupramarkBaseNode {
     meta?: string;
 }
 /**
- * 块级数学公式节点（对应 $$...$$）
+ * Block-level math node (matches Markdown's `$$ ... $$`).
  *
- * 语义上接近 mdast 的 "math" 节点，但这里只保留原始 TeX 文本，
- * 实际渲染由上层（KaTeX / headless WebView 等）负责。
+ * Semantically close to mdast's "math" node — supramark keeps only the
+ * raw TeX source here. The rendering surface is the host's renderer
+ * (typically `@supramark/engines/mathjax` for SSR-side SVG output, or
+ * a host-supplied KaTeX path).
  */
 export interface SupramarkMathBlockNode extends SupramarkBaseNode {
     type: 'math_block';
@@ -290,4 +292,3 @@ export type SupramarkNode = SupramarkRootNode | SupramarkBlockNode | SupramarkIn
 export interface SupramarkRootNode extends SupramarkParentNode {
     type: 'root';
 }
-//# sourceMappingURL=ast.d.ts.map

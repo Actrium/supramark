@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { getFeatureOptionsAs, FeatureRegistry } from '@supramark/core';
+import { makeFeatureConfigHelpers, FeatureRegistry } from '@supramark/core';
 import { htmlPageExamples } from './examples.js';
 
 interface HtmlPageContainerData {
@@ -214,19 +214,10 @@ export interface HtmlPageFeatureOptions {
 
 export type HtmlPageFeatureConfig = FeatureConfigWithOptions<HtmlPageFeatureOptions>;
 
-export function createHtmlPageFeatureConfig(
-  enabled = true,
-  options?: HtmlPageFeatureOptions
-): HtmlPageFeatureConfig {
-  return {
-    id: '@supramark/feature-html-page',
-    enabled,
-    options,
-  };
-}
-
-export function getHtmlPageFeatureOptions(config?: SupramarkConfig): HtmlPageFeatureOptions | undefined {
-  return getFeatureOptionsAs<HtmlPageFeatureOptions>(config, '@supramark/feature-html-page');
-}
+const htmlPageHelpers = makeFeatureConfigHelpers<HtmlPageFeatureOptions>(
+  '@supramark/feature-html-page'
+);
+export const createHtmlPageFeatureConfig = htmlPageHelpers.create;
+export const getHtmlPageFeatureOptions = htmlPageHelpers.getOptions;
 
 FeatureRegistry.register(htmlPageFeature);

@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
 } from '@supramark/core';
 import { emojiExamples } from './examples.js';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 
 /**
  * Emoji Feature
@@ -397,17 +397,6 @@ export interface EmojiFeatureOptions {
 
 export type EmojiFeatureConfig = FeatureConfigWithOptions<EmojiFeatureOptions>;
 
-export function createEmojiFeatureConfig(
-  enabled = true,
-  options?: EmojiFeatureOptions
-): EmojiFeatureConfig {
-  return {
-    id: '@supramark/feature-emoji',
-    enabled,
-    options,
-  };
-}
-
-export function getEmojiFeatureOptions(config?: SupramarkConfig): EmojiFeatureOptions | undefined {
-  return getFeatureOptionsAs<EmojiFeatureOptions>(config, '@supramark/feature-emoji');
-}
+const emojiHelpers = makeFeatureConfigHelpers<EmojiFeatureOptions>('@supramark/feature-emoji');
+export const createEmojiFeatureConfig = emojiHelpers.create;
+export const getEmojiFeatureOptions = emojiHelpers.getOptions;

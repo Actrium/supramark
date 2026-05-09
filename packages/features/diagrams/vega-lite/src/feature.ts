@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { diagramVegaLiteExamples } from './examples.js';
 
 /**
@@ -277,22 +277,8 @@ export interface DiagramVegaLiteFeatureOptions {
 
 export type DiagramVegaLiteFeatureConfig = FeatureConfigWithOptions<DiagramVegaLiteFeatureOptions>;
 
-export function createDiagramVegaLiteFeatureConfig(
-  enabled: boolean,
-  options?: DiagramVegaLiteFeatureOptions
-): DiagramVegaLiteFeatureConfig {
-  return {
-    id: '@supramark/feature-diagram-vega-lite',
-    enabled,
-    options,
-  };
-}
-
-export function getDiagramVegaLiteFeatureOptions(
-  config?: SupramarkConfig
-): DiagramVegaLiteFeatureOptions | undefined {
-  return getFeatureOptionsAs<DiagramVegaLiteFeatureOptions>(
-    config,
-    '@supramark/feature-diagram-vega-lite'
-  );
-}
+const diagramVegaLiteHelpers = makeFeatureConfigHelpers<DiagramVegaLiteFeatureOptions>(
+  '@supramark/feature-diagram-vega-lite'
+);
+export const createDiagramVegaLiteFeatureConfig = diagramVegaLiteHelpers.create;
+export const getDiagramVegaLiteFeatureOptions = diagramVegaLiteHelpers.getOptions;

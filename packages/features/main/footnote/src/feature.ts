@@ -7,7 +7,7 @@ import type {
   SupramarkConfig,
 } from '@supramark/core';
 import { footnoteExamples } from './examples.js';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 
 /**
  * Footnote Feature
@@ -476,19 +476,8 @@ export interface FootnoteFeatureOptions {
 
 export type FootnoteFeatureConfig = FeatureConfigWithOptions<FootnoteFeatureOptions>;
 
-export function createFootnoteFeatureConfig(
-  enabled = true,
-  options?: FootnoteFeatureOptions
-): FootnoteFeatureConfig {
-  return {
-    id: '@supramark/feature-footnote',
-    enabled,
-    options,
-  };
-}
-
-export function getFootnoteFeatureOptions(
-  config?: SupramarkConfig
-): FootnoteFeatureOptions | undefined {
-  return getFeatureOptionsAs<FootnoteFeatureOptions>(config, '@supramark/feature-footnote');
-}
+const footnoteHelpers = makeFeatureConfigHelpers<FootnoteFeatureOptions>(
+  '@supramark/feature-footnote'
+);
+export const createFootnoteFeatureConfig = footnoteHelpers.create;
+export const getFootnoteFeatureOptions = footnoteHelpers.getOptions;

@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { diagramEchartsExamples } from './examples.js';
 
 /**
@@ -261,22 +261,8 @@ export interface DiagramEchartsFeatureOptions {
 
 export type DiagramEchartsFeatureConfig = FeatureConfigWithOptions<DiagramEchartsFeatureOptions>;
 
-export function createDiagramEchartsFeatureConfig(
-  enabled: boolean,
-  options?: DiagramEchartsFeatureOptions
-): DiagramEchartsFeatureConfig {
-  return {
-    id: '@supramark/feature-diagram-echarts',
-    enabled,
-    options,
-  };
-}
-
-export function getDiagramEchartsFeatureOptions(
-  config?: SupramarkConfig
-): DiagramEchartsFeatureOptions | undefined {
-  return getFeatureOptionsAs<DiagramEchartsFeatureOptions>(
-    config,
-    '@supramark/feature-diagram-echarts'
-  );
-}
+const diagramEchartsHelpers = makeFeatureConfigHelpers<DiagramEchartsFeatureOptions>(
+  '@supramark/feature-diagram-echarts'
+);
+export const createDiagramEchartsFeatureConfig = diagramEchartsHelpers.create;
+export const getDiagramEchartsFeatureOptions = diagramEchartsHelpers.getOptions;

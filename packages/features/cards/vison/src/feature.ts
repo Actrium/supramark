@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { visonExamples } from './examples.js';
 
 /**
@@ -214,19 +214,8 @@ export interface VisonFeatureOptions {
 
 export type VisonFeatureConfig = FeatureConfigWithOptions<VisonFeatureOptions>;
 
-export function createVisonFeatureConfig(
-  enabled = true,
-  options?: VisonFeatureOptions
-): VisonFeatureConfig {
-  return {
-    id: '@supramark/feature-card-vison',
-    enabled,
-    options,
-  };
-}
-
-export function getVisonFeatureOptions(
-  config?: SupramarkConfig
-): VisonFeatureOptions | undefined {
-  return getFeatureOptionsAs<VisonFeatureOptions>(config, '@supramark/feature-card-vison');
-}
+const visonHelpers = makeFeatureConfigHelpers<VisonFeatureOptions>(
+  '@supramark/feature-card-vison'
+);
+export const createVisonFeatureConfig = visonHelpers.create;
+export const getVisonFeatureOptions = visonHelpers.getOptions;

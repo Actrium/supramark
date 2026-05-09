@@ -612,20 +612,29 @@ export interface StyleVariables {
     [key: string]: unknown;
 }
 /**
- * 渲染基础设施需求
+ * Renderer infrastructure requirements declared by a feature so hosts
+ * can decide whether to wire it up.
  */
 export interface InfrastructureRequirements {
-    /** 是否需要 Worker/WebView */
+    /** Whether a background worker is needed for rendering. */
     needsWorker?: boolean;
-    /** Worker 类型 */
-    workerType?: 'webview' | 'web-worker' | 'service-worker';
-    /** 是否需要缓存 */
+    /**
+     * Worker type. Note: 'webview' was removed in the 2026-05 cleanup —
+     * supramark no longer ships a hidden-WebView worker. RN engines that
+     * historically relied on one (mermaid / plantuml / d2 / echarts /
+     * vega-lite) now go through native FFI bindings or are documented as
+     * Web-only. New features should pick 'web-worker' or
+     * 'service-worker' (or omit `workerType` entirely if no worker is
+     * needed).
+     */
+    workerType?: 'web-worker' | 'service-worker';
+    /** Whether output caching is desired. */
     needsCache?: boolean;
-    /** 缓存配置 */
+    /** Cache configuration. */
     cacheConfig?: CacheConfig;
-    /** 是否需要客户端脚本（Web） */
+    /** Whether the feature needs a client-side script (Web). */
     needsClientScript?: boolean;
-    /** 客户端脚本生成器 */
+    /** Client-side script generator. */
     clientScriptBuilder?: () => string;
 }
 /**
@@ -1065,7 +1074,7 @@ export declare function getEnabledFeatures(config: SupramarkConfig): Array<Supra
  * @returns 是否启用
  */
 export declare function isFeatureEnabled(config: SupramarkConfig, featureId: string): boolean;
-export type DiagramFeatureFamilyId = 'mermaid' | 'plantuml' | 'vega-family' | 'echarts' | 'graphviz-family';
+export type DiagramFeatureFamilyId = 'mermaid' | 'vega-family' | 'echarts' | 'graphviz-family';
 /**
  * 将 diagram engine 归类到当前支持的 feature family。
  *
@@ -1109,4 +1118,27 @@ export declare function getFeatureOptions(config: SupramarkConfig, featureId: st
  * - 如果未配置对应 Feature，返回 undefined。
  */
 export declare function getFeatureOptionsAs<TOptions>(config: SupramarkConfig | undefined, featureId: string): TOptions | undefined;
-//# sourceMappingURL=feature.d.ts.map
+/**
+ * Helpers returned by `makeFeatureConfigHelpers`:
+ * - `create(enabled?, options?)` — build a strongly-typed FeatureConfig for this feature.
+ * - `getOptions(config)` — read the strongly-typed options for this feature from a SupramarkConfig.
+ */
+export interface FeatureConfigHelpers<TOptions> {
+    create(enabled?: boolean, options?: TOptions): FeatureConfigWithOptions<TOptions>;
+    getOptions(config?: SupramarkConfig): TOptions | undefined;
+}
+/**
+ * Generate the standard `(createConfig, getOptions)` helper pair for a single feature.
+ *
+ * Replaces the hand-written `createXFeatureConfig` + `getXFeatureOptions` boilerplate
+ * at the end of every feature package. `enabled` defaults to `true` (convention: an
+ * explicitly-declared feature is on by default).
+ *
+ * @example
+ *   const { create, getOptions } = makeFeatureConfigHelpers<MathFeatureOptions>(
+ *     '@supramark/feature-math'
+ *   );
+ *   export const createMathFeatureConfig = create;
+ *   export const getMathFeatureOptions = getOptions;
+ */
+export declare function makeFeatureConfigHelpers<TOptions>(featureId: string): FeatureConfigHelpers<TOptions>;

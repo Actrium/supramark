@@ -58,4 +58,3 @@ export declare function createInputProcessor(ctx: InputProcessorContext): (token
  * 从 input_open token 的信息中提取内部原始文本。
  */
 export declare function extractInputInnerText(token: Token, sourceLines: string[]): string;
-//# sourceMappingURL=input.d.ts.map

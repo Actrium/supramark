@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { getFeatureOptionsAs, FeatureRegistry } from '@supramark/core';
+import { makeFeatureConfigHelpers, FeatureRegistry } from '@supramark/core';
 import { mapExamples } from './examples.js';
 
 interface MapContainerData {
@@ -221,19 +221,8 @@ export interface MapFeatureOptions {
 
 export type MapFeatureConfig = FeatureConfigWithOptions<MapFeatureOptions>;
 
-export function createMapFeatureConfig(
-  enabled = true,
-  options?: MapFeatureOptions
-): MapFeatureConfig {
-  return {
-    id: '@supramark/feature-map',
-    enabled,
-    options,
-  };
-}
-
-export function getMapFeatureOptions(config?: SupramarkConfig): MapFeatureOptions | undefined {
-  return getFeatureOptionsAs<MapFeatureOptions>(config, '@supramark/feature-map');
-}
+const mapHelpers = makeFeatureConfigHelpers<MapFeatureOptions>('@supramark/feature-map');
+export const createMapFeatureConfig = mapHelpers.create;
+export const getMapFeatureOptions = mapHelpers.getOptions;
 
 FeatureRegistry.register(mapFeature);

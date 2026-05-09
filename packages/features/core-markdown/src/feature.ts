@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
 } from '@supramark/core';
 import { coreMarkdownExamples } from './examples.js';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 
 /**
  * Core Markdown Feature
@@ -750,22 +750,8 @@ export interface CoreMarkdownFeatureOptions {
 
 export type CoreMarkdownFeatureConfig = FeatureConfigWithOptions<CoreMarkdownFeatureOptions>;
 
-export function createCoreMarkdownFeatureConfig(
-  enabled = true,
-  options?: CoreMarkdownFeatureOptions
-): CoreMarkdownFeatureConfig {
-  return {
-    id: '@supramark/feature-core-markdown',
-    enabled,
-    options,
-  };
-}
-
-export function getCoreMarkdownFeatureOptions(
-  config?: SupramarkConfig
-): CoreMarkdownFeatureOptions | undefined {
-  return getFeatureOptionsAs<CoreMarkdownFeatureOptions>(
-    config,
-    '@supramark/feature-core-markdown'
-  );
-}
+const coreMarkdownHelpers = makeFeatureConfigHelpers<CoreMarkdownFeatureOptions>(
+  '@supramark/feature-core-markdown'
+);
+export const createCoreMarkdownFeatureConfig = coreMarkdownHelpers.create;
+export const getCoreMarkdownFeatureOptions = coreMarkdownHelpers.getOptions;

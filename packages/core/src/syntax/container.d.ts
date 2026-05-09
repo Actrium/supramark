@@ -59,9 +59,8 @@ export declare function createContainerTokenProcessor(context: ContainerProcesso
  * 从 container_open token 的信息中提取容器内部原始文本。
  *
  * markdown-it-container 约定：
- * - token.map[0] 为起始行（含 :::name）；
- * - token.map[1] 为结束行之后的行号；
- * - 因此内部内容行范围为 [start + 1, end - 1]。
+ * - token.map[0] 为开启围栏行（`:::name`）的行号；
+ * - token.map[1] 为关闭围栏行（`:::`）的行号（**不是** 之后的行号）；
+ * - 内部内容行范围为 [start + 1, end)（JS slice 语义天然排除掉关闭围栏行）。
  */
 export declare function extractContainerInnerText(token: Token, sourceLines: string[]): string;
-//# sourceMappingURL=container.d.ts.map

@@ -158,4 +158,3 @@ export declare function presetDefault(): SupramarkParseOptions;
  * ```
  */
 export declare function presetGFM(): SupramarkParseOptions;
-//# sourceMappingURL=plugin.d.ts.map

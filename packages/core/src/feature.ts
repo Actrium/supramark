@@ -1781,3 +1781,40 @@ export function getFeatureOptionsAs<TOptions>(
   const featureConfig = config.features.find(f => f.id === featureId);
   return (featureConfig?.options ?? undefined) as TOptions | undefined;
 }
+
+/**
+ * Helpers returned by `makeFeatureConfigHelpers`:
+ * - `create(enabled?, options?)` — build a strongly-typed FeatureConfig for this feature.
+ * - `getOptions(config)` — read the strongly-typed options for this feature from a SupramarkConfig.
+ */
+export interface FeatureConfigHelpers<TOptions> {
+  create(enabled?: boolean, options?: TOptions): FeatureConfigWithOptions<TOptions>;
+  getOptions(config?: SupramarkConfig): TOptions | undefined;
+}
+
+/**
+ * Generate the standard `(createConfig, getOptions)` helper pair for a single feature.
+ *
+ * Replaces the hand-written `createXFeatureConfig` + `getXFeatureOptions` boilerplate
+ * at the end of every feature package. `enabled` defaults to `true` (convention: an
+ * explicitly-declared feature is on by default).
+ *
+ * @example
+ *   const { create, getOptions } = makeFeatureConfigHelpers<MathFeatureOptions>(
+ *     '@supramark/feature-math'
+ *   );
+ *   export const createMathFeatureConfig = create;
+ *   export const getMathFeatureOptions = getOptions;
+ */
+export function makeFeatureConfigHelpers<TOptions>(
+  featureId: string
+): FeatureConfigHelpers<TOptions> {
+  return {
+    create(enabled = true, options) {
+      return { id: featureId, enabled, options };
+    },
+    getOptions(config) {
+      return getFeatureOptionsAs<TOptions>(config, featureId);
+    },
+  };
+}

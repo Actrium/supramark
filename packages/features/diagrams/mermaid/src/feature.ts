@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { mermaidExamples } from './examples.js';
 
 const isMermaidDiagram = (node: SupramarkNode): node is SupramarkDiagramNode => {
@@ -249,19 +249,8 @@ export interface MermaidFeatureOptions {
 
 export type MermaidFeatureConfig = FeatureConfigWithOptions<MermaidFeatureOptions>;
 
-export function createMermaidFeatureConfig(
-  enabled: boolean,
-  options?: MermaidFeatureOptions
-): MermaidFeatureConfig {
-  return {
-    id: '@supramark/feature-mermaid',
-    enabled,
-    options,
-  };
-}
-
-export function getMermaidFeatureOptions(
-  config?: SupramarkConfig
-): MermaidFeatureOptions | undefined {
-  return getFeatureOptionsAs<MermaidFeatureOptions>(config, '@supramark/feature-mermaid');
-}
+const mermaidHelpers = makeFeatureConfigHelpers<MermaidFeatureOptions>(
+  '@supramark/feature-mermaid'
+);
+export const createMermaidFeatureConfig = mermaidHelpers.create;
+export const getMermaidFeatureOptions = mermaidHelpers.getOptions;

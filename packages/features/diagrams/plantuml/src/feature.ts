@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { plantumlExamples } from './examples.js';
 
 /**
@@ -280,19 +280,8 @@ export interface PlantumlFeatureOptions {
 
 export type PlantumlFeatureConfig = FeatureConfigWithOptions<PlantumlFeatureOptions>;
 
-export function createPlantumlFeatureConfig(
-  enabled: boolean,
-  options?: PlantumlFeatureOptions
-): PlantumlFeatureConfig {
-  return {
-    id: '@supramark/feature-plantuml',
-    enabled,
-    options,
-  };
-}
-
-export function getPlantumlFeatureOptions(
-  config?: SupramarkConfig
-): PlantumlFeatureOptions | undefined {
-  return getFeatureOptionsAs<PlantumlFeatureOptions>(config, '@supramark/feature-plantuml');
-}
+const plantumlHelpers = makeFeatureConfigHelpers<PlantumlFeatureOptions>(
+  '@supramark/feature-plantuml'
+);
+export const createPlantumlFeatureConfig = plantumlHelpers.create;
+export const getPlantumlFeatureOptions = plantumlHelpers.getOptions;

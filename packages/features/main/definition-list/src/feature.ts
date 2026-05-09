@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
 } from '@supramark/core';
 import { definitionListExamples } from './examples.js';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 
 /**
  * Definition List Feature
@@ -414,22 +414,8 @@ export interface DefinitionListFeatureOptions {
 
 export type DefinitionListFeatureConfig = FeatureConfigWithOptions<DefinitionListFeatureOptions>;
 
-export function createDefinitionListFeatureConfig(
-  enabled = true,
-  options?: DefinitionListFeatureOptions
-): DefinitionListFeatureConfig {
-  return {
-    id: '@supramark/feature-definition-list',
-    enabled,
-    options,
-  };
-}
-
-export function getDefinitionListFeatureOptions(
-  config?: SupramarkConfig
-): DefinitionListFeatureOptions | undefined {
-  return getFeatureOptionsAs<DefinitionListFeatureOptions>(
-    config,
-    '@supramark/feature-definition-list'
-  );
-}
+const definitionListHelpers = makeFeatureConfigHelpers<DefinitionListFeatureOptions>(
+  '@supramark/feature-definition-list'
+);
+export const createDefinitionListFeatureConfig = definitionListHelpers.create;
+export const getDefinitionListFeatureOptions = definitionListHelpers.getOptions;

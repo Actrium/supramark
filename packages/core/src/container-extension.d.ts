@@ -35,4 +35,3 @@ export interface ContainerExtensionSpec {
     /** 生成器内部填充：feature 目录名 */
     featureDir?: string;
 }
-//# sourceMappingURL=container-extension.d.ts.map

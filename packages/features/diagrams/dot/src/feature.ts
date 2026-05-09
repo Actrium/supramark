@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { diagramDotExamples } from './examples.js';
 
 /**
@@ -244,19 +244,8 @@ export interface DiagramDotFeatureOptions {
 
 export type DiagramDotFeatureConfig = FeatureConfigWithOptions<DiagramDotFeatureOptions>;
 
-export function createDiagramDotFeatureConfig(
-  enabled: boolean,
-  options?: DiagramDotFeatureOptions
-): DiagramDotFeatureConfig {
-  return {
-    id: '@supramark/feature-diagram-dot',
-    enabled,
-    options,
-  };
-}
-
-export function getDiagramDotFeatureOptions(
-  config?: SupramarkConfig
-): DiagramDotFeatureOptions | undefined {
-  return getFeatureOptionsAs<DiagramDotFeatureOptions>(config, '@supramark/feature-diagram-dot');
-}
+const diagramDotHelpers = makeFeatureConfigHelpers<DiagramDotFeatureOptions>(
+  '@supramark/feature-diagram-dot'
+);
+export const createDiagramDotFeatureConfig = diagramDotHelpers.create;
+export const getDiagramDotFeatureOptions = diagramDotHelpers.getOptions;

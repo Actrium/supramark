@@ -17,4 +17,3 @@ export declare function isDiagramFenceLanguage(lang?: string | null): boolean;
  * Note: diagram 是否真正渲染由运行时（RN/Web）按 Feature 配置决定。
  */
 export declare function mapFenceTokenToBlockNode(token: Token, parent: SupramarkParentNode): void;
-//# sourceMappingURL=fence.d.ts.map

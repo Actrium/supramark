@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
-import { FeatureRegistry, getFeatureOptionsAs } from '@supramark/core';
+import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
 import { d2Examples } from './examples.js';
 
 /**
@@ -261,19 +261,6 @@ export interface D2FeatureOptions {
 
 export type D2FeatureConfig = FeatureConfigWithOptions<D2FeatureOptions>;
 
-export function createD2FeatureConfig(
-  enabled: boolean,
-  options?: D2FeatureOptions
-): D2FeatureConfig {
-  return {
-    id: '@supramark/feature-d2',
-    enabled,
-    options,
-  };
-}
-
-export function getD2FeatureOptions(
-  config?: SupramarkConfig
-): D2FeatureOptions | undefined {
-  return getFeatureOptionsAs<D2FeatureOptions>(config, '@supramark/feature-d2');
-}
+const d2Helpers = makeFeatureConfigHelpers<D2FeatureOptions>('@supramark/feature-d2');
+export const createD2FeatureConfig = d2Helpers.create;
+export const getD2FeatureOptions = d2Helpers.getOptions;

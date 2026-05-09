@@ -5,7 +5,7 @@ import type {
   SupramarkConfig,
 } from '@supramark/core';
 import { gfmExamples } from './examples.js';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 
 /**
  * GFM Feature
@@ -536,20 +536,9 @@ export interface GFMFeatureOptions {
 
 export type GFMFeatureConfig = FeatureConfigWithOptions<GFMFeatureOptions>;
 
-export function createGFMFeatureConfig(
-  enabled = true,
-  options?: GFMFeatureOptions
-): GFMFeatureConfig {
-  return {
-    id: '@supramark/feature-gfm',
-    enabled,
-    options,
-  };
-}
-
-export function getGFMFeatureOptions(config?: SupramarkConfig): GFMFeatureOptions | undefined {
-  return getFeatureOptionsAs<GFMFeatureOptions>(config, '@supramark/feature-gfm');
-}
+const gfmHelpers = makeFeatureConfigHelpers<GFMFeatureOptions>('@supramark/feature-gfm');
+export const createGFMFeatureConfig = gfmHelpers.create;
+export const getGFMFeatureOptions = gfmHelpers.getOptions;
 
 // Backward/usage compatibility: alias with lower-case 'fm' to match examples
 export function createGfmFeatureConfig(

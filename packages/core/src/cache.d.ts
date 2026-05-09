@@ -109,4 +109,3 @@ export declare function createCacheKey(...parts: (string | number | boolean | un
  * @returns 哈希值
  */
 export declare function simpleHash(str: string): string;
-//# sourceMappingURL=cache.d.ts.map

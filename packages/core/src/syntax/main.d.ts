@@ -8,4 +8,3 @@ import type { SupramarkConfig } from '../feature.js';
  * - 当未提供 config 或 features 为空时，视为所有内置扩展均启用。
  */
 export declare function registerMainSyntaxPlugins(md: MarkdownIt, config?: SupramarkConfig): void;
-//# sourceMappingURL=main.d.ts.map

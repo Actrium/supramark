@@ -6,7 +6,7 @@ import type {
   FeatureConfigWithOptions,
   SupramarkConfig,
 } from '@supramark/core';
-import { getFeatureOptionsAs } from '@supramark/core';
+import { makeFeatureConfigHelpers } from '@supramark/core';
 import { mathExamples } from './examples.js';
 
 /**
@@ -501,17 +501,6 @@ export interface MathFeatureOptions {
 
 export type MathFeatureConfig = FeatureConfigWithOptions<MathFeatureOptions>;
 
-export function createMathFeatureConfig(
-  enabled = true,
-  options?: MathFeatureOptions
-): MathFeatureConfig {
-  return {
-    id: '@supramark/feature-math',
-    enabled,
-    options,
-  };
-}
-
-export function getMathFeatureOptions(config?: SupramarkConfig): MathFeatureOptions | undefined {
-  return getFeatureOptionsAs<MathFeatureOptions>(config, '@supramark/feature-math');
-}
+const mathHelpers = makeFeatureConfigHelpers<MathFeatureOptions>('@supramark/feature-math');
+export const createMathFeatureConfig = mathHelpers.create;
+export const getMathFeatureOptions = mathHelpers.getOptions;
