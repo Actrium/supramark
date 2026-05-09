@@ -14,7 +14,13 @@ use crate::fonts::Font;
 
 pub mod d2_go_emulation;
 
+#[cfg(target_arch = "wasm32")]
+pub mod host_callback;
+
 pub use d2_go_emulation::D2GoEmulationRuler;
+
+#[cfg(target_arch = "wasm32")]
+pub use host_callback::HostCallbackRuler;
 
 /// Default font size used when measuring markdown content.
 pub const MARKDOWN_FONT_SIZE: i32 = crate::fonts::FONT_SIZE_M;

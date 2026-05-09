@@ -47,6 +47,15 @@ base64 = "0.22"
 # d2-chroma / d2-sketch / d2-sequence / d2-grid / dagre tracing.
 log = "0.4"
 
+# Wasm-only: bridge to the host's text-measurement callback (e.g.
+# `globalThis.supramark.measureText` wrapping `canvas.measureText` or
+# `react-native-skia.Skia.Text.Measure`). Imported as `font_metrics_core`
+# (via `package =`) to mirror the convention set by plantuml-little /
+# mermaid-little; the rename leaves the `font_metrics` namespace free
+# for any future d2-little wrapper module without crate-root shadowing.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+font_metrics_core = { package = "font-metrics", path = "../font-metrics", version = "0.1" }
+
 [dev-dependencies]
 # tests/flate_round_trip.rs validates our deflate against miniz_oxide.
 flate2 = "1"

@@ -237,6 +237,7 @@ dependencies = [
  "base64",
  "fancy-regex",
  "flate2",
+ "font-metrics",
  "log",
  "markdown",
  "regex",
