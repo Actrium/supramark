@@ -112,61 +112,50 @@ impl TtfParserMetrics<'static> {
     }
 }
 
+/// Glyph advance for a single character on a resolved face, in user units.
+///
+/// Returns `0.0` for `\n` and `\r`; falls back to the space advance for
+/// unmapped glyphs, then to `size * 0.6` if the face lacks a space glyph.
+fn char_advance(face: &Face<'_>, ch: char, size: f64) -> f64 {
+    if ch == '\n' || ch == '\r' {
+        return 0.0;
+    }
+    let upem = face.units_per_em() as f64;
+    if let Some(gid) = face.glyph_index(ch) {
+        if let Some(adv) = face.glyph_hor_advance(gid) {
+            return adv as f64 / upem * size;
+        }
+    }
+    if let Some(gid) = face.glyph_index(' ') {
+        if let Some(adv) = face.glyph_hor_advance(gid) {
+            return adv as f64 / upem * size;
+        }
+    }
+    size * 0.6
+}
+
 impl<'a> Metrics for TtfParserMetrics<'a> {
-    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
+    /// Single source of truth: computes width + ascent + descent
+    /// directly from face data. Going through the trait helpers would
+    /// recurse — they default-impl back to `measure`.
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, _italic: bool) -> Measured {
+        let face = self.pick_face(family, bold);
+        let upem = face.units_per_em() as f64;
+        let asc = face.ascender() as f64 / upem * size;
+        let desc = face.descender().unsigned_abs() as f64 / upem * size;
+        let width: f64 = text.chars().map(|c| char_advance(face, c, size)).sum();
         Measured {
-            width: self.text_width(text, family, size, bold, italic),
-            ascent: self.ascent(family, size, bold, italic),
-            descent: self.descent(family, size, bold, italic),
+            width,
+            ascent: asc,
+            descent: desc,
         }
     }
 
-    fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        if ch == '\n' || ch == '\r' {
-            return 0.0;
-        }
-        let face = self.pick_face(family, bold);
-        let upem = face.units_per_em() as f64;
-        if let Some(gid) = face.glyph_index(ch) {
-            if let Some(adv) = face.glyph_hor_advance(gid) {
-                return adv as f64 / upem * size;
-            }
-        }
-        if let Some(gid) = face.glyph_index(' ') {
-            if let Some(adv) = face.glyph_hor_advance(gid) {
-                return adv as f64 / upem * size;
-            }
-        }
-        size * 0.6
-    }
-
-    fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        text.chars()
-            .map(|c| self.char_width(c, family, size, bold, italic))
-            .sum()
-    }
-
-    fn line_height(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        let face = self.pick_face(family, bold);
-        let upem = face.units_per_em() as f64;
-        let asc = face.ascender() as f64;
-        let desc = face.descender().unsigned_abs() as f64;
-        (asc + desc) / upem * size
-    }
-
-    fn ascent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        let face = self.pick_face(family, bold);
-        face.ascender() as f64 / face.units_per_em() as f64 * size
-    }
-
-    fn descent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        let face = self.pick_face(family, bold);
-        face.descender().unsigned_abs() as f64 / face.units_per_em() as f64 * size
-    }
-
+    /// Override: `ttf_parser::Face::typographic_ascender()` reads
+    /// `OS/2.sTypoAscent` when present and may differ from
+    /// `hhea.ascent`. The default impl (which equals `ascent`) would
+    /// lose that distinction.
     fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        // ttf-parser's typographic_ascender() reads OS/2.sTypoAscent
-        // when present; falls back to hhea.ascent otherwise.
         let face = self.pick_face(family, bold);
         let typo = face.typographic_ascender().unwrap_or_else(|| face.ascender());
         let _ = italic;

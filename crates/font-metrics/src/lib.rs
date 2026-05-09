@@ -71,40 +71,83 @@ pub struct Measured {
 /// CSS-style fallback list (`"Foo, sans-serif"` → `"Foo"`). Each
 /// implementation chooses how to map family names to actual faces;
 /// see the implementation docs for the resolution table.
+///
+/// # Trait shape
+///
+/// The single trait method [`Metrics::measure`] is the source of truth;
+/// the 6 helpers (`text_width`, `char_width`, `line_height`, `ascent`,
+/// `descent`, `typo_ascent`) are default-impl derivations and exist for
+/// caller ergonomics until the planned migration in R3+. Backends only
+/// need to implement [`Metrics::measure`]; they may still override a
+/// helper (notably `typo_ascent`) when their face data exposes a value
+/// the default derivation cannot recover (e.g. `OS/2.sTypoAscent`
+/// distinct from `hhea.ascent`).
 pub trait Metrics {
     /// Measure a single line of text in the given font.
     ///
-    /// This is the host's single source of truth: width + ascent + descent
-    /// from one call. The 6 historical helpers (`text_width`, `line_height`,
-    /// `ascent`, `descent`, etc.) are derivable from this and will be
-    /// removed once caller code migrates (R2 onward).
+    /// Single source of truth: width + ascent + descent from one call.
+    /// All 6 helper methods on this trait have default impls that
+    /// derive their result from `measure`.
     ///
     /// Pre-condition: `text` should not contain newlines — multi-line
     /// layout is the caller's responsibility (split + per-line measure).
     fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured;
 
+    /// Total width of a text string.
+    ///
+    /// Default impl: `measure(text, ...).width`.
+    fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        self.measure(text, family, size, bold, italic).width
+    }
+
     /// Width of a single character (typographic horizontal advance).
     /// Returns `0.0` for `\n` and `\r`.
-    fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64;
-
-    /// Total width of a text string, summed character-by-character.
-    fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64;
-
-    /// Line height — typically `ascent + |descent|` for fonts whose
-    /// `hhea.lineGap` is zero (DejaVu, most browser-installed fonts).
-    fn line_height(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64;
+    ///
+    /// Default impl: `text_width(<single-char string>, ...)`.
+    fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        if ch == '\n' || ch == '\r' {
+            return 0.0;
+        }
+        let mut buf = [0u8; 4];
+        let s: &str = ch.encode_utf8(&mut buf);
+        self.text_width(s, family, size, bold, italic)
+    }
 
     /// Distance from baseline to top of the tallest glyph.
-    fn ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64;
+    ///
+    /// Default impl: `measure("M", ...).ascent`. Vertical metrics are
+    /// face-level (not text-dependent), so any reference glyph works.
+    fn ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        self.measure("M", family, size, bold, italic).ascent
+    }
 
     /// Distance from baseline to bottom of the lowest glyph
     /// (positive value).
-    fn descent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64;
+    ///
+    /// Default impl: `measure("M", ...).descent`.
+    fn descent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        self.measure("M", family, size, bold, italic).descent
+    }
+
+    /// Line height — typically `ascent + |descent|` for fonts whose
+    /// `hhea.lineGap` is zero (DejaVu, most browser-installed fonts).
+    ///
+    /// Default impl: `measure("M", ...).ascent + .descent`.
+    fn line_height(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        let m = self.measure("M", family, size, bold, italic);
+        m.ascent + m.descent
+    }
 
     /// OS/2 typographic ascent (`OS/2.sTypoAscent`). Some
     /// upstream-Java diagram families use this instead of the hhea
     /// ascent for their text-block height calculations.
-    fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64;
+    ///
+    /// Default impl: equals [`Metrics::ascent`]. Backends whose face
+    /// data exposes a distinct `OS/2.sTypoAscent` (e.g. the
+    /// `static_dejavu` backend) override this to return that value.
+    fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+        self.ascent(family, size, bold, italic)
+    }
 }
 
 #[cfg(feature = "static-fixtures")]

@@ -110,46 +110,18 @@ fn fallback_box(text: &str, size: f64) -> MeasuredBox {
 }
 
 impl Metrics for HostCallbackMetrics {
+    /// Single bridge call returns width + ascent + descent — the host's
+    /// natural shape. All 6 helper methods inherit their default impls
+    /// (which route back through `measure`); the bridge is the only
+    /// thing the host needs to wire up. `typo_ascent` collapses to
+    /// `ascent` via the default impl, which matches what every browser
+    /// bridge currently exposes.
     fn measure(&self, text: &str, family: &str, size: f64, bold: bool, _italic: bool) -> Measured {
-        // Single bridge call returns width + ascent + descent — the host's natural shape.
         let m = self.measure_box(text, family, size, bold);
         Measured {
             width: m.width,
             ascent: m.ascent,
             descent: m.descent,
         }
-    }
-
-    fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        if ch == '\n' || ch == '\r' {
-            return 0.0;
-        }
-        // Build a 1-char string without allocating when possible.
-        let mut buf = [0u8; 4];
-        let s: &str = ch.encode_utf8(&mut buf);
-        self.measure_box(s, family, size, bold).width
-    }
-
-    fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure_box(text, family, size, bold).width
-    }
-
-    fn line_height(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        let m = self.measure_box("M", family, size, bold);
-        m.ascent + m.descent
-    }
-
-    fn ascent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure_box("M", family, size, bold).ascent
-    }
-
-    fn descent(&self, family: &str, size: f64, bold: bool, _italic: bool) -> f64 {
-        self.measure_box("M", family, size, bold).descent
-    }
-
-    fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        // Most browser bridges only expose hhea-equivalent ascent;
-        // typo_ascent and ascent collapse to the same value.
-        self.ascent(family, size, bold, italic)
     }
 }

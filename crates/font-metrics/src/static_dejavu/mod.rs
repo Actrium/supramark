@@ -100,67 +100,54 @@ fn resolve_face(family: &str, bold: bool, italic: bool) -> &'static FontMeta {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StaticDejaVuMetrics;
 
+/// Glyph advance for a single character on a resolved face, in user units.
+///
+/// Computes `glyph_hor_advance / units_per_em * size`, matching Java's
+/// `font.getStringBounds(ch, frc).getWidth()` with `FRACTIONALMETRICS_ON`.
+/// Returns `0.0` for `\n` and `\r`. Falls back to the space advance for
+/// unmapped characters, then to `size * 0.6` if the face lacks a space
+/// glyph (should not happen with DejaVu).
+fn char_advance(face: &FontMeta, ch: char, size: f64) -> f64 {
+    if ch == '\n' || ch == '\r' {
+        return 0.0;
+    }
+    let upem = face.units_per_em as f64;
+    if let Some(adv) = face.glyph_advance(ch as u32) {
+        return adv as f64 / upem * size;
+    }
+    if let Some(sp_adv) = face.glyph_advance(' ' as u32) {
+        return sp_adv as f64 / upem * size;
+    }
+    size * 0.6
+}
+
 impl Metrics for StaticDejaVuMetrics {
-    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
-        Measured {
-            width: self.text_width(text, family, size, bold, italic),
-            ascent: self.ascent(family, size, bold, italic),
-            descent: self.descent(family, size, bold, italic),
-        }
-    }
-
-    /// Computes `glyph_hor_advance / units_per_em * size`, matching
-    /// Java's `font.getStringBounds(ch, frc).getWidth()` with
-    /// `FRACTIONALMETRICS_ON`.
-    fn char_width(&self, ch: char, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        if ch == '\n' || ch == '\r' {
-            return 0.0;
-        }
-        let face = resolve_face(family, bold, italic);
-        let upem = face.units_per_em as f64;
-        if let Some(adv) = face.glyph_advance(ch as u32) {
-            return adv as f64 / upem * size;
-        }
-        // Fallback: use space advance for unmapped characters.
-        if let Some(sp_adv) = face.glyph_advance(' ' as u32) {
-            return sp_adv as f64 / upem * size;
-        }
-        // Last-resort fallback for fonts missing both the requested
-        // glyph and a space glyph (should not happen with DejaVu).
-        size * 0.6
-    }
-
-    fn text_width(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        text.chars()
-            .map(|c| self.char_width(c, family, size, bold, italic))
-            .sum()
-    }
-
-    /// Line height = ascent + |descent| (DejaVu has zero
-    /// `hhea.lineGap`). Matches Java's `LineMetrics.getHeight()`.
+    /// Single source of truth: computes width + ascent + descent
+    /// directly from face data, without going through the helper
+    /// methods (which themselves derive from `measure` via default
+    /// impls — calling them here would recurse).
     ///
     /// Vertical metrics are face-dependent — DejaVu Sans / Mono share
     /// `asc=1901, desc=-483` across plain and bold, but DejaVu Serif
     /// Bold / BoldItalic raise the ascender to 1923. Java picks the
     /// value from the actual rendered face, so we do too.
-    fn line_height(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
         let face = resolve_face(family, bold, italic);
         let upem = face.units_per_em as f64;
-        let asc = face.ascender as f64;
-        let desc = face.descender.unsigned_abs() as f64;
-        (asc + desc) / upem * size
+        let asc = face.ascender as f64 / upem * size;
+        let desc = face.descender.unsigned_abs() as f64 / upem * size;
+        let width: f64 = text.chars().map(|c| char_advance(face, c, size)).sum();
+        Measured {
+            width,
+            ascent: asc,
+            descent: desc,
+        }
     }
 
-    fn ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        let face = resolve_face(family, bold, italic);
-        face.ascender as f64 / face.units_per_em as f64 * size
-    }
-
-    fn descent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
-        let face = resolve_face(family, bold, italic);
-        face.descender.unsigned_abs() as f64 / face.units_per_em as f64 * size
-    }
-
+    /// Override: DejaVu's pre-extracted tables expose `OS/2.sTypoAscent`
+    /// as a separate field that differs from `hhea.ascent` on some
+    /// faces; the default impl (which equals `ascent`) would lose that
+    /// distinction and break Java byte-equal regressions.
     fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
         let face = resolve_face(family, bold, italic);
         face.typo_ascender as f64 / face.units_per_em as f64 * size
