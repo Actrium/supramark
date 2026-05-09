@@ -1,0 +1,16 @@
+{
+  "name": "mermaid-little-ref-support",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Private helper package: deterministic Node-based reference SVG generator for mermaid-little. Not published. Mirrors plantuml-little/tests/support/ conventions.",
+  "scripts": {
+    "generate": "node generate_ref.mjs",
+    "probe": "node probe_render.mjs"
+  },
+  "dependencies": {
+    "jsdom": "25.0.1",
+    "mermaid": "11.14.0",
+    "opentype.js": "^1.3.4"
+  }
+}

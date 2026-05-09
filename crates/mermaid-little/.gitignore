@@ -1,0 +1,18 @@
+/target
+Cargo.lock.bak
+*.swp
+*.log
+.DS_Store
+
+# editor / IDE
+.idea/
+.vscode/
+
+# runtime artifacts
+tmp_debug/
+*.svg.out
+node_modules/
+
+# claude / ai tooling workspaces
+.claude/worktrees/
+.trace-skill/
