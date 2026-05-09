@@ -12,6 +12,7 @@
 
 use crate::fonts::Font;
 
+pub mod d2_emulation_metrics;
 pub mod d2_go_emulation;
 
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +20,7 @@ pub mod host_callback;
 
 mod markdown;
 
+pub use d2_emulation_metrics::D2GoEmulationMetrics;
 pub use d2_go_emulation::D2GoEmulationRuler;
 
 #[cfg(target_arch = "wasm32")]

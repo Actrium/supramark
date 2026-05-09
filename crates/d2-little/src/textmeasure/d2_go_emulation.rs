@@ -992,6 +992,19 @@ impl D2GoEmulationRuler {
         (self.bounds.w(), self.bounds.h())
     }
 
+    /// Return the (ascent, descent) in CSS pixels for the font's atlas.
+    /// Forces atlas creation if not already cached. Required by the
+    /// `font_metrics_core::Metrics` adapter (`D2GoEmulationMetrics`)
+    /// which needs face-level vertical metrics in addition to width.
+    pub fn face_metrics_for(&mut self, font: Font) -> (f64, f64) {
+        let key = FontKey::from(font);
+        if !self.atlases.contains_key(&key) {
+            self.add_font_size(font);
+        }
+        let atlas = &self.atlases[&key];
+        (atlas.ascent, atlas.descent)
+    }
+
     /// Measure text: ceil to i32 and apply the non-BMP composite-grapheme
     /// (e.g. emoji) adjustment.
     pub fn measure(&mut self, font: Font, s: &str) -> (i32, i32) {
