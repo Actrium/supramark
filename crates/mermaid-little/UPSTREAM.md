@@ -10,8 +10,11 @@
 - **mermaid-little license:** `MIT`.
 - **mermaid (the project being reimplemented):** `MIT` upstream.
 - mermaid-little is a **reimplementation in Rust** targeting byte-exact
-  SVG parity with `mermaid@11.14.0`. Font metrics are vendored from
-  the sister project `plantuml-little`.
+  SVG parity with `mermaid@11.14.0`. Static DejaVu range tables are
+  shared with sister project `plantuml-little` via the in-tree crate
+  `little-font-metrics` (extracted 2026-05-09; previously a hand-vendored
+  copy of plantuml-little @ `b32d6aa` lived in
+  `crates/mermaid-little/src/font_data.rs`).
 - MIT ⇆ Apache-2.0 (supramark default) is fully compatible.
 
 ## Relationship

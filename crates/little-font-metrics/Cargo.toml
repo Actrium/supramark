@@ -1,0 +1,30 @@
+[package]
+name = "little-font-metrics"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+# Inherits the multi-license posture of plantuml-little, where this data
+# was previously colocated. The static range tables are a derived work
+# of the DejaVu fonts (Bitstream Vera license) — see README.md.
+license = "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Shared static font metric tables (DejaVu Sans / Mono / Serif) used by plantuml-little and mermaid-little for Java/JS-parity SVG layout."
+homepage = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/kookyleo/supramark"
+keywords = ["font", "metrics", "dejavu", "svg", "diagram"]
+categories = ["graphics", "text-processing"]
+exclude = ["tests/"]
+
+# Phase 1 of the little-font-metrics extraction (see
+# docs/architecture/SHARED_FONT_METRICS.md if added). Currently the crate
+# exposes only the static range tables previously living in
+# plantuml-little/src/font_data.rs. Phase 2 will introduce a Metrics
+# trait + TtfParserMetrics + HostCallbackMetrics for runtime font
+# flexibility; Phase 3 brings d2-little into the same trait.
+
+[dependencies]
+# Intentionally none. font_data.rs is pure static lookup tables.
+
+[lib]
+name = "little_font_metrics"
+path = "src/lib.rs"

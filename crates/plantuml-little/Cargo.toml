@@ -51,6 +51,9 @@ cli = ["dep:env_logger"]
 remote = ["dep:ureq"]
 
 [dependencies]
+# Shared static DejaVu range tables (was crate::font_data; extracted to
+# eliminate the manual vendor in mermaid-little/src/font_data.rs).
+little-font-metrics = { path = "../little-font-metrics", version = "0.1" }
 thiserror = "1"
 log = "0.4"
 env_logger = { version = "0.11", optional = true }

@@ -17,6 +17,7 @@ members = [
     "crates/dagre",
     "crates/graphviz-anywhere/packages/rust",
     "crates/graphviz-anywhere/examples/rust",
+    "crates/little-font-metrics",
     "crates/plantuml-little",
     "crates/plantuml-little/packages/web",
     "crates/d2-little",
