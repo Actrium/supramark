@@ -1291,7 +1291,7 @@ pub fn measure_positioned_tooltip(shape: &Shape) -> (i32, i32) {
         let text_len = shape.tooltip.chars().count() as i32;
         ((text_len * 8 + 20).min(200), 30)
     };
-    if let Ok(mut ruler) = crate::textmeasure::Ruler::new() {
+    if let Ok(mut ruler) = crate::textmeasure::default_metrics() {
         let font_family = crate::fonts::d2_font_to_family(&shape.text.font_family);
         let font_size = if shape.text.font_size > 0 {
             shape.text.font_size
@@ -1300,7 +1300,7 @@ pub fn measure_positioned_tooltip(shape: &Shape) -> (i32, i32) {
         };
         if let Ok((w, h)) = crate::textmeasure::measure_markdown(
             &shape.tooltip,
-            &mut ruler,
+            &mut *ruler,
             font_family,
             None,
             font_size,

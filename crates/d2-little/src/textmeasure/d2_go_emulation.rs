@@ -1,21 +1,26 @@
-//! Text measurement for d2 rendering.
+//! D2 / Go upstream byte-equal text measurement engine.
 //!
 //! Ported from Go `lib/textmeasure/textmeasure.go` and `lib/textmeasure/atlas.go`.
 //!
-//! 实现策略：字节级复现 Go 版本 `golang/freetype/truetype` + `fixed.Int26_6`
-//! 的度量结果。所有与 Go 有关的中间量都以 Int26_6 (i32，表示 value * 64)
-//! 参与整数运算，只在最终返回时通过 `i2f` 转换为 `f64` 像素值。
+//! Strategy: byte-equal reproduction of Go upstream's `golang/freetype/truetype`
+//! plus `fixed.Int26_6`. All Go-correlated intermediate values flow through
+//! Int26_6 (i32 representing value * 64) integer arithmetic; conversion to
+//! `f64` pixels via `i2f` happens only at the final return boundary.
 //!
-//! 关键点：
-//! * 使用 `ttf-parser` 的 `glyph_bounding_box` 获取 FUnit 级别的紧凑控制点包围盒
-//!   (与 Go freetype 遍历所有控制点计算出的 `g.Bounds` 等价，因为 ttf-parser 的
-//!   `OutlineBuilder` 会把所有原始控制点都 `extend_by` 进去，而合成的中点不会
-//!   让包围盒扩大)。
-//! * 逐字形点按 Go 的 `Font.scale` 公式缩放：
-//!   `scaled = (scale_26_6 * funit + sign(funit) * fupe / 2) / fupe`，
-//!   其中 `scale_26_6 = round(size * dpi * 64 / 72)`，`fupe` 为每 em 单位数。
-//! * Floor / Ceil 到整数像素边界，按 Go `makeMapping` 的算法累积 frame / dot。
-//! * `DrawRune` 内把 rect 的高度替换为 `ascent + descent`，与 Go 一致。
+//! Key points:
+//! * Use ttf-parser's `glyph_bounding_box` to obtain the funit-level tight
+//!   control-point bounding box (equivalent to Go freetype walking every
+//!   control point and `g.Bounds`-extending — ttf-parser's `OutlineBuilder`
+//!   `extend_by`s every raw control point too, and the synthesized midpoints
+//!   never widen the box).
+//! * Per-glyph points are scaled with Go's `Font.scale` formula:
+//!   `scaled = (scale_26_6 * funit + sign(funit) * fupe / 2) / fupe`,
+//!   where `scale_26_6 = round(size * dpi * 64 / 72)` and `fupe` is the
+//!   font's units-per-em.
+//! * Floor / Ceil to integer pixel boundaries, accumulating frame / dot per
+//!   Go `makeMapping`.
+//! * Inside `DrawRune`, replace the rect height with `ascent + descent` to
+//!   match Go.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -28,16 +33,11 @@ use ttf_parser::Face;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use super::TextMetrics;
+
 const TAB_SIZE: f64 = 4.0;
 const SIZELESS_FONT_SIZE: i32 = 0;
 const REPLACEMENT_CHAR: char = '\u{FFFD}';
-
-pub const MARKDOWN_FONT_SIZE: i32 = crate::fonts::FONT_SIZE_M;
-
-/// Line-height factor used when measuring code blocks
-/// (shape: code with language / fenced code). Mirrors Go
-/// `textmeasure.CODE_LINE_HEIGHT`.
-pub const CODE_LINE_HEIGHT: f64 = 1.3;
 
 const MARKDOWN_LINE_HEIGHT: f64 = 1.5;
 
@@ -69,18 +69,11 @@ const PADDING_LR_BLOCKQUOTE_EM: f64 = 1.0;
 const MARGIN_BOTTOM_BLOCKQUOTE: f64 = 16.0;
 const BORDER_LEFT_BLOCKQUOTE_EM: f64 = 0.25;
 
-const H1_EM: f64 = 2.0;
-const H2_EM: f64 = 1.5;
-const H3_EM: f64 = 1.25;
-const H4_EM: f64 = 1.0;
-const H5_EM: f64 = 0.875;
-const H6_EM: f64 = 0.85;
-
 static HREF_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"href="([^"]*)""#).expect("href regex"));
 
-/// 默认会预先烘焙进 atlas 的 runes 集合。
-/// ASCII + Latin-1 Supplement + Geometric Shapes (与 Go `init()` 同步)。
+/// Default rune set baked into the atlas at construction time.
+/// ASCII + Latin-1 Supplement + Geometric Shapes (matches Go `init()`).
 fn default_runes() -> Vec<char> {
     let mut runes = Vec::with_capacity(512);
     for c in 0x0000u32..=0x007F {
@@ -102,42 +95,43 @@ fn default_runes() -> Vec<char> {
 }
 
 // ---------------------------------------------------------------------------
-// Fixed-point (Int26_6) helpers —— 严格复刻 Go `fixed.Int26_6` 行为
+// Fixed-point (Int26_6) helpers — strict reproduction of Go `fixed.Int26_6`.
 // ---------------------------------------------------------------------------
 
-/// Int26_6 值 x 对应的 pixel float64（= x / 64）。
+/// Pixel float64 (`x / 64`) for the Int26_6 value `x`.
 #[inline]
 fn i2f(x: i32) -> f64 {
     x as f64 / 64.0
 }
 
-/// `fixed.I(i)`: 把整数像素提升为 Int26_6（= i * 64）。
+/// `fixed.I(i)`: lift integer pixels to Int26_6 (= `i * 64`).
 #[inline]
 fn i_pixel(i: i32) -> i32 {
     i << 6
 }
 
-/// Go `fixed.Int26_6.Floor()` —— 算术右移 6 位。
+/// Go `fixed.Int26_6.Floor()` — arithmetic right shift by 6.
 #[inline]
 fn floor_26_6(x: i32) -> i32 {
-    // Rust 有符号整数右移就是算术右移，与 Go 一致。
+    // Rust signed-int right shift is arithmetic, matching Go.
     x >> 6
 }
 
-/// Go `fixed.Int26_6.Ceil()` —— `(x + 0x3f) >> 6`。
+/// Go `fixed.Int26_6.Ceil()` — `(x + 0x3f) >> 6`.
 #[inline]
 fn ceil_26_6(x: i32) -> i32 {
     (x + 0x3f) >> 6
 }
 
-/// Go `truetype.Font.scale`: 把 `scale_26_6 * funit` 按 fupe 取整。
+/// Go `truetype.Font.scale`: round `scale_26_6 * funit` by `fupe`.
 ///
 /// ```text
 /// if x >= 0 { x += fupe / 2 } else { x -= fupe / 2 }
 /// return x / fupe
 /// ```
 ///
-/// 注意：这里参数 `x` 已经是 `scale_26_6 * funit`（仍保留 Int26_6 的 *64 量级）。
+/// Note: argument `x` is already `scale_26_6 * funit` (still at the Int26_6
+/// *64 magnitude).
 #[inline]
 fn font_scale_div(x: i64, fupe: i32) -> i32 {
     let fupe64 = fupe as i64;
@@ -146,22 +140,23 @@ fn font_scale_div(x: i64, fupe: i32) -> i32 {
     } else {
         x - fupe64 / 2
     };
-    // Go 的整数除法对负数是向零截断，与 Rust 的 `/` 一致。
+    // Go integer division truncates toward zero for negatives — same as Rust.
     (y / fupe64) as i32
 }
 
-/// 将一个 FUnit 坐标按 Go freetype 的方式缩放到 Int26_6 像素单位。
+/// Scale a single FUnit coordinate to Int26_6 pixel units the Go-freetype way.
 #[inline]
 fn scale_funit_to_26_6(funit: i32, scale_26_6: i32, fupe: i32) -> i32 {
-    // Go 做的是 `Int26_6 * Int26_6`，两个都是 i32，结果落回 i32。
-    // 这里用 i64 防溢出。对 1000 以内的 fupe 与 1024 左右的 scale
-    // 以及数千的 funit 来说 i32 也够，但 i64 更安全。
+    // Go performs `Int26_6 * Int26_6` with both operands being i32 and the
+    // result falling back to i32. We promote to i64 to avoid overflow. With
+    // fupe < 1000, scale around 1024, and funit in the low thousands i32
+    // would suffice, but i64 is safer.
     let prod = scale_26_6 as i64 * funit as i64;
     font_scale_div(prod, fupe)
 }
 
 // ---------------------------------------------------------------------------
-// Rect (内部包围盒类型)
+// Rect (internal bounding-box type)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
@@ -221,7 +216,7 @@ struct Glyph {
     advance: f64,
 }
 
-/// Atlas 保存一个字体 / 尺寸下预计算好的 glyph 度量。
+/// Atlas keeps the precomputed glyph metrics for one (font, size) pair.
 struct Atlas {
     mapping: HashMap<char, Glyph>,
     ascent: f64,
@@ -229,30 +224,32 @@ struct Atlas {
     line_height: f64,
 }
 
-/// 单个 glyph 经过 Go freetype 缩放后的 Int26_6 像素度量。
+/// Per-glyph metrics in Int26_6 pixel units, post Go-freetype scaling.
 #[derive(Debug, Clone, Copy)]
 struct GlyphMetrics {
-    /// Int26_6 表示的 glyph 控制点包围盒（已缩放、Y 已经翻成 "正值向下"）。
-    /// 即与 Go `face.GlyphBounds` 返回的 `bounds` 对齐。
+    /// Int26_6 glyph control-point bounding box (already scaled, with Y
+    /// flipped to "positive-down"). Aligns with the `bounds` returned by
+    /// Go `face.GlyphBounds`.
     bx_min: i32,
     by_min: i32,
     bx_max: i32,
     by_max: i32,
-    /// Int26_6 表示的水平推进量。
+    /// Horizontal advance in Int26_6.
     advance: i32,
 }
 
 impl Atlas {
-    /// 按 Go 的 `NewAtlas` 逻辑构造 atlas。
+    /// Build the atlas following Go's `NewAtlas` logic.
     fn new(face: &Face<'_>, size: i32, runes: &[char]) -> Self {
         let fupe = face.units_per_em() as i32;
-        // 缺省 dpi = 72：scale = round(size * 72 * 64 / 72 + 0.5) = round(size*64+0.5)
-        // 对整数 size 等价于 size * 64。这里复刻 Go 的表达式保证严谨。
+        // Default dpi = 72: scale = round(size * 72 * 64 / 72 + 0.5) =
+        // round(size*64+0.5). For integer `size` that equals `size * 64`.
+        // We mirror Go's expression here for parity.
         let scale_26_6 = (0.5 + (size as f64 * 72.0 * 64.0 / 72.0)) as i32;
 
         // Go `face.Metrics()`:
         //   Height  = a.scale                              (Int26_6)
-        //   Ascent  = Int26_6(Ceil(scale * ascent / fupe)) (Int26_6 raw value！)
+        //   Ascent  = Int26_6(Ceil(scale * ascent / fupe)) (raw Int26_6 value!)
         //   Descent = Int26_6(Ceil(scale * -descent / fupe))
         let scale_f = scale_26_6 as f64;
         let ascent_raw = (scale_f * face.ascender() as f64 / fupe as f64).ceil() as i32;
@@ -261,12 +258,12 @@ impl Atlas {
         let descent = i2f(descent_raw);
         let line_height = i2f(scale_26_6);
 
-        // Go 把 Ascent / Descent 当成「像素数」直接加给 dot，所以这里要和
-        // atlas 布局里使用的 `face.Metrics().Ascent + face.Metrics().Descent`
-        // 保持一致（也是 Int26_6 raw value）。
+        // Go treats Ascent / Descent as a "pixel count" added directly to
+        // `dot`, so we keep the same Int26_6 raw representation as the
+        // atlas layout (`face.Metrics().Ascent + face.Metrics().Descent`).
         let row_step_26_6 = ascent_raw + descent_raw;
 
-        // --- 收集 runes + 预先计算 Int26_6 度量 ------------------------------
+        // --- collect runes + precompute Int26_6 metrics ---------------------
         use std::collections::HashSet;
         let mut seen: HashSet<char> = HashSet::new();
         let mut order: Vec<char> = Vec::with_capacity(runes.len() + 1);
@@ -278,8 +275,8 @@ impl Atlas {
             }
         }
 
-        // 只保留那些可以计算出 metrics 的字形（Go: `face.GlyphBounds` 返回
-        // ok=false 时跳过）。
+        // Keep only glyphs whose metrics resolved successfully (Go skips
+        // entries when `face.GlyphBounds` returns ok=false).
         let mut metrics: HashMap<char, GlyphMetrics> = HashMap::new();
         let mut valid_runes: Vec<char> = Vec::with_capacity(order.len());
         for r in order {
@@ -289,9 +286,10 @@ impl Atlas {
             }
         }
 
-        // --- 走 Go 的 makeSquareMapping -------------------------------------
-        // 这里其实只影响 atlas 的 Y 坐标：宽度到达 `width` 时换行。对最终
-        // `MeasurePrecise` 的结果影响有限，但为了与 Go 完全对齐仍然执行。
+        // --- run Go's makeSquareMapping -------------------------------------
+        // This only affects the atlas Y coordinates: rows wrap when width
+        // is reached. Final `MeasurePrecise` results barely change, but we
+        // still execute it to stay byte-equal with Go.
         let padding_26_6 = i_pixel(2);
         let lo_init = 0i32;
         let hi_init = i_pixel(1024 * 1024);
@@ -318,7 +316,8 @@ impl Atlas {
             row_step_26_6,
         );
 
-        // 将 Int26_6 mapping 转成 f64 像素并翻转 Y（Go atlas.go 相同处理）。
+        // Convert the Int26_6 mapping into f64 pixels and flip Y (same as
+        // Go atlas.go).
         let bounds_tl_y = i2f(fixed_bounds.min_y);
         let bounds_br_y = i2f(fixed_bounds.max_y);
 
@@ -370,13 +369,13 @@ impl Atlas {
             .unwrap_or_else(|| self.mapping[&REPLACEMENT_CHAR])
     }
 
-    /// 与 Go freetype 的 `Face.Kern` 对齐 —— 只读取旧 `kern` 表；对于 Source
-    /// Sans Pro 等没有该表的字体，恒为 0。
+    /// Mirrors Go freetype's `Face.Kern` — only reads the legacy `kern`
+    /// table. Always 0 for fonts without that table (e.g. Source Sans Pro).
     fn kern(&self, _r0: char, _r1: char) -> f64 {
         0.0
     }
 
-    /// 画一个 rune，返回 (rect, frame, bounds, new_dot_x, new_dot_y)。
+    /// Draw one rune. Returns (rect, frame, bounds, new_dot_x, new_dot_y).
     fn draw_rune(
         &self,
         prev_r: Option<char>,
@@ -433,7 +432,7 @@ impl Atlas {
 }
 
 // ---------------------------------------------------------------------------
-// make_mapping —— 对应 Go `makeMapping`
+// make_mapping — corresponds to Go `makeMapping`.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
@@ -457,9 +456,10 @@ struct FixedBounds {
 
 impl FixedBounds {
     fn union_rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
-        // Go 的 Union 在「当前矩形非空 vs empty」时有细微差异，但对度量没有
-        // 直接影响（measure 时会被 bounds==0 分支保护）。这里使用一致的「空
-        // 则替换」逻辑来匹配 `fixed.Rectangle26_6{}.Union`。
+        // Go's Union differs slightly between "current rect non-empty" and
+        // "empty" cases, but it has no direct effect on measurements (the
+        // bounds==0 branch in `measure` guards it). We use a consistent
+        // "empty -> replace" rule that matches `fixed.Rectangle26_6{}.Union`.
         if self.min_x == 0 && self.min_y == 0 && self.max_x == 0 && self.max_y == 0 {
             self.min_x = x0;
             self.min_y = y0;
@@ -501,7 +501,8 @@ fn make_mapping(
             None => continue,
         };
 
-        // Floor/Ceil 对齐到整像素（Int26_6 中仍存储为 64 的倍数）。
+        // Floor / Ceil-align to integer pixels (Int26_6 still stores them
+        // as multiples of 64).
         let frame_min_x_0 = i_pixel(floor_26_6(m.bx_min));
         let frame_min_y_0 = i_pixel(floor_26_6(m.by_min));
         let frame_max_x_0 = i_pixel(ceil_26_6(m.bx_max));
@@ -533,11 +534,11 @@ fn make_mapping(
 
         // dot.X = frame.Max.X
         dot_x = frame_max_x;
-        // padding + align 到整像素
+        // padding + align to integer pixel
         dot_x += padding_26_6;
         dot_x = i_pixel(ceil_26_6(dot_x));
 
-        // 宽度超过，换行
+        // wrap to next row when the width is exceeded
         if frame_max_x >= width_26_6 {
             dot_x = 0;
             dot_y += row_step_26_6;
@@ -736,7 +737,7 @@ fn compute_glyph_bounds_scaled(
 
         // We only support `args are XY values` + no transform (the
         // common case for Source Sans Pro). Glyphs requesting a point
-        // matching / scale / 2×2 transform fall through to the
+        // matching / scale / 2x2 transform fall through to the
         // component's bounds without adjustment — they're rare enough
         // that we'd rather log an approximation than panic.
         let has_transform = flags
@@ -840,11 +841,16 @@ fn compute_glyph_metrics(
 }
 
 // ---------------------------------------------------------------------------
-// Ruler
+// D2GoEmulationRuler
 // ---------------------------------------------------------------------------
 
-/// 文本度量 Ruler —— 为每个 (family, style, size) 维护一个 Atlas。
-pub struct Ruler {
+/// Text-measurement Ruler — keeps one Atlas per (family, style, size).
+///
+/// Renamed from the historical `Ruler` to flag this as the byte-equal
+/// reproduction of Go upstream's freetype + Int26_6 path. Future text
+/// measurement backends (host callbacks, ttf-parser fallback) will
+/// implement [`TextMetrics`] alongside this engine.
+pub struct D2GoEmulationRuler {
     orig_x: f64,
     orig_y: f64,
     dot_x: f64,
@@ -854,7 +860,7 @@ pub struct Ruler {
     line_heights: HashMap<FontKey, f64>,
     tab_widths: HashMap<FontKey, f64>,
     atlases: HashMap<FontKey, Atlas>,
-    /// 原始 TTF 字节（按 family+style 归档，size 无关）。
+    /// Raw TTF bytes (keyed by family+style; size-independent).
     ttfs: HashMap<FontKey, &'static [u8]>,
 
     prev_r: Option<char>,
@@ -888,8 +894,8 @@ impl FontKey {
     }
 }
 
-impl Ruler {
-    /// 创建 Ruler 并载入所有内建字体的 TTF 数据。
+impl D2GoEmulationRuler {
+    /// Construct a Ruler and load every built-in font's TTF bytes.
     pub fn new() -> Result<Self, String> {
         let mut ttfs: HashMap<FontKey, &'static [u8]> = HashMap::new();
 
@@ -904,7 +910,7 @@ impl Ruler {
                     continue;
                 }
                 let face_data = crate::fonts::lookup_font_face(family, style);
-                // 先试解析确保合法。
+                // Trial-parse to make sure the bytes are valid.
                 Face::parse(face_data, 0)
                     .map_err(|e| format!("failed to parse font {:?} {:?}: {}", family, style, e))?;
                 ttfs.insert(key, face_data);
@@ -1006,7 +1012,7 @@ impl Ruler {
         }
     }
 
-    /// 精确测量文本：返回浮点宽高。
+    /// Precise text measurement: returns floating-point width and height.
     pub fn measure_precise(&mut self, font: Font, s: &str) -> (f64, f64) {
         let key = FontKey::from(font);
         if !self.atlases.contains_key(&key) {
@@ -1017,14 +1023,15 @@ impl Ruler {
         (self.bounds.w(), self.bounds.h())
     }
 
-    /// 度量文本：向上取整为 i32；同时对非 BMP 合成字 (e.g. emoji) 做修正。
+    /// Measure text: ceil to i32 and apply the non-BMP composite-grapheme
+    /// (e.g. emoji) adjustment.
     pub fn measure(&mut self, font: Font, s: &str) -> (i32, i32) {
         let (w, h) = self.measure_precise(font, s);
         let w = self.scale_unicode(w, font, s);
         (w.ceil() as i32, h.ceil() as i32)
     }
 
-    /// Mono 模式：把 dot 也并入 bounds。
+    /// Mono mode: include `dot` in the bounds.
     pub fn measure_mono(&mut self, font: Font, s: &str) -> (i32, i32) {
         let orig = self.bounds_with_dot;
         self.bounds_with_dot = true;
@@ -1089,6 +1096,32 @@ impl Ruler {
 }
 
 // ---------------------------------------------------------------------------
+// TextMetrics impl — delegate to the inherent methods.
+// ---------------------------------------------------------------------------
+
+impl TextMetrics for D2GoEmulationRuler {
+    fn measure(&mut self, font: Font, s: &str) -> (i32, i32) {
+        D2GoEmulationRuler::measure(self, font, s)
+    }
+
+    fn measure_mono(&mut self, font: Font, s: &str) -> (i32, i32) {
+        D2GoEmulationRuler::measure_mono(self, font, s)
+    }
+
+    fn measure_precise(&mut self, font: Font, s: &str) -> (f64, f64) {
+        D2GoEmulationRuler::measure_precise(self, font, s)
+    }
+
+    fn line_height_factor(&self) -> f64 {
+        self.line_height_factor
+    }
+
+    fn set_line_height_factor(&mut self, value: f64) {
+        self.line_height_factor = value;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Markdown render + measure
 // ---------------------------------------------------------------------------
 
@@ -1122,7 +1155,7 @@ fn sanitize_links(input: &str) -> String {
         .into_owned()
 }
 
-pub fn render_markdown(input: &str) -> Result<String, String> {
+pub(super) fn render_markdown(input: &str) -> Result<String, String> {
     let rendered = markdown::to_html_with_options(input, &markdown_options())
         .map_err(|e| format!("markdown render failed: {e}"))?;
     let mut rendered = sanitize_links(&rendered);
@@ -1132,21 +1165,9 @@ pub fn render_markdown(input: &str) -> Result<String, String> {
     Ok(rendered)
 }
 
-pub fn header_to_font_size(base_font_size: i32, header: &str) -> i32 {
-    match header {
-        "h1" => (H1_EM * f64::from(base_font_size)) as i32,
-        "h2" => (H2_EM * f64::from(base_font_size)) as i32,
-        "h3" => (H3_EM * f64::from(base_font_size)) as i32,
-        "h4" => (H4_EM * f64::from(base_font_size)) as i32,
-        "h5" => (H5_EM * f64::from(base_font_size)) as i32,
-        "h6" => (H6_EM * f64::from(base_font_size)) as i32,
-        _ => 0,
-    }
-}
-
-pub fn measure_markdown(
+pub(super) fn measure_markdown_inner(
     md_text: &str,
-    ruler: &mut Ruler,
+    ruler: &mut D2GoEmulationRuler,
     font_family: Option<FontFamily>,
     mono_font_family: Option<FontFamily>,
     font_size: i32,
@@ -1309,7 +1330,7 @@ fn merge_column_widths(mut existing: Vec<f64>, new_rows: &[Vec<f64>]) -> Vec<f64
 }
 
 fn measure_node(
-    ruler: &mut Ruler,
+    ruler: &mut D2GoEmulationRuler,
     depth: usize,
     node: Node<'_, '_>,
     font_family: Option<FontFamily>,
@@ -1394,7 +1415,7 @@ fn measure_node(
 
             match tag {
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                    font_size = header_to_font_size(font_size, tag);
+                    font_size = super::header_to_font_size(font_size, tag);
                     font_style = FontStyle::Semibold;
                 }
                 "em" => {
@@ -1744,23 +1765,23 @@ mod tests {
 
     #[test]
     fn test_ruler_creation() {
-        let ruler = Ruler::new();
+        let ruler = D2GoEmulationRuler::new();
         assert!(ruler.is_ok());
     }
 
     #[test]
     fn test_measure_precise_basic() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let (w, h) = ruler.measure_precise(font, "Hello");
         assert!(w > 0.0, "width should be positive, got {}", w);
         assert!(h > 0.0, "height should be positive, got {}", h);
     }
 
-    /// Go 对 "Hello" 的 golden 值 —— 本 crate 的核心正确性指标。
+    /// Go golden values for "Hello" — the core correctness gauge for this crate.
     #[test]
     fn test_measure_hello_matches_go() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let (w, h) = ruler.measure_precise(font, "Hello");
         assert_eq!(w, 33.53125, "width of 'Hello' should match Go: got {}", w);
@@ -1769,7 +1790,7 @@ mod tests {
 
     #[test]
     fn test_measure_single_chars_match_go() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
 
         let cases: &[(&str, f64, f64)] = &[
@@ -1788,7 +1809,7 @@ mod tests {
 
     #[test]
     fn test_measure_hello_world_matches_go() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let (w, _h) = ruler.measure_precise(font, "Hello World");
         assert_eq!(w, 76.28125, "width of 'Hello World' mismatch: got {}", w);
@@ -1796,7 +1817,7 @@ mod tests {
 
     #[test]
     fn test_measure_increasing_chars() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let text = "abcdefghij";
         for i in 1..text.len() {
@@ -1816,7 +1837,7 @@ mod tests {
 
     #[test]
     fn test_measure_newlines_increase_height() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let (_, h1) = ruler.measure(font, "Hello");
         let (_, h2) = ruler.measure(font, "Hello\nWorld");
@@ -1825,7 +1846,7 @@ mod tests {
 
     #[test]
     fn test_font_sizes_increasing() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let text = "The quick brown fox";
         for i in 0..FONT_SIZES.len() - 1 {
             let f1 = FontFamily::SourceSansPro.font(FONT_SIZES[i], FontStyle::Regular);
@@ -1853,7 +1874,7 @@ mod tests {
 
     #[test]
     fn test_measure_empty_string() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
         let (w, h) = ruler.measure(font, "");
         assert_eq!(w, 0);
@@ -1862,7 +1883,7 @@ mod tests {
 
     #[test]
     fn test_measure_single_chars() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
         let font = FontFamily::SourceSansPro.font(FONT_SIZE_M, FontStyle::Regular);
 
         let (w, h) = ruler.measure(font, "a");
@@ -1881,7 +1902,7 @@ mod tests {
 
     #[test]
     fn test_measure_cjk_matches_go_fixture() {
-        let mut ruler = Ruler::new().unwrap();
+        let mut ruler = D2GoEmulationRuler::new().unwrap();
 
         let font_16 = FontFamily::SourceSansPro.font(16, FontStyle::Regular);
         // Japanese kanji "Soushinki" (transmitter): 3 CJK Unified Ideographs.

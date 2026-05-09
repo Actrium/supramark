@@ -105,7 +105,7 @@ fn apply_text_transform(
 
 /// Options controlling the compile phase.
 pub struct CompileOptions {
-    pub ruler: Option<crate::textmeasure::Ruler>,
+    pub ruler: Option<Box<dyn crate::textmeasure::TextMetrics>>,
     pub theme_id: Option<i64>,
     pub dark_theme_id: Option<i64>,
     pub pad: Option<i64>,
@@ -191,8 +191,9 @@ pub fn compile(
     let theme_id = theme_id.unwrap_or(0);
 
     // Step 2-5: recursively compile graph (theme, dimensions, layout, export)
-    let mut ruler = crate::textmeasure::Ruler::new().map_err(|e| format!("ruler init: {}", e))?;
-    let mut diagram = compile_graph(&mut g, theme_id, sketch, &mut ruler)?;
+    let mut ruler =
+        crate::textmeasure::default_metrics().map_err(|e| format!("ruler init: {}", e))?;
+    let mut diagram = compile_graph(&mut g, theme_id, sketch, &mut *ruler)?;
 
     // Match Go d2lib.Compile: copy selected render options back into
     // diagram.Config so the diagram hash (used for CSS scoping) accounts for
@@ -261,7 +262,7 @@ fn compile_graph(
     g: &mut Graph,
     theme_id: i64,
     sketch: bool,
-    ruler: &mut crate::textmeasure::Ruler,
+    ruler: &mut dyn crate::textmeasure::TextMetrics,
 ) -> Result<crate::target::Diagram, String> {
     // Apply theme
     if let Some(theme) = crate::themes::catalog::find(theme_id) {
@@ -1504,7 +1505,10 @@ pub fn d2_to_svg(input: &str) -> Result<Vec<u8>, String> {
 /// Measure label text for each object and edge, then set their width/height.
 ///
 /// This is a simplified port of Go's `Graph.SetDimensions`.
-pub fn set_dimensions(g: &mut Graph, ruler: &mut crate::textmeasure::Ruler) -> Result<(), String> {
+pub fn set_dimensions(
+    g: &mut Graph,
+    ruler: &mut dyn crate::textmeasure::TextMetrics,
+) -> Result<(), String> {
     set_dimensions_with_font(g, ruler, None)
 }
 
@@ -1513,7 +1517,7 @@ pub fn set_dimensions(g: &mut Graph, ruler: &mut crate::textmeasure::Ruler) -> R
 /// `compileOpts.FontFamily = HandDrawn` in `applyDefaults`.
 pub fn set_dimensions_with_font(
     g: &mut Graph,
-    ruler: &mut crate::textmeasure::Ruler,
+    ruler: &mut dyn crate::textmeasure::TextMetrics,
     override_family: Option<FontFamily>,
 ) -> Result<(), String> {
     // Default font family for the diagram. Themes with the `mono` special
@@ -1529,7 +1533,7 @@ pub fn set_dimensions_with_font(
         FontFamily::SourceSansPro
     };
 
-    let measure_label = |ruler: &mut crate::textmeasure::Ruler,
+    let measure_label = |ruler: &mut dyn crate::textmeasure::TextMetrics,
                          shape: &str,
                          language: &str,
                          font_family: FontFamily,
@@ -1543,15 +1547,15 @@ pub fn set_dimensions_with_font(
         // a vertical fudge for leading/trailing blank lines that the
         // ruler cannot account for on its own.
         if !language.is_empty() && shape == crate::target::SHAPE_CODE {
-            let original_lh = ruler.line_height_factor;
-            ruler.line_height_factor = crate::textmeasure::CODE_LINE_HEIGHT;
+            let original_lh = ruler.line_height_factor();
+            ruler.set_line_height_factor(crate::textmeasure::CODE_LINE_HEIGHT);
             let mono_font = crate::fonts::Font::new(
                 FontFamily::SourceCodePro,
                 crate::fonts::FontStyle::Regular,
                 font_size,
             );
             let (w, mut h) = ruler.measure_mono(mono_font, label);
-            ruler.line_height_factor = original_lh;
+            ruler.set_line_height_factor(original_lh);
 
             // Leading / trailing empty lines: Go counts them separately
             // because `MeasureMono` strips them from the bounds. A leading
@@ -2222,15 +2226,15 @@ pub fn set_dimensions_with_font(
             } else if !edge_language.is_empty() {
                 // Non-empty language: Go's GetTextDimensions uses
                 // MeasureMono with SourceCodePro Regular + CODE_LINE_HEIGHT
-                let original_lh = ruler.line_height_factor;
-                ruler.line_height_factor = crate::textmeasure::CODE_LINE_HEIGHT;
+                let original_lh = ruler.line_height_factor();
+                ruler.set_line_height_factor(crate::textmeasure::CODE_LINE_HEIGHT);
                 let mono_font = crate::fonts::Font::new(
                     FontFamily::SourceCodePro,
                     crate::fonts::FontStyle::Regular,
                     font_size,
                 );
                 let (w, mut h) = ruler.measure_mono(mono_font, &label);
-                ruler.line_height_factor = original_lh;
+                ruler.set_line_height_factor(original_lh);
 
                 // Count empty leading/trailing lines (same as object code)
                 let lines: Vec<&str> = label.split('\n').collect();

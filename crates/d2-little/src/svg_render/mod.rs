@@ -3771,7 +3771,7 @@ fn dimensions(diagram: &crate::target::Diagram, pad: i32) -> (i32, i32, i32, i32
 /// d2svg.go. Returns `None` if there are no labelled items (nothing to draw).
 fn legend_dimensions(legend: &crate::target::Legend) -> Option<(i32, i32)> {
     // Attempt a ruler, but fall back to heuristics if fonts are unavailable.
-    let mut ruler = crate::textmeasure::Ruler::new().ok();
+    let mut ruler = crate::textmeasure::default_metrics().ok();
     let mut total_height = LEGEND_PADDING + LEGEND_FONT_SIZE + LEGEND_ITEM_SPACING;
     let mut max_label_width = 0;
     let mut item_count = 0;
@@ -3855,7 +3855,7 @@ fn render_legend(
         return Ok(());
     };
 
-    let mut ruler = crate::textmeasure::Ruler::new().ok();
+    let mut ruler = crate::textmeasure::default_metrics().ok();
     let mut measure = |label: &str| -> (i32, i32) {
         if let Some(ref mut r) = ruler {
             let font = crate::fonts::Font::new(
