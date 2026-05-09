@@ -12,6 +12,9 @@ export type {
 // Feature Interface - 功能扩展接口系统
 export * from './feature.js';
 
+// Diagram Feature factory (defineDiagramFeature spec helper)
+export * from './diagram-feature.js';
+
 // 语法家族运行时 hook（供 Feature 使用）
 export {
   type ContainerProcessorContext,

@@ -1,6 +1,7 @@
 export * from './ast.js';
 export type { SupramarkParseContext, SupramarkPlugin, SupramarkParseOptions, SupramarkPreset, } from './plugin.js';
 export * from './feature.js';
+export * from './diagram-feature.js';
 export { type ContainerProcessorContext, type ContainerHookContext, type ContainerHook, registerContainerHook, extractContainerInnerText, } from './syntax/container.js';
 export { type InputProcessorContext, type InputHookContext, type InputHook, registerInputHook, extractInputInnerText, } from './syntax/input.js';
 export * from './container-extension.js';
