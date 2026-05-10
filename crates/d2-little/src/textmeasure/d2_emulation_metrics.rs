@@ -166,4 +166,116 @@ mod tests {
         assert_eq!(round_to_d2_size(100.0), 32); // clamps to max
         assert_eq!(round_to_d2_size(1.0), 13); // clamps to min
     }
+
+    /// Phase 3 spike (2026-05-10): validated that ruler.measure_precise on
+    /// multi-line text canNOT be exactly reproduced by per-line measure +
+    /// caller-side composition, because Go upstream `drawBuf` (lib/textmeasure
+    /// /textmeasure.go:282) intentionally leaks `prevR` across `\n` (only
+    /// `clear()` resets it; `controlRune('\n')` updates Dot but not prevR).
+    /// This produces a ~1 px width drift on certain prev/next char pairs.
+    ///
+    /// Result: multi-line + lh state stays INSIDE D2GoEmulationMetrics
+    /// (RefCell<Ruler>); the Metrics trait stays pure single-call. Phase 3
+    /// changes lib.rs signatures to `&dyn Metrics` for plain measure sites
+    /// and `&D2GoEmulationMetrics` (concrete) for sites that need to call
+    /// `set_line_height_factor`. Plantuml/mermaid trait usage is unaffected
+    /// since they never feed `\n`-containing strings to measure.
+    ///
+    /// Height formula DOES work for caller-side composition:
+    ///     bounds.h() = (asc + desc) + (n - 1) * lh_factor * font_size_px
+    /// Used by the wasm `D2HostMetrics` adapter where Go byte-equal is
+    /// impossible anyway (host canvas uses its own font stack).
+    #[test]
+    #[ignore = "documentation spike, retained as historical evidence"]
+    fn spike_multiline_decomposition() {
+        let cases: &[(&str, i32, FontFamily)] = &[
+            ("Hello", 14, FontFamily::SourceSansPro),
+            ("Hello\nWorld", 14, FontFamily::SourceSansPro),
+            ("Hello\nWorld\nFoo", 14, FontFamily::SourceSansPro),
+            ("Short\nMuchLonger", 14, FontFamily::SourceSansPro),
+            ("MuchLonger\nShort", 14, FontFamily::SourceSansPro),
+            ("\u{4E2D}\n\u{6587}", 16, FontFamily::SourceSansPro),
+            ("\u{4E2D}\u{6587}\u{6DF7}\u{5408}\nABC123", 16, FontFamily::SourceSansPro),
+            ("\u{4E00}\u{4E8C}\u{4E09}\n\u{56DB}\u{4E94}\n\u{516D}", 14, FontFamily::SourceCodePro),
+            ("Hello\nWorld", 20, FontFamily::SourceSansPro),
+            ("", 14, FontFamily::SourceSansPro),
+            ("\n", 14, FontFamily::SourceSansPro),
+            ("a\n\nb", 14, FontFamily::SourceSansPro),
+        ];
+        let lh_factors: &[f64] = &[1.0, 1.3, 1.45, 1.5, 1.25];
+
+        let mut report = String::new();
+        let mut all_match = true;
+
+        for &lh in lh_factors {
+            for (text, size, family) in cases {
+                let font = Font {
+                    family: *family,
+                    style: FontStyle::Regular,
+                    size: *size,
+                };
+
+                // Reference: ruler.measure_precise on the multi-line text
+                let mut r_multi = D2GoEmulationRuler::new().expect("init multi");
+                r_multi.set_line_height_factor(lh);
+                let (w_ref, h_ref) = r_multi.measure_precise(font, text);
+
+                // Caller-side composition from per-line measure
+                let lines: Vec<&str> = text.split('\n').collect();
+                let n = lines.len();
+
+                let mut r_per = D2GoEmulationRuler::new().expect("init per");
+                r_per.set_line_height_factor(lh); // shouldn't matter for single-line
+                let per_line: Vec<(f64, f64)> = lines
+                    .iter()
+                    .map(|line| r_per.measure_precise(font, line))
+                    .collect();
+
+                let max_w = per_line
+                    .iter()
+                    .map(|(w, _)| *w)
+                    .fold(0.0_f64, f64::max);
+
+                // single-line height (asc + desc) — same for all lines (same font)
+                let single_h = per_line.first().map(|(_, h)| *h).unwrap_or(0.0);
+
+                // line_height_unit = font_size in pixels (atlas.line_height = i2f(scale_26_6))
+                let lh_unit = *size as f64;
+
+                let composed_h = if text.is_empty() {
+                    // Edge case: empty text → bounds = Rect::zero() → h = 0.0
+                    0.0
+                } else {
+                    single_h + ((n - 1) as f64) * lh * lh_unit
+                };
+
+                let w_match = (max_w - w_ref).abs() < 0.001;
+                let h_match = (composed_h - h_ref).abs() < 0.001;
+
+                if !w_match || !h_match {
+                    all_match = false;
+                }
+
+                report.push_str(&format!(
+                    "lh={:.2} fam={:?} sz={} text={:?}\n  ref=({:.4},{:.4}) composed=({:.4},{:.4}) per_line={:?} {}\n",
+                    lh,
+                    family,
+                    size,
+                    text,
+                    w_ref,
+                    h_ref,
+                    max_w,
+                    composed_h,
+                    per_line,
+                    if w_match && h_match { "OK" } else { "MISMATCH" },
+                ));
+            }
+        }
+
+        eprintln!("{}", report);
+        assert!(
+            all_match,
+            "multi-line decomposition formula does not match ruler output for all cases"
+        );
+    }
 }
