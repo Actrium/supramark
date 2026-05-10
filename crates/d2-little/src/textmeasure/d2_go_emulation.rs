@@ -834,7 +834,12 @@ pub struct D2GoEmulationRuler {
 
     prev_r: Option<char>,
     bounds: Rect,
-    bounds_with_dot: bool,
+    /// Sibling [`super::d2_emulation_metrics`] toggles this when entering
+    /// markdown / mono measurement so its [`super::D2Metrics`] impl can
+    /// drive the trait-generic markdown walker without going through
+    /// `Self::measure_markdown` (which needs `&mut Self`, incompatible
+    /// with the `&self` interior-mutability shape of the trait).
+    pub(super) bounds_with_dot: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1094,38 +1099,11 @@ impl D2GoEmulationRuler {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Inherent measure_markdown — drives the shared markdown layout walker in
-// `super::markdown`, while toggling the `bounds_with_dot` /
-// `line_height_factor` state needed for byte-equal Go output.
-// ---------------------------------------------------------------------------
-
-impl D2GoEmulationRuler {
-    /// Measure a markdown blob and return the rendered (width, height) in
-    /// pixels.
-    pub fn measure_markdown(
-        &mut self,
-        md_text: &str,
-        font_family: Option<crate::fonts::FontFamily>,
-        mono_font_family: Option<crate::fonts::FontFamily>,
-        font_size: i32,
-    ) -> Result<(i32, i32), String> {
-        let original_lh = self.line_height_factor;
-        let original_bounds = self.bounds_with_dot;
-        self.bounds_with_dot = true;
-        self.line_height_factor = super::markdown::MARKDOWN_LINE_HEIGHT;
-        let result = super::markdown::measure_markdown_generic(
-            self,
-            md_text,
-            font_family,
-            mono_font_family,
-            font_size,
-        );
-        self.line_height_factor = original_lh;
-        self.bounds_with_dot = original_bounds;
-        result
-    }
-}
+// Markdown measurement now lives on
+// [`super::D2GoEmulationMetrics::measure_markdown`] (D2Metrics impl).
+// The trait-generic walker in super::markdown takes &dyn D2Metrics and
+// re-borrows the underlying ruler through the metrics adapter for every
+// inner call, so the old &mut Self entry point is no longer needed.
 
 // ---------------------------------------------------------------------------
 // Markdown render — `markdown` (commonmark + gfm) → sanitised HTML.

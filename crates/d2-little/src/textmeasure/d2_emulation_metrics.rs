@@ -105,9 +105,31 @@ impl D2Metrics for D2GoEmulationMetrics {
         opts: MarkdownOptions,
         font_size: i32,
     ) -> Result<(i32, i32), String> {
-        self.inner
-            .borrow_mut()
-            .measure_markdown(md_text, opts.font_family, opts.mono_font_family, font_size)
+        // Save / set per-call state on the underlying ruler, then drop the
+        // mutable borrow before invoking the trait-generic walker (which
+        // re-borrows the ruler through Self's D2Metrics impl on every
+        // measure_precise / space_width / scale_unicode / lh call).
+        let (original_lh, original_bounds) = {
+            let mut ruler = self.inner.borrow_mut();
+            let lh = ruler.line_height_factor;
+            let bounds = ruler.bounds_with_dot;
+            ruler.bounds_with_dot = true;
+            ruler.line_height_factor = super::markdown::MARKDOWN_LINE_HEIGHT;
+            (lh, bounds)
+        };
+        let result = super::markdown::measure_markdown_generic(
+            self,
+            md_text,
+            opts.font_family,
+            opts.mono_font_family,
+            font_size,
+        );
+        {
+            let mut ruler = self.inner.borrow_mut();
+            ruler.line_height_factor = original_lh;
+            ruler.bounds_with_dot = original_bounds;
+        }
+        result
     }
 }
 

@@ -1291,14 +1291,23 @@ pub fn measure_positioned_tooltip(shape: &Shape) -> (i32, i32) {
         let text_len = shape.tooltip.chars().count() as i32;
         ((text_len * 8 + 20).min(200), 30)
     };
-    if let Ok(mut ruler) = crate::textmeasure::default_metrics() {
+    if let Ok(metrics) = crate::textmeasure::default_d2_metrics() {
+        use crate::textmeasure::{D2Metrics, MarkdownOptions};
         let font_family = crate::fonts::d2_font_to_family(&shape.text.font_family);
         let font_size = if shape.text.font_size > 0 {
             shape.text.font_size
         } else {
             crate::fonts::FONT_SIZE_M
         };
-        if let Ok((w, h)) = ruler.measure_markdown(&shape.tooltip, font_family, None, font_size) {
+        if let Ok((w, h)) = D2Metrics::measure_markdown(
+            metrics.as_ref(),
+            &shape.tooltip,
+            MarkdownOptions {
+                font_family,
+                mono_font_family: None,
+            },
+            font_size,
+        ) {
             tw = w + 20;
             th = h + 20;
         }
