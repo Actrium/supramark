@@ -20,11 +20,17 @@
 //! exchange for layer-1 = layer-3 consistency in the host's actual font
 //! stack.
 //!
-//! `measure_markdown` is currently `Err(...)` on this adapter — the
-//! markdown walker reaches deep into d2-emulation-specific layout
-//! constants (em-relative paddings, blockquote borders, table cell
-//! widths) that need a separate verification pass against host-rendered
-//! SVG before we wire it up.
+//! `measure_markdown` drives the same trait-generic walker as the native
+//! `D2GoEmulationMetrics::measure_markdown` impl: save the current
+//! `line_height_factor`, set it to `MARKDOWN_LINE_HEIGHT`, walk the
+//! markdown tree (which calls back into our `measure_precise` /
+//! `space_width` / `scale_unicode` / `set_line_height_factor` for each
+//! node), then restore the saved factor. The walker handles header /
+//! `<pre>` line-height switches via the same per-node save/set/restore
+//! pattern the native path uses. Layer-3 SVG rendering goes through the
+//! host browser's font stack, matching layer-1 measurement (the same
+//! ~1 px upstream-Go drift on multi-line / mixed-width text applies as
+//! it does for plain `measure_precise`; see module preface).
 
 #![cfg(target_arch = "wasm32")]
 
@@ -182,15 +188,26 @@ impl D2Metrics for D2HostMetrics {
 
     fn measure_markdown(
         &self,
-        _md_text: &str,
-        _opts: MarkdownOptions,
-        _font_size: i32,
+        md_text: &str,
+        opts: MarkdownOptions,
+        font_size: i32,
     ) -> Result<(i32, i32), String> {
-        Err(
-            "D2HostMetrics::measure_markdown not implemented on wasm; \
-             markdown rendering needs a separate verification pass against \
-             host-rendered SVG (see d2_host_metrics module docs)."
-                .into(),
-        )
+        // Save / set / restore line_height_factor around the walker. The
+        // walker re-borrows it through D2Metrics::set_line_height_factor
+        // for header / `<pre>` per-node tweaks (same pattern the native
+        // adapter uses). Host canvas has no `bounds_with_dot` analog, so
+        // there's nothing to save on that axis.
+        let original_lh = self.line_height_factor.get();
+        self.line_height_factor
+            .set(super::markdown::MARKDOWN_LINE_HEIGHT);
+        let result = super::markdown::measure_markdown_generic(
+            self,
+            md_text,
+            opts.font_family,
+            opts.mono_font_family,
+            font_size,
+        );
+        self.line_height_factor.set(original_lh);
+        result
     }
 }

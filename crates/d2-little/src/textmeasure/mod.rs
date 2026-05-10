@@ -29,7 +29,11 @@ pub mod d2_go_emulation;
 #[cfg(target_arch = "wasm32")]
 pub mod d2_host_metrics;
 
-#[cfg(not(target_arch = "wasm32"))]
+// Markdown walker is target-agnostic — pure traversal over &dyn D2Metrics.
+// Both D2GoEmulationMetrics::measure_markdown (native, byte-equal Go) and
+// D2HostMetrics::measure_markdown (wasm, host-canvas via caller-side
+// composition) drive this same walker; they each save/set/restore their
+// own line_height_factor state around the call.
 mod markdown;
 mod markdown_render;
 
