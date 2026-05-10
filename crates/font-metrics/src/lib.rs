@@ -156,6 +156,9 @@ pub mod static_dejavu;
 
 pub mod ttf_parser;
 
+pub mod ttf_parser_java_compat;
+pub use ttf_parser_java_compat::TtfParserJavaCompatMetrics;
+
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(docsrs, doc(cfg(target_arch = "wasm32")))]
 pub mod host_callback;

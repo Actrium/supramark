@@ -109,6 +109,15 @@ impl<'a> TtfParserMetrics<'a> {
         Ok(self)
     }
 
+    /// Public accessor mirroring the internal [`Self::pick_face`] resolution
+    /// used by [`Metrics::measure`]. Sibling impls in the same crate
+    /// (notably [`crate::TtfParserJavaCompatMetrics`]) call this to read the
+    /// resolved face's metadata (e.g. `italic_angle()`) without having to
+    /// duplicate the family / bold / italic resolution table.
+    pub(crate) fn face_for(&self, family: &str, bold: bool, italic: bool) -> &Face<'a> {
+        self.pick_face(family, bold, italic)
+    }
+
     fn pick_face(&self, family: &str, bold: bool, italic: bool) -> &Face<'a> {
         let primary = family.split(',').next().unwrap_or(family).trim().to_lowercase();
         let is_mono = primary == "monospaced" || primary == "monospace" || primary == "courier";
