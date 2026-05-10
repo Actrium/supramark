@@ -1,4 +1,4 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! Journey byte-exact test harness (Wave 2).
 //!
 //! Runs every fixture in `tests/ext_fixtures/{cypress,demos}/journey`
@@ -7,7 +7,7 @@
 //! the journey renderer, this file calls `parse`/`layout`/`render`
 //! directly.
 //!
-//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Compiled only with `metrics-ttf-parser` — byte parity vs upstream
 //! Mermaid's reference SVGs only holds when the layout pipeline runs
 //! against the static DejaVu fixtures.
 

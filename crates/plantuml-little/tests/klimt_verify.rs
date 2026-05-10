@@ -1,5 +1,5 @@
-#![cfg(feature = "metrics-static-dejavu")]
-// Compiled only with `metrics-static-dejavu` — the cross-language Java
+#![cfg(feature = "metrics-ttf-parser")]
+// Compiled only with `metrics-ttf-parser` — the cross-language Java
 // parity assertions assume the static DejaVu fixtures produce the same
 // font advances as Java's FontMetrics.
 //

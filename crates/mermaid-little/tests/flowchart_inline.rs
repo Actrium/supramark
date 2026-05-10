@@ -1,4 +1,4 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! Flowchart integration tests — parse → layout → render, comparing
 //! against reference SVGs for structural soundness (not byte-exact
 //! yet; see module-level commentary in `src/render/svg_flowchart.rs`).
@@ -7,7 +7,7 @@
 //! and friends so that parser / layout / renderer churn doesn't
 //! cascade across the existing sweeps.
 //!
-//! Compiled only with `metrics-static-dejavu` — several tests below
+//! Compiled only with `metrics-ttf-parser` — several tests below
 //! (`flowchart_134_isolated_cluster_dom_order_is_byte_exact`, the byte
 //! sweep, etc.) assert byte-exact equality against upstream reference
 //! SVGs, which only holds with the static DejaVu fixtures.

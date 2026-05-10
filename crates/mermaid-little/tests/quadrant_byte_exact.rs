@@ -1,10 +1,10 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! Byte-exact parity tests for the quadrant-chart renderer.
 //!
 //! The Wave-2 pipeline is called directly (parser → layout → render) so
 //! these tests don't rely on `convert_with_id` dispatch from `lib.rs`.
 //!
-//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Compiled only with `metrics-ttf-parser` — byte parity vs upstream
 //! Mermaid's reference SVGs only holds when the layout pipeline runs
 //! against the static DejaVu fixtures.
 

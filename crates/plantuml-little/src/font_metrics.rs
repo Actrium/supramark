@@ -8,13 +8,17 @@
 //! provider; the active impl is picked by mutually-exclusive Cargo
 //! features:
 //!
-//! - `metrics-static-dejavu` (default) — byte-exact Java FontMetrics
-//!   parity on DejaVu Sans / Mono / Serif. Required for the 268+
-//!   reference SVG snapshot tests.
 //! - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
 //!   parsed font (defaults to font-metrics's embedded DejaVu Latin
-//!   subset). Native production builds that want dynamic metrics
-//!   without browser/RN bridging.
+//!   subset). Doubles as the byte-exact Java FontMetrics parity path
+//!   for the 268+ reference SVG snapshot tests: a 2026-05-10
+//!   measurement spike confirmed raw glyph advances from the embedded
+//!   DejaVu subset match Java's font stack to sub-0.0001 px on the
+//!   discriminating italic test (`«archimate-node»` italic =
+//!   128.385742 px vs Java 128.3857 px). Replaced the legacy
+//!   `metrics-java-compat` slot on 2026-05-10 after the spike showed
+//!   the wrapper's italic-skew adjustment was based on a wrong AWT
+//!   assumption and over-corrected widths.
 //! - `metrics-host-callback` (wasm32 only) — defer measurement to a
 //!   JS-side `globalThis.supramark.measureText` bridge so layer-1
 //!   layout sees the exact widths the host browser / RN-Skia will
@@ -27,23 +31,13 @@
 use font_metrics_core::Metrics;
 
 /// Compile-time-selected `Metrics` provider. Exactly one of the
-/// `metrics-*` Cargo features must be enabled; the default
-/// (`metrics-static-dejavu`) preserves byte-exact Java FontMetrics
-/// parity for the 268+ reference SVG tests.
+/// `metrics-*` Cargo features must be enabled; the dev-dep self-cycle
+/// in Cargo.toml selects `metrics-ttf-parser`, which preserves
+/// byte-exact Java FontMetrics parity for the 268+ reference SVG
+/// tests (per the 2026-05-10 measurement spike — see module docs).
 #[inline]
 fn metrics_provider() -> &'static dyn Metrics {
-    #[cfg(feature = "metrics-static-dejavu")]
-    {
-        static M: font_metrics_core::static_dejavu::StaticDejaVuMetrics =
-            font_metrics_core::static_dejavu::StaticDejaVuMetrics;
-        return &M;
-    }
-
-    #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
-        feature = "metrics-host-callback",
-        target_arch = "wasm32",
-    ))]
+    #[cfg(all(feature = "metrics-host-callback", target_arch = "wasm32"))]
     {
         static M: font_metrics_core::host_callback::HostCallbackMetrics =
             font_metrics_core::host_callback::HostCallbackMetrics;
@@ -51,7 +45,6 @@ fn metrics_provider() -> &'static dyn Metrics {
     }
 
     #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
         not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
         feature = "metrics-ttf-parser",
     ))]
@@ -66,7 +59,6 @@ fn metrics_provider() -> &'static dyn Metrics {
     }
 
     #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
         not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
         not(feature = "metrics-ttf-parser"),
         feature = "metrics-ffi-callback",
@@ -74,12 +66,11 @@ fn metrics_provider() -> &'static dyn Metrics {
     compile_error!("metrics-ffi-callback impl is reserved for the future React-Native FFI wrapper; not yet implemented. See crates/plantuml-little/UPSTREAM.md.");
 
     #[cfg(not(any(
-        feature = "metrics-static-dejavu",
         feature = "metrics-ttf-parser",
         feature = "metrics-host-callback",
         feature = "metrics-ffi-callback",
     )))]
-    compile_error!("plantuml-little requires exactly one metrics-* feature; enable metrics-static-dejavu for byte-exact Java parity, metrics-ttf-parser for native dynamic, or metrics-host-callback for wasm host-bridge");
+    compile_error!("plantuml-little requires exactly one metrics-* feature; enable metrics-ttf-parser for native (also covers byte-exact Java parity) or metrics-host-callback for wasm host-bridge");
 }
 
 /// Width of a single character (typographic horizontal advance).
@@ -120,8 +111,8 @@ pub fn typo_ascent(family: &str, size: f64, bold: bool, italic: bool) -> f64 {
 #[cfg(test)]
 mod tests {
     //! Sanity checks that the wrapper still pipes through to the
-    //! shared static impl. The full byte-exact-vs-Java battery lives
-    //! alongside the impl in `font-metrics/src/static_dejavu/mod.rs`.
+    //! shared `TtfParserMetrics` impl. The `TtfParserMetrics` unit
+    //! tests live alongside the impl in `font-metrics/src/ttf_parser.rs`.
 
     use super::*;
 

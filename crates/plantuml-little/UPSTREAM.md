@@ -64,20 +64,35 @@
 
 ## supramark-side metrics-* feature flags
 
-The crate exposes a `metrics-{static-dejavu, ttf-parser, host-callback,
-ffi-callback}` family — the `Metrics` impl `crate::font_metrics` routes
-through is selected at compile time and the family is mutually exclusive.
-The crate's own default feature set deliberately includes NONE of them:
+The crate exposes a `metrics-{ttf-parser, host-callback, ffi-callback}`
+family — the `Metrics` impl `crate::font_metrics` routes through is
+selected at compile time and the family is mutually exclusive. The
+crate's own default feature set deliberately includes NONE of them:
 production consumers (e.g. `plantuml-little-web`) must
 `default-features = false` and explicitly opt into one platform impl,
-so the choice is visible in the consumer's `Cargo.toml`. A `[dev-dependencies]`
-self-cycle flips on `metrics-static-dejavu` so `cargo test` keeps running
-the 268+ byte-equal-with-Java reference SVG suite unchanged. The
-`metrics-static-dejavu` impl is a regression-test fixture (byte parity
-with Java FontMetrics on DejaVu) and is NOT recommended for production.
-`metrics-ffi-callback` is reserved for the planned React-Native native-FFI
-wrapper; enabling it today fires a `compile_error!` because no impl ships
-yet.
+so the choice is visible in the consumer's `Cargo.toml`. A
+`[dev-dependencies]` self-cycle flips on `metrics-ttf-parser` so
+`cargo test` keeps running the 268+ byte-equal-with-Java reference SVG
+suite unchanged. `metrics-ttf-parser` doubles as both the byte-equal-
+Java path AND the production native fallback: a 2026-05-10 measurement
+spike confirmed raw `TtfParserMetrics::default_latin()` (the embedded
+DejaVu Latin subset parsed via ttf-parser) matches Java FontMetrics to
+sub-0.0001 px on the discriminating italic test (`«archimate-node»`
+italic = 128.385742 px vs Java 128.3857 px, delta = 0.000042 px), so
+no italic-skew wrapper is needed. `metrics-ffi-callback` is reserved
+for the planned React-Native native-FFI wrapper; enabling it today
+fires a `compile_error!` because no impl ships yet.
+
+Historical note: prior to 2026-05-10 this slot was `metrics-static-dejavu`,
+gated by ~22K LOC of offline-baked Java-FontMetrics-equivalent range
+tables. A first cleanup pass replaced those with a wrapper named
+`TtfParserJavaCompatMetrics` (TtfParser + Java AWT italic-skew
+adjustment) under a `metrics-java-compat` feature. The follow-up spike
+above showed the italic-skew adjustment was based on a wrong AWT
+assumption and over-corrected widths, while raw `TtfParserMetrics`
+already matched Java byte-for-byte — both the wrapper and the
+`metrics-java-compat` feature were therefore deleted in favour of
+`metrics-ttf-parser`.
 
 ## Outstanding
 - Once `mermaid-little` lands in step 4, both will share the in-tree

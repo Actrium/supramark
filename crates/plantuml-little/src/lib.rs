@@ -12,18 +12,12 @@ pub mod abel;
 pub mod decoration;
 pub mod dot;
 pub mod error;
-// Static DejaVu range tables live in the shared `font-metrics` crate
-// behind the `static-fixtures` feature, which is itself gated by this
-// crate's `metrics-static-dejavu` Cargo feature (default ON).
-// Re-export under the historical `crate::font_data` path so the one
-// remaining direct caller (`layout::flow` — which reads raw face
-// tables, not the `Metrics` trait) keeps resolving. Builds that turn
-// the default off in favour of `metrics-ttf-parser` /
-// `metrics-host-callback` lose this re-export, and `layout::flow`'s
-// serif helpers compile out alongside it (see that module for the
-// matching `cfg`).
-#[cfg(feature = "metrics-static-dejavu")]
-pub use font_metrics_core::static_dejavu::font_data;
+// Historical note: the legacy `pub use font_metrics_core::static_dejavu::
+// font_data;` re-export under `crate::font_data` was dropped on
+// 2026-05-10 along with the offline-baked range tables themselves.
+// The one direct caller (`layout::flow`'s serif helpers) was already
+// routing through the `Metrics` trait via `crate::font_metrics`; that
+// path remains the only supported way to reach raw face data.
 pub mod font_metrics;
 pub mod klimt;
 pub mod layout;

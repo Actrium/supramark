@@ -40,10 +40,13 @@ name = "plantuml-little"
 path = "src/main.rs"
 # The CLI depends on std::process, env_logger, and on-disk file I/O, which
 # are not available on wasm32. Compile the library only on that target.
-# `metrics-static-dejavu` is auto-selected because the CLI must ship a
-# concrete metrics impl; the byte-exact-with-Java DejaVu tables are the
-# safest default for a standalone tool.
-required-features = ["cli", "metrics-static-dejavu"]
+# `metrics-ttf-parser` is auto-selected because the CLI must ship a
+# concrete metrics impl; the TtfParser impl reproduces upstream Java
+# FontMetrics output byte-for-byte (raw glyph advances; the embedded
+# DejaVu Latin subset matches Java's font stack on the discriminating
+# italic test to sub-0.0001 px — see crates/font-metrics for the
+# measurement spike) and is the safest default for a standalone tool.
+required-features = ["cli", "metrics-ttf-parser"]
 
 [features]
 default = ["cli", "remote"]
@@ -60,17 +63,29 @@ remote = ["dep:ureq"]
 # impls below, so the choice is visible in the consumer's Cargo.toml
 # rather than implicit. `cargo test` here is unblocked by a dev-dep on
 # `plantuml-little` itself (see [dev-dependencies]) that flips on
-# `metrics-static-dejavu` so the existing 268+ byte-equal-with-Java
+# `metrics-ttf-parser` so the existing 268+ byte-equal-with-Java
 # reference SVG suite keeps running unchanged.
 #
-# - `metrics-static-dejavu` — byte-equal Java FontMetrics fixtures on
-#   DejaVu Sans / Mono / Serif. **Test-fixture only.** Used by the
-#   regression suite to verify the layout pipeline reproduces upstream
-#   Java SVG bytes exactly. Not recommended for production: real hosts
-#   render with their own font stack, not DejaVu.
+# Historical note: prior to 2026-05-10 this slot was `metrics-static-
+# dejavu`, gated by ~22K LOC of offline-baked Java-FontMetrics-equivalent
+# range tables. A first cleanup pass replaced those with a wrapper named
+# `TtfParserJavaCompatMetrics` (TtfParser + Java AWT italic-skew
+# adjustment); a follow-up measurement spike then showed the italic-
+# skew adjustment was based on a wrong assumption (Java AWT does not
+# reapply the skew on its own font path), and that raw
+# `TtfParserMetrics::default_latin()` already matches Java FontMetrics
+# byte-for-byte (italic `«archimate-node»` = 128.385742 px vs Java
+# 128.3857 px, delta = 0.000042 px). The wrapper and its
+# `metrics-java-compat` Cargo feature were therefore dropped in favour
+# of `metrics-ttf-parser` below.
+#
 # - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
 #   parsed font (defaults to font-metrics's embedded DejaVu Latin
-#   subset). Native production builds that want dynamic metrics
+#   subset). Doubles as the byte-equal-with-Java path: the embedded
+#   DejaVu subset matches Java's font stack to sub-0.0001 px on the
+#   discriminating italic test, so the 268+ reference SVG snapshot
+#   suite passes against this impl directly. Also the recommended
+#   choice for native production builds that want dynamic metrics
 #   without browser/RN bridging.
 # - `metrics-host-callback` — defer measurement to a JS-side bridge
 #   via `wasm-bindgen` extern. Used by the `plantuml-little-web` wasm
@@ -80,7 +95,6 @@ remote = ["dep:ureq"]
 #   native-FFI wrapper that will install a JS-side bridge through an
 #   `extern "C"` callback. No impl yet; enabling this feature today
 #   triggers a compile_error in `src/font_metrics.rs`.
-metrics-static-dejavu = ["font_metrics_core/static-fixtures"]
 metrics-ttf-parser = []
 metrics-host-callback = []
 metrics-ffi-callback = []
@@ -88,16 +102,17 @@ metrics-ffi-callback = []
 [dependencies]
 # Shared font metrics. The `metrics-*` Cargo features above pick
 # which `Metrics` impl `crate::font_metrics` routes through; the
-# default (`metrics-static-dejavu`) flips on font-metrics's
-# `static-fixtures` feature, preserving byte-exact Java parity for
-# the 268+ reference SVG tests. The TtfParser / HostCallback impls
-# (always compiled into font-metrics) become reachable when the
-# corresponding `metrics-*` feature is selected instead.
+# dev-dep self-cycle below selects `metrics-ttf-parser`, which
+# routes through `TtfParserMetrics::default_latin()` (raw glyph
+# advances from the embedded DejaVu Latin subset). A 2026-05-10
+# measurement spike confirmed the raw advances match Java
+# FontMetrics byte-for-byte on the 268+ reference SVG tests. The
+# HostCallback impl becomes reachable when its `metrics-*` feature
+# is selected instead.
 #
 # Imported as `font_metrics_core` (via `package =`) because plantuml-
 # little's own `crate::font_metrics` wrapper module would otherwise
-# shadow the dep in the crate-root namespace, breaking
-# `pub use font_metrics::static_dejavu::*` in src/lib.rs.
+# shadow the dep in the crate-root namespace.
 font_metrics_core = { package = "font-metrics", path = "../font-metrics", version = "0.1" }
 thiserror = "1"
 log = "0.4"
@@ -122,11 +137,15 @@ serde_json = "1"
 base64 = "0.22"
 
 [dev-dependencies]
-# Self-cycle so `cargo test` auto-enables `metrics-static-dejavu` —
+# Self-cycle so `cargo test` auto-enables `metrics-ttf-parser` —
 # the byte-equal-with-Java reference suite under `tests/` requires
-# the static DejaVu fixtures. Production consumers explicitly opt
-# into one of the `metrics-*` impls instead (see [features] above).
-plantuml-little = { path = ".", features = ["metrics-static-dejavu"] }
+# Java FontMetrics-compatible measurement, and a 2026-05-10
+# measurement spike confirmed `TtfParserMetrics::default_latin()`
+# (the embedded DejaVu Latin subset parsed via ttf-parser) matches
+# Java's font stack byte-for-byte. Production consumers explicitly
+# opt into one of the `metrics-*` impls instead (see [features]
+# above).
+plantuml-little = { path = ".", features = ["metrics-ttf-parser"] }
 
 [profile.release]
 opt-level = "z"

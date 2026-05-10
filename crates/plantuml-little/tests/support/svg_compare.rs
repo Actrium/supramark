@@ -9,9 +9,11 @@
 //!      drift below ±2.51pt — sub-pixel rounding from Java's float math
 //!      vs Rust's `f64` accumulation, plus a handful of small layout
 //!      offsets in less-trodden diagram types. Italic stereotype widths
-//!      no longer drift here: `src/font_data.rs` bakes DejaVu Sans
-//!      Oblique metrics so they match Java byte-exact (see
-//!      `tools/gen_font_data.py`).
+//!      no longer drift here: `metrics-ttf-parser` (TtfParserMetrics
+//!      backed by font-metrics's embedded DejaVu Latin subset)
+//!      reproduces the Java byte-exact metrics; the 2026-05-10 spike
+//!      measured raw italic `«archimate-node»` at 128.385742 px vs
+//!      Java 128.3857 px (delta 0.000042 px).
 
 use std::collections::HashMap;
 

@@ -17,11 +17,16 @@
 //! `&'static dyn Metrics` provider; the active impl is picked by
 //! mutually-exclusive Cargo features:
 //!
-//! - `metrics-static-dejavu` (default) — byte-exact parity with the
-//!   *_byte_exact.rs reference suites.
 //! - `metrics-ttf-parser` — runtime measurement against a ttf-parser-
 //!   parsed font (defaults to font-metrics's embedded DejaVu Latin
-//!   subset).
+//!   subset). Doubles as the byte-exact upstream-Mermaid parity path
+//!   for the *_byte_exact.rs reference suites: a 2026-05-10
+//!   measurement spike confirmed raw glyph advances from the embedded
+//!   DejaVu subset match Java's font stack to sub-0.0001 px on the
+//!   discriminating italic test. Replaced the legacy
+//!   `metrics-java-compat` slot on 2026-05-10 after the spike showed
+//!   the wrapper's italic-skew adjustment was based on a wrong AWT
+//!   assumption and over-corrected widths.
 //! - `metrics-host-callback` (wasm32 only) — defer measurement to a
 //!   JS-side `globalThis.supramark.measureText` bridge so layer-1
 //!   layout sees the exact widths the host browser / RN-Skia will
@@ -34,23 +39,14 @@
 use font_metrics_core::Metrics;
 
 /// Compile-time-selected `Metrics` provider. Exactly one of the
-/// `metrics-*` Cargo features must be enabled; the default
-/// (`metrics-static-dejavu`) preserves byte-exact parity for the
-/// *_byte_exact.rs reference suites.
+/// `metrics-*` Cargo features must be enabled; the dev-dep self-cycle
+/// in Cargo.toml selects `metrics-ttf-parser`, which preserves
+/// byte-exact upstream-Mermaid parity for the *_byte_exact.rs
+/// reference suites (per the 2026-05-10 measurement spike — see module
+/// docs).
 #[inline]
 fn metrics_provider() -> &'static dyn Metrics {
-    #[cfg(feature = "metrics-static-dejavu")]
-    {
-        static M: font_metrics_core::static_dejavu::StaticDejaVuMetrics =
-            font_metrics_core::static_dejavu::StaticDejaVuMetrics;
-        return &M;
-    }
-
-    #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
-        feature = "metrics-host-callback",
-        target_arch = "wasm32",
-    ))]
+    #[cfg(all(feature = "metrics-host-callback", target_arch = "wasm32"))]
     {
         static M: font_metrics_core::host_callback::HostCallbackMetrics =
             font_metrics_core::host_callback::HostCallbackMetrics;
@@ -58,7 +54,6 @@ fn metrics_provider() -> &'static dyn Metrics {
     }
 
     #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
         not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
         feature = "metrics-ttf-parser",
     ))]
@@ -67,13 +62,21 @@ fn metrics_provider() -> &'static dyn Metrics {
         static M: OnceLock<font_metrics_core::ttf_parser::TtfParserMetrics<'static>> =
             OnceLock::new();
         return M.get_or_init(|| {
+            // mermaid-little ports mermaid.js + canvas, whose missing-glyph
+            // behaviour is the space-advance fallback (Chrome canvas effective
+            // behaviour when no system font covers the codepoint, also matching
+            // the historical StaticDejaVu range-table fallback). Override the
+            // Java-AWT-flavoured `Notdef` default so byte-equal `*_byte_exact.rs`
+            // suites keep matching the canvas-recorded reference output.
             font_metrics_core::ttf_parser::TtfParserMetrics::default_latin()
                 .expect("default Latin TTF subset failed to parse")
+                .with_missing_glyph_fallback(
+                    font_metrics_core::ttf_parser::MissingGlyphFallback::Space,
+                )
         });
     }
 
     #[cfg(all(
-        not(feature = "metrics-static-dejavu"),
         not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
         not(feature = "metrics-ttf-parser"),
         feature = "metrics-ffi-callback",
@@ -81,12 +84,11 @@ fn metrics_provider() -> &'static dyn Metrics {
     compile_error!("metrics-ffi-callback impl is reserved for the future React-Native FFI wrapper; not yet implemented. See crates/mermaid-little/UPSTREAM.md.");
 
     #[cfg(not(any(
-        feature = "metrics-static-dejavu",
         feature = "metrics-ttf-parser",
         feature = "metrics-host-callback",
         feature = "metrics-ffi-callback",
     )))]
-    compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-static-dejavu for byte-exact parity, metrics-ttf-parser for native dynamic, or metrics-host-callback for wasm host-bridge");
+    compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-ttf-parser for native (also covers byte-exact parity) or metrics-host-callback for wasm host-bridge");
 }
 
 /// Width of a single character (typographic horizontal advance).

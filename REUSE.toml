@@ -124,32 +124,38 @@ SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "CC0-1.0"
 
 # ── crates/font-metrics — first-party shared-dep extraction ────────────
-# Static DejaVu range tables previously colocated in plantuml-little
-# were moved here on 2026-05-09 so plantuml-little and mermaid-little
-# can share a single source of truth (eliminating the manual vendor
-# that lived in crates/mermaid-little/src/font_data.rs).
+# First-party Metrics trait with TtfParser and HostCallback
+# implementations shared by plantuml-little, mermaid-little and
+# d2-little. Originally extracted on 2026-05-09 to share a single
+# source of truth across the *-little family. Two cleanup passes on
+# 2026-05-10 collapsed the impl set to its current shape: (1) the
+# offline-baked DejaVu range tables (~22K LOC of static data, formerly
+# under src/static_dejavu/) were deleted after a wrapper named
+# TtfParserJavaCompatMetrics was shown to reproduce them from the
+# embedded DejaVu Latin subset alone; (2) a follow-up measurement spike
+# then showed the wrapper's italic-skew adjustment was based on a wrong
+# Java AWT assumption and over-corrected widths, while raw
+# TtfParserMetrics::default_latin() already matches Java FontMetrics
+# byte-for-byte on the discriminating italic test (delta = 0.000042 px),
+# so the wrapper itself was deleted as well.
 #
-# Code (Cargo.toml, src/lib.rs): Apache-2.0 OR MIT (Rust-ecosystem dual
-# licence; matches the rest of supramark's first-party crates).
-# Data (src/font_data.rs): a derived work of DejaVu Sans / Mono / Serif
-# range tables generated offline by
-# crates/plantuml-little/tools/gen_font_data.py; the underlying DejaVu
-# fonts are released under the Bitstream Vera Fonts Copyright + Public
-# Domain dual licence (https://dejavu-fonts.github.io/). The Bitstream
-# Vera licence requires preservation of the copyright notice on
-# binary-redistributed derivatives; downstream consumers shipping the
-# compiled tables must keep that attribution intact.
+# Code (Cargo.toml, src/**/*.rs): Apache-2.0 OR MIT (Rust-ecosystem
+# dual licence; matches the rest of supramark's first-party crates).
+# Embedded DejaVu Latin subsets: see the crates/font-metrics/assets/**
+# block below for the Bitstream-Vera attribution.
 [[annotations]]
 path = "crates/font-metrics/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0 OR MIT"
 
-# Embedded DejaVu Latin subsets (Sans / Mono x Regular / Bold), generated
-# offline with pyftsubset against the upstream Bitstream-Vera-licensed
-# DejaVu fonts. Bundled by TtfParserMetrics::default_latin() as a
-# zero-config fallback. See https://dejavu-fonts.github.io/License.html
-# for the canonical licence text and LICENSES/Bitstream-Vera.txt for the
+# Embedded DejaVu Latin subsets (Sans / Mono x Regular / Bold / Italic /
+# Bold-Italic), generated offline with pyftsubset against the upstream
+# Bitstream-Vera-licensed DejaVu fonts. Bundled by
+# TtfParserMetrics::default_latin() as both the zero-config production
+# fallback and the byte-equal-Java regression-test fixture for the
+# *-little family. See https://dejavu-fonts.github.io/License.html for
+# the canonical licence text and LICENSES/Bitstream-Vera.txt for the
 # repo-local stub.
 [[annotations]]
 path = "crates/font-metrics/assets/**"

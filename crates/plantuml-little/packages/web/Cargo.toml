@@ -39,9 +39,12 @@ wasm-opt = false
 # impl. The host-callback impl defers every text measurement to
 # `globalThis.supramark.measureText`, which the host installs before
 # the wasm runs. This keeps Layer-1 layout consistent with the host's
-# actual font rendering and drops the 22K-LOC static range tables from
-# the wasm bundle. The host can install the default canvas-backed
-# bridge via `installHostMetricsBridge()` from
+# actual font rendering. The sibling `metrics-ttf-parser` impl
+# (also the byte-equal-Java path used by the native test suite) embeds
+# a ~130 KB DejaVu Latin subset; staying on `metrics-host-callback`
+# here keeps that subset out of the wasm bundle. The host can install
+# the default canvas-backed bridge
+# via `installHostMetricsBridge()` from
 # `@supramark/engines/host-bridge`, or supply its own
 # `globalThis.supramark.measureText` first.
 #

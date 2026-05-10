@@ -1,10 +1,10 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! State diagram byte-exact test harness.
 //!
 //! Runs fixtures in `tests/ext_fixtures/cypress/state` through the Rust
 //! pipeline and diffs against the matching reference SVG.
 //!
-//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Compiled only with `metrics-ttf-parser` — byte parity vs upstream
 //! Mermaid's reference SVGs only holds when the layout pipeline runs
 //! against the static DejaVu fixtures.
 

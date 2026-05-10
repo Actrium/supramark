@@ -6,24 +6,50 @@
 //! with; per-call measurements parse glyph advances from those
 //! buffers via `ttf-parser`.
 //!
-//! # Status
-//!
-//! Skeleton — the type and trait impl are in place so the
-//! [`crate::Metrics`] trait has at least one always-on
-//! implementation, but the methods currently return placeholder
-//! values. Production wiring (default-DejaVu embedded subset, family
-//! resolution table, kerning fallback) is filled in by a follow-up
-//! pass — tracked on the same milestone as the
-//! `host-callback`-bridge wiring.
-//!
-//! Once the implementation is complete, plantuml-little / mermaid-
-//! little / d2-little will switch their main code paths from the
-//! current static-tables route to this one. The static tables stay
-//! around as a `static-fixtures` test-only build for upstream-byte-
-//! equal regression tests.
+//! plantuml-little / mermaid-little / d2-little select this impl via
+//! their `metrics-ttf-parser` feature for both native production
+//! builds that want dynamic metrics without browser/RN bridging AND
+//! their byte-equal upstream-Java regression suites: a 2026-05-10
+//! measurement spike confirmed raw glyph advances from
+//! [`TtfParserMetrics::default_latin`] match Java FontMetrics to
+//! sub-0.0001 px on the discriminating italic test (raw italic
+//! `«archimate-node»` = 128.385742 px vs Java 128.3857 px,
+//! delta = 0.000042 px), so no italic-skew wrapper is needed.
 
 use crate::{Measured, Metrics};
 use ttf_parser::Face;
+
+/// Behaviour when measuring a character that is not in the font's `cmap`.
+///
+/// Different upstreams use different conventions for "missing glyph"
+/// width, and a single hard-coded choice cannot satisfy both byte-equal
+/// regression suites:
+///
+/// - **`Notdef`** matches Java AWT `FontMetrics`: missing chars use the
+///   `.notdef` glyph (gid 0) advance, which is typically the box-shaped
+///   placeholder. plantuml-little (port of PlantUML/Java) uses this so
+///   strings with chars outside the embedded subset reproduce the
+///   upstream Java widths.
+/// - **`Space`** matches the historical StaticDejaVu range-table
+///   behaviour and Chrome canvas's effective fallback when no system
+///   font covers the codepoint. mermaid-little (port of mermaid.js +
+///   canvas) uses this to keep its `*_byte_exact.rs` reference suite
+///   aligned with the canvas-recorded reference output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissingGlyphFallback {
+    /// Use the `.notdef` glyph (gid 0) advance. Matches Java AWT.
+    Notdef,
+    /// Use the space (' ') glyph advance. Matches canvas / StaticDejaVu.
+    Space,
+}
+
+impl Default for MissingGlyphFallback {
+    /// Default to `.notdef`, matching Java AWT — the more common port
+    /// source across the current `*-little` family.
+    fn default() -> Self {
+        Self::Notdef
+    }
+}
 
 /// Dynamic [`Metrics`] backed by `ttf-parser`.
 ///
@@ -41,6 +67,7 @@ pub struct TtfParserMetrics<'a> {
     mono_bold: Option<Face<'a>>,
     mono_italic: Option<Face<'a>>,
     mono_bold_italic: Option<Face<'a>>,
+    missing_glyph_fallback: MissingGlyphFallback,
 }
 
 impl<'a> TtfParserMetrics<'a> {
@@ -48,6 +75,11 @@ impl<'a> TtfParserMetrics<'a> {
     /// available face. All other faces (bold, italic, mono, mono-bold,
     /// mono-italic, etc.) fall back to `sans` until they're populated
     /// via the builder methods.
+    ///
+    /// The missing-glyph fallback policy defaults to
+    /// [`MissingGlyphFallback::Notdef`]; override with
+    /// [`Self::with_missing_glyph_fallback`] if your upstream uses a
+    /// different convention (e.g. canvas / StaticDejaVu space-fallback).
     pub fn from_sans(sans_ttf: &'a [u8]) -> Result<Self, ttf_parser::FaceParsingError> {
         Ok(Self {
             sans: Face::parse(sans_ttf, 0)?,
@@ -58,7 +90,16 @@ impl<'a> TtfParserMetrics<'a> {
             mono_bold: None,
             mono_italic: None,
             mono_bold_italic: None,
+            missing_glyph_fallback: MissingGlyphFallback::default(),
         })
+    }
+
+    /// Override the missing-glyph fallback policy. Returns `self` for
+    /// chaining; see [`MissingGlyphFallback`] for the rationale behind
+    /// each variant.
+    pub fn with_missing_glyph_fallback(mut self, policy: MissingGlyphFallback) -> Self {
+        self.missing_glyph_fallback = policy;
+        self
     }
 
     /// Set the bold sans face. Returns `self` for chaining.
@@ -109,15 +150,6 @@ impl<'a> TtfParserMetrics<'a> {
         Ok(self)
     }
 
-    /// Public accessor mirroring the internal [`Self::pick_face`] resolution
-    /// used by [`Metrics::measure`]. Sibling impls in the same crate
-    /// (notably [`crate::TtfParserJavaCompatMetrics`]) call this to read the
-    /// resolved face's metadata (e.g. `italic_angle()`) without having to
-    /// duplicate the family / bold / italic resolution table.
-    pub(crate) fn face_for(&self, family: &str, bold: bool, italic: bool) -> &Face<'a> {
-        self.pick_face(family, bold, italic)
-    }
-
     fn pick_face(&self, family: &str, bold: bool, italic: bool) -> &Face<'a> {
         let primary = family.split(',').next().unwrap_or(family).trim().to_lowercase();
         let is_mono = primary == "monospaced" || primary == "monospace" || primary == "courier";
@@ -155,16 +187,27 @@ impl<'a> TtfParserMetrics<'a> {
 
 impl TtfParserMetrics<'static> {
     /// Construct a [`TtfParserMetrics`] backed by an embedded DejaVu
-    /// Latin subset (Sans / Sans-Bold / Mono / Mono-Bold), covering
-    /// U+0020-U+007F and U+00A0-U+00FF. Each face is bundled via
+    /// Latin subset (Sans / Sans-Bold / Sans-Italic / Sans-BoldItalic
+    /// + the four Mono variants). Each face is bundled via
     /// `include_bytes!`, so the returned value owns no external buffer
     /// and has `'static` lifetime.
     ///
-    /// The subset weighs roughly 130 KB total (about 5x smaller than
-    /// the full DejaVu set) and is intended as a zero-config fallback
-    /// for callers that don't want to source their own TTFs. For
-    /// non-Latin scripts or custom fonts, use
-    /// [`TtfParserMetrics::from_sans`] with the desired byte buffer.
+    /// Codepoint coverage spans Basic Latin, Latin-1 Supplement, Latin
+    /// Extended-A/B, IPA Extensions, Spacing Modifier Letters,
+    /// Combining Diacriticals, Greek, Cyrillic, General Punctuation,
+    /// Super-/Subscripts, Currency, Letterlike Symbols, Number Forms,
+    /// Arrows, Math Operators, Misc Technical, Box Drawing, Block
+    /// Elements, Geometric Shapes, Misc Symbols, and Dingbats — broad
+    /// enough to byte-equal upstream Java/canvas widths on the full
+    /// plantuml + mermaid + d2 reference suites without dropping into
+    /// the [`MissingGlyphFallback`] path.
+    ///
+    /// The bundled subsets total ~970 KB across the 8 faces (about 4x
+    /// smaller than the full DejaVu set) and are intended as a
+    /// zero-config fallback for callers that don't want to source
+    /// their own TTFs. For non-Latin scripts (CJK, emoji) or custom
+    /// fonts, use [`TtfParserMetrics::from_sans`] with the desired
+    /// byte buffer.
     ///
     /// The DejaVu fonts are released under the Bitstream Vera Fonts
     /// Copyright + Public Domain dual licence; see
@@ -194,9 +237,14 @@ impl TtfParserMetrics<'static> {
 
 /// Glyph advance for a single character on a resolved face, in user units.
 ///
-/// Returns `0.0` for `\n` and `\r`; falls back to the space advance for
-/// unmapped glyphs, then to `size * 0.6` if the face lacks a space glyph.
-fn char_advance(face: &Face<'_>, ch: char, size: f64) -> f64 {
+/// Returns `0.0` for `\n` and `\r`; for unmapped characters, applies the
+/// caller-selected [`MissingGlyphFallback`] policy, then falls back to
+/// `size * 0.6` if even the chosen fallback glyph has no advance entry.
+///
+/// See [`MissingGlyphFallback`] for the rationale behind each policy
+/// (`.notdef` for Java AWT parity, space for canvas / StaticDejaVu
+/// parity).
+fn char_advance(face: &Face<'_>, ch: char, size: f64, fallback: MissingGlyphFallback) -> f64 {
     if ch == '\n' || ch == '\r' {
         return 0.0;
     }
@@ -206,10 +254,12 @@ fn char_advance(face: &Face<'_>, ch: char, size: f64) -> f64 {
             return adv as f64 / upem * size;
         }
     }
-    if let Some(gid) = face.glyph_index(' ') {
-        if let Some(adv) = face.glyph_hor_advance(gid) {
-            return adv as f64 / upem * size;
-        }
+    let fallback_gid = match fallback {
+        MissingGlyphFallback::Notdef => ttf_parser::GlyphId(0),
+        MissingGlyphFallback::Space => face.glyph_index(' ').unwrap_or(ttf_parser::GlyphId(0)),
+    };
+    if let Some(adv) = face.glyph_hor_advance(fallback_gid) {
+        return adv as f64 / upem * size;
     }
     size * 0.6
 }
@@ -223,7 +273,8 @@ impl<'a> Metrics for TtfParserMetrics<'a> {
         let upem = face.units_per_em() as f64;
         let asc = face.ascender() as f64 / upem * size;
         let desc = face.descender().unsigned_abs() as f64 / upem * size;
-        let width: f64 = text.chars().map(|c| char_advance(face, c, size)).sum();
+        let fallback = self.missing_glyph_fallback;
+        let width: f64 = text.chars().map(|c| char_advance(face, c, size, fallback)).sum();
         Measured {
             width,
             ascent: asc,
@@ -253,6 +304,39 @@ mod tests {
         assert!(w > 20.0 && w < 50.0, "expected ~31px, got {}", w);
         let h = m.line_height("sans-serif", 14.0, false, false);
         assert!(h > 12.0 && h < 22.0, "expected ~16px, got {}", h);
+    }
+
+    #[test]
+    fn missing_glyph_notdef_fallback() {
+        // Default policy is Notdef (Java AWT parity). U+1F600 GRINNING FACE
+        // is intentionally outside the embedded Latin/symbols subset and
+        // must therefore be measured through the `.notdef` advance, NOT
+        // the space advance. For DejaVu Sans @ 14pt the two differ by ~3.95
+        // px, so a single byte-precise assertion is enough to lock the
+        // policy.
+        let m = TtfParserMetrics::default_latin().expect("init");
+        let space = m.measure(" ", "sans-serif", 14.0, false, false).width;
+        let emoji = m.measure("😀", "sans-serif", 14.0, false, false).width;
+        assert!(
+            (emoji - space).abs() > 0.01,
+            "Notdef fallback expected; got space={space}, emoji={emoji}",
+        );
+    }
+
+    #[test]
+    fn missing_glyph_space_fallback() {
+        // Opting into Space policy makes missing-glyph chars (like the
+        // grinning-face emoji) measure as space-wide. This is the
+        // canvas / StaticDejaVu convention used by mermaid-little.
+        let m = TtfParserMetrics::default_latin()
+            .expect("init")
+            .with_missing_glyph_fallback(MissingGlyphFallback::Space);
+        let space = m.measure(" ", "sans-serif", 14.0, false, false).width;
+        let emoji = m.measure("😀", "sans-serif", 14.0, false, false).width;
+        assert!(
+            (emoji - space).abs() < 1e-9,
+            "Space fallback expected; got space={space}, emoji={emoji}",
+        );
     }
 
     #[test]
@@ -294,4 +378,5 @@ mod tests {
             "italic sans face should have non-zero italic angle, got {italic_angle}",
         );
     }
+
 }

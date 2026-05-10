@@ -274,9 +274,10 @@ fn move_point(center: (f64, f64), width: f64, height: f64, direction: FlowDirect
 // directly to compute glyph_advance / ascender / descender / units_per_em.
 // They now route through the same `Metrics` trait the rest of the crate
 // uses, which dispatches to the impl picked by the `metrics-*` Cargo
-// features. With the default `metrics-static-dejavu` the output is
-// byte-identical to the previous direct table lookups (the static impl
-// applies the same `advance / units_per_em * size` formula).
+// features. With `metrics-ttf-parser` selected (the dev-dep default)
+// the output matches Java's serif handling (raw TtfParser glyph advances
+// from the embedded DejaVu Latin subset; the bundled subset omits Serif
+// so requests fall back to the embedded Sans face).
 
 fn serif_text_width(text: &str, size: f64) -> f64 {
     font_metrics::text_width(text, "Serif", size, false, false)

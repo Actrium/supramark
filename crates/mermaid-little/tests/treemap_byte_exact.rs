@@ -1,7 +1,7 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! Byte-exact treemap fixtures — mirrors `wave1_e2e.rs` pattern.
 //!
-//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Compiled only with `metrics-ttf-parser` — byte parity vs upstream
 //! Mermaid's reference SVGs only holds when the layout pipeline runs
 //! against the static DejaVu fixtures.
 

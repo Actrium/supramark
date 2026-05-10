@@ -11,7 +11,14 @@
 //! 1. **`TtfParserMetrics`** — parse a caller-supplied TTF buffer
 //!    with `ttf-parser` and compute glyph advances at runtime. The
 //!    production main path on native / SSR / wasm hosts that have no
-//!    text-measurement bridge.
+//!    text-measurement bridge. Backed by the embedded DejaVu Latin
+//!    subset via [`TtfParserMetrics::default_latin`], it also drives
+//!    the byte-equal upstream-Java regression suites in plantuml-
+//!    little and mermaid-little: a 2026-05-10 measurement spike
+//!    confirmed the raw glyph advances match Java FontMetrics to
+//!    sub-0.0001 px on the discriminating italic test (raw italic
+//!    `«archimate-node»` = 128.385742 px vs Java 128.3857 px,
+//!    delta = 0.000042 px).
 //!
 //! 2. **`HostCallbackMetrics`** — defer measurement to a JS-side
 //!    callback (e.g. `canvas.measureText` in browsers, RN-Skia
@@ -20,14 +27,6 @@
 //!    measuring with the very font the host will render with
 //!    eliminates Layer 1 / Layer 3 drift that no static table can
 //!    fix.
-//!
-//! 3. **`StaticDejaVuMetrics`** (feature `static-fixtures`) —
-//!    pre-computed range tables that match Java FontMetrics on
-//!    DejaVu Sans / Mono / Serif byte-exactly. Used **only** by the
-//!    upstream-byte-equal regression tests in plantuml-little and
-//!    mermaid-little to verify the port still matches Java's output.
-//!    Production code should not depend on it; the Java-flavoured
-//!    numbers diverge from any browser's actual rendering anyway.
 //!
 //! # Layer 1 / 2 / 3 architecture (for context)
 //!
@@ -143,21 +142,14 @@ pub trait Metrics {
     /// ascent for their text-block height calculations.
     ///
     /// Default impl: equals [`Metrics::ascent`]. Backends whose face
-    /// data exposes a distinct `OS/2.sTypoAscent` (e.g. the
-    /// `static_dejavu` backend) override this to return that value.
+    /// data exposes a distinct `OS/2.sTypoAscent` may override this
+    /// to return that value.
     fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
         self.ascent(family, size, bold, italic)
     }
 }
 
-#[cfg(feature = "static-fixtures")]
-#[cfg_attr(docsrs, doc(cfg(feature = "static-fixtures")))]
-pub mod static_dejavu;
-
 pub mod ttf_parser;
-
-pub mod ttf_parser_java_compat;
-pub use ttf_parser_java_compat::TtfParserJavaCompatMetrics;
 
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(docsrs, doc(cfg(target_arch = "wasm32")))]

@@ -16,19 +16,18 @@
 pub mod config;
 pub mod detect;
 pub mod error;
-// Static DejaVu range tables live in the shared `font-metrics` crate
-// behind the `static-fixtures` feature, which is itself gated by this
-// crate's `metrics-static-dejavu` Cargo feature (default ON). Until
-// 2026-05-09 mermaid-little carried a hand-vendored copy of
-// plantuml-little's tables anchored at commit b32d6aa; that
-// duplication is now eliminated. Re-export under the historical
-// `crate::font_data` path is kept as a safety net for any future
-// caller that needs raw face tables (the `Metrics` trait covers all
-// current uses — `crate::font_metrics` is the right import). Builds
-// that disable the default in favour of `metrics-ttf-parser` /
-// `metrics-host-callback` lose this re-export.
-#[cfg(feature = "metrics-static-dejavu")]
-pub use font_metrics_core::static_dejavu::font_data;
+// Historical note: until 2026-05-09 mermaid-little carried a
+// hand-vendored copy of plantuml-little's static DejaVu range tables
+// at commit b32d6aa; that duplication was eliminated by routing
+// through the shared `font-metrics` crate. On 2026-05-10 the offline
+// range tables themselves were deleted, and a follow-up measurement
+// spike further showed raw `TtfParserMetrics::default_latin()` already
+// matches Java FontMetrics byte-for-byte (delta = 0.000042 px on the
+// italic discriminator), so the short-lived `TtfParserJavaCompatMetrics`
+// wrapper and the historical `pub use font_metrics_core::static_dejavu::
+// font_data;` re-export under `crate::font_data` were removed at the
+// same time. Callers should use `crate::font_metrics` (which routes
+// through the `Metrics` trait) for all measurement.
 pub mod font_metrics;
 #[cfg(feature = "katex")]
 pub mod katex;

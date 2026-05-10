@@ -4,15 +4,15 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 # Apache-2.0 OR MIT for the Rust wrapper code (Rust-ecosystem standard
-# dual licence). The static range tables in src/static_dejavu/font_data.rs
-# (only present when the `static-fixtures` feature is enabled) are a
-# derived work of DejaVu (Bitstream Vera + Public Domain dual);
-# downstream consumers redistributing the binary should preserve the
-# DejaVu attribution. See REUSE.toml for the SPDX block and the
-# upstream DejaVu copyright at https://dejavu-fonts.github.io/.
+# dual licence). The embedded DejaVu Latin subsets bundled by
+# `TtfParserMetrics::default_latin()` are a derived work of DejaVu
+# (Bitstream Vera + Public Domain dual); downstream consumers
+# redistributing the binary should preserve the DejaVu attribution.
+# See REUSE.toml for the SPDX block and the upstream DejaVu copyright
+# at https://dejavu-fonts.github.io/.
 license = "Apache-2.0 OR MIT"
 authors = ["kookyleo <kookyleo@gmail.com>"]
-description = "Font metrics abstraction for the *-little family: a Metrics trait + ttf-parser, host-callback, and (test-only) static DejaVu implementations."
+description = "Font metrics abstraction for the *-little family: a Metrics trait with ttf-parser and host-callback implementations, backed by an embedded DejaVu Latin subset."
 homepage = "https://github.com/kookyleo/supramark"
 repository = "https://github.com/kookyleo/supramark"
 keywords = ["font", "metrics", "dejavu", "svg", "diagram"]
@@ -21,15 +21,6 @@ exclude = ["tests/"]
 
 [features]
 default = []
-# Pulls in src/static_dejavu/* — pre-computed range tables (~22K LOC of
-# static data) covering DejaVu Sans / Mono / Serif × plain/bold/italic/
-# bold-italic. Used by the upstream-byte-equal regression tests in
-# plantuml-little and mermaid-little (where the goal is to verify the
-# Rust port matches Java FontMetrics output exactly). Production main
-# paths should NOT enable this — they should instead use
-# `TtfParserMetrics` or `HostCallbackMetrics` so layout reflects the
-# fonts the host actually renders with.
-static-fixtures = []
 
 [dependencies]
 # Generic TTF parsing for `TtfParserMetrics`. Pinned to a major version

@@ -10,11 +10,15 @@
 - **mermaid-little license:** `MIT`.
 - **mermaid (the project being reimplemented):** `MIT` upstream.
 - mermaid-little is a **reimplementation in Rust** targeting byte-exact
-  SVG parity with `mermaid@11.14.0`. Static DejaVu range tables are
-  shared with sister project `plantuml-little` via the in-tree crate
-  `little-font-metrics` (extracted 2026-05-09; previously a hand-vendored
-  copy of plantuml-little @ `b32d6aa` lived in
-  `crates/mermaid-little/src/font_data.rs`).
+  SVG parity with `mermaid@11.14.0`. Font metrics are shared with sister
+  project `plantuml-little` via the in-tree crate `font-metrics`
+  (extracted 2026-05-09; previously a hand-vendored copy of plantuml-
+  little @ `b32d6aa` lived in `crates/mermaid-little/src/font_data.rs`).
+  The shared crate's offline-baked Java-FontMetrics-equivalent range
+  tables (~22K LOC) were deleted on 2026-05-10 in favour of
+  `TtfParserJavaCompatMetrics` (TtfParser + Java AWT italic-skew
+  adjustment) which produces byte-identical output from the embedded
+  DejaVu Latin subset alone.
 - MIT ⇆ Apache-2.0 (supramark default) is fully compatible.
 
 ## Relationship
@@ -77,19 +81,36 @@ by accepting upstream's version. If upstream takes a different shape
 
 ## supramark-side metrics-* feature flags
 
-The crate exposes a `metrics-{static-dejavu, ttf-parser, host-callback,
-ffi-callback}` family — the `Metrics` impl `crate::font_metrics` routes
-through is selected at compile time and the family is mutually exclusive.
-The crate's own default feature set deliberately includes NONE of them:
+The crate exposes a `metrics-{ttf-parser, host-callback, ffi-callback}`
+family — the `Metrics` impl `crate::font_metrics` routes through is
+selected at compile time and the family is mutually exclusive. The
+crate's own default feature set deliberately includes NONE of them:
 production consumers (e.g. `mermaid-little-web`) must
 `default-features = false` and explicitly opt into one platform impl,
-so the choice is visible in the consumer's `Cargo.toml`. A `[dev-dependencies]`
-self-cycle flips on `metrics-static-dejavu` so `cargo test` keeps running
-the `*_byte_exact.rs` reference suites unchanged. The `metrics-static-dejavu`
-impl is a regression-test fixture (byte parity with upstream Mermaid on
-DejaVu) and is NOT recommended for production. `metrics-ffi-callback`
-is reserved for the planned React-Native native-FFI wrapper; enabling it
-today fires a `compile_error!` because no impl ships yet.
+so the choice is visible in the consumer's `Cargo.toml`. A
+`[dev-dependencies]` self-cycle flips on `metrics-ttf-parser` so
+`cargo test` keeps running the `*_byte_exact.rs` reference suites
+unchanged. `metrics-ttf-parser` doubles as both the byte-equal
+upstream-Mermaid path AND the production native fallback: a
+2026-05-10 measurement spike confirmed raw
+`TtfParserMetrics::default_latin()` (the embedded DejaVu Latin subset
+parsed via ttf-parser) matches Java FontMetrics to sub-0.0001 px on
+the discriminating italic test (`«archimate-node»` italic =
+128.385742 px vs Java 128.3857 px, delta = 0.000042 px), so no
+italic-skew wrapper is needed. `metrics-ffi-callback` is reserved
+for the planned React-Native native-FFI wrapper; enabling it today
+fires a `compile_error!` because no impl ships yet.
+
+Historical note: prior to 2026-05-10 this slot was `metrics-static-dejavu`,
+gated by ~22K LOC of offline-baked Java-FontMetrics-equivalent range
+tables. A first cleanup pass replaced those with a wrapper named
+`TtfParserJavaCompatMetrics` (TtfParser + Java AWT italic-skew
+adjustment) under a `metrics-java-compat` feature. The follow-up spike
+above showed the italic-skew adjustment was based on a wrong AWT
+assumption and over-corrected widths, while raw `TtfParserMetrics`
+already matched Java byte-for-byte — both the wrapper and the
+`metrics-java-compat` feature were therefore deleted in favour of
+`metrics-ttf-parser`.
 
 ## Outstanding
 - Land the `packages/web/` patch upstream so this section can shrink to

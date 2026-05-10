@@ -1,5 +1,5 @@
-#![cfg(feature = "metrics-static-dejavu")]
-// Compiled only with `metrics-static-dejavu` — this suite spawns Java
+#![cfg(feature = "metrics-ttf-parser")]
+// Compiled only with `metrics-ttf-parser` — this suite spawns Java
 // PlantUML and diffs its SVG bytes against the Rust output. Java's
 // FontMetrics maps to the static DejaVu fixtures; any other metrics
 // impl would diverge by construction.

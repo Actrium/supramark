@@ -1,4 +1,4 @@
-#![cfg(feature = "metrics-static-dejavu")]
+#![cfg(feature = "metrics-ttf-parser")]
 //! gitGraph byte-exact test harness.
 //!
 //! Runs the fixtures in `tests/ext_fixtures/{cypress,demos}/gitGraph`
@@ -8,7 +8,7 @@
 //! Fixtures requiring features not yet ported are listed in
 //! `tests/known_ignored.txt` and skipped here.
 //!
-//! Compiled only with `metrics-static-dejavu` — byte parity vs upstream
+//! Compiled only with `metrics-ttf-parser` — byte parity vs upstream
 //! Mermaid's reference SVGs only holds when the layout pipeline runs
 //! against the static DejaVu fixtures.
 
