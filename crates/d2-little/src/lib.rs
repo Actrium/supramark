@@ -105,7 +105,7 @@ fn apply_text_transform(
 
 /// Options controlling the compile phase.
 pub struct CompileOptions {
-    pub ruler: Option<Box<dyn crate::textmeasure::TextMetrics>>,
+    pub ruler: Option<crate::textmeasure::D2GoEmulationRuler>,
     pub theme_id: Option<i64>,
     pub dark_theme_id: Option<i64>,
     pub pad: Option<i64>,
@@ -193,7 +193,7 @@ pub fn compile(
     // Step 2-5: recursively compile graph (theme, dimensions, layout, export)
     let mut ruler =
         crate::textmeasure::default_metrics().map_err(|e| format!("ruler init: {}", e))?;
-    let mut diagram = compile_graph(&mut g, theme_id, sketch, &mut *ruler)?;
+    let mut diagram = compile_graph(&mut g, theme_id, sketch, &mut ruler)?;
 
     // Match Go d2lib.Compile: copy selected render options back into
     // diagram.Config so the diagram hash (used for CSS scoping) accounts for
@@ -262,7 +262,7 @@ fn compile_graph(
     g: &mut Graph,
     theme_id: i64,
     sketch: bool,
-    ruler: &mut dyn crate::textmeasure::TextMetrics,
+    ruler: &mut crate::textmeasure::D2GoEmulationRuler,
 ) -> Result<crate::target::Diagram, String> {
     // Apply theme
     if let Some(theme) = crate::themes::catalog::find(theme_id) {
@@ -1507,7 +1507,7 @@ pub fn d2_to_svg(input: &str) -> Result<Vec<u8>, String> {
 /// This is a simplified port of Go's `Graph.SetDimensions`.
 pub fn set_dimensions(
     g: &mut Graph,
-    ruler: &mut dyn crate::textmeasure::TextMetrics,
+    ruler: &mut crate::textmeasure::D2GoEmulationRuler,
 ) -> Result<(), String> {
     set_dimensions_with_font(g, ruler, None)
 }
@@ -1517,7 +1517,7 @@ pub fn set_dimensions(
 /// `compileOpts.FontFamily = HandDrawn` in `applyDefaults`.
 pub fn set_dimensions_with_font(
     g: &mut Graph,
-    ruler: &mut dyn crate::textmeasure::TextMetrics,
+    ruler: &mut crate::textmeasure::D2GoEmulationRuler,
     override_family: Option<FontFamily>,
 ) -> Result<(), String> {
     // Default font family for the diagram. Themes with the `mono` special
@@ -1533,7 +1533,7 @@ pub fn set_dimensions_with_font(
         FontFamily::SourceSansPro
     };
 
-    let measure_label = |ruler: &mut dyn crate::textmeasure::TextMetrics,
+    let measure_label = |ruler: &mut crate::textmeasure::D2GoEmulationRuler,
                          shape: &str,
                          language: &str,
                          font_family: FontFamily,
@@ -1582,9 +1582,8 @@ pub fn set_dimensions_with_font(
         if language == "latex" {
             crate::latex::measure(label).map_err(|e| format!("latex measure: {}", e))
         } else if language == "markdown" {
-            crate::textmeasure::measure_markdown(
+            ruler.measure_markdown(
                 label,
-                ruler,
                 Some(font_family),
                 Some(FontFamily::SourceCodePro),
                 font_size,
@@ -1592,9 +1591,8 @@ pub fn set_dimensions_with_font(
         } else if !language.is_empty() {
             // Non-code shapes with a non-markdown language are still
             // treated as markdown by Go (see GetLabelSize).
-            crate::textmeasure::measure_markdown(
+            ruler.measure_markdown(
                 label,
-                ruler,
                 Some(font_family),
                 Some(FontFamily::SourceCodePro),
                 font_size,
@@ -2216,9 +2214,8 @@ pub fn set_dimensions_with_font(
             let (tw, th) = if edge_language == "latex" {
                 crate::latex::measure(&label).unwrap_or_else(|_| ruler.measure(font, &label))
             } else if edge_language == "markdown" {
-                crate::textmeasure::measure_markdown(
+                ruler.measure_markdown(
                     &label,
-                    ruler,
                     Some(edge_font_family),
                     Some(FontFamily::SourceCodePro),
                     font_size,

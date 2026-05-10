@@ -1,17 +1,17 @@
-//! Backend-generic markdown layout for d2.
+//! Markdown layout for d2.
 //!
 //! Hosts the recursive HTML-tree walker [`measure_node`] together with the
 //! markdown-specific layout constants that were originally inlined in
 //! [`super::d2_go_emulation`]. The entry point [`measure_markdown_generic`]
-//! takes any [`TextMetrics`] backend, so both `D2GoEmulationRuler` and
-//! `HostCallbackRuler` can share the same layout pipeline.
+//! drives [`D2GoEmulationRuler`] directly — d2 layout has only one
+//! text-measurement backend because `line_height_factor` is a stateful
+//! d2-internal concept that other backends cannot cleanly substitute.
 //!
-//! Per-impl `TextMetrics::measure_markdown` overrides are responsible for
-//! setting any backend-specific state (e.g. `bounds_with_dot`,
-//! `line_height_factor`) before/after calling into here — this module
-//! intentionally never touches concrete-only fields.
+//! [`D2GoEmulationRuler::measure_markdown`] is responsible for setting the
+//! per-call state (`bounds_with_dot`, `line_height_factor`) before/after
+//! delegating into here.
 
-use super::TextMetrics;
+use super::d2_go_emulation::D2GoEmulationRuler;
 use crate::fonts::{FontFamily, FontStyle};
 use roxmltree::{Document, Node, NodeType};
 
@@ -48,12 +48,11 @@ const BORDER_LEFT_BLOCKQUOTE_EM: f64 = 0.25;
 /// Render `md_text` to sanitised HTML, walk it as a block tree, and return
 /// the rendered (width, height) in pixels.
 ///
-/// Any backend-specific state (e.g. `bounds_with_dot`, `line_height_factor`)
-/// must be set by the per-impl `TextMetrics::measure_markdown` override
-/// before calling in here, and restored after — this function only goes
-/// through the trait surface.
+/// Per-call state (`bounds_with_dot`, `line_height_factor`) must be set by
+/// [`D2GoEmulationRuler::measure_markdown`] before calling in here, and
+/// restored after.
 pub(super) fn measure_markdown_generic(
-    metrics: &mut dyn TextMetrics,
+    ruler: &mut D2GoEmulationRuler,
     md_text: &str,
     font_family: Option<FontFamily>,
     mono_font_family: Option<FontFamily>,
@@ -65,7 +64,7 @@ pub(super) fn measure_markdown_generic(
 
     let body_node = doc.root_element();
     let body_attrs = measure_node(
-        metrics,
+        ruler,
         0,
         body_node,
         font_family,
@@ -209,7 +208,7 @@ fn merge_column_widths(mut existing: Vec<f64>, new_rows: &[Vec<f64>]) -> Vec<f64
 }
 
 fn measure_node(
-    metrics: &mut dyn TextMetrics,
+    ruler: &mut D2GoEmulationRuler,
     depth: usize,
     node: Node<'_, '_>,
     font_family: Option<FontFamily>,
@@ -240,7 +239,7 @@ fn measure_node(
             let mut space_widths = 0.0;
 
             if !is_code {
-                let space_width = metrics.space_width(font);
+                let space_width = ruler.space_width(font);
                 str_ = str_.replace('\n', " ");
                 str_ = str_.replace('\t', " ");
                 if str_.starts_with(' ') {
@@ -258,10 +257,10 @@ fn measure_node(
             }
 
             if parent_element_type == Some("pre") {
-                let original_line_height = metrics.line_height_factor();
-                metrics.set_line_height_factor(LINE_HEIGHT_PRE);
-                let (mut w, mut h) = metrics.measure_precise(font, &str_);
-                metrics.set_line_height_factor(original_line_height);
+                let original_line_height = ruler.line_height_factor();
+                ruler.set_line_height_factor(LINE_HEIGHT_PRE);
+                let (mut w, mut h) = ruler.measure_precise(font, &str_);
+                ruler.set_line_height_factor(original_line_height);
                 w *= FONT_SIZE_PRE_CODE_EM;
                 h *= FONT_SIZE_PRE_CODE_EM;
                 return BlockAttrs {
@@ -271,7 +270,7 @@ fn measure_node(
                 };
             }
 
-            let (mut w, h) = metrics.measure_precise(font, &str_);
+            let (mut w, h) = ruler.measure_precise(font, &str_);
             if is_code {
                 w *= FONT_SIZE_PRE_CODE_EM;
                 return BlockAttrs {
@@ -281,7 +280,7 @@ fn measure_node(
                 };
             }
 
-            w = metrics.scale_unicode(w, font, &str_);
+            w = ruler.scale_unicode(w, font, &str_);
             BlockAttrs {
                 width: w + space_widths,
                 height: h,
@@ -311,12 +310,12 @@ fn measure_node(
                 _ => {}
             }
 
-            let original_line_height = metrics.line_height_factor();
+            let original_line_height = ruler.line_height_factor();
             if matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-                metrics.set_line_height_factor(LINE_HEIGHT_H);
+                ruler.set_line_height_factor(LINE_HEIGHT_H);
             }
 
-            let line_height_px = f64::from(font_size) * metrics.line_height_factor();
+            let line_height_px = f64::from(font_size) * ruler.line_height_factor();
             let mut block = BlockAttrs::default();
 
             if node.first_child().is_some() {
@@ -337,7 +336,7 @@ fn measure_node(
 
                 for child in node.children() {
                     let child_block = measure_node(
-                        metrics,
+                        ruler,
                         depth + 1,
                         child,
                         Some(font_family),
@@ -469,7 +468,7 @@ fn measure_node(
                             && matches!(child.tag_name().name(), "tbody" | "thead" | "tfoot")
                         {
                             let child_attrs = measure_node(
-                                metrics,
+                                ruler,
                                 depth + 1,
                                 child,
                                 Some(font_family),
@@ -483,7 +482,7 @@ fn measure_node(
                             }
                         } else if child.is_element() && child.tag_name().name() == "tr" {
                             let row_attrs = measure_node(
-                                metrics,
+                                ruler,
                                 depth + 1,
                                 child,
                                 Some(font_family),
@@ -521,7 +520,7 @@ fn measure_node(
                     for child in node.children() {
                         if child.is_element() && child.tag_name().name() == "tr" {
                             let child_attrs = measure_node(
-                                metrics,
+                                ruler,
                                 depth + 1,
                                 child,
                                 Some(font_family),
@@ -552,7 +551,7 @@ fn measure_node(
 
                     for child in node.children() {
                         let child_attrs = measure_node(
-                            metrics,
+                            ruler,
                             depth + 1,
                             child,
                             Some(font_family),
@@ -591,7 +590,7 @@ fn measure_node(
                                 row_font_style
                             };
                             let child_attrs = measure_node(
-                                metrics,
+                                ruler,
                                 depth + 1,
                                 child,
                                 Some(font_family),
@@ -621,7 +620,7 @@ fn measure_node(
             }
 
             if matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-                metrics.set_line_height_factor(original_line_height);
+                ruler.set_line_height_factor(original_line_height);
             }
 
             if block.height > 0.0 && block.height < line_height_px {

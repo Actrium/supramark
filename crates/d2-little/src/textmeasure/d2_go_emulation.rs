@@ -32,8 +32,6 @@ use ttf_parser::Face;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::TextMetrics;
-
 const TAB_SIZE: f64 = 4.0;
 const SIZELESS_FONT_SIZE: i32 = 0;
 const REPLACEMENT_CHAR: char = '\u{FFFD}';
@@ -816,9 +814,11 @@ fn compute_glyph_metrics(
 /// Text-measurement Ruler — keeps one Atlas per (family, style, size).
 ///
 /// Renamed from the historical `Ruler` to flag this as the byte-equal
-/// reproduction of Go upstream's freetype + Int26_6 path. Future text
-/// measurement backends (host callbacks, ttf-parser fallback) will
-/// implement [`TextMetrics`] alongside this engine.
+/// reproduction of Go upstream's freetype + Int26_6 path. d2 layout uses
+/// this concrete type directly; see
+/// [`crate::textmeasure::D2GoEmulationMetrics`] for the
+/// `font_metrics_core::Metrics` adapter that wasm production wiring
+/// dispatches through.
 pub struct D2GoEmulationRuler {
     orig_x: f64,
     orig_y: f64,
@@ -1022,7 +1022,8 @@ impl D2GoEmulationRuler {
         result
     }
 
-    fn space_width(&mut self, font: Font) -> f64 {
+    /// Width of the space glyph in the supplied font, in pixels.
+    pub fn space_width(&mut self, font: Font) -> f64 {
         let key = FontKey::from(font);
         if !self.atlases.contains_key(&key) {
             self.add_font_size(font);
@@ -1030,7 +1031,23 @@ impl D2GoEmulationRuler {
         self.atlases[&key].glyph(' ').advance
     }
 
-    fn scale_unicode(&mut self, mut w: f64, font: Font, s: &str) -> f64 {
+    /// Read the current line-height factor (defaults to 1.0). Mutated for
+    /// markdown / code-block measurement.
+    pub fn line_height_factor(&self) -> f64 {
+        self.line_height_factor
+    }
+
+    /// Override the line-height factor used by [`Self::draw_buf`] when
+    /// advancing past a `\n`. Callers usually save the previous value and
+    /// restore it after the temporary override.
+    pub fn set_line_height_factor(&mut self, value: f64) {
+        self.line_height_factor = value;
+    }
+
+    /// CJK width-fallback heuristic: replace the measured Latin-fallback
+    /// width with `space_width(mono) * unicode_width` for non-1-cell
+    /// graphemes. Returns the corrected width.
+    pub fn scale_unicode(&mut self, mut w: f64, font: Font, s: &str) -> f64 {
         let grapheme_count = s.graphemes(true).count();
         if grapheme_count != s.len() {
             for line in s.split('\n') {
@@ -1078,39 +1095,15 @@ impl D2GoEmulationRuler {
 }
 
 // ---------------------------------------------------------------------------
-// TextMetrics impl — delegate to the inherent methods.
+// Inherent measure_markdown — drives the shared markdown layout walker in
+// `super::markdown`, while toggling the `bounds_with_dot` /
+// `line_height_factor` state needed for byte-equal Go output.
 // ---------------------------------------------------------------------------
 
-impl TextMetrics for D2GoEmulationRuler {
-    fn measure(&mut self, font: Font, s: &str) -> (i32, i32) {
-        D2GoEmulationRuler::measure(self, font, s)
-    }
-
-    fn measure_mono(&mut self, font: Font, s: &str) -> (i32, i32) {
-        D2GoEmulationRuler::measure_mono(self, font, s)
-    }
-
-    fn measure_precise(&mut self, font: Font, s: &str) -> (f64, f64) {
-        D2GoEmulationRuler::measure_precise(self, font, s)
-    }
-
-    fn line_height_factor(&self) -> f64 {
-        self.line_height_factor
-    }
-
-    fn set_line_height_factor(&mut self, value: f64) {
-        self.line_height_factor = value;
-    }
-
-    fn space_width(&mut self, font: Font) -> f64 {
-        D2GoEmulationRuler::space_width(self, font)
-    }
-
-    fn scale_unicode(&mut self, w: f64, font: Font, s: &str) -> f64 {
-        D2GoEmulationRuler::scale_unicode(self, w, font, s)
-    }
-
-    fn measure_markdown(
+impl D2GoEmulationRuler {
+    /// Measure a markdown blob and return the rendered (width, height) in
+    /// pixels.
+    pub fn measure_markdown(
         &mut self,
         md_text: &str,
         font_family: Option<crate::fonts::FontFamily>,
@@ -1136,10 +1129,6 @@ impl TextMetrics for D2GoEmulationRuler {
 
 // ---------------------------------------------------------------------------
 // Markdown render — `markdown` (commonmark + gfm) → sanitised HTML.
-// The measure pipeline lives in `super::markdown` so it can be shared with
-// other TextMetrics backends (e.g. HostCallbackRuler). The Go-byte-equal
-// `bounds_with_dot` toggle is set/unset by this file's TextMetrics impl
-// before/after delegating into the generic measure_markdown_generic.
 // ---------------------------------------------------------------------------
 
 fn markdown_options() -> Options {

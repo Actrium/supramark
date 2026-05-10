@@ -90,7 +90,7 @@ fn probe_case() {
     }
 
     let mut ruler = d2_little::textmeasure::default_metrics().expect("ruler");
-    d2_little::set_dimensions(&mut g, &mut *ruler).expect("set_dimensions");
+    d2_little::set_dimensions(&mut g, &mut ruler).expect("set_dimensions");
     eprintln!("set_dimensions ok");
 
     d2_little::dagre_layout::layout(&mut g, None).expect("layout");
