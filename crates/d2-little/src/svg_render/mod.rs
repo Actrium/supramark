@@ -3771,13 +3771,13 @@ fn dimensions(diagram: &crate::target::Diagram, pad: i32) -> (i32, i32, i32, i32
 /// d2svg.go. Returns `None` if there are no labelled items (nothing to draw).
 fn legend_dimensions(legend: &crate::target::Legend) -> Option<(i32, i32)> {
     // Attempt a ruler, but fall back to heuristics if fonts are unavailable.
-    let mut ruler = crate::textmeasure::default_metrics().ok();
+    let metrics = crate::textmeasure::default_d2_metrics().ok();
     let mut total_height = LEGEND_PADDING + LEGEND_FONT_SIZE + LEGEND_ITEM_SPACING;
     let mut max_label_width = 0;
     let mut item_count = 0;
 
-    let mut measure = |label: &str, is_bold: bool| -> (i32, i32) {
-        if let Some(ref mut r) = ruler {
+    let measure = |label: &str, is_bold: bool| -> (i32, i32) {
+        if let Some(m) = metrics.as_ref() {
             let style = if is_bold {
                 crate::fonts::FontStyle::Bold
             } else {
@@ -3788,7 +3788,7 @@ fn legend_dimensions(legend: &crate::target::Legend) -> Option<(i32, i32)> {
                 style,
                 LEGEND_FONT_SIZE,
             );
-            r.measure(font, label)
+            m.measure_text(font, label)
         } else {
             // Crude fallback: assume 7px per character, font-size height.
             (label.chars().count() as i32 * 7, LEGEND_FONT_SIZE)
@@ -3855,15 +3855,15 @@ fn render_legend(
         return Ok(());
     };
 
-    let mut ruler = crate::textmeasure::default_metrics().ok();
-    let mut measure = |label: &str| -> (i32, i32) {
-        if let Some(ref mut r) = ruler {
+    let metrics = crate::textmeasure::default_d2_metrics().ok();
+    let measure = |label: &str| -> (i32, i32) {
+        if let Some(m) = metrics.as_ref() {
             let font = crate::fonts::Font::new(
                 crate::fonts::FontFamily::SourceSansPro,
                 crate::fonts::FontStyle::Regular,
                 LEGEND_FONT_SIZE,
             );
-            r.measure(font, label)
+            m.measure_text(font, label)
         } else {
             (label.chars().count() as i32 * 7, LEGEND_FONT_SIZE)
         }
@@ -4268,8 +4268,58 @@ fn append_on_trigger(buf: &mut String, source: &str, triggers: &[&str], content:
     }
 }
 
+/// Map a `FontFamily` to its canonical CSS `font-family` value, with
+/// a generic fallback in the cascade. Used by the wasm `embed_fonts`
+/// path which delegates rendering to the host browser's installed /
+/// host-page-registered fonts instead of inlining base64 WOFF data.
+#[cfg(target_arch = "wasm32")]
+fn family_css(family: crate::fonts::FontFamily) -> &'static str {
+    match family {
+        crate::fonts::FontFamily::SourceSansPro => "\"Source Sans Pro\", sans-serif",
+        crate::fonts::FontFamily::SourceCodePro => "\"Source Code Pro\", monospace",
+        crate::fonts::FontFamily::HandDrawn => "\"Fuzzy Bubbles\", cursive",
+    }
+}
+
 /// Embed font-face CSS rules into the SVG, scanning for font class usage.
+///
+/// On native / SSR builds the function inlines the diagram's font subsets
+/// as base64 WOFF data URLs (`@font-face { src: url("data:..."); }`) so
+/// that standalone `.svg` files render correctly offline. On wasm the
+/// data-URL path is skipped because: (1) base64 data URLs defeat HTTP /
+/// service-worker caching and waste bytes when the same page hosts many
+/// diagrams; (2) layer-1 measurement uses host canvas which queries the
+/// host browser's installed / page-registered fonts — embedded WOFF
+/// would override those at layer-3 and break layer-1↔layer-3 alignment.
+/// The wasm output therefore emits only the CSS class declarations with
+/// generic-fallback `font-family` values; consumers register a webfont
+/// (or rely on system fonts) at the host-page level.
 pub fn embed_fonts(
+    buf: &mut String,
+    diagram_hash: &str,
+    source: &str,
+    font_family: &crate::fonts::FontFamily,
+    mono_font_family: &crate::fonts::FontFamily,
+    corpus: &str,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = corpus;
+        return embed_fonts_wasm(buf, diagram_hash, source, *font_family, *mono_font_family);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    embed_fonts_native(
+        buf,
+        diagram_hash,
+        source,
+        font_family,
+        mono_font_family,
+        corpus,
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn embed_fonts_native(
     buf: &mut String,
     diagram_hash: &str,
     source: &str,
@@ -4495,6 +4545,201 @@ pub fn embed_fonts(
             url = mono_font_family
                 .font(0, crate::fonts::FontStyle::Italic)
                 .get_encoded_subset(corpus),
+        ),
+    );
+
+    buf.push_str("]]></style>");
+}
+
+/// Wasm variant: emit CSS class declarations only, no `@font-face` data
+/// URL, no font subset / WOFF code path. The host browser resolves
+/// `font-family` via its installed font stack or any webfont the host
+/// page registered. Same trigger logic as the native path so empty
+/// diagrams stay empty.
+#[cfg(target_arch = "wasm32")]
+fn embed_fonts_wasm(
+    buf: &mut String,
+    diagram_hash: &str,
+    source: &str,
+    font_family: crate::fonts::FontFamily,
+    mono_font_family: crate::fonts::FontFamily,
+) {
+    let regular = family_css(font_family);
+    let mono = family_css(mono_font_family);
+
+    buf.push_str(r#"<style type="text/css"><![CDATA["#);
+
+    // 1. Regular text font
+    append_on_trigger(
+        buf,
+        source,
+        &[
+            r#"class="text""#,
+            r#"class="text "#,
+            r#"class="md""#,
+            r#"class="md "#,
+        ],
+        &format!(
+            r#"
+.{dh} .text {{
+	font-family: {regular};
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 2. Markdown semibold (no separate face: rely on font-weight + cascade)
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="md""#, r#"class="md "#],
+        &format!(
+            r#"
+.{dh} .md strong, .{dh} .md b {{
+	font-weight: 600;
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 3. Text underline
+    append_on_trigger(
+        buf,
+        source,
+        &["text-underline"],
+        r#"
+.text-underline {
+	text-decoration: underline;
+}"#,
+    );
+
+    // 4. Text link
+    append_on_trigger(
+        buf,
+        source,
+        &["text-link"],
+        r#"
+.text-link {
+	fill: blue;
+}
+
+.text-link:visited {
+	fill: purple;
+}"#,
+    );
+
+    // 5. Animated connection
+    append_on_trigger(
+        buf,
+        source,
+        &["animated-connection"],
+        r#"
+@keyframes dashdraw {
+	from {
+		stroke-dashoffset: 0;
+	}
+}
+"#,
+    );
+
+    // 6. Animated shape
+    append_on_trigger(
+        buf,
+        source,
+        &["animated-shape"],
+        r#"
+@keyframes shapeappear {
+    0%, 100% { transform: translateY(0); filter: drop-shadow(0px 0px 0px rgba(0,0,0,0)); }
+    50% { transform: translateY(-4px); filter: drop-shadow(0px 12.6px 25.2px rgba(50,50,93,0.25)) drop-shadow(0px 7.56px 15.12px rgba(0,0,0,0.1)); }
+}
+.animated-shape {
+	animation: shapeappear 1s linear infinite;
+}
+"#,
+    );
+
+    // 7. Appendix icon drop shadow
+    append_on_trigger(
+        buf,
+        source,
+        &["appendix-icon"],
+        r#"
+.appendix-icon {
+	filter: drop-shadow(0px 0px 32px rgba(31, 36, 58, 0.1));
+}"#,
+    );
+
+    // 8. Bold (font-weight on the host-resolved family)
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="text-bold"#, "<b>", "<strong>"],
+        &format!(
+            r#"
+.{dh} .text-bold {{
+	font-family: {regular};
+	font-weight: bold;
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 9. Italic
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="text-italic"#, "<em>", "<dfn>"],
+        &format!(
+            r#"
+.{dh} .text-italic {{
+	font-family: {regular};
+	font-style: italic;
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 10. Mono regular
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="text-mono"#, "<pre>", "<code>", "<kbd>", "<samp>"],
+        &format!(
+            r#"
+.{dh} .text-mono {{
+	font-family: {mono};
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 11. Mono bold
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="text-mono-bold"#],
+        &format!(
+            r#"
+.{dh} .text-mono-bold {{
+	font-family: {mono};
+	font-weight: bold;
+}}"#,
+            dh = diagram_hash,
+        ),
+    );
+
+    // 12. Mono italic
+    append_on_trigger(
+        buf,
+        source,
+        &[r#"class="text-mono-italic"#],
+        &format!(
+            r#"
+.{dh} .text-mono-italic {{
+	font-family: {mono};
+	font-style: italic;
+}}"#,
+            dh = diagram_hash,
         ),
     );
 

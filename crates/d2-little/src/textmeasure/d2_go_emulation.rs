@@ -23,11 +23,8 @@
 //!   match Go.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use crate::fonts::{FONT_FAMILIES, FONT_STYLES, Font, FontFamily, FontStyle};
-use markdown::{CompileOptions, Constructs, Options, ParseOptions};
-use regex::Regex;
 use ttf_parser::Face;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -35,9 +32,6 @@ use unicode_width::UnicodeWidthStr;
 const TAB_SIZE: f64 = 4.0;
 const SIZELESS_FONT_SIZE: i32 = 0;
 const REPLACEMENT_CHAR: char = '\u{FFFD}';
-
-static HREF_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"href="([^"]*)""#).expect("href regex"));
 
 /// Default rune set baked into the atlas at construction time.
 /// ASCII + Latin-1 Supplement + Geometric Shapes (matches Go `init()`).
@@ -1105,49 +1099,9 @@ impl D2GoEmulationRuler {
 // re-borrows the underlying ruler through the metrics adapter for every
 // inner call, so the old &mut Self entry point is no longer needed.
 
-// ---------------------------------------------------------------------------
-// Markdown render — `markdown` (commonmark + gfm) → sanitised HTML.
-// ---------------------------------------------------------------------------
-
-fn markdown_options() -> Options {
-    Options {
-        parse: ParseOptions {
-            constructs: Constructs {
-                gfm_strikethrough: true,
-                gfm_table: true,
-                ..Constructs::default()
-            },
-            ..ParseOptions::default()
-        },
-        compile: CompileOptions {
-            allow_dangerous_html: true,
-            allow_dangerous_protocol: true,
-            ..CompileOptions::default()
-        },
-    }
-}
-
-fn sanitize_links(input: &str) -> String {
-    HREF_RE
-        .replace_all(input, |caps: &regex::Captures<'_>| {
-            let value = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-            let value = value.replace("&amp;", "TEMP_AMP");
-            let value = value.replace('&', "&amp;");
-            let value = value.replace("TEMP_AMP", "&amp;");
-            format!(r#"href="{}""#, value)
-        })
-        .into_owned()
-}
-
-pub(super) fn render_markdown(input: &str) -> Result<String, String> {
-    let rendered = markdown::to_html_with_options(input, &markdown_options())
-        .map_err(|e| format!("markdown render failed: {e}"))?;
-    let mut rendered = sanitize_links(&rendered);
-    if !rendered.is_empty() && !rendered.ends_with('\n') {
-        rendered.push('\n');
-    }
-    Ok(rendered)
-}
+// `render_markdown` + helpers moved to `super::markdown_render` so the
+// entry point is available on wasm too (no font work, pure markdown ->
+// HTML pipeline). See `crates/d2-little/src/textmeasure/markdown_render.rs`.
 
 // ---------------------------------------------------------------------------
 // Tests

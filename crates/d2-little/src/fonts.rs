@@ -5,7 +5,9 @@
 
 use std::fmt;
 
+#[cfg(not(target_arch = "wasm32"))]
 use base64::Engine;
+#[cfg(not(target_arch = "wasm32"))]
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
 // ---------------------------------------------------------------------------
@@ -118,7 +120,12 @@ impl Font {
         }
     }
 
-    /// Return the encoded (base64 WOFF data-URI) subset font for the given corpus.
+    /// Return the encoded (base64 WOFF data-URI) subset font for the given
+    /// corpus. Native / SSR only; on wasm the SVG renderer skips the
+    /// `@font-face` data-URL path (see `svg_render::embed_fonts`) and
+    /// host-page fonts are used instead, so this code is dead on wasm and
+    /// is `cfg`-gated out of the bundle.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_encoded_subset(&self, corpus: &str) -> String {
         // Deduplicate characters
         let mut seen = std::collections::HashSet::new();
@@ -153,25 +160,43 @@ impl Font {
 // ---------------------------------------------------------------------------
 // Embedded TTF font data
 // ---------------------------------------------------------------------------
+//
+// `cfg(not(wasm32))` because wasm builds use the host-callback metrics
+// path (no D2GoEmulationRuler) and skip the `@font-face` WOFF data-URL
+// emission (see `svg_render::embed_fonts`). Including the TTF bytes on
+// wasm would just inflate the bundle for no consumer.
 
 // SourceSansPro
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_SANS_PRO_REGULAR: &[u8] = include_bytes!("../ttf/SourceSansPro-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_SANS_PRO_BOLD: &[u8] = include_bytes!("../ttf/SourceSansPro-Bold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_SANS_PRO_SEMIBOLD: &[u8] = include_bytes!("../ttf/SourceSansPro-Semibold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_SANS_PRO_ITALIC: &[u8] = include_bytes!("../ttf/SourceSansPro-Italic.ttf");
 
 // SourceCodePro
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_CODE_PRO_REGULAR: &[u8] = include_bytes!("../ttf/SourceCodePro-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_CODE_PRO_BOLD: &[u8] = include_bytes!("../ttf/SourceCodePro-Bold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_CODE_PRO_SEMIBOLD: &[u8] = include_bytes!("../ttf/SourceCodePro-Semibold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static SOURCE_CODE_PRO_ITALIC: &[u8] = include_bytes!("../ttf/SourceCodePro-Italic.ttf");
 
 // HandDrawn = FuzzyBubbles.  Go reuses regular for italic and bold for
 // semibold because FuzzyBubbles ships only two cuts.  Mirror that.
+#[cfg(not(target_arch = "wasm32"))]
 static FUZZY_BUBBLES_REGULAR: &[u8] = include_bytes!("../ttf/FuzzyBubbles-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static FUZZY_BUBBLES_BOLD: &[u8] = include_bytes!("../ttf/FuzzyBubbles-Bold.ttf");
 
-/// Look up the raw TTF bytes for a given font family + style.
+/// Look up the raw TTF bytes for a given font family + style. Native
+/// only — wasm builds don't ship the embedded TTFs (see the static
+/// declarations above).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn lookup_font_face(family: FontFamily, style: FontStyle) -> &'static [u8] {
     match (family, style) {
         (FontFamily::SourceSansPro, FontStyle::Regular) => SOURCE_SANS_PRO_REGULAR,

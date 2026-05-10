@@ -17,14 +17,27 @@ use font_metrics_core::Metrics;
 
 use crate::fonts::{Font, FontFamily, FontStyle};
 
+// The byte-equal Go ruler + its Metrics adapter pull in Atlas / freetype
+// emulation / fontTools-equivalent code that totals ~2000 LOC and has no
+// consumer on wasm (default_d2_metrics() picks D2HostMetrics there).
+// Gating these modules out of wasm shrinks the bundle without changing
+// any reachable code path.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod d2_emulation_metrics;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod d2_go_emulation;
 #[cfg(target_arch = "wasm32")]
 pub mod d2_host_metrics;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod markdown;
+mod markdown_render;
 
+pub use markdown_render::render_markdown;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use d2_emulation_metrics::D2GoEmulationMetrics;
+#[cfg(not(target_arch = "wasm32"))]
 pub use d2_go_emulation::D2GoEmulationRuler;
 #[cfg(target_arch = "wasm32")]
 pub use d2_host_metrics::D2HostMetrics;
@@ -119,12 +132,10 @@ const H5_EM: f64 = 0.875;
 const H6_EM: f64 = 0.85;
 
 /// Construct the default d2 text-measurement engine (the byte-equal
-/// reproduction of Go upstream's freetype + Int26_6 path).
-///
-/// This returns the concrete [`D2GoEmulationRuler`] for callers that need
-/// `&mut Ruler` (the legacy public `set_dimensions` shim, regression
-/// fixtures). Layout pipeline code path goes through
-/// [`default_d2_metrics`] instead.
+/// reproduction of Go upstream's freetype + Int26_6 path). Native only —
+/// wasm builds do not embed the byte-equal Go ruler. For the trait-object
+/// equivalent that works on both targets, use [`default_d2_metrics`].
+#[cfg(not(target_arch = "wasm32"))]
 pub fn default_metrics() -> Result<D2GoEmulationRuler, String> {
     D2GoEmulationRuler::new()
 }
@@ -146,10 +157,6 @@ pub fn default_d2_metrics() -> Result<Box<dyn D2Metrics>, String> {
     }
 }
 
-/// Render markdown source to sanitised HTML. No font work involved.
-pub fn render_markdown(input: &str) -> Result<String, String> {
-    d2_go_emulation::render_markdown(input)
-}
 
 /// Resolve an HTML header tag (`h1` … `h6`) to its scaled font size.
 pub fn header_to_font_size(base_font_size: i32, header: &str) -> i32 {
