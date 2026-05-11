@@ -527,7 +527,11 @@ jobs:
           path: packages/web/dist/
 
   publish-npm-cargo:
-    if: startsWith(github.ref, 'refs/tags/')
+    # ONLY run on real v* tags. test* tags trigger CI matrix + GitHub
+    # prerelease via the `release` job, but must NEVER publish to
+    # npm/crates.io — a duplicate version push to those registries is
+    # immutable and would burn the version number for the actual release.
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-linux, build-macos, build-windows, build-wasm]
     runs-on: ubuntu-latest
     continue-on-error: true
