@@ -73,6 +73,27 @@ jobs:
           cp "output/linux-${{ matrix.arch }}/lib/libgraphviz_api.a" \
              "packages/rust/prebuilt/${TRIPLE}/libgraphviz_api.a" || true
 
+      - name: Verify Rust crate cross-build
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            RUST_TARGET="x86_64-unknown-linux-gnu"
+            GVA_DIR="${GITHUB_WORKSPACE}/output/linux-x86_64/lib"
+            rustup target add "$RUST_TARGET"
+            GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 \
+            GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" \
+              cargo build --release --target "$RUST_TARGET" -p graphviz-anywhere
+          else
+            # aarch64: runner is x86_64, use `cross` for docker-based cross-compile
+            RUST_TARGET="aarch64-unknown-linux-gnu"
+            GVA_DIR="${GITHUB_WORKSPACE}/output/linux-aarch64/lib"
+            cargo install cross --quiet
+            rustup target add "$RUST_TARGET"
+            GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 \
+            GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" \
+              cross build --release --target "$RUST_TARGET" -p graphviz-anywhere
+          fi
+
       - name: Package
         run: |
           cd output/linux-${{ matrix.arch }}
@@ -129,6 +150,18 @@ jobs:
             mkdir -p "packages/rust/prebuilt/${TRIPLE}"
             cp output/macos-universal/lib/libgraphviz_api.a \
                "packages/rust/prebuilt/${TRIPLE}/libgraphviz_api.a" || true
+          done
+
+      - name: Verify Rust crate cross-build
+        shell: bash
+        env:
+          GRAPHVIZ_ANYWHERE_NO_DOWNLOAD: "1"
+          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/output/macos-universal/lib
+        run: |
+          # Verify both Darwin targets against the universal library (host + cross)
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          for RUST_TARGET in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$RUST_TARGET" -p graphviz-anywhere
           done
 
       - name: Package
@@ -205,6 +238,21 @@ jobs:
           tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-sim-x86_64.tar.gz" \
             lib/libgraphviz_api.a include/
 
+      - name: Verify Rust crate cross-build for all iOS slices
+        shell: bash
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+          for slice in iphoneos-arm64 iphonesimulator-arm64 iphonesimulator-x86_64; do
+            case $slice in
+              iphoneos-arm64)        RUST_TARGET=aarch64-apple-ios ;;
+              iphonesimulator-arm64) RUST_TARGET=aarch64-apple-ios-sim ;;
+              iphonesimulator-x86_64) RUST_TARGET=x86_64-apple-ios ;;
+            esac
+            GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 \
+            GRAPHVIZ_ANYWHERE_DIR="${GITHUB_WORKSPACE}/output/ios/${slice}/lib" \
+              cargo build --release --target "$RUST_TARGET" -p graphviz-anywhere
+          done
+
       - uses: actions/upload-artifact@v7
         with:
           name: ios
@@ -262,6 +310,24 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/25.2.9519653"
           chmod +x scripts/*.sh
           ./scripts/build-android.sh --abi ${{ matrix.abi }}
+
+      - name: Verify Rust crate cross-build
+        shell: bash
+        run: |
+          # Map Android ABI to Rust target triple
+          case "${{ matrix.abi }}" in
+            arm64-v8a)    RUST_TARGET=aarch64-linux-android ;;
+            armeabi-v7a)  RUST_TARGET=armv7-linux-androideabi ;;
+            x86_64)       RUST_TARGET=x86_64-linux-android ;;
+            x86)          RUST_TARGET=i686-linux-android ;;
+          esac
+          GVA_DIR="${GITHUB_WORKSPACE}/output/android/${{ matrix.abi }}/lib"
+          # cargo-ndk handles Android toolchain wiring; takes ABI names directly
+          cargo install cargo-ndk --quiet
+          rustup target add "$RUST_TARGET"
+          GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 \
+          GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" \
+            cargo ndk -t ${{ matrix.abi }} build --release -p graphviz-anywhere
 
       - name: Package
         run: |
@@ -361,6 +427,29 @@ jobs:
              "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || \
           cp "output/windows-${{ matrix.arch }}/lib/libgraphviz_api.a" \
              "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || true
+
+      - name: Verify Rust crate cross-build (x86_64)
+        if: matrix.arch == 'x86_64'
+        shell: bash
+        env:
+          GRAPHVIZ_ANYWHERE_NO_DOWNLOAD: "1"
+          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/output/windows-x86_64/lib
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          cargo build --release --target x86_64-pc-windows-msvc -p graphviz-anywhere
+
+      - name: Verify Rust crate cross-build (arm64)
+        # Windows arm64 cross-compile from x86_64 runner may not fully link;
+        # mirroring the continue-on-error of the existing arm64 native build leg.
+        if: matrix.arch == 'arm64'
+        continue-on-error: true
+        shell: bash
+        env:
+          GRAPHVIZ_ANYWHERE_NO_DOWNLOAD: "1"
+          GRAPHVIZ_ANYWHERE_DIR: ${{ github.workspace }}/output/windows-arm64/lib
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo build --release --target aarch64-pc-windows-msvc -p graphviz-anywhere
 
       - name: Package
         shell: bash
