@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-11
+
+### Fixed
+
+- **Windows static library merge** — `graphviz_api_static.lib` previously
+  contained only the C wrapper (~19 KB) because the CMake `STATIC` target's
+  `target_link_options(... LINKER:/WHOLEARCHIVE)` is a link-time directive
+  for executables/DLLs, silently ignored when producing a static archive.
+  Downstream Rust crates that static-linked on Windows hit hundreds of
+  unresolved Graphviz symbols. Now invokes `lib.exe` directly to merge all
+  27 Graphviz component `.lib` archives + the wrapper `.obj` into a
+  ~7 MB merged static library that actually contains the Graphviz code.
+- **`publish-npm-cargo` gate** — was `if: startsWith(refs/tags/)` so
+  `test*` tags accidentally published 0.2.0 to npm + crates.io. Tightened
+  to `refs/tags/v` so only real release tags publish.
+
+### Note on 0.2.0
+
+The 0.2.0 npm packages and crates.io crate were released via a `test-*`
+tag during pipeline verification. They are functionally identical to 0.2.1
+on all platforms **except** Windows static-link consumers, who must use
+0.2.1+. Shared-link consumers (DLL via import library) are unaffected
+either way.
+
 ## [0.2.0] — 2026-05-11
 
 Target version: **0.2.0** (cross-target build.rs + asset coverage)
@@ -116,7 +140,8 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
 
 ---
 
-[Unreleased]: https://github.com/kookyleo/graphviz-anywhere/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kookyleo/graphviz-anywhere/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kookyleo/graphviz-anywhere/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kookyleo/graphviz-anywhere/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/kookyleo/graphviz-anywhere/releases/tag/v0.1.8
 [0.1.7]: https://github.com/kookyleo/graphviz-anywhere/releases/tag/v0.1.7
