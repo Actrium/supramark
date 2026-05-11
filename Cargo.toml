@@ -26,6 +26,7 @@ members = [
     "crates/d2-little/packages/native",
     "crates/mermaid-little",
     "crates/mermaid-little/packages/web",
+    "crates/mermaid-little/packages/native",
     "crates/vison/vison-core",
 ]
 

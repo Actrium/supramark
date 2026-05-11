@@ -1145,6 +1145,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "supramark-mermaid-native"
+version = "11.14.0-1"
+dependencies = [
+ "font-metrics",
+ "mermaid-little",
+]
+
+[[package]]
 name = "supramark-plantuml-native"
 version = "1.2026.2-3"
 dependencies = [

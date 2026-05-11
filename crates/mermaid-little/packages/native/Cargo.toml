@@ -1,0 +1,60 @@
+[package]
+name = "supramark-mermaid-native"
+version = "11.14.0-1"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "C ABI wrapper around mermaid-little — Mermaid → SVG for React Native / iOS / Android / Linux / macOS / Windows native hosts"
+homepage = "https://github.com/kookyleo/mermaid-little"
+repository = "https://github.com/kookyleo/mermaid-little"
+keywords = ["mermaid", "mmd", "svg", "ffi", "native"]
+categories = ["graphics", "external-ffi-bindings"]
+publish = false
+
+[lib]
+# `staticlib` for Android / iOS toolchains that prefer linking a Rust
+# archive into a JNI / Swift static library; `cdylib` for hosts that
+# load a shared object via JNA / dlopen (e.g. desktop Linux, RN's
+# `loadLibrary`). Both are produced by a single `cargo build`.
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# Depend on the root crate as a pure library — CLI / KaTeX / mindmap
+# (cose_bilkent) are off so the resulting binary doesn't drag in
+# env_logger or QuickJS. Hosts that need KaTeX or mindmap support can
+# fork this Cargo.toml or build with `--features
+# mermaid-little/katex,mermaid-little/cose_bilkent`.
+#
+# Metrics impl: the parent crate's default feature set excludes ALL
+# `metrics-*` impls (mutually exclusive family — see parent
+# Cargo.toml), so production native explicitly selects
+# `metrics-ffi-callback`. The host wires Rust's measurement up via
+# `supramark_install_metrics_callback` (exported by `font-metrics`)
+# before calling any `supramark_mermaid_render*` entry point. The
+# sibling `metrics-ttf-parser` impl would embed a ~130 KB DejaVu
+# Latin subset; keeping it off here lets the native lib stay small
+# and forces the host's actual text renderer (UIFont / Paint /
+# Skia / DirectWrite) to drive layout, so on-screen widths match
+# what Layer-1 measured.
+mermaid-little = { path = "../..", default-features = false, features = ["metrics-ffi-callback"] }
+
+# `font-metrics` is re-listed here (rather than pulled transitively
+# through `mermaid-little`) so this crate can see and re-document
+# the `supramark_install_metrics_callback` export. The feature flag
+# must match what mermaid-little selects above, otherwise the
+# `Metrics` impl chosen by `font_metrics_core` (mermaid-little's
+# rename of this crate) would not agree with what the native lib
+# advertises to the host.
+font-metrics = { path = "../../../font-metrics", features = ["metrics-ffi-callback"], package = "font-metrics" }
+
+[profile.release]
+# Inherit the parent crate's opt-for-size release profile. `panic =
+# "abort"` is important here — unwinding across the C ABI boundary
+# is undefined behaviour, so any panic must terminate the process
+# rather than unwind into the host's stack frames.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
