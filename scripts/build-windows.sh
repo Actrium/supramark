@@ -204,12 +204,23 @@ if [ "${#GV_LIBS[@]}" -eq 0 ]; then
 fi
 log_info "Merging ${#GV_LIBS[@]} Graphviz lib(s) + wrapper obj into graphviz_api_static.lib"
 
-STATIC_OUT="${INSTALL_DIR}/lib/graphviz_api_static.lib"
-"${LIBEXE}" /NOLOGO \
-    "/MACHINE:${LIB_MACHINE}" \
-    "/OUT:${STATIC_OUT}" \
-    "${WRAPPER_OBJ}" \
-    "${GV_LIBS[@]}"
+# Convert paths to Windows-native form for lib.exe. The script runs in
+# Git Bash on windows-latest runners; without cygpath, lib.exe sees mangled
+# `/d/a/...` paths that don't resolve. Also disable MSYS argument-conversion
+# (which rewrites bare `/NOLOGO` style flags to `C:\Program Files\Git\NOLOGO`,
+# tripping LNK1181 "cannot open input file 'C:\Program Files\Git\NOLOGO'").
+STATIC_OUT_WIN="$(cygpath -w "${INSTALL_DIR}/lib/graphviz_api_static.lib")"
+WRAPPER_OBJ_WIN="$(cygpath -w "${WRAPPER_OBJ}")"
+GV_LIBS_WIN=()
+for lib in "${GV_LIBS[@]}"; do
+    GV_LIBS_WIN+=("$(cygpath -w "$lib")")
+done
+
+MSYS2_ARG_CONV_EXCL='*' "${LIBEXE}" //NOLOGO \
+    "//MACHINE:${LIB_MACHINE}" \
+    "//OUT:${STATIC_OUT_WIN}" \
+    "${WRAPPER_OBJ_WIN}" \
+    "${GV_LIBS_WIN[@]}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
