@@ -342,25 +342,25 @@ jobs:
         shell: bash
         run: |
           mkdir -p packages/rust/prebuilt/windows
-          cp output/windows-${{ matrix.arch }}/lib/libgraphviz_api.a packages/rust/prebuilt/windows/ || true
+          # graphviz_api_static.lib is the true static archive produced by the
+          # build script; graphviz_api.lib is the DLL import lib (not useful for
+          # static Rust linking).  Copy the static lib under the canonical name.
+          cp output/windows-${{ matrix.arch }}/lib/graphviz_api_static.lib \
+             packages/rust/prebuilt/windows/graphviz_api.lib || true
 
       - name: Copy to packages/rust/prebuilt (target-triple layout)
         shell: bash
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             TRIPLE="x86_64-pc-windows-msvc"
-            LIB_NAME="graphviz_api.lib"
           else
             TRIPLE="aarch64-pc-windows-msvc"
-            LIB_NAME="graphviz_api.lib"
           fi
           mkdir -p "packages/rust/prebuilt/${TRIPLE}"
-          # Windows builds may produce .lib or .a depending on toolchain;
-          # try both names and copy whichever exists.
-          cp "output/windows-${{ matrix.arch }}/lib/${LIB_NAME}" \
-             "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || \
-          cp "output/windows-${{ matrix.arch }}/lib/libgraphviz_api.a" \
-             "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || true
+          # Copy the static archive (graphviz_api_static.lib) as graphviz_api.lib
+          # so that packages/rust/build.rs can find it under the standard name.
+          cp "output/windows-${{ matrix.arch }}/lib/graphviz_api_static.lib" \
+             "packages/rust/prebuilt/${TRIPLE}/graphviz_api.lib" || true
 
       - name: Package
         shell: bash

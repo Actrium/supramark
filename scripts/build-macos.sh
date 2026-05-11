@@ -9,6 +9,11 @@
 #   BUILD_DIR   - Build directory (default: build/macos-<arch>)
 #   INSTALL_DIR - Install prefix (default: output/macos-<arch>)
 #
+# Outputs:
+#   output/macos-<arch>/lib/libgraphviz_api.dylib  (shared — existing)
+#   output/macos-<arch>/lib/libgraphviz_api.a       (static — for Rust prebuilt)
+#   output/macos-<arch>/include/graphviz_api.h
+#
 
 set -euo pipefail
 
@@ -94,6 +99,15 @@ build_single_arch() {
         -Wl,-all_load \
         "${libs[@]}" \
         -lm -lz -lexpat
+
+    # Also produce a static archive for packages/rust/prebuilt.
+    # libtool -static handles fat-archive merging correctly on macOS;
+    # plain `ar` cannot merge multi-arch .a files.
+    log_info "Building static archive for macOS ${arch}..."
+    libtool -static \
+        -o "${build_dir}/out/libgraphviz_api.a" \
+        "${build_dir}/graphviz_api.o" \
+        "${libs[@]}"
 }
 
 if [ "$ARCH" = "universal" ]; then
@@ -106,16 +120,27 @@ if [ "$ARCH" = "universal" ]; then
         "${BUILD_DIR}/arm64/out/libgraphviz_api.dylib" \
         "${BUILD_DIR}/x86_64/out/libgraphviz_api.dylib" \
         -output "${INSTALL_DIR}/lib/libgraphviz_api.dylib"
+
+    # Merge per-arch static archives into a universal fat .a.
+    # libtool -static on macOS handles multi-arch merging natively.
+    log_info "Creating universal static archive..."
+    libtool -static \
+        -o "${INSTALL_DIR}/lib/libgraphviz_api.a" \
+        "${BUILD_DIR}/arm64/out/libgraphviz_api.a" \
+        "${BUILD_DIR}/x86_64/out/libgraphviz_api.a"
+
     cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 else
     build_single_arch "$ARCH"
     mkdir -p "${INSTALL_DIR}/lib" "${INSTALL_DIR}/include"
     cp "${BUILD_DIR}/${ARCH}/out/libgraphviz_api.dylib" "${INSTALL_DIR}/lib/"
+    cp "${BUILD_DIR}/${ARCH}/out/libgraphviz_api.a" "${INSTALL_DIR}/lib/"
     cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 fi
 
 log_info "Verifying outputs..."
 verify_output "${INSTALL_DIR}/lib/libgraphviz_api.dylib" "Unified shared library"
+verify_output "${INSTALL_DIR}/lib/libgraphviz_api.a" "Unified static archive"
 verify_output "${INSTALL_DIR}/include/graphviz_api.h" "Wrapper header"
 
 log_info "macOS ${ARCH} build complete: ${INSTALL_DIR}"
