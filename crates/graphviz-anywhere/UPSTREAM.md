@@ -2,9 +2,10 @@
 
 ## Source repo
 - **Upstream:** https://github.com/kookyleo/graphviz-anywhere
-- **Pinned commit (at merge time):** `436fe2f00bf099416a3e6eea6d1012911d4f7435`
-- **Pinned tag:** `v0.1.7`
-- **Merged into supramark on:** 2026-05-09 (step 2 of the super-monorepo plan)
+- **Pinned commit (last subtree pull):** `631e871c726041241252fc874c98725db5f308a2`
+- **Pinned tag:** `test-v0.2.0-rc1` (release candidate; promote to `v0.2.0` once CI green)
+- **First subtree merge into supramark:** 2026-05-09 at `436fe2f` / `v0.1.7`
+- **Last subtree pull:** 2026-05-11 — 0.2.0 brings full iOS / Android-x86 / Linux-aarch64 / Windows-arm64 coverage in `build.rs`, scripts, and CI; also static `.a` alongside shared libs so `prebuilt/<target-triple>/` actually has content. Unblocks `plantuml-little` cross-compile for iOS + 4 Android ABI (see `docs/architecture/native-ffi-blockers.md` 阻塞 #1 + #4).
 
 ## License relationship
 - **graphviz-anywhere wrapper code:** Apache-2.0 (see `LICENSE`).

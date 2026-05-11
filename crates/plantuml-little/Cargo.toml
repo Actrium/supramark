@@ -125,7 +125,7 @@ regex = "1"
 # releases additionally fixed (a) size_t overflow in the C wrapper on
 # 64-bit targets, (b) WITH_EXPAT=ON for HTML label geometry, and
 # (c) g++ linkage so libstdc++ vtables resolve on Ubuntu/Debian.
-graphviz-anywhere = "0.1.8"
+graphviz-anywhere = "0.2"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 ureq = { version = "3", optional = true }
 url = "2"
