@@ -20,6 +20,7 @@ members = [
     "crates/font-metrics",
     "crates/plantuml-little",
     "crates/plantuml-little/packages/web",
+    "crates/plantuml-little/packages/native",
     "crates/d2-little",
     "crates/d2-little/packages/web",
     "crates/d2-little/packages/native",

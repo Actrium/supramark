@@ -1,0 +1,50 @@
+[package]
+name = "supramark-plantuml-native"
+version = "1.2026.2-3"
+edition = "2024"
+rust-version = "1.85"
+# Inherit the upstream multi-licence disjunction. Downstream consumers
+# pick the option compatible with their distribution; supramark's own
+# build artefacts ship under Apache-2.0 (see UPSTREAM.md).
+license = "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Native FFI wrapper around plantuml-little for React Native / iOS / Android consumers"
+homepage = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/kookyleo/supramark"
+keywords = ["plantuml", "puml", "svg", "ffi", "react-native"]
+categories = ["graphics", "external-ffi-bindings"]
+publish = false
+
+[lib]
+# - `staticlib` is consumed by the iOS XCFramework / Android NDK build
+#   (one self-contained `.a` per arch, then `lipo`/`ar` into a fat
+#   archive).
+# - `cdylib` is convenient for desktop hosts that prefer dynamic
+#   loading (`.so` / `.dylib` / `.dll`).
+# - `rlib` keeps the crate usable from other in-workspace tests /
+#   integration crates without re-running the FFI layer codegen.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+# Pull in the parent crate as a library only — disable `cli` (env_logger
+# + main.rs, neither of which makes sense in an embedded host) and
+# `remote` (ureq blocking I/O, banned on RN's main thread). The native
+# host installs its own measurement bridge through
+# `supramark_install_metrics_callback` (re-exported from `font-metrics`),
+# so the only metrics impl we enable is `metrics-ffi-callback`.
+plantuml-little = { path = "../..", default-features = false, features = ["metrics-ffi-callback"] }
+# Re-export `supramark_install_metrics_callback` and `MeasureTextFfi`
+# from the same `cdylib` so a single `dlopen` / static-link surface
+# satisfies the host's "install metrics, then render" sequence.
+font-metrics = { path = "../../../font-metrics", default-features = false, features = ["metrics-ffi-callback"] }
+
+[profile.release]
+# Mirror plantuml-little's own release profile — opt-level z + LTO is
+# what the upstream maintainer ships, and the staticlib size of the
+# native wrapper is dominated by plantuml-little + graphviz-anywhere
+# bytes anyway.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
