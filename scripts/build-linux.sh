@@ -42,6 +42,7 @@
 #
 # Output layout (both scenarios):
 #   output/linux-aarch64/lib/libgraphviz_api.so
+#   output/linux-aarch64/lib/libgraphviz_api.a   (static archive — for Rust prebuilt)
 #   output/linux-aarch64/include/graphviz_api.h
 # ────────────────────────────────────────────────────────────────────────────
 #
@@ -163,10 +164,23 @@ ${CXX:-g++} -shared -o "${INSTALL_DIR}/lib/libgraphviz_api.so" \
 
 cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 
-# Step 4: Verify
+# Step 4: Also produce a static archive (libgraphviz_api.a)
+# This is what packages/rust/build.rs + Cargo.toml (links = "graphviz_api",
+# cargo:rustc-link-lib=static=graphviz_api) expect in the prebuilt layout.
+# The shared .so is kept for consumers that prefer dynamic linking.
+log_info "Building static archive libgraphviz_api.a..."
+AR="${AR:-ar}"
+# Respect cross-compilation AR (e.g. AR=aarch64-linux-gnu-ar)
+"${AR}" rcs "${INSTALL_DIR}/lib/libgraphviz_api.a" \
+    "${BUILD_DIR}/graphviz_api.o" \
+    "${GV_STATIC_LIBS[@]}"
+
+# Step 5: Verify
 log_info "Verifying outputs..."
 verify_output "${INSTALL_DIR}/lib/libgraphviz_api.so" "Unified shared library"
+verify_output "${INSTALL_DIR}/lib/libgraphviz_api.a" "Unified static archive"
 verify_output "${INSTALL_DIR}/include/graphviz_api.h" "Wrapper header"
 
-log_info "Library size: $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.so" | cut -f1)"
+log_info "Library size (.so): $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.so" | cut -f1)"
+log_info "Library size (.a):  $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.a"  | cut -f1)"
 log_info "Linux ${ARCH} build complete: ${INSTALL_DIR}"

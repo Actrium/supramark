@@ -99,6 +99,7 @@ list(FILTER GV_STATIC_LIBS EXCLUDE REGEX "CMakeFiles|_CMakeLTOTest-|/CMakeScratc
 file(GLOB GV_INSTALL_LIBS "${GV_INSTALL_DIR}/lib/*.lib")
 list(APPEND GV_ALL_LIBS ${GV_STATIC_LIBS} ${GV_INSTALL_LIBS})
 
+# Shared DLL — kept for consumers that prefer dynamic linking.
 add_library(graphviz_api SHARED "${SRC_DIR}/graphviz_api.c")
 
 target_include_directories(graphviz_api PRIVATE
@@ -116,6 +117,35 @@ target_link_libraries(graphviz_api PRIVATE ${GV_ALL_LIBS})
 install(TARGETS graphviz_api
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+)
+
+# Static library — required by packages/rust/build.rs (cargo:rustc-link-lib=static=graphviz_api).
+# Named graphviz_api_static to avoid collision with the DLL import lib
+# (graphviz_api.lib).  The CI cp step copies this as graphviz_api.lib into
+# the prebuilt layout consumed by Cargo.
+add_library(graphviz_api_static STATIC "${SRC_DIR}/graphviz_api.c")
+
+target_include_directories(graphviz_api_static PRIVATE
+    "${GV_INSTALL_DIR}/include"
+    "${GV_INSTALL_DIR}/include/graphviz"
+)
+
+target_compile_definitions(graphviz_api_static PRIVATE
+    PACKAGE_VERSION="${GV_VERSION}"
+)
+
+# Whole-archive link: embed all Graphviz static libs into the single .lib.
+# On MSVC the equivalent of --whole-archive is /WHOLEARCHIVE per-lib, passed
+# via target_link_options with LINKER: prefix (CMake 3.13+).
+foreach(gv_lib IN LISTS GV_ALL_LIBS)
+    target_link_options(graphviz_api_static PRIVATE "LINKER:/WHOLEARCHIVE:${gv_lib}")
+endforeach()
+
+# Set the install output name so it lands as graphviz_api_static.lib
+set_target_properties(graphviz_api_static PROPERTIES OUTPUT_NAME "graphviz_api_static")
+
+install(TARGETS graphviz_api_static
     ARCHIVE DESTINATION lib
 )
 CMAKE_EOF
@@ -136,6 +166,7 @@ cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 
 log_info "Verifying outputs..."
 verify_output "${INSTALL_DIR}/bin/graphviz_api.dll" "Wrapper DLL"
+verify_output "${INSTALL_DIR}/lib/graphviz_api_static.lib" "Static library (for Rust prebuilt)"
 verify_output "${INSTALL_DIR}/include/graphviz_api.h" "Wrapper header"
 
 log_info "Windows ${ARCH} build complete: ${INSTALL_DIR}"
