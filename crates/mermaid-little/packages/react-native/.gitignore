@@ -9,3 +9,7 @@ lib/
 # Node / build noise
 node_modules/
 *.log
+
+# Android CMake external native build state
+android/.cxx/
+android/build/

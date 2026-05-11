@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(supramark_d2_jni)
+project(supramark_plantuml_jni)
 
 # Pre-built libsupramark_plantuml_native.so for this ABI — staged by
 # scripts/prepare-native.js under jniLibs/<abi>/. We import it as a
@@ -21,23 +21,24 @@ endif()
 # (sibling-of-sibling-of-sibling directory). Inlining it via include
 # path so we don't duplicate the source of truth.
 set(SUPRAMARK_PLANTUML_INCLUDE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../native/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/include")
 
-add_library(supramark_d2_native SHARED IMPORTED)
-set_target_properties(supramark_d2_native PROPERTIES
+add_library(supramark_plantuml_native SHARED IMPORTED)
+set_target_properties(supramark_plantuml_native PROPERTIES
+    IMPORTED_NO_SONAME TRUE
     IMPORTED_LOCATION "${PlantUML_NATIVE_LIB}"
 )
 
-add_library(supramark_d2_jni SHARED
-    jni/supramark_d2_jni.c
+add_library(supramark_plantuml_jni SHARED
+    jni/supramark_plantuml_jni.c
 )
 
-target_include_directories(supramark_d2_jni PRIVATE
+target_include_directories(supramark_plantuml_jni PRIVATE
     "${SUPRAMARK_PLANTUML_INCLUDE}"
 )
 
 find_library(log-lib log)
-target_link_libraries(supramark_d2_jni
-    supramark_d2_native
+target_link_libraries(supramark_plantuml_jni
+    supramark_plantuml_native
     ${log-lib}
 )

@@ -1,7 +1,7 @@
 /*
  * SupramarkMermaidModule.java — RN bridge module for d2 native FFI.
  *
- * Loads libsupramark_d2_jni.so (the JNI shim, which in turn links
+ * Loads libsupramark_mermaid_jni.so (the JNI shim, which in turn links
  * libsupramark_mermaid_native.so), dispatches render calls off the JS
  * thread, and resolves promises with the produced SVG.
  */
@@ -30,7 +30,7 @@ public class SupramarkMermaidModule extends ReactContextBaseJavaModule {
     static {
         // Loading the JNI shim transitively pulls in libsupramark_mermaid_native.so
         // via its DT_NEEDED entry (set up by CMake's IMPORTED target).
-        System.loadLibrary("supramark_d2_jni");
+        System.loadLibrary("supramark_mermaid_jni");
     }
 
     private final ExecutorService renderQueue =

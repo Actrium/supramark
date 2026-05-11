@@ -1,7 +1,7 @@
 /*
  * SupramarkPlantumlModule.java — RN bridge module for d2 native FFI.
  *
- * Loads libsupramark_d2_jni.so (the JNI shim, which in turn links
+ * Loads libsupramark_plantuml_jni.so (the JNI shim, which in turn links
  * libsupramark_plantuml_native.so), dispatches render calls off the JS
  * thread, and resolves promises with the produced SVG.
  */
@@ -27,10 +27,25 @@ public class SupramarkPlantumlModule extends ReactContextBaseJavaModule {
     private static final int ERR_RENDER     = 2;
     private static final int ERR_NULL_INPUT = 3;
 
+    private static final boolean NATIVE_AVAILABLE;
     static {
-        // Loading the JNI shim transitively pulls in libsupramark_plantuml_native.so
-        // via its DT_NEEDED entry (set up by CMake's IMPORTED target).
-        System.loadLibrary("supramark_d2_jni");
+        boolean ok = false;
+        // libgraphviz_api.so (linked in transitively by libsupramark_plantuml_native.so)
+        // references std::* typeinfo from libc++_shared.so but its NEEDED entry
+        // doesn't list it. Pre-load c++_shared so the symbols resolve at dlopen
+        // time when CMake's IMPORTED chain pulls plantuml in. On Android linker
+        // namespaces the pre-load alone is sometimes insufficient — guard the
+        // whole chain so a missing dep doesn't crash the host app at class init.
+        try {
+            try { System.loadLibrary("c++_shared"); } catch (UnsatisfiedLinkError ignore) {}
+            System.loadLibrary("supramark_plantuml_jni");
+            ok = true;
+        } catch (UnsatisfiedLinkError e) {
+            android.util.Log.e("SupramarkPlantumlNative",
+                "Failed to load libsupramark_plantuml_jni or its dependencies; " +
+                "render() will reject. Cause: " + e.getMessage());
+        }
+        NATIVE_AVAILABLE = ok;
     }
 
     private final ExecutorService renderQueue =
@@ -55,6 +70,12 @@ public class SupramarkPlantumlModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void render(final String source, final Promise promise) {
+        if (!NATIVE_AVAILABLE) {
+            promise.reject("NATIVE_UNAVAILABLE",
+                "libsupramark_plantuml_native.so (or its libgraphviz_api.so dep) " +
+                "failed to load; see logcat at startup for the underlying dlopen error.");
+            return;
+        }
         if (source == null) {
             promise.reject("NULL_INPUT", "render: source is null");
             return;
@@ -83,6 +104,12 @@ public class SupramarkPlantumlModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void getVersion(final Promise promise) {
+        if (!NATIVE_AVAILABLE) {
+            promise.reject("NATIVE_UNAVAILABLE",
+                "libsupramark_plantuml_native.so (or its libgraphviz_api.so dep) " +
+                "failed to load; see logcat at startup for the underlying dlopen error.");
+            return;
+        }
         try {
             String v = nativeGetVersion();
             if (v == null) {

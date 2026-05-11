@@ -21,10 +21,11 @@ endif()
 # (sibling-of-sibling-of-sibling directory). Inlining it via include
 # path so we don't duplicate the source of truth.
 set(SUPRAMARK_D2_INCLUDE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../native/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/include")
 
 add_library(supramark_d2_native SHARED IMPORTED)
 set_target_properties(supramark_d2_native PROPERTIES
+    IMPORTED_NO_SONAME TRUE
     IMPORTED_LOCATION "${D2_NATIVE_LIB}"
 )
 
