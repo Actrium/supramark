@@ -31,10 +31,11 @@
 //!   JS-side `globalThis.supramark.measureText` bridge so layer-1
 //!   layout sees the exact widths the host browser / RN-Skia will
 //!   render with.
-//! - `metrics-ffi-callback` — reserved for the planned React-Native
-//!   native-FFI wrapper that will install a JS-side bridge through
-//!   an `extern "C"` callback. No impl yet; enabling the feature
-//!   today fires a `compile_error!` so the gap is visible.
+//! - `metrics-ffi-callback` (non-wasm only) — defer measurement to a
+//!   native-side `extern "C"` callback installed via
+//!   `supramark_install_metrics_callback`. The React-Native path:
+//!   the iOS / Android TurboModule wraps UIFont / Paint / RN-Skia
+//!   and registers the C ABI shim once at module init.
 
 use font_metrics_core::Metrics;
 
@@ -80,15 +81,28 @@ fn metrics_provider() -> &'static dyn Metrics {
         not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
         not(feature = "metrics-ttf-parser"),
         feature = "metrics-ffi-callback",
+        not(target_arch = "wasm32"),
     ))]
-    compile_error!("metrics-ffi-callback impl is reserved for the future React-Native FFI wrapper; not yet implemented. See crates/mermaid-little/UPSTREAM.md.");
+    {
+        static M: font_metrics_core::ffi_callback::FfiCallbackMetrics =
+            font_metrics_core::ffi_callback::FfiCallbackMetrics;
+        return &M;
+    }
+
+    #[cfg(all(
+        not(all(feature = "metrics-host-callback", target_arch = "wasm32")),
+        not(feature = "metrics-ttf-parser"),
+        feature = "metrics-ffi-callback",
+        target_arch = "wasm32",
+    ))]
+    compile_error!("metrics-ffi-callback is for native targets (RN iOS / Android, macOS, Linux); on wasm32 enable metrics-host-callback instead.");
 
     #[cfg(not(any(
         feature = "metrics-ttf-parser",
         feature = "metrics-host-callback",
         feature = "metrics-ffi-callback",
     )))]
-    compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-ttf-parser for native (also covers byte-exact parity) or metrics-host-callback for wasm host-bridge");
+    compile_error!("mermaid-little requires exactly one metrics-* feature; enable metrics-ttf-parser for native byte-exact parity, metrics-host-callback for wasm host-bridge, or metrics-ffi-callback for RN native host-bridge");
 }
 
 /// Width of a single character (typographic horizontal advance).

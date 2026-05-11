@@ -154,3 +154,12 @@ pub mod ttf_parser;
 #[cfg(target_arch = "wasm32")]
 #[cfg_attr(docsrs, doc(cfg(target_arch = "wasm32")))]
 pub mod host_callback;
+
+/// Native-side text-measurement bridge for hosts that aren't wasm
+/// (React Native iOS / Android, macOS / Linux native, …). The host
+/// installs a single `extern "C"` callback at startup and
+/// [`ffi_callback::FfiCallbackMetrics`] adapts it to the
+/// [`Metrics`] trait.
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(docsrs, doc(cfg(not(target_arch = "wasm32"))))]
+pub mod ffi_callback;

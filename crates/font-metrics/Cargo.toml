@@ -20,7 +20,25 @@ categories = ["graphics", "text-processing"]
 exclude = ["tests/"]
 
 [features]
+# The metrics-* features below are reflective markers: this crate
+# always compiles all three impls (the cfg gating is by `target_arch`,
+# not by feature), but downstream crates (plantuml-little /
+# mermaid-little / d2-little) take the host's feature flag and turn
+# it into a `&'static dyn Metrics` selection. Declaring the names
+# here lets cargo resolve `--features metrics-*` against this crate
+# without "no such feature" errors, and gives `cargo doc` something
+# to hang doc-cfg on.
 default = []
+# Embedded-TTF path (`TtfParserMetrics::default_latin()`) — always
+# available; the feature is a no-op marker here.
+metrics-ttf-parser = []
+# Wasm host-callback path (`HostCallbackMetrics`) — compiled only on
+# `target_arch = "wasm32"`; the feature is a no-op marker here.
+metrics-host-callback = []
+# Native FFI-callback path (`FfiCallbackMetrics`) — compiled on every
+# non-wasm target; the feature is a no-op marker here. Host wires the
+# Rust side via `supramark_install_metrics_callback`.
+metrics-ffi-callback = []
 
 [dependencies]
 # Generic TTF parsing for `TtfParserMetrics`. Pinned to a major version
