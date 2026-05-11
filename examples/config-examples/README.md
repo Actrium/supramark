@@ -89,11 +89,10 @@ npm install @supramark/web @supramark/core react react-dom
 import { Supramark } from '@supramark/web/client';
 ```
 
-**服务端渲染（SSR）：**
-
-```typescript
-import { parseMarkdown, astToHtml } from '@supramark/web/server';
-```
+> 当前版本仅支持客户端渲染。SSR 入口已下线 —— diagram 渲染需要浏览器
+> canvas 做字体测量（layer-1 layout）+ 浏览器实际字体堆栈做绘制
+> （layer-3 render），服务端无法完成端到端 byte-equal 输出。普通
+> markdown 节点可在客户端 hydrate 时由 React 一次性渲染。
 
 ### 3. TypeScript 支持
 
@@ -127,23 +126,7 @@ import { parseMarkdown, astToHtml } from '@supramark/web/server';
 
 ### Next.js
 
-Next.js 13+ (App Router) 无需特殊配置：
-
-**服务端组件：**
-
-```typescript
-// app/page.tsx
-import { parseMarkdown, astToHtml } from '@supramark/web/server';
-
-export default async function Page() {
-  const markdown = '# Hello World';
-  const ast = await parseMarkdown(markdown);
-  const html = astToHtml(ast);
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
-}
-```
-
-**客户端组件：**
+Next.js 13+ (App Router) 把 supramark 放在客户端组件里使用：
 
 ```typescript
 // components/Editor.tsx
@@ -155,38 +138,10 @@ export function Editor({ markdown }: { markdown: string }) {
 }
 ```
 
-### Remix
+### Remix / Astro
 
-Remix 同样支持 SSR 和 CSR：
-
-```typescript
-// routes/index.tsx
-import { parseMarkdown, astToHtml } from '@supramark/web/server';
-import { json } from '@remix-run/node';
-
-export async function loader() {
-  const markdown = '# Hello from Remix';
-  const ast = await parseMarkdown(markdown);
-  const html = astToHtml(ast);
-  return json({ html });
-}
-```
-
-### Astro
-
-Astro 组件中直接使用：
-
-```astro
----
-import { parseMarkdown, astToHtml } from '@supramark/web/server';
-
-const markdown = '# Hello from Astro';
-const ast = await parseMarkdown(markdown);
-const html = astToHtml(ast);
----
-
-<div set:html={html} />
-```
+同样仅在客户端组件 / island 里使用 `Supramark`，服务端只承担页面骨架渲染。
+Diagram 节点会在客户端 hydrate 后通过 host canvas 完成测量 + 渲染。
 
 ---
 

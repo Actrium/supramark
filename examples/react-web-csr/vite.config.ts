@@ -40,7 +40,6 @@ export default defineConfig({
       '@supramark/core',
       '@supramark/web',
       '@supramark/web/client',
-      '@supramark/web/server',
       '@supramark/engines',
       '@supramark/engines/web',
       // Pre-bundling would strip viz.wasm away from viz.js's sibling
