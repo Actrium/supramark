@@ -11,6 +11,9 @@ Pod::Spec.new do |s|
   s.authors      = package["author"]
   s.source       = { :git => package["repository"]["url"], :tag => "v#{s.version}" }
 
+  # iOS 15.1 matches the IOS_MIN_VERSION used in scripts/build-ios.sh to compile
+  # the prebuilt staticlib. Lowering this value without rebuilding the prebuilt
+  # would produce an ABI/SDK mismatch at link time.
   s.ios.deployment_target = "15.1"
   s.osx.deployment_target = "11.0"
 

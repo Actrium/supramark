@@ -5,7 +5,13 @@
 # Builds a unified libgraphviz_api.so per ABI.
 #
 # Usage:
-#   ./scripts/build-android.sh [--abi arm64-v8a|armeabi-v7a|x86_64]
+#   ./scripts/build-android.sh [--abi arm64-v8a|armeabi-v7a|x86_64|x86]
+#
+# Pass --abi multiple times to build a subset, e.g.:
+#   ./scripts/build-android.sh --abi arm64-v8a --abi x86_64
+#
+# Default builds all four ABIs listed in packages/react-native/android/build.gradle:
+#   arm64-v8a  armeabi-v7a  x86_64  x86
 #
 # Environment variables:
 #   ANDROID_NDK_HOME - Path to Android NDK (required)
@@ -31,7 +37,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ ${#TARGET_ABIS[@]} -eq 0 ]; then
-    TARGET_ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+    # Default: all four ABIs declared in packages/react-native/android/build.gradle.
+    # x86 (i686) is required for Android emulator on Intel hosts.
+    TARGET_ABIS=("arm64-v8a" "armeabi-v7a" "x86_64" "x86")
 fi
 
 # Find NDK
@@ -115,6 +123,8 @@ build_android_abi() {
         arm64-v8a)    target_flag="--target=aarch64-linux-android${ANDROID_API}" ;;
         armeabi-v7a)  target_flag="--target=armv7a-linux-androideabi${ANDROID_API}" ;;
         x86_64)       target_flag="--target=x86_64-linux-android${ANDROID_API}" ;;
+        x86)          target_flag="--target=i686-linux-android${ANDROID_API}" ;;
+        *)            log_error "Unknown ABI: ${abi}"; exit 1 ;;
     esac
 
     "${cc}" -c -fPIC -O2 \

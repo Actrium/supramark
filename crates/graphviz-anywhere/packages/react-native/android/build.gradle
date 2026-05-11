@@ -30,11 +30,20 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags ""
+                // ANDROID_STL=c++_shared: this module links against the shared
+                // libc++ runtime. The host application (or React Native's own
+                // Gradle setup) must ensure libc++_shared.so is packaged in the
+                // APK/AAB for every ABI that is enabled. React Native >= 0.71
+                // bundles libc++_shared.so automatically; standalone apps must
+                // add `packagingOptions { pickFirst "**/libc++_shared.so" }` to
+                // avoid duplicate-library conflicts during merging.
+                // Reference: https://developer.android.com/ndk/guides/cpp-support
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
 
         ndk {
+            // All four ABIs are built; x86 is required for Intel-host emulators.
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }

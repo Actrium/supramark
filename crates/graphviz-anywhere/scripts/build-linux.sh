@@ -12,6 +12,40 @@
 #   BUILD_DIR   - Build directory (default: build/linux-<arch>)
 #   INSTALL_DIR - Install prefix (default: output/linux-<arch>)
 #
+# ── aarch64 build notes ────────────────────────────────────────────────────
+# Two supported scenarios:
+#
+# 1. Native aarch64 host (e.g. AWS Graviton, Ampere, Raspberry Pi 64-bit):
+#    Run the script without any extra setup.  gcc/g++ must target aarch64
+#    natively, which is the default on those hosts.
+#    Output: output/linux-aarch64/lib/libgraphviz_api.so
+#
+# 2. Cross-compile from x86_64 host (e.g. standard ubuntu-latest CI runner):
+#    Install the cross toolchain and sysroot before running this script:
+#      apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+#                         binutils-aarch64-linux-gnu
+#    Then export CC/CXX so CMake and the wrapper compile step pick up the
+#    correct cross compilers:
+#      export CC=aarch64-linux-gnu-gcc
+#      export CXX=aarch64-linux-gnu-g++
+#    CMake will use these via CMAKE_C_COMPILER / CMAKE_CXX_COMPILER
+#    auto-detection.  No CMAKE_TOOLCHAIN_FILE is required for this simple
+#    native-ABI cross because we are not using Android or iOS sysroots.
+#
+#    pkg-config will try to find harfbuzz/pangocairo for the host arch.
+#    On a plain cross-compile runner these will be absent, so pango plugin
+#    support is skipped automatically (the `pkg-config --exists pangocairo`
+#    check returns false and gvplugin_pango is omitted from the build).
+#    If you need pango on aarch64, install the cross-compiled dev packages:
+#      apt-get install -y libpango1.0-dev:arm64
+#    and point PKG_CONFIG_PATH / PKG_CONFIG_LIBDIR at the arm64 sysroot.
+#
+# Output layout (both scenarios):
+#   output/linux-aarch64/lib/libgraphviz_api.so
+#   output/linux-aarch64/lib/libgraphviz_api.a   (static archive — for Rust prebuilt)
+#   output/linux-aarch64/include/graphviz_api.h
+# ────────────────────────────────────────────────────────────────────────────
+#
 
 set -euo pipefail
 
@@ -95,7 +129,9 @@ log_info "Found ${#GV_STATIC_LIBS[@]} static libraries"
 log_info "Building unified libgraphviz_api.so..."
 mkdir -p "${INSTALL_DIR}/lib" "${INSTALL_DIR}/include"
 
-gcc -c -fPIC -O2 \
+# Respect CC/CXX for cross-compilation (e.g. CC=aarch64-linux-gnu-gcc).
+# Falls back to gcc/g++ on native builds.
+${CC:-gcc} -c -fPIC -O2 \
     -DPACKAGE_VERSION="\"${GRAPHVIZ_VERSION}\"" \
     -I"${GV_INSTALL}/include" \
     -I"${GV_INSTALL}/include/graphviz" \
@@ -119,7 +155,7 @@ fi
 # `undefined symbol: _ZTVN10__cxxabiv117__class_type_infoE`). Use `g++` so
 # the C++ runtime is pulled in, matching what build-macos.sh does with
 # `clang++`.
-g++ -shared -o "${INSTALL_DIR}/lib/libgraphviz_api.so" \
+${CXX:-g++} -shared -o "${INSTALL_DIR}/lib/libgraphviz_api.so" \
     "${BUILD_DIR}/graphviz_api.o" \
     -Wl,--whole-archive \
     "${GV_STATIC_LIBS[@]}" \
@@ -128,10 +164,23 @@ g++ -shared -o "${INSTALL_DIR}/lib/libgraphviz_api.so" \
 
 cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 
-# Step 4: Verify
+# Step 4: Also produce a static archive (libgraphviz_api.a)
+# This is what packages/rust/build.rs + Cargo.toml (links = "graphviz_api",
+# cargo:rustc-link-lib=static=graphviz_api) expect in the prebuilt layout.
+# The shared .so is kept for consumers that prefer dynamic linking.
+log_info "Building static archive libgraphviz_api.a..."
+AR="${AR:-ar}"
+# Respect cross-compilation AR (e.g. AR=aarch64-linux-gnu-ar)
+"${AR}" rcs "${INSTALL_DIR}/lib/libgraphviz_api.a" \
+    "${BUILD_DIR}/graphviz_api.o" \
+    "${GV_STATIC_LIBS[@]}"
+
+# Step 5: Verify
 log_info "Verifying outputs..."
 verify_output "${INSTALL_DIR}/lib/libgraphviz_api.so" "Unified shared library"
+verify_output "${INSTALL_DIR}/lib/libgraphviz_api.a" "Unified static archive"
 verify_output "${INSTALL_DIR}/include/graphviz_api.h" "Wrapper header"
 
-log_info "Library size: $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.so" | cut -f1)"
+log_info "Library size (.so): $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.so" | cut -f1)"
+log_info "Library size (.a):  $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.a"  | cut -f1)"
 log_info "Linux ${ARCH} build complete: ${INSTALL_DIR}"
