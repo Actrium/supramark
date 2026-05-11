@@ -33,9 +33,9 @@ CI or airgapped environments). Override the release tag with
 - **Toolchain**: `aarch64-linux-gnu-gcc`, CMake cross-file or `ARCH=aarch64`
 - **Build**: `./scripts/build-linux.sh --arch aarch64`
 - **Output**: `output/linux-aarch64/lib/libgraphviz_api.so`
-- **Release asset**: `graphviz-native-linux-aarch64.tar.gz` (NEW — Agent C, ubuntu-24.04-arm runner)
+- **Release asset**: `graphviz-native-linux-aarch64.tar.gz` (CI uses `ubuntu-24.04-arm` runner when available)
 - **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/linux-aarch64 cargo build --target aarch64-unknown-linux-gnu`
-- **build.rs**: auto-resolved once Agent A wires `linux-aarch64` output path
+- **build.rs auto-resolve**: ✅
 - **Common errors**: cross-linker not on PATH → `apt-get install gcc-aarch64-linux-gnu`
 
 ## aarch64-apple-darwin / x86_64-apple-darwin (macOS universal)
@@ -52,29 +52,30 @@ CI or airgapped environments). Override the release tag with
 
 - **Toolchain**: Xcode 15+, iOS SDK ≥ 15.1
 - **Build**: `./scripts/build-ios.sh` (produces XCFramework + per-slice `.a`)
-- **Output**: `output/ios/` — XCFramework and `aarch64-apple-ios/libgraphviz_api.a`
-- **Release asset**: `graphviz-native-ios-aarch64.tar.gz` (NEW per-slice — Agent C)
-- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/aarch64-apple-ios cargo build --target aarch64-apple-ios`
-- **build.rs**: auto-resolve added by Agent A
-- **Common errors**: `ld: file not found` if using full XCFramework path — point to the slice directory, not the `.xcframework` bundle root
+- **Output**: `output/ios/iphoneos-arm64/lib/libgraphviz_api.a` (and `include/graphviz_api.h`)
+- **Release asset**: `graphviz-native-ios-device-arm64.tar.gz`
+- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/iphoneos-arm64 cargo build --target aarch64-apple-ios`
+- **build.rs auto-resolve**: ✅
+- **Common errors**: `ld: file not found` if pointing at the full XCFramework bundle — use the per-slice directory instead
 
 ## aarch64-apple-ios-sim
 
 - **Toolchain**: Xcode 15+, iOS Simulator SDK ≥ 15.1
 - **Build**: `./scripts/build-ios.sh` (simulator slice built automatically)
-- **Output**: `output/ios/aarch64-apple-ios-sim/libgraphviz_api.a`
-- **Release asset**: `graphviz-native-ios-sim-aarch64.tar.gz` (NEW per-slice — Agent C)
-- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/aarch64-apple-ios-sim cargo build --target aarch64-apple-ios-sim`
+- **Output**: `output/ios/iphonesimulator-arm64/lib/libgraphviz_api.a`
+- **Release asset**: `graphviz-native-ios-sim-arm64.tar.gz`
+- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/iphonesimulator-arm64 cargo build --target aarch64-apple-ios-sim`
+- **build.rs auto-resolve**: ✅
 - **Common errors**: wrong slice — simulator and device slices are separate; don't mix them
 
 ## x86_64-apple-ios (Intel simulator)
 
-- **Toolchain**: Xcode 15+, iOS Simulator SDK ≥ 15.1 (Intel host or `--platform SIMULATOR`)
-- **Build**: `./scripts/build-ios.sh` (NEW — Agent B adds x86_64 simulator slice)
-- **Output**: `output/ios/x86_64-apple-ios/libgraphviz_api.a`
-- **Release asset**: `graphviz-native-ios-sim-x86_64.tar.gz` (NEW — Agent C)
-- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/x86_64-apple-ios cargo build --target x86_64-apple-ios`
-- **build.rs**: auto-resolve added by Agent A
+- **Toolchain**: Xcode 15+, iOS Simulator SDK ≥ 15.1 (any Mac host)
+- **Build**: `./scripts/build-ios.sh` (third slice built automatically)
+- **Output**: `output/ios/iphonesimulator-x86_64/lib/libgraphviz_api.a`
+- **Release asset**: `graphviz-native-ios-sim-x86_64.tar.gz`
+- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/ios/iphonesimulator-x86_64 cargo build --target x86_64-apple-ios`
+- **build.rs auto-resolve**: ✅
 - **Common errors**: `xcrun` cannot find SDK on arm64 Mac → set `-sdk iphonesimulator` explicitly in CMake flags
 
 ## aarch64-linux-android
@@ -105,11 +106,11 @@ CI or airgapped environments). Override the release tag with
 ## i686-linux-android (x86 emulator)
 
 - **Toolchain**: Android NDK r26+
-- **Build**: `./scripts/build-android.sh --abi x86` (NEW — Agent B)
+- **Build**: `./scripts/build-android.sh --abi x86`
 - **Output**: `output/android/x86/lib/libgraphviz_api.so`
-- **Release asset**: `graphviz-native-android-x86.tar.gz` (NEW — Agent C)
+- **Release asset**: `graphviz-native-android-x86.tar.gz`
 - **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/android/x86 cargo build --target i686-linux-android`
-- **build.rs**: asset name mapping added by Agent A (`("android", "x86")` arm)
+- **build.rs auto-resolve**: ✅
 - **Common errors**: emulator only; do not ship to production without `arm64-v8a` as primary ABI
 
 ## x86_64-pc-windows-msvc
@@ -143,16 +144,17 @@ The `@kookyleo/graphviz-anywhere-rn` postinstall script downloads a prebuilt
 native library into `packages/react-native/ios/Frameworks/` and the Android
 JNI libs. This is **separate** from what `build.rs` does.
 
-Today, `build.rs` does **not** scan the RN postinstall paths. If you depend on
-the Rust crate in the same monorepo as the RN package, set:
+`build.rs`'s `try_repo_output` now also scans the RN postinstall paths
+(`packages/react-native/ios/Frameworks/lib/`, `packages/react-native/android/libs/<abi>/`)
+when the Rust crate is built inside the same monorepo as the RN package — no
+extra setup needed beyond running `npm install` in `packages/react-native/`
+first.
+
+If you want to point at a custom location, the env override always wins:
 
 ```bash
-GRAPHVIZ_ANYWHERE_DIR=packages/react-native/ios/Frameworks cargo build   # iOS
-GRAPHVIZ_ANYWHERE_DIR=packages/react-native/android/jni/arm64-v8a cargo build --target aarch64-linux-android
+GRAPHVIZ_ANYWHERE_DIR=/path/to/lib-dir cargo build --target <triple>
 ```
-
-Once Agent A wires the RN paths into `try_repo_output`, this manual step will
-no longer be required — verify on merge.
 
 ---
 
