@@ -1,6 +1,6 @@
 [package]
 name = "graphviz-anywhere"
-version = "0.1.8"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.64"
 description = "Safe Rust wrapper for the graphviz-anywhere C library with bundled prebuilt binaries (and a wasm32 JS bridge)"

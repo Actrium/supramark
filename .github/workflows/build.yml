@@ -502,7 +502,9 @@ jobs:
         run: cargo publish --manifest-path packages/rust/Cargo.toml --token ${{ secrets.CARGO_TOKEN }} --allow-dirty --no-verify
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Run on real v* tags (full release) and test* tags (prerelease pipeline dry-run).
+    # Push test-v0.2.0-rc1 to fully verify assets before tagging real v0.2.0.
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/test')
     needs:
       - build-linux
       - build-macos
@@ -530,7 +532,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          prerelease: false
+          # test* tags produce a prerelease so the pipeline can be verified
+          # end-to-end without polluting the stable release list.
+          prerelease: ${{ startsWith(github.ref, 'refs/tags/test') }}
           generate_release_notes: true
           files: |
             release-assets/graphviz-native-linux-x86_64.tar.gz
