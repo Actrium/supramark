@@ -71,8 +71,19 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
         return false;
     };
     let output_root = repo_root.join("output");
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    let candidates = if cfg!(target_os = "macos") {
+    let candidates: Vec<PathBuf> = if target_os == "android" {
+        let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+        let abi = match target_arch.as_str() {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            "x86_64" => "x86_64",
+            "x86" => "x86",
+            _ => return false,
+        };
+        vec![output_root.join("android").join(abi).join("lib")]
+    } else if cfg!(target_os = "macos") {
         vec![output_root.join("macos-universal/lib")]
     } else if cfg!(target_os = "linux") {
         vec![
@@ -118,6 +129,9 @@ fn try_github_release() -> bool {
     let asset = match (target_os.as_str(), target_arch.as_str()) {
         ("linux", "x86_64") => "graphviz-native-linux-x86_64.tar.gz",
         ("macos", _) => "graphviz-native-macos-universal.tar.gz",
+        ("android", "aarch64") => "graphviz-native-android-arm64-v8a.tar.gz",
+        ("android", "arm") => "graphviz-native-android-armeabi-v7a.tar.gz",
+        ("android", "x86_64") => "graphviz-native-android-x86_64.tar.gz",
         // Windows ships a .zip with a different layout; not auto-handled
         // here yet — Windows users must set GRAPHVIZ_ANYWHERE_DIR or drop
         // the prebuilt static lib under packages/rust/prebuilt/windows/.
@@ -144,10 +158,9 @@ fn try_github_release() -> bool {
     // crate version changes.
     let staging = out_dir.join(format!("graphviz-anywhere-prebuilt-v{release_version}"));
     let lib_subdir = staging.join("lib");
-    let lib_file = if cfg!(target_os = "macos") {
-        lib_subdir.join("libgraphviz_api.dylib")
-    } else {
-        lib_subdir.join("libgraphviz_api.so")
+    let lib_file = match target_os.as_str() {
+        "macos" => lib_subdir.join("libgraphviz_api.dylib"),
+        _ => lib_subdir.join("libgraphviz_api.so"),
     };
 
     if !lib_file.exists() {
