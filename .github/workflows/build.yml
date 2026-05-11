@@ -16,10 +16,17 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [x86_64]
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+          - arch: aarch64
+            # TODO(infra): switch to ubuntu-24.04-arm once confirmed available in this org
+            runs-on: ubuntu-latest
+            continue-on-error: true
+    runs-on: ${{ matrix.runs-on }}
+    continue-on-error: ${{ matrix.continue-on-error == true }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,10 +57,21 @@ jobs:
           chmod +x scripts/*.sh
           ./scripts/build-linux.sh --arch ${{ matrix.arch }}
 
-      - name: Copy to packages/rust/prebuilt
+      - name: Copy to packages/rust/prebuilt (legacy layout)
         run: |
           mkdir -p packages/rust/prebuilt/linux
           cp output/linux-${{ matrix.arch }}/lib/libgraphviz_api.a packages/rust/prebuilt/linux/ || true
+
+      - name: Copy to packages/rust/prebuilt (target-triple layout)
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            TRIPLE="x86_64-unknown-linux-gnu"
+          else
+            TRIPLE="aarch64-unknown-linux-gnu"
+          fi
+          mkdir -p "packages/rust/prebuilt/${TRIPLE}"
+          cp "output/linux-${{ matrix.arch }}/lib/libgraphviz_api.a" \
+             "packages/rust/prebuilt/${TRIPLE}/libgraphviz_api.a" || true
 
       - name: Package
         run: |
@@ -67,8 +85,8 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: prebuilt-linux
-          path: packages/rust/prebuilt/linux/
+          name: prebuilt-linux-${{ matrix.arch }}
+          path: packages/rust/prebuilt/
 
   build-macos:
     runs-on: macos-14
@@ -99,10 +117,19 @@ jobs:
           chmod +x scripts/*.sh
           ./scripts/build-macos.sh --arch universal
 
-      - name: Copy to packages/rust/prebuilt
+      - name: Copy to packages/rust/prebuilt (legacy layout)
         run: |
           mkdir -p packages/rust/prebuilt/macos
           cp output/macos-universal/lib/libgraphviz_api.a packages/rust/prebuilt/macos/ || true
+
+      - name: Copy to packages/rust/prebuilt (target-triple layout)
+        run: |
+          # Universal binary serves both Darwin targets
+          for TRIPLE in aarch64-apple-darwin x86_64-apple-darwin; do
+            mkdir -p "packages/rust/prebuilt/${TRIPLE}"
+            cp output/macos-universal/lib/libgraphviz_api.a \
+               "packages/rust/prebuilt/${TRIPLE}/libgraphviz_api.a" || true
+          done
 
       - name: Package
         run: |
@@ -117,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: prebuilt-macos
-          path: packages/rust/prebuilt/macos/
+          path: packages/rust/prebuilt/
 
   build-ios:
     runs-on: macos-14
@@ -141,28 +168,64 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: brew install bison flex
 
-      - name: Build iOS
+      - name: Build iOS (all slices)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$PATH"
           chmod +x scripts/*.sh
           ./scripts/build-ios.sh
 
-      - name: Package
+      # Legacy bundled tarball — RN postinstall depends on this name; do not rename.
+      - name: Package legacy bundled tarball
         run: |
           cd output/ios
           tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios.tar.gz" .
+
+      # Per-slice tarballs: each contains lib/libgraphviz_api.a + include/*.h
+      # for direct cargo build --target X consumption (build.rs Agent A layout).
+      - name: Package per-slice tarball — device arm64
+        run: |
+          cd output/ios/device-arm64
+          tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-device-arm64.tar.gz" \
+            lib/libgraphviz_api.a include/
+
+      - name: Package per-slice tarball — simulator arm64
+        run: |
+          cd output/ios/sim-arm64
+          tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-sim-arm64.tar.gz" \
+            lib/libgraphviz_api.a include/
+
+      - name: Package per-slice tarball — simulator x86_64 (Agent B)
+        run: |
+          cd output/ios/sim-x86_64
+          tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-sim-x86_64.tar.gz" \
+            lib/libgraphviz_api.a include/
 
       - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: graphviz-native-ios.tar.gz
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-device-arm64
+          path: graphviz-native-ios-device-arm64.tar.gz
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-sim-arm64
+          path: graphviz-native-ios-sim-arm64.tar.gz
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-sim-x86_64
+          path: graphviz-native-ios-sim-x86_64.tar.gz
+
   build-android:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        abi: [arm64-v8a, armeabi-v7a, x86_64]
+        abi: [arm64-v8a, armeabi-v7a, x86_64, x86]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -207,7 +270,17 @@ jobs:
           path: graphviz-native-android-${{ matrix.abi }}.tar.gz
 
   build-windows:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: windows-latest
+          - arch: arm64
+            runs-on: windows-latest
+            # TODO(infra): verify Windows ARM64 cross-build (vcvarsall arm64)
+            continue-on-error: true
+    runs-on: ${{ matrix.runs-on }}
+    continue-on-error: ${{ matrix.continue-on-error == true }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -222,8 +295,8 @@ jobs:
         id: cache
         uses: actions/cache@v4
         with:
-          path: output/windows-x86_64
-          key: gv-build-windows-x86_64-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('capi/**', 'scripts/build-windows.sh', 'scripts/common.sh') }}
+          path: output/windows-${{ matrix.arch }}
+          key: gv-build-windows-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('capi/**', 'scripts/build-windows.sh', 'scripts/common.sh') }}
 
       - name: Install dependencies
         # choco.org serves 503 periodically; retry a few times before
@@ -247,34 +320,60 @@ jobs:
             }
           }
 
+      - name: Configure MSVC for ARM64 cross-compile
+        if: matrix.arch == 'arm64' && steps.cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64_arm64
+
       - name: Build
         if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           chmod +x scripts/*.sh
-          ./scripts/build-windows.sh
+          ./scripts/build-windows.sh --arch ${{ matrix.arch }}
 
-      - name: Copy to packages/rust/prebuilt
+      - name: Copy to packages/rust/prebuilt (legacy layout — x86_64 only)
+        if: matrix.arch == 'x86_64'
         shell: bash
         run: |
           mkdir -p packages/rust/prebuilt/windows
-          cp output/windows-x86_64/lib/libgraphviz_api.a packages/rust/prebuilt/windows/ || true
+          cp output/windows-${{ matrix.arch }}/lib/libgraphviz_api.a packages/rust/prebuilt/windows/ || true
+
+      - name: Copy to packages/rust/prebuilt (target-triple layout)
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            TRIPLE="x86_64-pc-windows-msvc"
+            LIB_NAME="graphviz_api.lib"
+          else
+            TRIPLE="aarch64-pc-windows-msvc"
+            LIB_NAME="graphviz_api.lib"
+          fi
+          mkdir -p "packages/rust/prebuilt/${TRIPLE}"
+          # Windows builds may produce .lib or .a depending on toolchain;
+          # try both names and copy whichever exists.
+          cp "output/windows-${{ matrix.arch }}/lib/${LIB_NAME}" \
+             "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || \
+          cp "output/windows-${{ matrix.arch }}/lib/libgraphviz_api.a" \
+             "packages/rust/prebuilt/${TRIPLE}/${LIB_NAME}" 2>/dev/null || true
 
       - name: Package
         shell: bash
         run: |
-          cd output/windows-x86_64
-          7z a "${GITHUB_WORKSPACE}/graphviz-native-windows-x86_64.zip" .
+          cd output/windows-${{ matrix.arch }}
+          7z a "${GITHUB_WORKSPACE}/graphviz-native-windows-${{ matrix.arch }}.zip" .
 
       - uses: actions/upload-artifact@v7
         with:
-          name: windows-x86_64
-          path: graphviz-native-windows-x86_64.zip
+          name: windows-${{ matrix.arch }}
+          path: graphviz-native-windows-${{ matrix.arch }}.zip
 
       - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'x86_64'
         with:
           name: prebuilt-windows
-          path: packages/rust/prebuilt/windows/
+          path: packages/rust/prebuilt/
 
   build-wasm:
     runs-on: ubuntu-latest
@@ -362,9 +461,9 @@ jobs:
         run: |
           mkdir -p packages/rust/prebuilt/{macos,linux,windows}
           mkdir -p packages/web/dist
-          # 尽力复制，但不要因为缺失文件而失败
+          # Best-effort copy; do not fail on missing files
           cp -r artifacts/prebuilt-macos/* packages/rust/prebuilt/macos/ 2>/dev/null || true
-          cp -r artifacts/prebuilt-linux/* packages/rust/prebuilt/linux/ 2>/dev/null || true
+          cp -r artifacts/prebuilt-linux-x86_64/* packages/rust/prebuilt/linux/ 2>/dev/null || true
           cp -r artifacts/prebuilt-windows/* packages/rust/prebuilt/windows/ 2>/dev/null || true
           cp -r artifacts/wasm-dist/* packages/web/dist/ 2>/dev/null || true
           echo "=== prebuilt libs ===" && find packages/rust/prebuilt -type f
@@ -400,13 +499,28 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-linux, build-macos, build-ios, build-android, build-windows]
+    needs:
+      - build-linux
+      - build-macos
+      - build-ios
+      - build-android
+      - build-windows
+      - build-wasm
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+
+      - name: Flatten release assets
+        run: |
+          mkdir -p release-assets
+          # Collect every .tar.gz and .zip from all artifact subdirs
+          find artifacts -name '*.tar.gz' -o -name '*.zip' | \
+            xargs -I{} cp {} release-assets/ || true
+          echo "=== Release assets ==="
+          ls -lh release-assets/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -415,5 +529,17 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
+            release-assets/graphviz-native-linux-x86_64.tar.gz
+            release-assets/graphviz-native-linux-aarch64.tar.gz
+            release-assets/graphviz-native-macos-universal.tar.gz
+            release-assets/graphviz-native-windows-x86_64.zip
+            release-assets/graphviz-native-windows-arm64.zip
+            release-assets/graphviz-native-android-arm64-v8a.tar.gz
+            release-assets/graphviz-native-android-armeabi-v7a.tar.gz
+            release-assets/graphviz-native-android-x86_64.tar.gz
+            release-assets/graphviz-native-android-x86.tar.gz
+            release-assets/graphviz-native-ios.tar.gz
+            release-assets/graphviz-native-ios-device-arm64.tar.gz
+            release-assets/graphviz-native-ios-sim-arm64.tar.gz
+            release-assets/graphviz-native-ios-sim-x86_64.tar.gz
+            release-assets/graphviz-native-wasm.tar.gz
