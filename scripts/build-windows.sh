@@ -119,35 +119,6 @@ install(TARGETS graphviz_api
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
-
-# Static library — required by packages/rust/build.rs (cargo:rustc-link-lib=static=graphviz_api).
-# Named graphviz_api_static to avoid collision with the DLL import lib
-# (graphviz_api.lib).  The CI cp step copies this as graphviz_api.lib into
-# the prebuilt layout consumed by Cargo.
-add_library(graphviz_api_static STATIC "${SRC_DIR}/graphviz_api.c")
-
-target_include_directories(graphviz_api_static PRIVATE
-    "${GV_INSTALL_DIR}/include"
-    "${GV_INSTALL_DIR}/include/graphviz"
-)
-
-target_compile_definitions(graphviz_api_static PRIVATE
-    PACKAGE_VERSION="${GV_VERSION}"
-)
-
-# Whole-archive link: embed all Graphviz static libs into the single .lib.
-# On MSVC the equivalent of --whole-archive is /WHOLEARCHIVE per-lib, passed
-# via target_link_options with LINKER: prefix (CMake 3.13+).
-foreach(gv_lib IN LISTS GV_ALL_LIBS)
-    target_link_options(graphviz_api_static PRIVATE "LINKER:/WHOLEARCHIVE:${gv_lib}")
-endforeach()
-
-# Set the install output name so it lands as graphviz_api_static.lib
-set_target_properties(graphviz_api_static PROPERTIES OUTPUT_NAME "graphviz_api_static")
-
-install(TARGETS graphviz_api_static
-    ARCHIVE DESTINATION lib
-)
 CMAKE_EOF
 
 # TODO(verify-in-ci): ARM64 wrapper CMake path untested — needs windows-arm64 runner
@@ -161,6 +132,85 @@ cmake -S "${BUILD_DIR}/wrapper" -B "${BUILD_DIR}/wrapper/build" \
 
 cmake --build "${BUILD_DIR}/wrapper/build" --config Release
 cmake --install "${BUILD_DIR}/wrapper/build" --config Release
+
+# ── Merged static library via lib.exe ────────────────────────────────────────
+# CMake's add_library(STATIC) only archives THIS target's own .obj files;
+# target_link_libraries / LINKER:/WHOLEARCHIVE is a link-time flag for
+# executables/DLLs and has NO effect on static archive output.  To produce a
+# truly merged static .lib we must invoke lib.exe directly.
+#
+# lib.exe accepts .obj files and .lib archives as inputs and extracts + merges
+# all member .obj files into a single output archive — no /WHOLEARCHIVE needed.
+log_info "Building merged static library (graphviz_api_static.lib) via lib.exe..."
+
+# Locate lib.exe from the MSVC toolchain.  vswhere is the canonical locator on
+# windows-latest runners; fall back to PATH lookup for custom environments.
+LIBEXE=""
+VSWHERE="C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+if [ -f "${VSWHERE}" ]; then
+    VS_INSTALL="$("${VSWHERE}" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>/dev/null | tr -d '\r')"
+    if [ -n "${VS_INSTALL}" ]; then
+        # VC tools version string lives in a single-line text file
+        VC_VER_FILE="${VS_INSTALL}/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt"
+        if [ -f "${VC_VER_FILE}" ]; then
+            VC_VER="$(cat "${VC_VER_FILE}" | tr -d '[:space:]')"
+            case "$ARCH" in
+                x86_64) HOST_SUBDIR="x64" ;;
+                arm64)  HOST_SUBDIR="x64" ;;  # cross-compile: host tools are x64
+            esac
+            CANDIDATE="${VS_INSTALL}/VC/Tools/MSVC/${VC_VER}/bin/Host${HOST_SUBDIR}/${HOST_SUBDIR}/lib.exe"
+            [ -f "${CANDIDATE}" ] && LIBEXE="${CANDIDATE}"
+        fi
+    fi
+fi
+# Fallback: rely on PATH (works when vcvarsall.bat has been sourced)
+if [ -z "${LIBEXE}" ]; then
+    LIBEXE="$(command -v lib.exe 2>/dev/null || command -v lib 2>/dev/null || true)"
+fi
+if [ -z "${LIBEXE}" ]; then
+    log_error "Cannot locate lib.exe — ensure MSVC build tools are installed"
+    exit 1
+fi
+log_info "Using lib.exe: ${LIBEXE}"
+
+# Map our arch to lib.exe /MACHINE flag
+case "$ARCH" in
+    x86_64) LIB_MACHINE="X64" ;;
+    arm64)  LIB_MACHINE="ARM64" ;;
+esac
+
+# Collect the wrapper's compiled .obj (produced by the DLL build above).
+# MSVC places per-config objects under Release/graphviz_api.obj inside the
+# CMake project build directory for the source file.
+WRAPPER_OBJ=""
+while IFS= read -r -d '' f; do
+    WRAPPER_OBJ="$f"
+    break
+done < <(find "${BUILD_DIR}/wrapper/build" -name "graphviz_api.obj" -print0 2>/dev/null)
+if [ -z "${WRAPPER_OBJ}" ]; then
+    log_error "graphviz_api.obj not found under ${BUILD_DIR}/wrapper/build"
+    exit 1
+fi
+log_info "Wrapper object: ${WRAPPER_OBJ}"
+
+# Collect all Graphviz component static libs from the build tree.
+# Exclude CMake internal scratch archives (LTO test, feature probes).
+mapfile -d '' GV_LIBS < <(find "${BUILD_DIR}/graphviz" -name "*.lib" -print0 2>/dev/null \
+    | grep -zEv 'CMakeFiles|_CMakeLTOTest-|CMakeScratch|CMakeTmp')
+
+if [ "${#GV_LIBS[@]}" -eq 0 ]; then
+    log_error "No Graphviz .lib files found under ${BUILD_DIR}/graphviz"
+    exit 1
+fi
+log_info "Merging ${#GV_LIBS[@]} Graphviz lib(s) + wrapper obj into graphviz_api_static.lib"
+
+STATIC_OUT="${INSTALL_DIR}/lib/graphviz_api_static.lib"
+"${LIBEXE}" /NOLOGO \
+    "/MACHINE:${LIB_MACHINE}" \
+    "/OUT:${STATIC_OUT}" \
+    "${WRAPPER_OBJ}" \
+    "${GV_LIBS[@]}"
+# ─────────────────────────────────────────────────────────────────────────────
 
 cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 
