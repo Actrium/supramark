@@ -183,21 +183,25 @@ jobs:
 
       # Per-slice tarballs: each contains lib/libgraphviz_api.a + include/*.h
       # for direct cargo build --target X consumption (build.rs Agent A layout).
+      # Per-slice install dirs are keyed by "${sdk}-${arch}" exactly as
+      # build-ios.sh writes them (iphoneos-arm64, iphonesimulator-arm64,
+      # iphonesimulator-x86_64). The consumer-facing asset names use the
+      # device/sim-arm64/sim-x86_64 short form for legibility.
       - name: Package per-slice tarball — device arm64
         run: |
-          cd output/ios/device-arm64
+          cd output/ios/iphoneos-arm64
           tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-device-arm64.tar.gz" \
             lib/libgraphviz_api.a include/
 
       - name: Package per-slice tarball — simulator arm64
         run: |
-          cd output/ios/sim-arm64
+          cd output/ios/iphonesimulator-arm64
           tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-sim-arm64.tar.gz" \
             lib/libgraphviz_api.a include/
 
-      - name: Package per-slice tarball — simulator x86_64 (Agent B)
+      - name: Package per-slice tarball — simulator x86_64
         run: |
-          cd output/ios/sim-x86_64
+          cd output/ios/iphonesimulator-x86_64
           tar czf "${GITHUB_WORKSPACE}/graphviz-native-ios-sim-x86_64.tar.gz" \
             lib/libgraphviz_api.a include/
 
