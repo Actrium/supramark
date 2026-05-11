@@ -1,0 +1,33 @@
+[package]
+name = "supramark-d2-native"
+version = "0.7.2"
+edition = "2024"
+license = "MPL-2.0"
+authors = ["kookyleo <kookyleo@gmail.com>"]
+description = "Native FFI wrapper around d2-little for React Native / iOS / Android consumers"
+homepage = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/kookyleo/supramark"
+publish = false
+
+[lib]
+# staticlib  → libsupramark_d2_native.a   (iOS .xcframework, Android NDK static link)
+# cdylib     → libsupramark_d2_native.so / .dylib / .dll (Android jniLibs, desktop hosts)
+# rlib       → keep so other in-workspace Rust crates can depend on this wrapper if useful.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+d2-little = { path = "../.." }
+
+# font-metrics is pulled in so its `supramark_install_metrics_callback`
+# C-ABI symbol (defined in `font_metrics::ffi_callback`, gated on
+# `not(target_arch = "wasm32")`) ends up in the linked staticlib /
+# cdylib. The host wires its own `measureText` impl through that symbol
+# at module-init time. The `metrics-ffi-callback` feature is a marker
+# (the impl always compiles on native targets) — declaring it here
+# documents intent and keeps parity with plantuml-little / mermaid-little.
+#
+# Imported as `font_metrics_core` (via `package =`) to mirror the
+# convention set by plantuml-little / mermaid-little. d2-little's main
+# crate uses the same rename, leaving `font_metrics` namespace free for
+# any future wrapper module without crate-root shadowing.
+font_metrics_core = { package = "font-metrics", path = "../../../font-metrics", version = "0.1", features = ["metrics-ffi-callback"] }

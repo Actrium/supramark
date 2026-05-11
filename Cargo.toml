@@ -22,6 +22,7 @@ members = [
     "crates/plantuml-little/packages/web",
     "crates/d2-little",
     "crates/d2-little/packages/web",
+    "crates/d2-little/packages/native",
     "crates/mermaid-little",
     "crates/mermaid-little/packages/web",
     "crates/vison/vison-core",
