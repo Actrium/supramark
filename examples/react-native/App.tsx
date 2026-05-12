@@ -1,36 +1,110 @@
-// Minimal App.tsx for native FFI simulator smoke verification across d2 / mermaid / plantuml.
-//
-// The full feature-rich demo (App.full.tsx.bak) imports outdated `createXxxFeatureConfig(...)`
-// factories that no longer exist — the feature API moved to direct exports of
-// per-feature objects (`admonitionFeature`, etc.) per the engines + container
-// refactor. Restoring App.full.tsx is its own migration; until then this minimal
-// app exercises the three native FFI wrappers end-to-end.
+/**
+ * Supramark RN demo app.
+ *
+ * Migrated to the current feature API:
+ *  - Imports per-feature objects directly (no more `createXxxFeatureConfig`
+ *    factories on the caller side — we just write FeatureConfig literals).
+ *  - Calls `admonitionFeature.registerParser()` once at module load, since
+ *    admonition is a ContainerFeature whose hooks aren't auto-registered.
+ *  - html-page / map register their parsers via their own runtime.js
+ *    side-effect import; importing the feature object suffices.
+ *  - Drops the old `DiagramRenderProvider` wrapper — the RN renderer now
+ *    creates its own engine via `createReactNativeDiagramEngine()` and
+ *    native adapters (d2 / mermaid / plantuml) register themselves via
+ *    the side-effect imports below.
+ *
+ * Boot also runs the three native FFI engines once for smoke verification.
+ * Look for `[<ENGINE>_SMOKE_*]` lines in logcat / xcode console.
+ */
 
 import React, { useEffect, useState } from 'react';
 import {
   SafeAreaView,
   ScrollView,
-  Text,
-  View,
   StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Alert,
   NativeModules,
 } from 'react-native';
+
+import { Supramark } from '@supramark/rn';
+import type { SupramarkConfig } from '@supramark/core';
+
+// Feature metadata — id/version is read off these for the FeatureConfig list.
+import { coreMarkdownFeature } from '@supramark/feature-core-markdown';
+import { gfmFeature } from '@supramark/feature-gfm';
+import { admonitionFeature } from '@supramark/feature-admonition';
+import { definitionListFeature } from '@supramark/feature-definition-list';
+import { htmlPageFeature } from '@supramark/feature-html-page';
+import { mapFeature } from '@supramark/feature-map';
+import { diagramVegaLiteFeature } from '@supramark/feature-diagram-vega-lite';
+import { diagramEchartsFeature } from '@supramark/feature-diagram-echarts';
+
+// Side-effect: each registers a native adapter against @supramark/engines/rn
+// so the diagram engine routes d2 / mermaid / plantuml blocks to the linked
+// libsupramark_*_native.so / .a.
+import '@kookyleo/supramark-d2-native-rn';
+import '@kookyleo/supramark-mermaid-native-rn';
+import '@kookyleo/supramark-plantuml-native-rn';
+
+import { DEMOS } from '../demos';
+
+// admonition is a ContainerFeature — its container hooks must be registered
+// explicitly. html-page / map register theirs via side-effect import in their
+// own index.ts.
+admonitionFeature.registerParser();
+
+const BASE_CONFIG: SupramarkConfig = {
+  features: [
+    { id: coreMarkdownFeature.metadata.id, enabled: true },
+    {
+      id: gfmFeature.metadata.id,
+      enabled: true,
+      options: { tables: true, taskListItems: true, strikethrough: false },
+    },
+    {
+      id: admonitionFeature.id,
+      enabled: true,
+      options: { kinds: ['note', 'warning'] },
+    },
+    {
+      id: definitionListFeature.metadata.id,
+      enabled: true,
+      options: { compact: true },
+    },
+    { id: htmlPageFeature.metadata.id, enabled: true },
+    { id: mapFeature.metadata.id, enabled: true, options: { provider: 'custom' } },
+    { id: diagramVegaLiteFeature.metadata.id, enabled: true },
+    { id: diagramEchartsFeature.metadata.id, enabled: true },
+  ],
+
+  diagram: {
+    defaultTimeoutMs: 10000,
+    defaultCache: {
+      enabled: true,
+      maxSize: 100,
+      ttl: 300000,
+    },
+  },
+};
+
+type Theme = 'light' | 'dark';
 
 interface NativeEngine {
   render: (source: string) => Promise<string>;
   getVersion: () => Promise<string>;
 }
 
-type Status = 'pending' | 'ok' | 'error';
-interface EngineResult {
+type SmokeStatus = 'pending' | 'ok' | 'error';
+interface SmokeResult {
   name: string;
-  module: NativeEngine | undefined;
-  source: string;
-  status: Status;
+  status: SmokeStatus;
   detail: string;
 }
 
-const ENGINES_SPEC: Array<{ name: string; key: string; source: string }> = [
+const SMOKE_SPEC: Array<{ name: string; key: string; source: string }> = [
   { name: 'd2', key: 'SupramarkD2Native', source: 'a -> b -> c' },
   {
     name: 'mermaid',
@@ -45,123 +119,235 @@ const ENGINES_SPEC: Array<{ name: string; key: string; source: string }> = [
 ];
 
 export default function App() {
-  const [results, setResults] = useState<EngineResult[]>(
-    ENGINES_SPEC.map((s) => ({
-      name: s.name,
-      module: NativeModules[s.key] as NativeEngine | undefined,
-      source: s.source,
-      status: 'pending',
-      detail: 'booting...',
-    })),
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<Theme>('light');
+  const [smoke, setSmoke] = useState<SmokeResult[]>(
+    SMOKE_SPEC.map((s) => ({ name: s.name, status: 'pending', detail: 'booting...' })),
   );
+  const activeDemo = activeId ? DEMOS.find((d) => d.id === activeId) ?? null : null;
+
+  const isDark = theme === 'dark';
+  const toggleTheme = () => setTheme(isDark ? 'light' : 'dark');
+
+  const runNativeSmokeTest = async () => {
+    for (let i = 0; i < SMOKE_SPEC.length; i++) {
+      const spec = SMOKE_SPEC[i];
+      const mod = NativeModules[spec.key] as NativeEngine | undefined;
+      let next: SmokeResult;
+      try {
+        if (!mod) {
+          throw new Error(`NativeModules.${spec.key} is undefined — not linked`);
+        }
+        const version = await mod.getVersion();
+        const svg = await mod.render(spec.source);
+        const line = `[${spec.name.toUpperCase()}_SMOKE_OK] v=${version} len=${svg.length}`;
+        console.log(line);
+        next = {
+          name: spec.name,
+          status: 'ok',
+          detail: `v=${version}  svg.length=${svg.length}`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`[${spec.name.toUpperCase()}_SMOKE_ERROR] ${msg.slice(0, 300)}`);
+        next = { name: spec.name, status: 'error', detail: msg.slice(0, 600) };
+      }
+      setSmoke((prev) => {
+        const arr = [...prev];
+        arr[i] = next;
+        return arr;
+      });
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      for (let i = 0; i < ENGINES_SPEC.length; i++) {
-        const spec = ENGINES_SPEC[i];
-        const mod = NativeModules[spec.key] as NativeEngine | undefined;
-        let next: EngineResult;
-        try {
-          if (!mod) {
-            throw new Error(`NativeModules.${spec.key} is undefined — not linked`);
-          }
-          const version = await mod.getVersion();
-          const svg = await mod.render(spec.source);
-          const line = `[${spec.name.toUpperCase()}_SMOKE_OK] v=${version} len=${svg.length}`;
-          console.log(line);
-          next = {
-            name: spec.name,
-            module: mod,
-            source: spec.source,
-            status: 'ok',
-            detail: `v=${version}  svg.length=${svg.length}\n${svg.slice(0, 400)}`,
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.log(`[${spec.name.toUpperCase()}_SMOKE_ERROR] ${msg.slice(0, 300)}`);
-          next = {
-            name: spec.name,
-            module: mod,
-            source: spec.source,
-            status: 'error',
-            detail: msg.slice(0, 600),
-          };
-        }
-        setResults((prev) => {
-          const arr = [...prev];
-          arr[i] = next;
-          return arr;
-        });
-      }
-    })();
+    runNativeSmokeTest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>supramark · native FFI smoke</Text>
-      </View>
-      <ScrollView contentContainerStyle={styles.body}>
-        {results.map((r) => (
-          <View key={r.name} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{r.name}</Text>
-              <Text style={[styles.badge, badgeStyle(r.status)]}>
-                {r.status.toUpperCase()}
+  const containerStyle = [styles.container, isDark && { backgroundColor: '#0d1117' }];
+  const headerStyle = [styles.header, isDark && { borderBottomColor: '#30363d' }];
+  const titleStyle = [styles.title, isDark && { color: '#ffffff' }];
+  const subtitleStyle = [styles.subtitle, isDark && { color: '#8b949e' }];
+  const menuContentStyle = [styles.menuContent, isDark && { backgroundColor: '#0d1117' }];
+  const menuItemStyle = [styles.menuItem, isDark && { borderBottomColor: '#21262d' }];
+  const menuItemTitleStyle = [styles.menuItemTitle, isDark && { color: '#ffffff' }];
+  const menuItemDescStyle = [styles.menuItemDesc, isDark && { color: '#8b949e' }];
+  const themeButtonStyle = [styles.themeButton, isDark && { backgroundColor: '#21262d' }];
+  const themeButtonTextStyle = [styles.themeButtonText, isDark && { color: '#58a6ff' }];
+
+  if (!activeDemo) {
+    return (
+      <SafeAreaView style={containerStyle}>
+        <View style={headerStyle}>
+          <View style={styles.headerRow}>
+            <View style={styles.headerLeft}>
+              <Text style={titleStyle}>supramark Demo</Text>
+              <Text style={subtitleStyle}>
+                选择要演示的类型，进入详情查看 markdown 与渲染结果。
               </Text>
             </View>
-            <Text style={styles.mono} selectable>
-              {r.detail}
-            </Text>
+            <TouchableOpacity style={themeButtonStyle} onPress={toggleTheme}>
+              <Text style={themeButtonTextStyle}>{isDark ? '☀️ Light' : '🌙 Dark'}</Text>
+            </TouchableOpacity>
           </View>
-        ))}
+          <View style={styles.smokeRow}>
+            {smoke.map((s) => (
+              <View key={s.name} style={[styles.smokeBadge, smokeBadgeStyle(s.status)]}>
+                <Text style={styles.smokeBadgeText}>
+                  {s.name} · {s.status}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[themeButtonStyle, { marginTop: 8, alignSelf: 'flex-start' }]}
+            onPress={runNativeSmokeTest}
+          >
+            <Text style={themeButtonTextStyle}>🧪 Re-run native FFI smoke (d2 / mermaid / plantuml)</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={menuContentStyle}>
+          {DEMOS.map((demo) => (
+            <TouchableOpacity
+              key={demo.id}
+              style={menuItemStyle}
+              onPress={() => setActiveId(demo.id)}
+            >
+              <Text style={menuItemTitleStyle}>{demo.name}</Text>
+              <Text style={menuItemDescStyle}>{demo.description}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  const detailContentStyle = [styles.detailContent, isDark && { backgroundColor: '#0d1117' }];
+  const demoTitleStyle = [styles.demoTitle, isDark && { color: '#ffffff' }];
+  const demoDescriptionStyle = [styles.demoDescription, isDark && { color: '#8b949e' }];
+  const demoSectionTitleStyle = [styles.demoSectionTitle, isDark && { color: '#ffffff' }];
+  const sourceBlockStyle = [
+    styles.sourceBlock,
+    isDark && { backgroundColor: '#161b22', borderColor: '#30363d' },
+  ];
+  const sourceTextStyle = [styles.sourceText, isDark && { color: '#e0e0e0' }];
+
+  return (
+    <SafeAreaView style={containerStyle}>
+      <ScrollView contentContainerStyle={detailContentStyle}>
+        <View style={styles.detailHeader}>
+          <TouchableOpacity onPress={() => setActiveId(null)} style={styles.backButton}>
+            <Text style={[styles.backButtonText, isDark && { color: '#58a6ff' }]}>‹ 返回</Text>
+          </TouchableOpacity>
+          <View style={styles.detailTitleWrap}>
+            <Text style={demoTitleStyle}>{activeDemo.name}</Text>
+            <Text style={demoDescriptionStyle}>{activeDemo.description}</Text>
+          </View>
+          <TouchableOpacity style={themeButtonStyle} onPress={toggleTheme}>
+            <Text style={themeButtonTextStyle}>{isDark ? '☀️' : '🌙'}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={demoSectionTitleStyle}>Markdown 源文本：</Text>
+        <View style={sourceBlockStyle}>
+          <Text style={sourceTextStyle}>{activeDemo.markdown}</Text>
+        </View>
+        <Text style={demoSectionTitleStyle}>渲染结果：</Text>
+        <View style={styles.renderBlock}>
+          <Supramark
+            markdown={activeDemo.markdown}
+            theme={theme}
+            config={BASE_CONFIG}
+            onOpenHtmlPage={(node) => {
+              Alert.alert(
+                node.params || 'HTML Page',
+                '这里应该在宿主中打开独立 WebView。当前只是示意回调已触发。',
+              );
+            }}
+          />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function badgeStyle(s: Status) {
+function smokeBadgeStyle(s: SmokeStatus) {
   switch (s) {
     case 'ok':
-      return { backgroundColor: '#1f883d', color: '#ffffff' };
+      return { backgroundColor: '#1f883d' };
     case 'error':
-      return { backgroundColor: '#cf222e', color: '#ffffff' };
+      return { backgroundColor: '#cf222e' };
     default:
-      return { backgroundColor: '#9aa0a6', color: '#ffffff' };
+      return { backgroundColor: '#9aa0a6' };
   }
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0d1117' },
+  container: { flex: 1 },
+  title: { fontSize: 24, fontWeight: '600', marginBottom: 4 },
+  subtitle: { fontSize: 14, color: '#666' },
   header: {
-    padding: 16,
-    borderBottomColor: '#21262d',
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
   },
-  title: { color: '#f0f6fc', fontSize: 18, fontWeight: '600' },
-  body: { padding: 16 },
-  card: {
-    marginBottom: 16,
-    borderColor: '#21262d',
-    borderWidth: 1,
-    borderRadius: 6,
-    padding: 12,
-    backgroundColor: '#161b22',
-  },
-  cardHeader: {
+  headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    alignItems: 'center',
   },
-  cardTitle: { color: '#f0f6fc', fontSize: 16, fontWeight: '600' },
-  badge: {
-    fontSize: 11,
-    fontWeight: '700',
+  headerLeft: { flex: 1 },
+  themeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#f5f5f5',
+    marginLeft: 12,
+  },
+  themeButtonText: { fontSize: 12, fontWeight: '600', color: '#2f54eb' },
+  smokeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8, gap: 6 },
+  smokeBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 3,
-    overflow: 'hidden',
+    marginRight: 6,
+    marginBottom: 4,
   },
-  mono: { color: '#c9d1d9', fontFamily: 'Menlo', fontSize: 10, lineHeight: 14 },
+  smokeBadgeText: { fontSize: 11, fontWeight: '700', color: '#ffffff' },
+  menuContent: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuItem: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+  },
+  menuItemTitle: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  menuItemDesc: { fontSize: 13, color: '#666' },
+  detailContent: { flexGrow: 1, padding: 16 },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  backButton: { paddingRight: 12, paddingVertical: 4 },
+  backButtonText: { fontSize: 14, color: '#2f54eb' },
+  detailTitleWrap: { flex: 1 },
+  demoTitle: { fontSize: 20, fontWeight: '600', marginBottom: 4 },
+  demoDescription: { fontSize: 13, color: '#666', marginBottom: 12 },
+  demoSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  sourceBlock: {
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: '#fafafa',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+  },
+  sourceText: { fontFamily: 'Menlo', fontSize: 12 },
+  renderBlock: { marginTop: 4 },
 });
