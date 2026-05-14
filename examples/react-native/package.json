@@ -17,6 +17,7 @@
     "@supramark/feature-admonition": "workspace:*",
     "@supramark/feature-core-markdown": "workspace:*",
     "@supramark/feature-definition-list": "workspace:*",
+    "@supramark/feature-diagram-dot": "workspace:*",
     "@supramark/feature-diagram-echarts": "workspace:*",
     "@supramark/feature-diagram-vega-lite": "workspace:*",
     "@supramark/feature-emoji": "workspace:*",

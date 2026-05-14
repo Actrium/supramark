@@ -41,6 +41,7 @@ import { htmlPageFeature } from '@supramark/feature-html-page';
 import { mapFeature } from '@supramark/feature-map';
 import { diagramVegaLiteFeature } from '@supramark/feature-diagram-vega-lite';
 import { diagramEchartsFeature } from '@supramark/feature-diagram-echarts';
+import { diagramDotFeature } from '@supramark/feature-diagram-dot';
 
 // Side-effect: each registers a native adapter against @supramark/engines/rn
 // so the diagram engine routes d2 / mermaid / plantuml blocks to the linked
@@ -78,6 +79,7 @@ const BASE_CONFIG: SupramarkConfig = {
     { id: mapFeature.metadata.id, enabled: true, options: { provider: 'custom' } },
     { id: diagramVegaLiteFeature.metadata.id, enabled: true },
     { id: diagramEchartsFeature.metadata.id, enabled: true },
+    { id: diagramDotFeature.metadata.id, enabled: true },
   ],
 
   diagram: {
