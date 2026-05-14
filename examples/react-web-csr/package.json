@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@kookyleo/d2-little-web": "^0.7.2",
+    "@kookyleo/mermaid-little-web": "workspace:*",
     "@kookyleo/plantuml-little-web": "^1.2026.2-3",
     "@supramark/core": "workspace:*",
     "@supramark/feature-admonition": "workspace:*",
