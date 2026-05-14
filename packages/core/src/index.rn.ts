@@ -65,6 +65,3 @@ export {
   isFeatureGroupEnabled,
   isDiagramFeatureEnabled,
 } from './feature.js';
-
-// 注意: parseMarkdownWithRemark 不在 React Native 版本中导出
-// 如需使用 remark,请在 Web/Node.js 环境中使用默认入口点

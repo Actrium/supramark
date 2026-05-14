@@ -30,17 +30,12 @@
     "markdown-it-deflist": "^3.0.0",
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-footnote": "^4.0.0",
-    "markdown-it-texmath": "^1.0.0",
-    "remark-gfm": "^4.0.0",
-    "remark-parse": "^11.0.0",
-    "unified": "^11.0.0"
+    "markdown-it-texmath": "^1.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/markdown-it": "^14.1.2",
     "@types/markdown-it-emoji": "^2.0.4",
-    "@types/mdast": "^4.0.3",
-    "@types/unist": "^3.0.2",
     "jest-environment-jsdom": "^30.2.0",
     "typedoc": "^0.28.15",
     "typescript": "^5.5.0"

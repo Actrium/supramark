@@ -57,18 +57,6 @@ export {
 export { parseMarkdown } from './plugin.js';
 
 /**
- * Remark 解析器（使用 unified + remark）
- *
- * 仅支持 Node.js 和 Web 环境（不支持 React Native）
- * 提供更丰富的 remark 生态集成能力
- * 体积较大，但可以使用 remark 插件
- * @param markdown - Markdown 源文本
- * @param options - 解析选项（可选插件）
- * @returns Supramark AST
- */
-export { parseMarkdownWithRemark } from './remark.js';
-
-/**
  * 预设（Presets）
  *
  * 预设是预配置的选项组合，用于快速设置常见的解析配置。

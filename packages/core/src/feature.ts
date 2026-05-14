@@ -443,13 +443,10 @@ export interface NodeConstraints {
  */
 export interface ParserRules {
   /** 解析器类型 */
-  engine: 'markdown-it' | 'remark' | 'custom';
+  engine: 'markdown-it' | 'custom';
 
   /** markdown-it 解析规则 */
   markdownIt?: MarkdownItRules;
-
-  /** remark 解析规则 */
-  remark?: RemarkRules;
 
   /** 自定义解析器 */
   custom?: CustomParserRules;
@@ -500,17 +497,6 @@ export interface ParserContext {
 
   /** 当前父节点 */
   parent: SupramarkNode;
-}
-
-/**
- * remark 解析规则
- */
-export interface RemarkRules {
-  /** remark 插件 */
-  plugin: unknown;
-
-  /** 插件选项 */
-  options?: Record<string, unknown>;
 }
 
 /**
