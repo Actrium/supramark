@@ -5,6 +5,7 @@ import type {
   SupramarkNode,
   SupramarkParagraphNode,
   SupramarkHeadingNode,
+  SupramarkBlockquoteNode,
   SupramarkCodeNode,
   SupramarkMathBlockNode,
   SupramarkInlineCodeNode,
@@ -12,6 +13,7 @@ import type {
   SupramarkListItemNode,
   SupramarkDiagramNode,
   SupramarkContainerNode,
+  SupramarkInputNode,
   SupramarkTextNode,
   SupramarkStrongNode,
   SupramarkEmphasisNode,
@@ -226,6 +228,38 @@ function renderNode(
         </View>
       );
     }
+    case 'blockquote': {
+      const blockquote = node as SupramarkBlockquoteNode;
+      // 中文注释：引用块需要显式渲染为带左边框的容器，避免 RN 端把已解析的内容静默丢弃。
+      return (
+        <View
+          key={key}
+          style={{
+            marginBottom: 8,
+            paddingLeft: 12,
+            borderLeftWidth: 3,
+            borderLeftColor: '#d0d7de',
+          }}
+        >
+          {blockquote.children.map((child, index) =>
+            renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+          )}
+        </View>
+      );
+    }
+    case 'thematic_break': {
+      // 中文注释：分隔线节点需要落地成一条横线，避免 `---` / `***` 在 RN 中无输出。
+      return (
+        <View
+          key={key}
+          style={{
+            marginBottom: 12,
+            borderBottomWidth: 1,
+            borderBottomColor: '#d0d7de',
+          }}
+        />
+      );
+    }
     case 'math_block': {
       const mathBlock = node as SupramarkMathBlockNode;
       // 如果禁用了 Math Feature，则降级为普通代码块展示原始 TeX
@@ -396,6 +430,35 @@ function renderNode(
             </Text>
           )}
           {container.children.map((child, index) =>
+            renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+          )}
+        </View>
+      );
+    }
+    case 'input': {
+      const input = node as SupramarkInputNode;
+      // 中文注释：通用 input 块先渲染为信息卡片，保证 `%%%...%%%` 在 RN 端至少可见。
+      const dataText =
+        input.data && Object.keys(input.data).length > 0 ? JSON.stringify(input.data, null, 2) : '';
+
+      return (
+        <View
+          key={key}
+          style={{
+            marginBottom: 8,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: '#d0d7de',
+            borderRadius: 6,
+            backgroundColor: '#f6f8fa',
+          }}
+        >
+          <Text style={[styles.listItemText, { fontWeight: '600', marginBottom: 4 }]}>
+            %%%{input.name}
+            {input.params ? ` ${input.params}` : ''}
+          </Text>
+          {dataText ? <Text style={styles.code}>{dataText}</Text> : null}
+          {input.children.map((child, index) =>
             renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
           )}
         </View>
