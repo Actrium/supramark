@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   LayoutChangeEvent,
   StyleSheet,
   Text,
@@ -24,15 +25,32 @@ export interface DiagramNodeProps {
   diagramConfig?: SupramarkDiagramConfig;
 }
 
+// 聊天列表中的图表统一使用固定预览框，避免 SVG 异步完成后再改高度导致列表抖动。
+const PHONE_DIAGRAM_BOX_SIZE = 300;
+const PAD_DIAGRAM_BOX_SIZE = 500;
+// iPad 常见最小逻辑宽度为 768，使用窗口宽度做简单区分，保证首帧就能选出稳定预览框尺寸。
+const PAD_MIN_SCREEN_WIDTH = 768;
+
 export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig }) => {
   const diagramRender = useDiagramRender();
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+  const windowWidth = Dimensions.get('window').width;
+  // Phone / Pad 分别采用 300 和 500 的固定预览框，高度从第一帧开始就稳定，防止异步 SVG 补高。
+  const previewBoxSize = windowWidth >= PAD_MIN_SCREEN_WIDTH
+    ? PAD_DIAGRAM_BOX_SIZE
+    : PHONE_DIAGRAM_BOX_SIZE;
+
+  // 渲染选项只在节点内容或 diagram 配置变化时重建，避免重复触发异步渲染 effect。
+  const options = useMemo(
+    () => buildRenderOptions(node.engine, node.meta, diagramConfig),
+    [diagramConfig, node.code, node.engine, node.meta]
+  );
 
   const handleLayout = (event: LayoutChangeEvent) => {
-    // 中文注释：图表宽度必须跟随父容器，而不是直接按屏宽渲染，
+    // 图表宽度必须跟随父容器，而不是直接按屏宽渲染，
     // 否则放进聊天气泡等窄容器时会右偏、溢出或触发重复布局。
     const nextWidth = Math.max(0, Math.floor(event.nativeEvent.layout.width));
     setContainerWidth(prev => (prev === nextWidth ? prev : nextWidth));
@@ -75,7 +93,6 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
       }
     };
 
-    const options = buildRenderOptions(node.engine, node.meta, diagramConfig);
     diagramRender.render({ engine: node.engine, code: node.code, options })
       .then(handleResult)
       .catch(err => {
@@ -87,11 +104,19 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
     return () => {
       cancelled = true;
     };
-  }, [node.engine, node.code, node.meta, diagramConfig, diagramRender]);
+  }, [diagramConfig, diagramRender, node.code, node.engine, node.meta, options]);
+
+  // 外层容器高度始终固定，宽度跟随父容器可用宽，确保图表加载前后列表高度不变，
+  // 同时尽量利用横向空间提升图表可读性。
+  const frameWidth = containerWidth > 0 ? containerWidth : previewBoxSize;
+  const frameHeight = previewBoxSize;
 
   if (loading && !svg && !error) {
     return (
-      <View style={styles.placeholder} onLayout={handleLayout}>
+      <View
+        style={[styles.placeholder, styles.previewFrame, { height: frameHeight }]}
+        onLayout={handleLayout}
+      >
         <ActivityIndicator size="small" />
         <Text style={styles.placeholderText}>正在渲染图表（{node.engine}）...</Text>
       </View>
@@ -100,46 +125,39 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
 
   if (error) {
     return (
-      <View style={styles.placeholder} onLayout={handleLayout}>
+      <View
+        style={[styles.placeholder, styles.previewFrame, { height: frameHeight }]}
+        onLayout={handleLayout}
+      >
         <Text style={styles.errorText}>图表渲染错误：{error}</Text>
       </View>
     );
   }
 
   if (svg) {
-    const containerSize = getSvgSize(svg);
-    // 中文注释：首次 layout 前给出保守宽度，避免 0 宽导致的空白；
-    // 一旦量到父容器宽度，就立即切换为真实宽度。
-    const effectiveWidth = containerWidth > 0 ? containerWidth : 320;
-
-    let height = 300;
-    if (containerSize && containerSize.width > 0 && containerSize.height > 0) {
-      height = (containerSize.height / containerSize.width) * effectiveWidth;
-      height = Math.min(height, 500);
-    }
-
     // Ensure SVG has viewBox and no fixed dimensions for proper scaling
     let scalableSvg = svg;
-    if (!/viewBox="[^"]+"/.test(scalableSvg) && containerSize) {
+    const intrinsicSize = getSvgSize(svg);
+    if (!/viewBox="[^"]+"/.test(scalableSvg) && intrinsicSize) {
       scalableSvg = scalableSvg.replace(
         /<svg([^>]*)>/,
-        `<svg$1 viewBox="0 0 ${containerSize.width} ${containerSize.height}">`
+        `<svg$1 viewBox="0 0 ${intrinsicSize.width} ${intrinsicSize.height}">`
       );
     }
-    // 中文注释：去掉根节点固定宽高，让 SvgXml 用父容器尺寸控制最终显示大小。
+    // 去掉根节点固定宽高，让 SvgXml 用父容器尺寸控制最终显示大小。
     scalableSvg = scalableSvg
       .replace(/(<svg[^>]*)\bwidth="[^"]*"/, '$1')
       .replace(/(<svg[^>]*)\bheight="[^"]*"/, '$1');
 
     return (
-      <View style={[styles.diagram, { height }]} onLayout={handleLayout}>
-        <SvgXml xml={scalableSvg} width={effectiveWidth} height={height} />
+      <View style={[styles.diagram, styles.previewFrame, { height: frameHeight }]} onLayout={handleLayout}>
+        <SvgXml xml={scalableSvg} width={frameWidth} height={frameHeight} />
       </View>
     );
   }
 
   return (
-    <View style={styles.placeholder} onLayout={handleLayout}>
+    <View style={[styles.placeholder, styles.previewFrame, { height: frameHeight }]} onLayout={handleLayout}>
       <Text style={styles.placeholderText}>[diagram: {node.engine}]</Text>
     </View>
   );
@@ -211,6 +229,8 @@ const styles = StyleSheet.create({
     width: '100%',
     minWidth: 0,
     marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   placeholder: {
     width: '100%',
@@ -222,6 +242,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewFrame: {
+    width: '100%',
+    alignSelf: 'center',
+    overflow: 'hidden',
   },
   placeholderText: {
     fontSize: 12,

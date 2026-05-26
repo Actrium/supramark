@@ -230,7 +230,7 @@ function renderNode(
     }
     case 'blockquote': {
       const blockquote = node as SupramarkBlockquoteNode;
-      // 中文注释：引用块需要显式渲染为带左边框的容器，避免 RN 端把已解析的内容静默丢弃。
+      // 引用块需要显式渲染为带左边框的容器，避免 RN 端把已解析的内容静默丢弃。
       return (
         <View
           key={key}
@@ -248,7 +248,7 @@ function renderNode(
       );
     }
     case 'thematic_break': {
-      // 中文注释：分隔线节点需要落地成一条横线，避免 `---` / `***` 在 RN 中无输出。
+      // 分隔线节点需要落地成一条横线，避免 `---` / `***` 在 RN 中无输出。
       return (
         <View
           key={key}
@@ -437,7 +437,7 @@ function renderNode(
     }
     case 'input': {
       const input = node as SupramarkInputNode;
-      // 中文注释：通用 input 块先渲染为信息卡片，保证 `%%%...%%%` 在 RN 端至少可见。
+      // 通用 input 块先渲染为信息卡片，保证 `%%%...%%%` 在 RN 端至少可见。
       const dataText =
         input.data && Object.keys(input.data).length > 0 ? JSON.stringify(input.data, null, 2) : '';
 
