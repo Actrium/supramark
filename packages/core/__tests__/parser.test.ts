@@ -74,6 +74,14 @@ describe('parseMarkdown', () => {
       const paragraph = ast.children[0] as any;
       expect(paragraph.children.some((node: any) => node.type === 'inline_code')).toBe(true);
     });
+
+    it('应该解析 br 标签为换行', async () => {
+      const markdown = 'Line 1<br />Line 2';
+      const ast = await parseMarkdown(markdown);
+
+      const paragraph = ast.children[0] as any;
+      expect(paragraph.children.some((node: any) => node.type === 'break')).toBe(true);
+    });
   });
 
   describe('GFM 扩展', () => {

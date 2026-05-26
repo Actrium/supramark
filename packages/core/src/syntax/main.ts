@@ -21,6 +21,31 @@ interface EmojiOptions {
 }
 
 // ----------------------------------------------------------------------------
+// Inline HTML: 仅支持 <br> / <br/> / <br />
+// ----------------------------------------------------------------------------
+
+// 只将 `<br>` 家族标签映射为换行，避免在 `html:false` 前提下放开整套 HTML 能力。
+function inlineBrPlugin(md: MarkdownIt) {
+  md.inline.ruler.before('text', 'inline-br', function inlineBr(state, silent) {
+    const start = state.pos;
+    const src = state.src.slice(start);
+    const match = src.match(/^<br\s*\/?>/i);
+
+    if (!match) {
+      return false;
+    }
+    if (silent) {
+      return true;
+    }
+
+    const token = state.push('hardbreak', 'br', 0);
+    token.markup = match[0];
+    state.pos += match[0].length;
+    return true;
+  });
+}
+
+// ----------------------------------------------------------------------------
 // GFM: 任务列表 & 删除线插件（inline 层）
 // ----------------------------------------------------------------------------
 
@@ -165,6 +190,9 @@ export function registerMainSyntaxPlugins(md: MarkdownIt, config?: SupramarkConf
     if (!hasConfig) return true;
     return isFeatureEnabled(config!, id);
   };
+
+  // 仅补充 `<br>` 的兼容解析，不放开其他 HTML 标签。
+  md.use(inlineBrPlugin);
 
   // GFM：表格 + 任务列表 + 删除线
   if (isFeatureOn('@supramark/feature-gfm')) {
