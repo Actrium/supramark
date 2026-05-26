@@ -39,6 +39,11 @@ export interface SupramarkStyles {
   delete?: TextStyle;
 
   // Tables
+  tableScrollContainer?: ViewStyle;
+  tableScrollContent?: ViewStyle;
+  tableContainer?: ViewStyle;
+  tableTitleContainer?: ViewStyle;
+  tableTitleText?: TextStyle;
   table?: ViewStyle;
   tableRow?: ViewStyle;
   tableCell?: ViewStyle;
@@ -272,10 +277,32 @@ export const defaultStyles = StyleSheet.create({
     textDecorationStyle: 'solid',
   },
   // Table styles
-  table: {
+  tableScrollContainer: {
+    width: '100%',
+  },
+  tableScrollContent: {
+    flexGrow: 1,
+  },
+  tableContainer: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#ddd',
-    marginBottom: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  tableTitleContainer: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#f3f4f6',
+  },
+  tableTitleText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  table: {
   },
   tableRow: {
     flexDirection: 'row',
@@ -283,13 +310,11 @@ export const defaultStyles = StyleSheet.create({
     borderBottomColor: '#ddd',
   },
   tableCell: {
-    flex: 1,
     padding: 8,
     borderRightWidth: 1,
     borderRightColor: '#ddd',
   },
   tableHeaderCell: {
-    backgroundColor: '#f5f5f5',
   },
   tableCellText: {
     fontSize: 14,
@@ -380,7 +405,15 @@ export const darkThemeStyles: SupramarkStyles = {
     color: '#8b949e',
   },
   table: {
+  },
+  tableContainer: {
     borderColor: '#444',
+  },
+  tableTitleContainer: {
+    backgroundColor: '#1f2937',
+  },
+  tableTitleText: {
+    color: '#9ca3af',
   },
   tableRow: {
     borderBottomColor: '#444',
@@ -389,7 +422,6 @@ export const darkThemeStyles: SupramarkStyles = {
     borderRightColor: '#444',
   },
   tableHeaderCell: {
-    backgroundColor: '#2d2d2d',
   },
   tableCellText: {
     color: '#e0e0e0',

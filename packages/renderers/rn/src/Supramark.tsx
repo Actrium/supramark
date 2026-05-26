@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, ReactNode } from 'react';
-import { Text, View, Linking, TouchableOpacity, Dimensions } from 'react-native';
+import { Text, View, Linking, TouchableOpacity, Dimensions, ScrollView } from 'react-native';
 import type {
   SupramarkRootNode,
   SupramarkNode,
@@ -90,6 +90,18 @@ export interface SupramarkProps {
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
 }
+
+// 表格列宽策略：每列至少 120，避免内容过早折行。
+const TABLE_COLUMN_MIN_WIDTH = 120;
+
+// 表格列宽策略：每列最多 360，避免单列吞掉过多横向空间。
+const TABLE_COLUMN_MAX_WIDTH = 360;
+
+// 估算字符宽度，用于在不做原生测量的前提下近似计算列宽。
+const TABLE_COLUMN_CHAR_WIDTH = 8;
+
+// 单元格左右内边距总和，用于把文本宽度换算成最终列宽。
+const TABLE_COLUMN_HORIZONTAL_PADDING = 16;
 
 export const Supramark: React.FC<SupramarkProps> = ({
   markdown,
@@ -541,13 +553,7 @@ function renderNode(
     }
     case 'table': {
       const table = node as SupramarkTableNode;
-      return (
-        <View key={key} style={styles.table}>
-          {table.children.map((row, index) =>
-            renderNode(row, index, styles, config, onOpenHtmlPage, containerRenderers)
-          )}
-        </View>
-      );
+      return renderTableNode(table, key, styles, config);
     }
     case 'table_row': {
       const row = node as SupramarkTableRowNode;
@@ -713,6 +719,220 @@ function headingStyle(
     default:
       return styles.h4;
   }
+}
+
+/**
+ * RN 端表格使用专用渲染，按列估算宽度并在超出时启用横向滚动。
+ */
+function renderTableNode(
+  table: SupramarkTableNode,
+  key: number,
+  styles: ReturnType<typeof mergeStyles>,
+  config?: SupramarkConfig
+): React.ReactNode {
+  // 先根据整张表的文本内容估算每一列宽度，避免继续走均分列宽策略。
+  const columnWidths = estimateTableColumnWidths(table);
+  const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+
+  return (
+    <View key={key} style={styles.tableContainer}>
+      <View style={styles.tableTitleContainer}>
+        <Text style={styles.tableTitleText}>表格</Text>
+      </View>
+      <ScrollView
+        horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
+        showsHorizontalScrollIndicator
+        style={styles.tableScrollContainer}
+        contentContainerStyle={styles.tableScrollContent}
+      >
+        <View style={[styles.table, { width: totalWidth }]}>
+          {(table.children as SupramarkTableRowNode[]).map((row, rowIndex) =>
+            renderTableRowNode(
+              row,
+              rowIndex,
+              columnWidths,
+              styles,
+              config,
+              rowIndex === table.children.length - 1
+            )
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * 表格行使用统一的列宽数组，保证同一列在所有行里宽度一致。
+ */
+function renderTableRowNode(
+  row: SupramarkTableRowNode,
+  key: number,
+  columnWidths: number[],
+  styles: ReturnType<typeof mergeStyles>,
+  config?: SupramarkConfig,
+  isLastRow?: boolean
+): React.ReactNode {
+  // 最后一行不再绘制底部分隔线，避免形成表格主体的外边框。
+  const rowStyle = [styles.tableRow, isLastRow && { borderBottomWidth: 0 }];
+
+  return (
+    <View key={key} style={rowStyle}>
+      {columnWidths.map((columnWidth, columnIndex) => {
+        const cell = row.children[columnIndex] as SupramarkTableCellNode | undefined;
+
+        // 缺失单元格时补空白列，保证整行列数和表格宽度保持一致。
+        if (!cell) {
+          return (
+            <View
+              key={columnIndex}
+              style={[
+                styles.tableCell,
+                createTableCellWidthStyle(columnWidth),
+                // 最后一列不再绘制右侧分隔线，避免形成表格主体的外边框。
+                columnIndex === columnWidths.length - 1 && { borderRightWidth: 0 },
+              ]}
+            />
+          );
+        }
+
+        return renderTableCellNode(
+          cell,
+          columnIndex,
+          columnWidth,
+          styles,
+          config,
+          columnIndex === columnWidths.length - 1
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * 单元格宽度固定为列宽，文本在列宽内换行而不是继续压缩整列。
+ */
+function renderTableCellNode(
+  cell: SupramarkTableCellNode,
+  key: number,
+  columnWidth: number,
+  styles: ReturnType<typeof mergeStyles>,
+  config?: SupramarkConfig,
+  isLastColumn?: boolean
+): React.ReactNode {
+  const cellStyle = [
+    styles.tableCell,
+    createTableCellWidthStyle(columnWidth),
+    isLastColumn && { borderRightWidth: 0 },
+    cell.header && styles.tableHeaderCell,
+  ];
+  const textStyle = [
+    styles.tableCellText,
+    cell.header && styles.tableHeaderText,
+    cell.align === 'center' && styles.textCenter,
+    cell.align === 'right' && styles.textRight,
+  ];
+
+  return (
+    <View key={key} style={cellStyle}>
+      <Text style={textStyle}>{renderInlineNodes(cell.children, styles, config)}</Text>
+    </View>
+  );
+}
+
+/**
+ * 列宽固定后显式关闭 flex 均分，避免默认 `flex: 1` 再次把列压回平均分配。
+ */
+function createTableCellWidthStyle(columnWidth: number) {
+  return {
+    width: columnWidth,
+    minWidth: columnWidth,
+    maxWidth: columnWidth,
+    flexBasis: columnWidth,
+    flexGrow: 0,
+    flexShrink: 0,
+  } as const;
+}
+
+/**
+ * 通过扫描所有行的文本内容估算每列宽度，并限制在固定最小/最大范围内。
+ */
+function estimateTableColumnWidths(table: SupramarkTableNode): number[] {
+  const rows = table.children as SupramarkTableRowNode[];
+  const columnCount = Math.max(0, ...rows.map(row => row.children.length));
+
+  return Array.from({ length: columnCount }, (_, columnIndex) => {
+    const longestCellTextLength = rows.reduce((maxLength, row) => {
+      const cell = row.children[columnIndex] as SupramarkTableCellNode | undefined;
+
+      // 当前行没有这一列时跳过，避免把空单元格也算进宽度估算。
+      if (!cell) {
+        return maxLength;
+      }
+
+      const cellTextLength = extractPlainTextFromNodes(cell.children).trim().length;
+      return Math.max(maxLength, cellTextLength);
+    }, 0);
+
+    // 空列仍然保留最小宽度，避免边框和布局塌掉。
+    if (longestCellTextLength === 0) {
+      return TABLE_COLUMN_MIN_WIDTH;
+    }
+
+    const estimatedWidth =
+      longestCellTextLength * TABLE_COLUMN_CHAR_WIDTH + TABLE_COLUMN_HORIZONTAL_PADDING;
+    return clamp(estimatedWidth, TABLE_COLUMN_MIN_WIDTH, TABLE_COLUMN_MAX_WIDTH);
+  });
+}
+
+/**
+ * 把 inline 节点树拍平成纯文本，用于列宽估算。
+ */
+function extractPlainTextFromNodes(nodes: SupramarkNode[]): string {
+  return nodes.map(node => extractPlainTextFromNode(node)).join('');
+}
+
+/**
+ * 针对常见 inline 节点提取文本内容，保证粗体、链接、删除线等也能参与列宽估算。
+ */
+function extractPlainTextFromNode(node: SupramarkNode): string {
+  switch (node.type) {
+    case 'text':
+      return (node as SupramarkTextNode).value;
+    case 'strong':
+    case 'emphasis':
+    case 'link':
+    case 'delete':
+      return extractPlainTextFromNodes(
+        (
+          node as
+            | SupramarkStrongNode
+            | SupramarkEmphasisNode
+            | SupramarkLinkNode
+            | SupramarkDeleteNode
+        ).children
+      );
+    case 'inline_code':
+    case 'math_inline':
+      return (node as SupramarkInlineCodeNode | SupramarkMathInlineNode).value;
+    case 'image': {
+      const imageNode = node as SupramarkImageNode;
+      return imageNode.alt || imageNode.url;
+    }
+    case 'break':
+      return ' ';
+    default:
+      return '';
+  }
+}
+
+/**
+ * 统一限制列宽上下界，避免极端内容把布局拉爆或压得过窄。
+ */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 /**
