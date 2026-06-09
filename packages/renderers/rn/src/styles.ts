@@ -318,6 +318,7 @@ export const defaultStyles = StyleSheet.create({
   },
   tableCellText: {
     fontSize: 14,
+    lineHeight: 22,
   },
   tableHeaderText: {
     fontWeight: '600',

@@ -265,7 +265,8 @@ function renderNode(
         <View
           key={key}
           style={{
-            marginBottom: 12,
+            marginTop: 16,
+            marginBottom: 16,
             borderBottomWidth: 1,
             borderBottomColor: '#d0d7de',
           }}
