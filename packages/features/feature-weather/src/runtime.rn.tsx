@@ -66,6 +66,9 @@ const localStyles = StyleSheet.create({
     paddingBottom: 28,
     alignItems: 'center',
   },
+  contentDark: {
+    backgroundColor: 'rgba(13, 17, 23, 0.72)',
+  },
   weekday: {
     fontSize: 14,
     fontWeight: '600',
@@ -111,6 +114,15 @@ const localStyles = StyleSheet.create({
     color: '#565656',
     textAlign: 'center',
   },
+  textDark: {
+    color: '#f0f6fc',
+  },
+  mutedTextDark: {
+    color: '#c9d1d9',
+  },
+  accentTextDark: {
+    color: '#79c0ff',
+  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -119,6 +131,9 @@ const localStyles = StyleSheet.create({
     paddingVertical: 14,
     columnGap: 2,
     backgroundColor: '#E9F0FC',
+  },
+  footerDark: {
+    backgroundColor: '#161b22',
   },
   locationRow: {
     flexDirection: 'row',
@@ -145,6 +160,9 @@ const localStyles = StyleSheet.create({
     width: 78,
     height: 24,
   },
+  unitSwitchDark: {
+    backgroundColor: '#30363d',
+  },
   unitOption: {
     width: 39,
     alignItems: 'center',
@@ -153,6 +171,9 @@ const localStyles = StyleSheet.create({
     width: 39,
     borderRadius: 12,
     backgroundColor: '#5b7bf5',
+  },
+  unitOptionActiveDark: {
+    backgroundColor: '#1f6feb',
   },
   unitOptionText: {
     fontSize: 14,
@@ -169,6 +190,9 @@ const localStyles = StyleSheet.create({
     padding: 12,
     marginVertical: 12,
   },
+  errorDark: {
+    backgroundColor: '#2d1517',
+  },
   errorTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -179,6 +203,9 @@ const localStyles = StyleSheet.create({
     fontSize: 12,
     color: '#c62828',
   },
+  errorTextDark: {
+    color: '#ffb4ad',
+  },
   errorCode: {
     fontFamily: 'monospace',
     fontSize: 11,
@@ -187,6 +214,10 @@ const localStyles = StyleSheet.create({
     padding: 8,
     borderRadius: 4,
     marginTop: 8,
+  },
+  errorCodeDark: {
+    color: '#ffd8d3',
+    backgroundColor: '#161b22',
   },
 });
 
@@ -202,38 +233,61 @@ type UnitType = 'metric' | 'imperial';
 type WeatherCardProps = {
   location: string;
   initialUnits: UnitType;
+  theme: 'light' | 'dark';
 };
 
-function WeatherCard({ location, initialUnits }: WeatherCardProps) {
+function WeatherCard({ location, initialUnits, theme }: WeatherCardProps) {
   // 组件内部维护当前单位，点击开关时只切换展示状态。
   const [currentUnits, setCurrentUnits] = React.useState<UnitType>(initialUnits);
+
+  // 当前主题只影响天气卡片自身色板，不改变天气数据和单位切换状态。
+  const isDark = theme === 'dark';
 
   const weather = getMockWeather(location, currentUnits);
 
   return (
     <View style={localStyles.container}>
-      <ImageBackground source={weatherBackground} resizeMode="cover" style={localStyles.content}>
-        <Text style={localStyles.weekday}>{weather.weekday}</Text>
-        <Text style={localStyles.date}>{weather.dateLabel}</Text>
-        <Text style={localStyles.summary}>{weather.conditionText}</Text>
-        <Text style={localStyles.primaryIcon}>{weather.conditionIcon}</Text>
-        <Text style={localStyles.range}>
+      <ImageBackground
+        source={weatherBackground}
+        resizeMode="cover"
+        style={[localStyles.content, isDark && localStyles.contentDark]}
+        imageStyle={isDark ? { opacity: 0.35 } : undefined}
+      >
+        <Text style={[localStyles.weekday, isDark && localStyles.textDark]}>{weather.weekday}</Text>
+        <Text style={[localStyles.date, isDark && localStyles.textDark]}>{weather.dateLabel}</Text>
+        <Text style={[localStyles.summary, isDark && localStyles.mutedTextDark]}>
+          {weather.conditionText}
+        </Text>
+        <Text style={[localStyles.primaryIcon, isDark && localStyles.textDark]}>
+          {weather.conditionIcon}
+        </Text>
+        <Text style={[localStyles.range, isDark && localStyles.accentTextDark]}>
           {weather.lowTemp}
           {weather.unit}/{weather.highTemp}
           {weather.unit}
         </Text>
-        <Text style={localStyles.secondaryIcon}>{weather.conditionIcon}</Text>
-        <Text style={localStyles.secondarySummary}>{weather.conditionSecondaryText}</Text>
-        <Text style={localStyles.windLevel}>{weather.windLevel}</Text>
+        <Text style={[localStyles.secondaryIcon, isDark && localStyles.textDark]}>
+          {weather.conditionIcon}
+        </Text>
+        <Text style={[localStyles.secondarySummary, isDark && localStyles.mutedTextDark]}>
+          {weather.conditionSecondaryText}
+        </Text>
+        <Text style={[localStyles.windLevel, isDark && localStyles.mutedTextDark]}>
+          {weather.windLevel}
+        </Text>
       </ImageBackground>
-      <View style={localStyles.footer}>
+      <View style={[localStyles.footer, isDark && localStyles.footerDark]}>
         <View style={localStyles.locationRow}>
           <Image source={locationIcon} style={localStyles.locationIcon} />
-          <Text style={localStyles.location} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={[localStyles.location, isDark && localStyles.textDark]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {location}
           </Text>
         </View>
-        <View style={localStyles.unitSwitch}>
+        <View style={[localStyles.unitSwitch, isDark && localStyles.unitSwitchDark]}>
           {unitOptions.map(option => {
             const selected = currentUnits === option.key;
 
@@ -241,10 +295,18 @@ function WeatherCard({ location, initialUnits }: WeatherCardProps) {
               <Pressable
                 key={option.key}
                 onPress={() => setCurrentUnits(option.key)}
-                style={[localStyles.unitOption, selected && localStyles.unitOptionActive]}
+                style={[
+                  localStyles.unitOption,
+                  selected && localStyles.unitOptionActive,
+                  selected && isDark && localStyles.unitOptionActiveDark,
+                ]}
               >
                 <Text
-                  style={[localStyles.unitOptionText, selected && localStyles.unitOptionTextActive]}
+                  style={[
+                    localStyles.unitOptionText,
+                    isDark && localStyles.textDark,
+                    selected && localStyles.unitOptionTextActive,
+                  ]}
                 >
                   {option.label}
                 </Text>
@@ -260,17 +322,31 @@ function WeatherCard({ location, initialUnits }: WeatherCardProps) {
 /**
  * RN 渲染器 for :::weather
  */
-export function renderWeatherContainerRN({ node, key }: ContainerRNRenderArgs): React.ReactNode {
+export function renderWeatherContainerRN({
+  node,
+  key,
+  theme = 'light',
+}: ContainerRNRenderArgs): React.ReactNode {
   const data = (node?.data ?? {}) as WeatherData;
   const { location, units = 'metric', parseError, rawConfig } = data;
+  // 错误态与正常卡片使用同一个主题来源，避免浅色错误块插进深色内容。
+  const isDark = theme === 'dark';
 
   // 解析错误时显示错误信息
   if (parseError) {
     return (
-      <View key={key} style={localStyles.error}>
-        <Text style={localStyles.errorTitle}>⚠️ Weather 配置错误</Text>
-        <Text style={localStyles.errorText}>{parseError}</Text>
-        {rawConfig && <Text style={localStyles.errorCode}>{rawConfig}</Text>}
+      <View key={key} style={[localStyles.error, isDark && localStyles.errorDark]}>
+        <Text style={[localStyles.errorTitle, isDark && localStyles.errorTextDark]}>
+          ⚠️ Weather 配置错误
+        </Text>
+        <Text style={[localStyles.errorText, isDark && localStyles.errorTextDark]}>
+          {parseError}
+        </Text>
+        {rawConfig && (
+          <Text style={[localStyles.errorCode, isDark && localStyles.errorCodeDark]}>
+            {rawConfig}
+          </Text>
+        )}
       </View>
     );
   }
@@ -278,12 +354,16 @@ export function renderWeatherContainerRN({ node, key }: ContainerRNRenderArgs): 
   // 缺少必要配置
   if (!location) {
     return (
-      <View key={key} style={localStyles.error}>
-        <Text style={localStyles.errorTitle}>⚠️ 缺少 location 配置</Text>
-        <Text style={localStyles.errorText}>请在配置中指定 location 字段</Text>
+      <View key={key} style={[localStyles.error, isDark && localStyles.errorDark]}>
+        <Text style={[localStyles.errorTitle, isDark && localStyles.errorTextDark]}>
+          ⚠️ 缺少 location 配置
+        </Text>
+        <Text style={[localStyles.errorText, isDark && localStyles.errorTextDark]}>
+          请在配置中指定 location 字段
+        </Text>
       </View>
     );
   }
 
-  return <WeatherCard key={key} location={location} initialUnits={units} />;
+  return <WeatherCard key={key} location={location} initialUnits={units} theme={theme} />;
 }

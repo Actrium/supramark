@@ -19,6 +19,8 @@ export interface SupramarkStyles {
   h4?: TextStyle;
   h5?: TextStyle;
   h6?: TextStyle;
+  blockquote?: ViewStyle;
+  thematicBreak?: ViewStyle;
 
   // Code blocks
   codeBlock?: ViewStyle;
@@ -57,6 +59,24 @@ export interface SupramarkStyles {
   diagramPlaceholder?: ViewStyle;
   diagramPlaceholderText?: TextStyle;
 
+  // Input blocks
+  inputBlock?: ViewStyle;
+  inputTitle?: TextStyle;
+
+  // Error display
+  errorContainer?: ViewStyle;
+  errorBox?: ViewStyle;
+  errorHeader?: ViewStyle;
+  errorTitle?: TextStyle;
+  errorBody?: ViewStyle;
+  errorMessage?: TextStyle;
+  errorSection?: ViewStyle;
+  errorSectionTitle?: TextStyle;
+  errorDetailsScroll?: ViewStyle;
+  errorDetailsText?: TextStyle;
+  errorStackScroll?: ViewStyle;
+  errorStackText?: TextStyle;
+
   // Map
   mapCard?: ViewStyle;
   mapCardHeader?: ViewStyle;
@@ -78,6 +98,17 @@ export interface SupramarkStyles {
 
   // Container
   root?: ViewStyle;
+}
+
+/**
+ * 宿主可传入的正文样式 token，只描述内容文字，不暴露表格、分割线等结构样式 key。
+ */
+export interface SupramarkContentStyle {
+  color?: TextStyle['color'];
+  headingColor?: TextStyle['color'];
+  fontFamily?: TextStyle['fontFamily'];
+  fontSize?: TextStyle['fontSize'];
+  lineHeight?: TextStyle['lineHeight'];
 }
 
 /**
@@ -118,6 +149,18 @@ export const defaultStyles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 4,
   },
+  blockquote: {
+    marginBottom: 8,
+    paddingLeft: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#d0d7de',
+  },
+  thematicBreak: {
+    marginTop: 16,
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#d0d7de',
+  },
   codeBlock: {
     backgroundColor: '#f5f5f5',
     padding: 8,
@@ -154,6 +197,72 @@ export const defaultStyles = StyleSheet.create({
   diagramPlaceholderText: {
     fontSize: 12,
     color: '#666',
+  },
+  inputBlock: {
+    marginBottom: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#d0d7de',
+    borderRadius: 6,
+    backgroundColor: '#f6f8fa',
+  },
+  inputTitle: {
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  errorContainer: {
+    padding: 12,
+  },
+  errorBox: {
+    borderWidth: 1,
+    borderColor: '#ffccc7',
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  errorHeader: {
+    padding: 12,
+  },
+  errorTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  errorBody: {
+    padding: 12,
+    backgroundColor: '#fff2f0',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#262626',
+    marginBottom: 8,
+  },
+  errorSection: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#ffccc7',
+  },
+  errorSectionTitle: {
+    fontSize: 12,
+    color: '#8c8c8c',
+    marginBottom: 4,
+  },
+  errorDetailsScroll: {
+    maxHeight: 60,
+  },
+  errorDetailsText: {
+    fontSize: 12,
+    color: '#595959',
+    fontFamily: 'monospace',
+  },
+  errorStackScroll: {
+    maxHeight: 100,
+  },
+  errorStackText: {
+    fontSize: 10,
+    color: '#8c8c8c',
+    fontFamily: 'monospace',
   },
   mapCard: {
     backgroundColor: '#f8f9fa',
@@ -302,8 +411,7 @@ export const defaultStyles = StyleSheet.create({
     fontWeight: '500',
     color: '#6b7280',
   },
-  table: {
-  },
+  table: {},
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
@@ -314,8 +422,7 @@ export const defaultStyles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: '#ddd',
   },
-  tableHeaderCell: {
-  },
+  tableHeaderCell: {},
   tableCellText: {
     fontSize: 14,
     lineHeight: 22,
@@ -365,6 +472,86 @@ export function mergeStyles(customStyles?: SupramarkStyles): typeof defaultStyle
 }
 
 /**
+ * 按样式 key 合并多个样式层，保证后一个层只覆盖具体字段，不会整块抹掉前一个层。
+ */
+export function mergeStyleLayers(
+  ...styleLayers: Array<SupramarkStyles | undefined>
+): SupramarkStyles {
+  const merged: Record<string, any> = {};
+
+  styleLayers.forEach(styleLayer => {
+    // 空样式层不参与合并。
+    if (!styleLayer) {
+      return;
+    }
+
+    Object.keys(styleLayer).forEach(key => {
+      const layerStyle = styleLayer[key as keyof SupramarkStyles];
+
+      // 当前样式 key 没有值时跳过，避免把前面的样式层清空。
+      if (!layerStyle) {
+        return;
+      }
+
+      const previousStyle = merged[key] || {};
+      merged[key] = { ...previousStyle, ...layerStyle };
+    });
+  });
+
+  return merged as SupramarkStyles;
+}
+
+/**
+ * 将宿主传入的正文 token 转换为 Supramark 内部样式覆盖。
+ */
+export function createContentStyles(contentStyle?: SupramarkContentStyle): SupramarkStyles {
+  // 没有正文 token 时不生成额外覆盖，保持默认主题样式。
+  if (!contentStyle) {
+    return {};
+  }
+
+  // 正文文本 token 会应用到段落、列表、代码文本和表格内容。
+  const bodyText: TextStyle = {
+    color: contentStyle.color,
+    fontFamily: contentStyle.fontFamily,
+    fontSize: contentStyle.fontSize,
+    lineHeight: contentStyle.lineHeight,
+  };
+
+  // 标题只继承颜色和字体族，保留 Supramark 自己的标题层级字号。
+  const headingText: TextStyle = {
+    color: contentStyle.headingColor ?? contentStyle.color,
+    fontFamily: contentStyle.fontFamily,
+  };
+
+  // 内联强调节点需要显式颜色，避免嵌套 Text 在深色模式下回退到系统默认黑色。
+  const inlineText: TextStyle = {
+    color: contentStyle.color,
+    fontFamily: contentStyle.fontFamily,
+  };
+
+  return {
+    paragraph: bodyText,
+    h1: headingText,
+    h2: headingText,
+    h3: headingText,
+    h4: headingText,
+    h5: headingText,
+    h6: headingText,
+    code: bodyText,
+    listItemText: bodyText,
+    bullet: bodyText,
+    strong: inlineText,
+    emphasis: inlineText,
+    inlineCode: bodyText,
+    delete: inlineText,
+    tableCellText: bodyText,
+    tableHeaderText: headingText,
+    inputTitle: headingText,
+  };
+}
+
+/**
  * Dark 主题样式
  */
 export const darkThemeStyles: SupramarkStyles = {
@@ -395,8 +582,26 @@ export const darkThemeStyles: SupramarkStyles = {
   codeBlock: {
     backgroundColor: '#2d2d2d',
   },
+  blockquote: {
+    borderLeftColor: '#30363d',
+  },
+  thematicBreak: {
+    borderBottomColor: '#21262d',
+  },
+  strong: {
+    color: '#e6edf3',
+  },
+  emphasis: {
+    color: '#e6edf3',
+  },
   inlineCode: {
     backgroundColor: '#2d2d2d',
+    color: '#e0e0e0',
+  },
+  bullet: {
+    color: '#e0e0e0',
+  },
+  listItemText: {
     color: '#e0e0e0',
   },
   link: {
@@ -405,30 +610,62 @@ export const darkThemeStyles: SupramarkStyles = {
   imageText: {
     color: '#8b949e',
   },
-  table: {
-  },
-  tableContainer: {
-    borderColor: '#444',
-  },
-  tableTitleContainer: {
-    backgroundColor: '#1f2937',
-  },
-  tableTitleText: {
-    color: '#9ca3af',
-  },
-  tableRow: {
-    borderBottomColor: '#444',
-  },
-  tableCell: {
-    borderRightColor: '#444',
-  },
-  tableHeaderCell: {
-  },
-  tableCellText: {
+  delete: {
     color: '#e0e0e0',
   },
+  inputBlock: {
+    borderColor: '#30363d',
+    backgroundColor: '#161b22',
+  },
+  inputTitle: {
+    color: '#f0f6fc',
+  },
+  errorBox: {
+    borderColor: '#6e3b2f',
+    backgroundColor: '#161b22',
+  },
+  errorBody: {
+    backgroundColor: '#2a1414',
+  },
+  errorMessage: {
+    color: '#ffd8d3',
+  },
+  errorSection: {
+    borderTopColor: '#6e3b2f',
+  },
+  errorSectionTitle: {
+    color: '#f2a8a1',
+  },
+  errorDetailsText: {
+    color: '#ffd8d3',
+  },
+  errorStackText: {
+    color: '#f2a8a1',
+  },
+  table: {},
+  tableContainer: {
+    borderColor: '#30363d',
+  },
+  tableTitleContainer: {
+    backgroundColor: '#161b22',
+  },
+  tableTitleText: {
+    color: '#c9d1d9',
+  },
+  tableRow: {
+    borderBottomColor: '#30363d',
+  },
+  tableCell: {
+    borderRightColor: '#30363d',
+  },
+  tableHeaderCell: {
+    backgroundColor: '#161b22',
+  },
+  tableCellText: {
+    color: '#c9d1d9',
+  },
   tableHeaderText: {
-    color: '#ffffff',
+    color: '#f0f6fc',
   },
   diagramPlaceholder: {
     borderColor: '#444',
@@ -450,17 +687,11 @@ export const darkThemeStyles: SupramarkStyles = {
   mapCardInfo: {
     color: '#e6edf3',
   },
-  root: {
-    backgroundColor: '#0d1117',
-  },
 };
 
 /**
  * Light 主题样式（默认主题的别名）
  */
 export const lightThemeStyles: SupramarkStyles = {
-  // Light 主题使用默认样式，这里可以做一些微调
-  root: {
-    backgroundColor: '#ffffff',
-  },
+  // Light 主题使用默认样式，根容器背景由宿主控制。
 };

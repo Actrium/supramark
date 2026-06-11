@@ -41,19 +41,26 @@ import {
 import { DiagramNode } from './DiagramNode';
 import { MathBlock, MathInline } from './math';
 import {
+  type SupramarkContentStyle,
   type SupramarkStyles,
+  createContentStyles,
   defaultStyles,
+  mergeStyleLayers,
   mergeStyles,
   darkThemeStyles,
   lightThemeStyles,
 } from './styles';
 import { ErrorBoundary, ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 
+// RN 渲染层当前只需要区分浅色和深色两种主题。
+type SupramarkThemeName = 'light' | 'dark';
+
 export interface ContainerRendererRN {
   (args: {
     node: any;
     key: number;
     styles: ReturnType<typeof mergeStyles>;
+    theme: SupramarkThemeName;
     config?: SupramarkConfig;
     onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
     renderNode: (node: SupramarkNode, key: number) => React.ReactNode;
@@ -68,6 +75,8 @@ export interface SupramarkProps {
   ast?: SupramarkRootNode;
   /** 自定义样式（覆盖默认样式） */
   styles?: SupramarkStyles;
+  /** 宿主正文样式 token，用于统一正文文字颜色、字号和行高 */
+  contentStyle?: SupramarkContentStyle;
   /** 主题：'light' | 'dark' | 自定义样式对象 */
   theme?: 'light' | 'dark' | SupramarkStyles;
   /** Feature 配置（用于按需启用/禁用图表等扩展能力） */
@@ -103,10 +112,17 @@ const TABLE_COLUMN_CHAR_WIDTH = 8;
 // 单元格左右内边距总和，用于把文本宽度换算成最终列宽。
 const TABLE_COLUMN_HORIZONTAL_PADDING = 16;
 
+// 最后一个块节点不保留段后距，避免宿主容器底部多出额外空白。
+const LAST_BLOCK_STYLE = { marginBottom: 0 } as const;
+
+// 定义列表条目默认仍保留条目间距，最后一项再由 LAST_BLOCK_STYLE 清掉。
+const DEFINITION_ITEM_STYLE = { marginBottom: 8 } as const;
+
 export const Supramark: React.FC<SupramarkProps> = ({
   markdown,
   ast,
   styles: customStyles,
+  contentStyle,
   theme,
   config,
   onError,
@@ -117,7 +133,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   const [root, setRoot] = useState<SupramarkRootNode | null>(ast ?? null);
   const [parseError, setParseError] = useState<ErrorInfo | null>(null);
 
-  // 合并样式：theme -> customStyles -> defaultStyles
+  // 合并样式：theme -> contentStyle -> customStyles -> defaultStyles
   const mergedStyles = useMemo(() => {
     let themeStyles: SupramarkStyles | undefined;
 
@@ -127,14 +143,15 @@ export const Supramark: React.FC<SupramarkProps> = ({
       themeStyles = theme;
     }
 
-    // 如果同时提供了 theme 和 customStyles，customStyles 优先级更高
-    const finalCustomStyles = {
-      ...themeStyles,
-      ...customStyles,
-    };
+    // contentStyle 是常规宿主入口，customStyles 作为逃生口保留最高优先级。
+    const contentStyles = createContentStyles(contentStyle);
+    const finalCustomStyles = mergeStyleLayers(themeStyles, contentStyles, customStyles);
 
     return mergeStyles(finalCustomStyles);
-  }, [customStyles, theme]);
+  }, [contentStyle, customStyles, theme]);
+
+  // 传给 RN container runtime 的主题名只表达明暗模式，不影响自定义 styles 的合并优先级。
+  const resolvedThemeName: SupramarkThemeName = theme === 'dark' ? 'dark' : 'light';
 
   useEffect(() => {
     if (ast) {
@@ -176,7 +193,10 @@ export const Supramark: React.FC<SupramarkProps> = ({
     };
   }, [markdown, ast, onError]);
 
-  const mergedContainerRenderers = useMemo(() => ({ ...(containerRenderers ?? {}) }), [containerRenderers]);
+  const mergedContainerRenderers = useMemo(
+    () => ({ ...(containerRenderers ?? {}) }),
+    [containerRenderers]
+  );
 
   // 解析错误降级：显示错误信息或原始 markdown
   if (parseError) {
@@ -185,7 +205,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     }
     return (
       <View>
-        <ErrorDisplay error={parseError} />
+        <ErrorDisplay error={parseError} styles={mergedStyles} />
         <View style={mergedStyles.codeBlock}>
           <Text style={mergedStyles.code}>{markdown}</Text>
         </View>
@@ -199,35 +219,53 @@ export const Supramark: React.FC<SupramarkProps> = ({
   }
 
   return (
-    <ErrorBoundary onError={onError} fallback={errorFallback}>
+    <ErrorBoundary onError={onError} fallback={errorFallback} styles={mergedStyles}>
       <View style={mergedStyles.root}>
+        {/* 根节点最后一个块不保留段后距，避免宿主容器底部多出空白。 */}
         {root.children.map((node, index) =>
-          renderNode(node, index, mergedStyles, config, onOpenHtmlPage, mergedContainerRenderers)
+          renderNode(
+            node,
+            index,
+            mergedStyles,
+            config,
+            onOpenHtmlPage,
+            mergedContainerRenderers,
+            resolvedThemeName,
+            index === root.children.length - 1
+          )
         )}
       </View>
     </ErrorBoundary>
   );
 };
 
+/**
+ * 渲染块级节点，isLastBlock 用来清掉当前容器内最后一个块节点的尾部间距。
+ */
 function renderNode(
   node: SupramarkNode,
   key: number,
   styles: ReturnType<typeof mergeStyles>,
   config?: SupramarkConfig,
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void,
-  containerRenderers?: Record<string, ContainerRendererRN>
+  containerRenderers?: Record<string, ContainerRendererRN>,
+  themeName: SupramarkThemeName = 'light',
+  isLastBlock = false
 ): React.ReactNode {
   switch (node.type) {
     case 'paragraph':
       return (
-        <Text key={key} style={styles.paragraph}>
+        <Text key={key} style={[styles.paragraph, isLastBlock && LAST_BLOCK_STYLE]}>
           {renderInlineNodes(node.children, styles, config)}
         </Text>
       );
     case 'heading': {
       const heading = node as SupramarkHeadingNode;
       return (
-        <Text key={key} style={headingStyle(heading.depth, styles)}>
+        <Text
+          key={key}
+          style={[headingStyle(heading.depth, styles), isLastBlock && LAST_BLOCK_STYLE]}
+        >
           {renderInlineNodes(heading.children, styles, config)}
         </Text>
       );
@@ -235,7 +273,7 @@ function renderNode(
     case 'code': {
       const codeBlock = node as SupramarkCodeNode;
       return (
-        <View key={key} style={styles.codeBlock}>
+        <View key={key} style={[styles.codeBlock, isLastBlock && LAST_BLOCK_STYLE]}>
           <Text style={styles.code}>{codeBlock.value}</Text>
         </View>
       );
@@ -244,40 +282,31 @@ function renderNode(
       const blockquote = node as SupramarkBlockquoteNode;
       // 引用块需要显式渲染为带左边框的容器，避免 RN 端把已解析的内容静默丢弃。
       return (
-        <View
-          key={key}
-          style={{
-            marginBottom: 8,
-            paddingLeft: 12,
-            borderLeftWidth: 3,
-            borderLeftColor: '#d0d7de',
-          }}
-        >
+        <View key={key} style={[styles.blockquote, isLastBlock && LAST_BLOCK_STYLE]}>
           {blockquote.children.map((child, index) =>
-            renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              index,
+              styles,
+              config,
+              onOpenHtmlPage,
+              containerRenderers,
+              themeName,
+              index === blockquote.children.length - 1
+            )
           )}
         </View>
       );
     }
     case 'thematic_break': {
       // 分隔线节点需要落地成一条横线，避免 `---` / `***` 在 RN 中无输出。
-      return (
-        <View
-          key={key}
-          style={{
-            marginTop: 16,
-            marginBottom: 16,
-            borderBottomWidth: 1,
-            borderBottomColor: '#d0d7de',
-          }}
-        />
-      );
+      return <View key={key} style={[styles.thematicBreak, isLastBlock && LAST_BLOCK_STYLE]} />;
     }
     case 'math_block': {
       const mathBlock = node as SupramarkMathBlockNode;
       // 如果禁用了 Math Feature，则降级为普通代码块展示原始 TeX
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
-        return renderDisabledMathBlock(mathBlock, key, styles);
+        return renderDisabledMathBlock(mathBlock, key, styles, isLastBlock);
       }
       return <MathBlock key={key} node={mathBlock} />;
     }
@@ -287,10 +316,19 @@ function renderNode(
       const isOrdered = list.ordered === true;
 
       return (
-        <View key={key} style={styles.list}>
+        <View key={key} style={[styles.list, isLastBlock && LAST_BLOCK_STYLE]}>
           {list.children.map((item, index) => {
             if (item.type !== 'list_item') {
-              return renderNode(item, index, styles, config, onOpenHtmlPage, containerRenderers);
+              return renderNode(
+                item,
+                index,
+                styles,
+                config,
+                onOpenHtmlPage,
+                containerRenderers,
+                themeName,
+                index === list.children.length - 1
+              );
             }
 
             const listItem = item as SupramarkListItemNode;
@@ -304,11 +342,23 @@ function renderNode(
                 : '•';
 
             return (
-              <View key={index} style={styles.listItem}>
+              <View
+                key={index}
+                style={[styles.listItem, index === list.children.length - 1 && LAST_BLOCK_STYLE]}
+              >
                 <Text style={styles.bullet}>{marker}</Text>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   {listItem.children.map((child, childIndex) =>
-                    renderNode(child, childIndex, styles, config, onOpenHtmlPage, containerRenderers)
+                    renderNode(
+                      child,
+                      childIndex,
+                      styles,
+                      config,
+                      onOpenHtmlPage,
+                      containerRenderers,
+                      themeName,
+                      childIndex === listItem.children.length - 1
+                    )
                   )}
                 </View>
               </View>
@@ -323,11 +373,20 @@ function renderNode(
       const marker = isTaskList ? (item.checked === true ? '☑' : '☐') : '•';
 
       return (
-        <View key={key} style={styles.listItem}>
+        <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
           <Text style={styles.bullet}>{marker}</Text>
           <View style={{ flex: 1, minWidth: 0 }}>
             {item.children.map((child, index) =>
-              renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+              renderNode(
+                child,
+                index,
+                styles,
+                config,
+                onOpenHtmlPage,
+                containerRenderers,
+                themeName,
+                index === item.children.length - 1
+              )
             )}
           </View>
         </View>
@@ -337,7 +396,7 @@ function renderNode(
       const diagram = node as SupramarkDiagramNode;
       // 如果配置中显式禁用了对应图表 Feature，则降级为代码块渲染
       if (!isDiagramFeatureEnabled(config, diagram.engine)) {
-        return renderDisabledDiagram(diagram, key, styles);
+        return renderDisabledDiagram(diagram, key, styles, isLastBlock);
       }
       return <DiagramNode key={key} node={diagram} diagramConfig={config?.diagram} />;
     }
@@ -351,13 +410,23 @@ function renderNode(
           node: container,
           key,
           styles,
+          theme: themeName,
           config,
           onOpenHtmlPage,
           renderNode: (n, k) =>
-            renderNode(n, k, styles, config, onOpenHtmlPage, containerRenderers),
+            renderNode(n, k, styles, config, onOpenHtmlPage, containerRenderers, themeName),
           renderChildren: children =>
             children.map((child, index) =>
-              renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+              renderNode(
+                child,
+                index,
+                styles,
+                config,
+                onOpenHtmlPage,
+                containerRenderers,
+                themeName,
+                index === children.length - 1
+              )
             ),
         });
       }
@@ -372,7 +441,7 @@ function renderNode(
         const data = container.data || {};
         const title = (data.title as string) || container.params || '[HTML 页面]';
         const content = (
-          <View style={styles.listItem}>
+          <View style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
             <Text style={[styles.listItemText, { fontWeight: '600' }]}>{title}</Text>
             <Text style={styles.listItemText}>
               点击卡片以在独立容器中打开 HTML 页面（需要宿主实现 onOpenHtmlPage 回调）。
@@ -398,7 +467,7 @@ function renderNode(
 
         if (!isFeatureGroupEnabled(config, ['@supramark/feature-admonition'])) {
           return (
-            <View key={key} style={styles.listItem}>
+            <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
               {title ? <Text style={styles.listItemText}>{title}</Text> : null}
               <Text style={styles.listItemText}>
                 {renderInlineNodes(container.children, styles, config)}
@@ -412,7 +481,7 @@ function renderNode(
         if (Array.isArray(adOptions.kinds) && adOptions.kinds.length > 0) {
           if (!adOptions.kinds.includes(kind)) {
             return (
-              <View key={key} style={styles.listItem}>
+              <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
                 {title ? <Text style={styles.listItemText}>{title}</Text> : null}
                 <Text style={styles.listItemText}>
                   {renderInlineNodes(container.children, styles, config)}
@@ -423,7 +492,7 @@ function renderNode(
         }
 
         return (
-          <View key={key} style={styles.listItem}>
+          <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
             {title ? (
               <Text style={[styles.listItemText, { fontWeight: '600' }]}>{title}</Text>
             ) : null}
@@ -436,14 +505,23 @@ function renderNode(
 
       // 默认：渲染为通用容器块
       return (
-        <View key={key} style={styles.listItem}>
+        <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
           {container.params && (
             <Text style={[styles.listItemText, { fontWeight: '600' }]}>
               {container.name}: {container.params}
             </Text>
           )}
           {container.children.map((child, index) =>
-            renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              index,
+              styles,
+              config,
+              onOpenHtmlPage,
+              containerRenderers,
+              themeName,
+              index === container.children.length - 1
+            )
           )}
         </View>
       );
@@ -455,24 +533,23 @@ function renderNode(
         input.data && Object.keys(input.data).length > 0 ? JSON.stringify(input.data, null, 2) : '';
 
       return (
-        <View
-          key={key}
-          style={{
-            marginBottom: 8,
-            padding: 12,
-            borderWidth: 1,
-            borderColor: '#d0d7de',
-            borderRadius: 6,
-            backgroundColor: '#f6f8fa',
-          }}
-        >
-          <Text style={[styles.listItemText, { fontWeight: '600', marginBottom: 4 }]}>
+        <View key={key} style={[styles.inputBlock, isLastBlock && LAST_BLOCK_STYLE]}>
+          <Text style={[styles.listItemText, styles.inputTitle]}>
             %%%{input.name}
             {input.params ? ` ${input.params}` : ''}
           </Text>
           {dataText ? <Text style={styles.code}>{dataText}</Text> : null}
           {input.children.map((child, index) =>
-            renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              index,
+              styles,
+              config,
+              onOpenHtmlPage,
+              containerRenderers,
+              themeName,
+              index === input.children.length - 1
+            )
           )}
         </View>
       );
@@ -486,11 +563,17 @@ function renderNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-definition-list'])) {
         // 禁用时，将定义列表退化为普通列表样式
         return (
-          <View key={key} style={styles.list}>
+          <View key={key} style={[styles.list, isLastBlock && LAST_BLOCK_STYLE]}>
             {list.children.map((item, index) => {
               const defItem = item as SupramarkDefinitionItemNode;
               return (
-                <View key={index} style={{ marginBottom: 8 }}>
+                <View
+                  key={index}
+                  style={[
+                    DEFINITION_ITEM_STYLE,
+                    index === list.children.length - 1 && LAST_BLOCK_STYLE,
+                  ]}
+                >
                   <Text style={[styles.listItemText, { fontWeight: '600' }]}>
                     {renderInlineNodes(defItem.term, styles, config)}
                   </Text>
@@ -506,11 +589,17 @@ function renderNode(
         );
       }
       return (
-        <View key={key} style={styles.list}>
+        <View key={key} style={[styles.list, isLastBlock && LAST_BLOCK_STYLE]}>
           {list.children.map((item, index) => {
             const defItem = item as SupramarkDefinitionItemNode;
             return (
-              <View key={index} style={{ marginBottom: 8 }}>
+              <View
+                key={index}
+                style={[
+                  DEFINITION_ITEM_STYLE,
+                  index === list.children.length - 1 && LAST_BLOCK_STYLE,
+                ]}
+              >
                 <Text style={[styles.listItemText, { fontWeight: '600' }]}>
                   {renderInlineNodes(defItem.term, styles, config)}
                 </Text>
@@ -532,21 +621,39 @@ function renderNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-footnote'])) {
         // 禁用脚注 Feature 时，直接渲染为普通段落
         return (
-          <View key={key} style={styles.listItem}>
+          <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
             <View style={{ flex: 1, minWidth: 0 }}>
               {def.children.map((child, index) =>
-                renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+                renderNode(
+                  child,
+                  index,
+                  styles,
+                  config,
+                  onOpenHtmlPage,
+                  containerRenderers,
+                  themeName,
+                  index === def.children.length - 1
+                )
               )}
             </View>
           </View>
         );
       }
       return (
-        <View key={key} style={styles.listItem}>
+        <View key={key} style={[styles.listItem, isLastBlock && LAST_BLOCK_STYLE]}>
           <Text style={styles.bullet}>[{def.index}]</Text>
           <View style={{ flex: 1, minWidth: 0 }}>
             {def.children.map((child, index) =>
-              renderNode(child, index, styles, config, onOpenHtmlPage, containerRenderers)
+              renderNode(
+                child,
+                index,
+                styles,
+                config,
+                onOpenHtmlPage,
+                containerRenderers,
+                themeName,
+                index === def.children.length - 1
+              )
             )}
           </View>
         </View>
@@ -554,14 +661,14 @@ function renderNode(
     }
     case 'table': {
       const table = node as SupramarkTableNode;
-      return renderTableNode(table, key, styles, config);
+      return renderTableNode(table, key, styles, config, isLastBlock);
     }
     case 'table_row': {
       const row = node as SupramarkTableRowNode;
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
-            renderNode(cell, index, styles, config, onOpenHtmlPage, containerRenderers)
+            renderNode(cell, index, styles, config, onOpenHtmlPage, containerRenderers, themeName)
           )}
         </View>
       );
@@ -584,7 +691,7 @@ function renderNode(
     }
     case 'text':
       return (
-        <Text key={key} style={styles.paragraph}>
+        <Text key={key} style={[styles.paragraph, isLastBlock && LAST_BLOCK_STYLE]}>
           {(node as SupramarkTextNode).value}
         </Text>
       );
@@ -641,13 +748,7 @@ function renderInlineNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return mathNode.value;
       }
-      return (
-        <MathInline
-          key={key}
-          value={mathNode.value}
-          textStyle={styles.paragraph}
-        />
-      );
+      return <MathInline key={key} value={mathNode.value} textStyle={styles.paragraph} />;
     }
     case 'link': {
       const linkNode = node as SupramarkLinkNode;
@@ -729,14 +830,15 @@ function renderTableNode(
   table: SupramarkTableNode,
   key: number,
   styles: ReturnType<typeof mergeStyles>,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  isLastBlock = false
 ): React.ReactNode {
   // 先根据整张表的文本内容估算每一列宽度，避免继续走均分列宽策略。
   const columnWidths = estimateTableColumnWidths(table);
   const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
 
   return (
-    <View key={key} style={styles.tableContainer}>
+    <View key={key} style={[styles.tableContainer, isLastBlock && LAST_BLOCK_STYLE]}>
       <View style={styles.tableTitleContainer}>
         <Text style={styles.tableTitleText}>表格</Text>
       </View>
@@ -1002,11 +1104,12 @@ function isFeatureGroupEnabled(config: SupramarkConfig | undefined, ids: string[
 function renderDisabledDiagram(
   diagram: SupramarkDiagramNode,
   key: number,
-  styles: ReturnType<typeof mergeStyles>
+  styles: ReturnType<typeof mergeStyles>,
+  isLastBlock = false
 ): React.ReactNode {
   const header = `[diagram engine="${diagram.engine}" 已被禁用]\n\n`;
   return (
-    <View key={key} style={styles.codeBlock}>
+    <View key={key} style={[styles.codeBlock, isLastBlock && LAST_BLOCK_STYLE]}>
       <Text style={styles.code}>{header + diagram.code}</Text>
     </View>
   );
@@ -1015,11 +1118,12 @@ function renderDisabledDiagram(
 function renderDisabledMathBlock(
   math: SupramarkMathBlockNode,
   key: number,
-  styles: ReturnType<typeof mergeStyles>
+  styles: ReturnType<typeof mergeStyles>,
+  isLastBlock = false
 ): React.ReactNode {
   const header = '[math 已被禁用]\n\n';
   return (
-    <View key={key} style={styles.codeBlock}>
+    <View key={key} style={[styles.codeBlock, isLastBlock && LAST_BLOCK_STYLE]}>
       <Text style={styles.code}>{header + math.value}</Text>
     </View>
   );

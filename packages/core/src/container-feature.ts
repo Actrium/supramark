@@ -168,6 +168,8 @@ export interface ContainerRNRenderArgs {
   key: number;
   /** RN 样式映射 */
   styles: Record<string, any>;
+  /** RN 当前主题名称 */
+  theme?: 'light' | 'dark';
   /** Supramark 配置 */
   config?: any;
   /** 渲染子节点的函数 */

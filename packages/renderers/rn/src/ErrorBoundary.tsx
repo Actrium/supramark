@@ -1,5 +1,6 @@
 import React, { Component, ReactNode } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import type { SupramarkStyles } from './styles';
 
 /**
  * 错误信息接口
@@ -24,6 +25,10 @@ export interface ErrorBoundaryProps {
    * 自定义错误展示组件（可选）
    */
   fallback?: (error: ErrorInfo) => ReactNode;
+  /**
+   * 错误展示使用的主题样式。
+   */
+  styles?: SupramarkStyles;
 }
 
 /**
@@ -100,7 +105,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       if (this.props.fallback) {
         return this.props.fallback(this.state.error);
       }
-      return <ErrorDisplay error={this.state.error} />;
+      return <ErrorDisplay error={this.state.error} styles={this.props.styles} />;
     }
 
     return this.props.children;
@@ -110,7 +115,19 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 /**
  * 默认错误展示组件
  */
-export function ErrorDisplay({ error }: { error: ErrorInfo }) {
+export function ErrorDisplay({
+  error,
+  styles: customStyles,
+}: {
+  error: ErrorInfo;
+  styles?: SupramarkStyles;
+}) {
+  // 默认错误样式与传入主题样式合并，保证单独使用 ErrorDisplay 时仍然可渲染。
+  const styles = {
+    ...defaultErrorStyles,
+    ...customStyles,
+  };
+
   const errorTypeText = {
     parse: '解析错误',
     render: '渲染错误',
@@ -126,7 +143,7 @@ export function ErrorDisplay({ error }: { error: ErrorInfo }) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.errorContainer}>
       <View style={styles.errorBox}>
         <View style={[styles.errorHeader, { backgroundColor: errorTypeColor[error.type] }]}>
           <Text style={styles.errorTitle}>{errorTypeText[error.type]}</Text>
@@ -134,18 +151,18 @@ export function ErrorDisplay({ error }: { error: ErrorInfo }) {
         <View style={styles.errorBody}>
           <Text style={styles.errorMessage}>{error.message}</Text>
           {error.details && (
-            <View style={styles.detailsContainer}>
-              <Text style={styles.detailsTitle}>详细信息：</Text>
-              <ScrollView style={styles.detailsScroll} horizontal>
-                <Text style={styles.detailsText}>{error.details}</Text>
+            <View style={styles.errorSection}>
+              <Text style={styles.errorSectionTitle}>详细信息：</Text>
+              <ScrollView style={styles.errorDetailsScroll} horizontal>
+                <Text style={styles.errorDetailsText}>{error.details}</Text>
               </ScrollView>
             </View>
           )}
           {__DEV__ && error.stack && (
-            <View style={styles.stackContainer}>
-              <Text style={styles.stackTitle}>堆栈跟踪（开发模式）：</Text>
-              <ScrollView style={styles.stackScroll}>
-                <Text style={styles.stackText}>{error.stack}</Text>
+            <View style={styles.errorSection}>
+              <Text style={styles.errorSectionTitle}>堆栈跟踪（开发模式）：</Text>
+              <ScrollView style={styles.errorStackScroll}>
+                <Text style={styles.errorStackText}>{error.stack}</Text>
               </ScrollView>
             </View>
           )}
@@ -155,8 +172,8 @@ export function ErrorDisplay({ error }: { error: ErrorInfo }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+const defaultErrorStyles = StyleSheet.create({
+  errorContainer: {
     padding: 12,
   },
   errorBox: {
@@ -183,40 +200,29 @@ const styles = StyleSheet.create({
     color: '#262626',
     marginBottom: 8,
   },
-  detailsContainer: {
+  errorSection: {
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#ffccc7',
   },
-  detailsTitle: {
+  errorSectionTitle: {
     fontSize: 12,
     color: '#8c8c8c',
     marginBottom: 4,
   },
-  detailsScroll: {
+  errorDetailsScroll: {
     maxHeight: 60,
   },
-  detailsText: {
+  errorDetailsText: {
     fontSize: 12,
     color: '#595959',
     fontFamily: 'monospace',
   },
-  stackContainer: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#ffccc7',
-  },
-  stackTitle: {
-    fontSize: 12,
-    color: '#8c8c8c',
-    marginBottom: 4,
-  },
-  stackScroll: {
+  errorStackScroll: {
     maxHeight: 100,
   },
-  stackText: {
+  errorStackText: {
     fontSize: 10,
     color: '#8c8c8c',
     fontFamily: 'monospace',

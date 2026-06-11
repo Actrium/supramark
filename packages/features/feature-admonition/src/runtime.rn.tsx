@@ -56,6 +56,48 @@ const kindTheme: Record<
   },
 };
 
+/** 深色主题下每种 admonition 类型对应的卡片色板。 */
+const darkKindTheme: Record<
+  AdmonitionKind,
+  { border: string; bg: string; color: string; icon: ImageSourcePropType; fallbackTitle: string }
+> = {
+  note: {
+    border: '#58a6ff',
+    bg: '#10223a',
+    color: '#79c0ff',
+    icon: noteIcon,
+    fallbackTitle: '提示',
+  },
+  tip: {
+    border: '#3fb950',
+    bg: '#0f2a1a',
+    color: '#7ee787',
+    icon: warningIcon,
+    fallbackTitle: '建议',
+  },
+  info: {
+    border: '#58a6ff',
+    bg: '#10223a',
+    color: '#79c0ff',
+    icon: noteIcon,
+    fallbackTitle: '信息',
+  },
+  warning: {
+    border: '#d29922',
+    bg: '#2d230d',
+    color: '#f2cc60',
+    icon: warningIcon,
+    fallbackTitle: '警告',
+  },
+  danger: {
+    border: '#f85149',
+    bg: '#2d1517',
+    color: '#ff7b72',
+    icon: warningIcon,
+    fallbackTitle: '危险',
+  },
+};
+
 function resolveKind(node: any): AdmonitionKind {
   const raw = String(node?.data?.kind ?? '').toLowerCase();
   if (raw === 'note' || raw === 'tip' || raw === 'info' || raw === 'warning' || raw === 'danger') {
@@ -92,11 +134,13 @@ function normalizeChildren(children: React.ReactNode[] | undefined): React.React
 export function renderAdmonitionContainerRN({
   node,
   key,
+  styles,
+  theme: themeName = 'light',
   config,
   renderChildren,
 }: ContainerRNRenderArgs): React.ReactNode {
   const kind = resolveKind(node);
-  const theme = kindTheme[kind];
+  const theme = themeName === 'dark' ? darkKindTheme[kind] : kindTheme[kind];
   const title = String(node?.data?.title ?? '').trim() || theme.fallbackTitle;
 
   const renderedChildren = normalizeChildren(renderChildren(node.children ?? []));
@@ -111,7 +155,9 @@ export function renderAdmonitionContainerRN({
   if (!isEnabled) {
     return (
       <View key={key} style={localStyles.fallbackBlock}>
-        {title ? <Text style={localStyles.fallbackTitle}>{title}</Text> : null}
+        {title ? (
+          <Text style={[styles?.listItemText, localStyles.fallbackTitle]}>{title}</Text>
+        ) : null}
         <View style={localStyles.content}>{renderedChildren}</View>
       </View>
     );
@@ -124,6 +170,7 @@ export function renderAdmonitionContainerRN({
         localStyles.card,
         {
           backgroundColor: theme.bg,
+          borderLeftColor: theme.border,
         },
       ]}
     >
@@ -139,6 +186,7 @@ export function renderAdmonitionContainerRN({
 const localStyles = StyleSheet.create({
   card: {
     width: '100%',
+    borderLeftWidth: 4,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 12,
