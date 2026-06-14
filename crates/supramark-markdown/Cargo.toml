@@ -27,7 +27,7 @@ name = "public_api"
 path = "tests/public_api.rs"
 
 [features]
-default = ["commonmark", "gfm", "diagram", "container", "linkify"]
+default = ["commonmark", "gfm", "diagram", "container", "input", "math", "footnote", "definition-list", "raw-html", "linkify"]
 commonmark = []
 gfm = ["gfm-table", "gfm-strikethrough", "gfm-task-list"]
 gfm-table = []

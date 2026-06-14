@@ -317,10 +317,20 @@ fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
 fn create_parser(options: ParseOptions) -> MarkdownParser {
     let mut md = MarkdownParser::new();
     crate::plugins::cmark::add(&mut md);
+
+    #[cfg(feature = "raw-html")]
     crate::plugins::html::add(&mut md);
+
+    #[cfg(feature = "math")]
     crate::plugins::extra::math::add(&mut md);
+
+    #[cfg(feature = "footnote")]
     crate::plugins::extra::footnote::add(&mut md);
+
+    #[cfg(any(feature = "container", feature = "input"))]
     crate::plugins::extra::ext::add(&mut md);
+
+    #[cfg(feature = "definition-list")]
     crate::plugins::extra::deflist::add(&mut md);
 
     if options.gfm_tables {
