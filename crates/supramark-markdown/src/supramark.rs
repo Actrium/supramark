@@ -7,7 +7,6 @@ use crate::plugins::cmark::block::lheading::SetextHeader;
 use crate::plugins::cmark::block::list::{BulletList, ListItem, OrderedList};
 use crate::plugins::cmark::block::paragraph::Paragraph;
 use crate::plugins::cmark::inline::backticks::CodeInline;
-use crate::plugins::cmark::inline::emphasis::{Em, Strong};
 use crate::plugins::cmark::inline::image::Image;
 use crate::plugins::cmark::inline::link::Link;
 use crate::plugins::cmark::inline::newline::{Hardbreak, Softbreak};
@@ -520,6 +519,26 @@ fn map_markdown_fragment(
     map_children(&root.children, index, start)
 }
 
+/// Context threaded through in-rule AST v2 construction.
+///
+/// Holds the immutable offset index and document base offset so a node's
+/// `to_ast_v2` impl can compute positions and recurse into children without
+/// re-plumbing those arguments by hand.
+pub(crate) struct AstV2Ctx<'a> {
+    index: &'a OffsetIndex,
+    base_offset: usize,
+}
+
+impl<'a> AstV2Ctx<'a> {
+    pub(crate) fn position(&self, node: &Node) -> Option<SourcePosition> {
+        position_for(node, self.index, self.base_offset)
+    }
+
+    pub(crate) fn map_children(&self, children: &[Node]) -> Vec<SupramarkNode> {
+        map_children(children, self.index, self.base_offset)
+    }
+}
+
 fn map_children(children: &[Node], index: &OffsetIndex, base_offset: usize) -> Vec<SupramarkNode> {
     children
         .iter()
@@ -656,6 +675,11 @@ where
 fn map_node(node: &Node, index: &OffsetIndex, base_offset: usize) -> Vec<SupramarkNode> {
     let position = position_for(node, index, base_offset);
 
+    let ctx = AstV2Ctx { index, base_offset };
+    if let Some(v2) = node.to_ast_v2(&ctx) {
+        return v2;
+    }
+
     if let Some(text) = node.cast::<crate::parser::inline::Text>() {
         return map_inline_text(&text.content, position, index);
     }
@@ -682,20 +706,6 @@ fn map_node(node: &Node, index: &OffsetIndex, base_offset: usize) -> Vec<Suprama
     if let Some(heading) = node.cast::<SetextHeader>() {
         return vec![SupramarkNode::Heading {
             depth: heading.level,
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if node.is::<Strong>() {
-        return vec![SupramarkNode::Strong {
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if node.is::<Em>() {
-        return vec![SupramarkNode::Emphasis {
             children: map_children(&node.children, index, base_offset),
             position,
         }];

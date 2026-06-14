@@ -4,6 +4,7 @@
 //!
 //! <https://spec.commonmark.org/0.30/#emphasis-and-strong-emphasis>
 use crate::generics::inline::emph_pair;
+use crate::supramark::{AstV2Ctx, SupramarkNode};
 use crate::{MarkdownIt, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
@@ -17,6 +18,13 @@ impl NodeValue for Em {
         fmt.contents(&node.children);
         fmt.close("em");
     }
+
+    fn to_ast_v2(&self, node: &Node, ctx: &AstV2Ctx<'_>) -> Option<Vec<SupramarkNode>> {
+        Some(vec![SupramarkNode::Emphasis {
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
 }
 
 #[derive(Debug)]
@@ -29,6 +37,13 @@ impl NodeValue for Strong {
         fmt.open("strong", &node.attrs);
         fmt.contents(&node.children);
         fmt.close("strong");
+    }
+
+    fn to_ast_v2(&self, node: &Node, ctx: &AstV2Ctx<'_>) -> Option<Vec<SupramarkNode>> {
+        Some(vec![SupramarkNode::Strong {
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
     }
 }
 

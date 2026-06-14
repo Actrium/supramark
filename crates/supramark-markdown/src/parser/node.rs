@@ -89,6 +89,16 @@ impl Node {
         fmt.into()
     }
 
+    /// Build this node's Supramark AST v2 representation, dispatching to the
+    /// node value's `to_ast_v2`. Returns `None` for node types not yet migrated
+    /// off the centralized mapper in `crate::supramark`.
+    pub(crate) fn to_ast_v2(
+        &self,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        self.node_value.to_ast_v2(self, ctx)
+    }
+
     /// Render this node to XHTML, it adds slash to self-closing tags like this: `<img />`.
     ///
     /// This mode exists for compatibility with CommonMark tests.
@@ -223,6 +233,21 @@ pub trait NodeValue: Debug + Downcast {
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         let _ = fmt;
         unimplemented!("{} doesn't implement render", node.name());
+    }
+
+    /// Build this node's Supramark AST v2 representation in-rule.
+    ///
+    /// Default returns `None`, meaning the centralized mapper in
+    /// `crate::supramark` still handles this node type. Node types are migrated
+    /// to construct their own v2 nodes here, next to their parse rule, so the
+    /// centralized downcast chain shrinks and eventually disappears.
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        let _ = (node, ctx);
+        None
     }
 }
 
