@@ -454,3 +454,73 @@ fn public_api_maps_definition_lists_with_v2_children() {
         Some(source.find("After").unwrap())
     );
 }
+
+// --- nesting regression tests: extension blocks now compose inside other
+// block constructs (they were top-level only under the old prescan) ---
+
+#[test]
+fn nests_math_block_inside_list_item() {
+    let ast = parse("- item\n\n  $$\n  E=mc^2\n  $$\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::List { children: items, .. } = &children[0] else {
+        panic!("expected list");
+    };
+    let SupramarkNode::ListItem { children: item, .. } = &items[0] else {
+        panic!("expected list item");
+    };
+    let SupramarkNode::MathBlock { value, .. } = &item[1] else {
+        panic!("expected math block nested in list item, got {item:?}");
+    };
+    assert_eq!(value, "E=mc^2");
+}
+
+#[test]
+fn nests_container_inside_list_item() {
+    let ast = parse("- item\n\n  :::map\n  center: [0,0]\n  :::\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::List { children: items, .. } = &children[0] else {
+        panic!("expected list");
+    };
+    let SupramarkNode::ListItem { children: item, .. } = &items[0] else {
+        panic!("expected list item");
+    };
+    let SupramarkNode::Container { name, value, .. } = &item[1] else {
+        panic!("expected container nested in list item, got {item:?}");
+    };
+    assert_eq!(name, "map");
+    assert_eq!(value.as_deref(), Some("center: [0,0]"));
+}
+
+#[test]
+fn nests_math_block_inside_blockquote() {
+    let ast = parse("> $$\n> E=mc^2\n> $$\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Blockquote { children: bq, .. } = &children[0] else {
+        panic!("expected blockquote");
+    };
+    let SupramarkNode::MathBlock { value, .. } = &bq[0] else {
+        panic!("expected math block nested in blockquote, got {bq:?}");
+    };
+    assert_eq!(value, "E=mc^2");
+}
+
+#[test]
+fn nests_footnote_definition_inside_blockquote() {
+    let ast = parse("> [^a]: note\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Blockquote { children: bq, .. } = &children[0] else {
+        panic!("expected blockquote");
+    };
+    let SupramarkNode::FootnoteDefinition { label, .. } = &bq[0] else {
+        panic!("expected footnote definition nested in blockquote, got {bq:?}");
+    };
+    assert_eq!(label, "a");
+}

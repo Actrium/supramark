@@ -66,7 +66,7 @@ impl BlockRule for MathBlockScanner {
         }
         let close = close?;
 
-        let (value, _) = state.get_lines(state.line + 1, close, 0, false);
+        let (value, _) = state.get_lines(state.line + 1, close, state.blk_indent, false);
         let node = Node::new(MathBlock { value });
         Some((node, close - state.line + 1))
     }
