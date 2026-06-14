@@ -319,6 +319,7 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
     crate::plugins::cmark::add(&mut md);
     crate::plugins::extra::math::add(&mut md);
     crate::plugins::extra::footnote::add(&mut md);
+    crate::plugins::extra::ext::add(&mut md);
     crate::plugins::extra::deflist::add(&mut md);
 
     if options.gfm_tables {
@@ -329,119 +330,6 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
     }
 
     md
-}
-
-fn map_document(
-    source: &str,
-    md: &MarkdownParser,
-    index: &OffsetIndex,
-) -> (Vec<SupramarkNode>, Vec<Diagnostic>) {
-    let lines = LineSpan::scan(source);
-    if lines.is_empty() {
-        return (Vec::new(), Vec::new());
-    }
-
-    let mut children = Vec::new();
-    let mut diagnostics = Vec::new();
-    let mut normal_start = 0;
-    let mut line = 0;
-
-    while line < lines.len() {
-        if let Some(open) = parse_extension_open(lines[line].text) {
-            if normal_start < line {
-                children.extend(map_markdown_fragment(
-                    md,
-                    source,
-                    lines[normal_start].start,
-                    lines[line].start,
-                    index,
-                ));
-            }
-
-            match find_closing_line(&lines, line + 1, open.close_marker) {
-                Some(close_line) => {
-                    let node_start = lines[line].start;
-                    let node_end = lines[close_line].end_with_newline;
-                    let value = join_line_text(&lines[line + 1..close_line]);
-                    children.push(map_extension_block(
-                        open,
-                        value,
-                        SourcePosition {
-                            start: index.point_at(node_start),
-                            end: index.point_at(node_end),
-                        },
-                    ));
-                    line = close_line + 1;
-                    normal_start = line;
-                    continue;
-                }
-                None => {
-                    let node_start = lines[line].start;
-                    let node_end = source.len();
-                    let position = SourcePosition {
-                        start: index.point_at(node_start),
-                        end: index.point_at(node_end),
-                    };
-                    let diagnostic = Diagnostic {
-                        code: "unclosed_extension_block".to_owned(),
-                        severity: DiagnosticSeverity::Error,
-                        message: format!("Missing closing `{}` marker.", open.close_marker),
-                        position: Some(position.clone()),
-                        data: None,
-                    };
-                    diagnostics.push(diagnostic.clone());
-                    children.push(SupramarkNode::Unsupported {
-                        syntax: open.syntax_name().to_owned(),
-                        reason: "missing closing marker".to_owned(),
-                        value: Some(source[node_start..node_end].to_owned()),
-                        children: Vec::new(),
-                        diagnostics: vec![diagnostic],
-                        position: Some(position),
-                    });
-                    return (children, diagnostics);
-                }
-            }
-        }
-
-        if is_raw_html_line(lines[line].text) {
-            if normal_start < line {
-                children.extend(map_markdown_fragment(
-                    md,
-                    source,
-                    lines[normal_start].start,
-                    lines[line].start,
-                    index,
-                ));
-            }
-
-            children.push(SupramarkNode::Raw {
-                format: "html".to_owned(),
-                value: lines[line].text.trim().to_owned(),
-                block: true,
-                position: Some(SourcePosition {
-                    start: index.point_at(lines[line].start),
-                    end: index.point_at(lines[line].end_with_newline),
-                }),
-            });
-            line += 1;
-            normal_start = line;
-            continue;
-        }
-
-        line += 1;
-    }
-
-    if normal_start < lines.len() {
-        children.extend(map_markdown_fragment(
-            md,
-            source,
-            lines[normal_start].start,
-            source.len(),
-            index,
-        ));
-    }
-
-    (children, diagnostics)
 }
 
 fn map_markdown_fragment(
@@ -1065,61 +953,17 @@ fn root_position(source: &str, index: &OffsetIndex) -> SourcePosition {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct LineSpan<'a> {
-    start: usize,
-    end_with_newline: usize,
-    text: &'a str,
-}
-
-impl<'a> LineSpan<'a> {
-    fn scan(source: &'a str) -> Vec<Self> {
-        let mut lines = Vec::new();
-        let mut start = 0;
-
-        while start < source.len() {
-            let relative_newline = source[start..].find('\n');
-            let (end_no_newline, end_with_newline) = match relative_newline {
-                Some(relative) => {
-                    let newline = start + relative;
-                    let end_no_newline =
-                        if newline > start && source.as_bytes()[newline - 1] == b'\r' {
-                            newline - 1
-                        } else {
-                            newline
-                        };
-                    (end_no_newline, newline + 1)
-                }
-                None => (source.len(), source.len()),
-            };
-
-            lines.push(Self {
-                start,
-                end_with_newline,
-                text: &source[start..end_no_newline],
-            });
-
-            if end_with_newline == source.len() {
-                break;
-            }
-            start = end_with_newline;
-        }
-
-        lines
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ExtensionSyntax {
+pub(crate) enum ExtensionSyntax {
     Container,
     Input,
 }
 
 #[derive(Debug, Clone)]
-struct ExtensionOpen {
-    syntax: ExtensionSyntax,
-    name: String,
-    params: Option<String>,
-    close_marker: &'static str,
+pub(crate) struct ExtensionOpen {
+    pub(crate) syntax: ExtensionSyntax,
+    pub(crate) name: String,
+    pub(crate) params: Option<String>,
+    pub(crate) close_marker: &'static str,
 }
 
 impl ExtensionOpen {
@@ -1131,7 +975,7 @@ impl ExtensionOpen {
     }
 }
 
-fn parse_extension_open(line: &str) -> Option<ExtensionOpen> {
+pub(crate) fn parse_extension_open(line: &str) -> Option<ExtensionOpen> {
     let trimmed = line.trim_start();
     if let Some(rest) = trimmed.strip_prefix(":::") {
         return parse_named_extension(rest, ExtensionSyntax::Container, ":::");
@@ -1175,57 +1019,6 @@ fn is_valid_extension_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('a'..='z'))
         && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
-}
-
-fn find_closing_line(lines: &[LineSpan<'_>], start: usize, close_marker: &str) -> Option<usize> {
-    lines[start..]
-        .iter()
-        .position(|line| line.text.trim() == close_marker)
-        .map(|offset| start + offset)
-}
-
-fn join_line_text(lines: &[LineSpan<'_>]) -> String {
-    lines
-        .iter()
-        .map(|line| line.text)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn map_extension_block(
-    open: ExtensionOpen,
-    value: String,
-    position: SourcePosition,
-) -> SupramarkNode {
-    match open.syntax {
-        ExtensionSyntax::Container => {
-            let data = match open.name.as_str() {
-                "map" => parse_map_data(&value),
-                "vison" => Some(parse_vison_data(&value)),
-                "html" => Some(serde_json::json!({ "html": value.clone() })),
-                "weather" => Some(parse_weather_data(open.params.as_deref(), &value)),
-                _ => None,
-            };
-            SupramarkNode::Container {
-                name: open.name,
-                mode: ExtensionMode::Opaque,
-                params: open.params,
-                children: Vec::new(),
-                value: Some(value),
-                data,
-                position: Some(position),
-            }
-        }
-        ExtensionSyntax::Input => SupramarkNode::Input {
-            name: open.name,
-            mode: ExtensionMode::Opaque,
-            params: open.params,
-            children: Vec::new(),
-            value: Some(value),
-            data: None,
-            position: Some(position),
-        },
-    }
 }
 
 fn parse_vison_data(value: &str) -> serde_json::Value {
@@ -1461,7 +1254,7 @@ fn parse_tuple2(raw: &str) -> Option<[f64; 2]> {
     Some([first, second])
 }
 
-fn is_raw_html_line(line: &str) -> bool {
+pub(crate) fn is_raw_html_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     if trimmed.starts_with("<!--") || trimmed.starts_with("<!") {
         return true;
@@ -1528,6 +1321,84 @@ impl OffsetIndex {
             Err(0) => self.entries[0].1.clone(),
             Err(index) => self.entries[index - 1].1.clone(),
         }
+    }
+}
+
+fn map_document(
+    source: &str,
+    md: &MarkdownParser,
+    index: &OffsetIndex,
+) -> (Vec<SupramarkNode>, Vec<Diagnostic>) {
+    let children = map_markdown_fragment(md, source, 0, source.len(), index);
+    let mut diagnostics = Vec::new();
+    collect_diagnostics(&children, &mut diagnostics);
+    (children, diagnostics)
+}
+
+fn collect_diagnostics(nodes: &[SupramarkNode], out: &mut Vec<Diagnostic>) {
+    for node in nodes {
+        if let SupramarkNode::Unsupported { diagnostics, .. } = node {
+            out.extend(diagnostics.iter().cloned());
+        }
+        visit_children(node, |children| collect_diagnostics(children, out));
+    }
+}
+
+/// Build the AST v2 node for an extension block (container / input). An unclosed
+/// opener becomes an Unsupported node carrying a diagnostic; a closed one
+/// dispatches by name into the opaque container/input shapes.
+pub(crate) fn build_extension_node(
+    open: &ExtensionOpen,
+    value: String,
+    position: Option<SourcePosition>,
+    closed: bool,
+) -> SupramarkNode {
+    if !closed {
+        let diagnostic = Diagnostic {
+            code: "unclosed_extension_block".to_owned(),
+            severity: DiagnosticSeverity::Error,
+            message: format!("Missing closing `{}` marker.", open.close_marker),
+            position: position.clone(),
+            data: None,
+        };
+        return SupramarkNode::Unsupported {
+            syntax: open.syntax_name().to_owned(),
+            reason: "missing closing marker".to_owned(),
+            value: Some(value),
+            children: Vec::new(),
+            diagnostics: vec![diagnostic],
+            position,
+        };
+    }
+
+    match open.syntax {
+        ExtensionSyntax::Container => {
+            let data = match open.name.as_str() {
+                "map" => parse_map_data(&value),
+                "vison" => Some(parse_vison_data(&value)),
+                "html" => Some(serde_json::json!({ "html": value.clone() })),
+                "weather" => Some(parse_weather_data(open.params.as_deref(), &value)),
+                _ => None,
+            };
+            SupramarkNode::Container {
+                name: open.name.clone(),
+                mode: ExtensionMode::Opaque,
+                params: open.params.clone(),
+                children: Vec::new(),
+                value: Some(value),
+                data,
+                position,
+            }
+        }
+        ExtensionSyntax::Input => SupramarkNode::Input {
+            name: open.name.clone(),
+            mode: ExtensionMode::Opaque,
+            params: open.params.clone(),
+            children: Vec::new(),
+            value: Some(value),
+            data: None,
+            position,
+        },
     }
 }
 
