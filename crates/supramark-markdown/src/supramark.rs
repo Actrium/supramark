@@ -1,7 +1,5 @@
 use crate::plugins::cmark::block::fence::CodeFence;
-use crate::plugins::extra::tables::{
-    ColumnAlignment, TableBody, TableCell, TableHead, TableRow,
-};
+use crate::plugins::extra::tables::{ColumnAlignment, TableBody, TableCell, TableHead, TableRow};
 use crate::{MarkdownParser, Node};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -404,17 +402,22 @@ impl<'a> AstV2Ctx<'a> {
 }
 
 fn map_children(children: &[Node], index: &OffsetIndex, base_offset: usize) -> Vec<SupramarkNode> {
-    children
+    let mapped = children
         .iter()
         .flat_map(|child| map_node(child, index, base_offset))
-        .collect()
+        .collect();
+    rescan_adjacent_text_runs(mapped, index)
 }
 
 /// Normalize a footnote label into an mdast-style identifier used to match
 /// references with definitions: trim leading/trailing whitespace, collapse
 /// internal whitespace runs into a single space, and lowercase.
 pub(crate) fn normalize_footnote_identifier(label: &str) -> String {
-    label.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn assign_footnote_indices(children: &mut [SupramarkNode]) {
@@ -451,7 +454,9 @@ fn collect_footnote_definition_labels(
     for node in nodes {
         match node {
             SupramarkNode::FootnoteDefinition {
-                identifier, children, ..
+                identifier,
+                children,
+                ..
             } => {
                 assign_footnote_label(identifier, labels, next_index);
                 collect_footnote_definition_labels(children, labels, next_index);
@@ -634,6 +639,65 @@ fn map_inline_text(
     }
 
     nodes
+}
+
+fn rescan_adjacent_text_runs(nodes: Vec<SupramarkNode>, index: &OffsetIndex) -> Vec<SupramarkNode> {
+    let mut out = Vec::with_capacity(nodes.len());
+    let mut run_value = String::new();
+    let mut run_position: Option<SourcePosition> = None;
+
+    for node in nodes {
+        match node {
+            SupramarkNode::Text { value, position } => {
+                if let Some(existing) = run_position.as_mut() {
+                    if position.as_ref().is_some_and(|position| {
+                        existing.end.byte_offset == position.start.byte_offset
+                    }) {
+                        run_value.push_str(&value);
+                        existing.end = position.expect("checked by is_some_and").end;
+                        continue;
+                    }
+                }
+                flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+                run_value = value;
+                run_position = position;
+            }
+            node => {
+                flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+                out.push(node);
+            }
+        }
+    }
+
+    flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+    out
+}
+
+fn flush_text_run(
+    out: &mut Vec<SupramarkNode>,
+    value: &mut String,
+    position: &mut Option<SourcePosition>,
+    index: &OffsetIndex,
+) {
+    if value.is_empty() {
+        *position = None;
+        return;
+    }
+
+    let value_out = std::mem::take(value);
+    let position_out = position.take();
+    if inline_extension_scan_needed(&value_out) {
+        out.extend(map_inline_text(&value_out, position_out, index));
+    } else {
+        out.push(SupramarkNode::Text {
+            value: value_out,
+            position: position_out,
+        });
+    }
+}
+
+fn inline_extension_scan_needed(value: &str) -> bool {
+    value.contains('$') || value.contains("[^")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -875,10 +939,7 @@ fn parse_diagram_meta(meta: &str) -> Option<serde_json::Value> {
                 .strip_prefix('"')
                 .and_then(|v| v.strip_suffix('"'))
                 .unwrap_or(value);
-            object.insert(
-                key.to_owned(),
-                serde_json::Value::String(value.to_owned()),
-            );
+            object.insert(key.to_owned(), serde_json::Value::String(value.to_owned()));
         } else {
             object.insert(item.to_owned(), serde_json::Value::Bool(true));
         }
@@ -1551,6 +1612,31 @@ mod tests {
             &paragraph[3],
             SupramarkNode::FootnoteReference { label, .. } if label == "note"
         ));
+    }
+
+    #[test]
+    fn maps_multiple_inline_math_runs_split_by_text_tokens() {
+        let ast = parse("Inline $E = mc^2$ and $A = \\pi r^2$.");
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+
+        let SupramarkNode::Paragraph {
+            children: paragraph,
+            ..
+        } = &children[0]
+        else {
+            panic!("expected paragraph");
+        };
+
+        let math_values = paragraph
+            .iter()
+            .filter_map(|node| match node {
+                SupramarkNode::MathInline { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(math_values, vec!["E = mc^2", "A = \\pi r^2"]);
     }
 
     #[test]
