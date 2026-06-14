@@ -317,6 +317,7 @@ fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
 fn create_parser(options: ParseOptions) -> MarkdownParser {
     let mut md = MarkdownParser::new();
     crate::plugins::cmark::add(&mut md);
+    crate::plugins::extra::math::add(&mut md);
 
     if options.gfm_tables {
         crate::plugins::extra::tables::add(&mut md);
@@ -344,23 +345,6 @@ fn map_document(
     let mut line = 0;
 
     while line < lines.len() {
-        if let Some((node, next_line)) = map_math_block(source, &lines, line, index) {
-            if normal_start < line {
-                children.extend(map_markdown_fragment(
-                    md,
-                    source,
-                    lines[normal_start].start,
-                    lines[line].start,
-                    index,
-                ));
-            }
-
-            children.push(node);
-            line = next_line;
-            normal_start = line;
-            continue;
-        }
-
         if let Some((node, next_line)) = map_footnote_definition(source, md, &lines, line, index) {
             if normal_start < line {
                 children.extend(map_markdown_fragment(
@@ -1238,36 +1222,6 @@ fn join_line_text(lines: &[LineSpan<'_>]) -> String {
         .map(|line| line.text)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn map_math_block(
-    _source: &str,
-    lines: &[LineSpan<'_>],
-    start_line: usize,
-    index: &OffsetIndex,
-) -> Option<(SupramarkNode, usize)> {
-    if lines[start_line].text.trim() != "$$" {
-        return None;
-    }
-
-    let close_line = lines[start_line + 1..]
-        .iter()
-        .position(|line| line.text.trim() == "$$")
-        .map(|offset| start_line + 1 + offset)?;
-
-    let value = join_line_text(&lines[start_line + 1..close_line]);
-    let position = SourcePosition {
-        start: index.point_at(lines[start_line].start),
-        end: index.point_at(lines[close_line].end_with_newline),
-    };
-
-    Some((
-        SupramarkNode::MathBlock {
-            value,
-            position: Some(position),
-        },
-        close_line + 1,
-    ))
 }
 
 fn map_footnote_definition(

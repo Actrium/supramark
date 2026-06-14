@@ -7,6 +7,7 @@
 
 #[cfg(feature = "linkify")]
 pub mod linkify;
+pub mod math;
 pub mod strikethrough;
 #[cfg(feature = "syntect")]
 pub mod syntect;
