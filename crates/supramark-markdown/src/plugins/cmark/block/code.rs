@@ -14,6 +14,15 @@ pub struct CodeBlock {
 }
 
 impl NodeValue for CodeBlock {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Code {
+            value: self.content.clone(),
+            lang: None,
+            meta: None,
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
         fmt.open("pre", &[]);

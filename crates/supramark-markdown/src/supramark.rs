@@ -1,16 +1,5 @@
-use crate::plugins::cmark::block::blockquote::Blockquote;
-use crate::plugins::cmark::block::code::CodeBlock;
 use crate::plugins::cmark::block::fence::CodeFence;
-use crate::plugins::cmark::block::heading::ATXHeading;
-use crate::plugins::cmark::block::hr::ThematicBreak;
-use crate::plugins::cmark::block::lheading::SetextHeader;
-use crate::plugins::cmark::block::list::{BulletList, ListItem, OrderedList};
-use crate::plugins::cmark::block::paragraph::Paragraph;
-use crate::plugins::cmark::inline::backticks::CodeInline;
-use crate::plugins::cmark::inline::image::Image;
-use crate::plugins::cmark::inline::link::Link;
-use crate::plugins::cmark::inline::newline::{Hardbreak, Softbreak};
-use crate::plugins::extra::strikethrough::Strikethrough;
+use crate::plugins::cmark::block::list::ListItem;
 use crate::plugins::extra::tables::{
     ColumnAlignment, Table, TableBody, TableCell, TableHead, TableRow,
 };
@@ -688,101 +677,8 @@ fn map_node(node: &Node, index: &OffsetIndex, base_offset: usize) -> Vec<Suprama
         return map_inline_text(&text.content, position, index);
     }
 
-    if node.is::<Paragraph>() {
-        return vec![SupramarkNode::Paragraph {
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if let Some(heading) = node.cast::<ATXHeading>() {
-        return vec![SupramarkNode::Heading {
-            depth: heading.level,
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if let Some(heading) = node.cast::<SetextHeader>() {
-        return vec![SupramarkNode::Heading {
-            depth: heading.level,
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if node.is::<CodeInline>() {
-        return vec![SupramarkNode::InlineCode {
-            value: node.collect_text(),
-            position,
-        }];
-    }
-
-    if let Some(link) = node.cast::<Link>() {
-        return vec![SupramarkNode::Link {
-            url: link.url.clone(),
-            title: link.title.clone(),
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if let Some(image) = node.cast::<Image>() {
-        return vec![SupramarkNode::Image {
-            url: image.url.clone(),
-            title: image.title.clone(),
-            alt: node.collect_text(),
-            position,
-        }];
-    }
-
-    if node.is::<Hardbreak>() {
-        return vec![SupramarkNode::Break { position }];
-    }
-
-    if node.is::<Softbreak>() {
-        return vec![SupramarkNode::Text {
-            value: "\n".to_owned(),
-            position,
-        }];
-    }
-
-    if node.is::<Strikethrough>() {
-        return vec![SupramarkNode::Delete {
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if let Some(code) = node.cast::<CodeBlock>() {
-        return vec![SupramarkNode::Code {
-            value: code.content.clone(),
-            lang: None,
-            meta: None,
-            position,
-        }];
-    }
-
     if let Some(fence) = node.cast::<CodeFence>() {
         return vec![map_fence(fence, position)];
-    }
-
-    if let Some(list) = node.cast::<OrderedList>() {
-        return vec![SupramarkNode::List {
-            ordered: true,
-            start: Some(list.start),
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if node.is::<BulletList>() {
-        return vec![SupramarkNode::List {
-            ordered: false,
-            start: None,
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
     }
 
     if node.is::<ListItem>() {
@@ -792,17 +688,6 @@ fn map_node(node: &Node, index: &OffsetIndex, base_offset: usize) -> Vec<Suprama
             children,
             position,
         }];
-    }
-
-    if node.is::<Blockquote>() {
-        return vec![SupramarkNode::Blockquote {
-            children: map_children(&node.children, index, base_offset),
-            position,
-        }];
-    }
-
-    if node.is::<ThematicBreak>() {
-        return vec![SupramarkNode::ThematicBreak { position }];
     }
 
     if let Some(table) = node.cast::<Table>() {

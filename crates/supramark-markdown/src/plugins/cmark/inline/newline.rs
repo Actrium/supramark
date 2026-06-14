@@ -11,6 +11,10 @@ use crate::{MarkdownIt, Node, NodeValue, Renderer};
 pub struct Hardbreak;
 
 impl NodeValue for Hardbreak {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Break { position: ctx.position(node) }])
+    }
+
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
         fmt.self_close("br", &[]);
         fmt.cr();
@@ -21,6 +25,13 @@ impl NodeValue for Hardbreak {
 pub struct Softbreak;
 
 impl NodeValue for Softbreak {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Text {
+            value: "\n".to_owned(),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
     }

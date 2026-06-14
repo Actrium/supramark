@@ -13,6 +13,14 @@ pub struct ATXHeading {
 }
 
 impl NodeValue for ATXHeading {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Heading {
+            depth: self.level,
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         static TAG: [&str; 6] = ["h1", "h2", "h3", "h4", "h5", "h6"];
         debug_assert!(self.level >= 1 && self.level <= 6);

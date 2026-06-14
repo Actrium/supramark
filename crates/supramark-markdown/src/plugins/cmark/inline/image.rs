@@ -13,6 +13,15 @@ pub struct Image {
 }
 
 impl NodeValue for Image {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Image {
+            url: self.url.clone(),
+            title: self.title.clone(),
+            alt: node.collect_text(),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         let mut attrs = node.attrs.clone();
         attrs.push(("src", self.url.clone()));

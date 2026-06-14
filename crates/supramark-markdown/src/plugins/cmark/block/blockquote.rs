@@ -11,6 +11,13 @@ use crate::{MarkdownIt, Node, NodeValue, Renderer};
 pub struct Blockquote;
 
 impl NodeValue for Blockquote {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Blockquote {
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
         fmt.open("blockquote", &node.attrs);

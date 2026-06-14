@@ -15,6 +15,14 @@ pub struct SetextHeader {
 }
 
 impl NodeValue for SetextHeader {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Heading {
+            depth: self.level,
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         static TAG: [&str; 2] = ["h1", "h2"];
         debug_assert!(self.level >= 1 && self.level <= 2);

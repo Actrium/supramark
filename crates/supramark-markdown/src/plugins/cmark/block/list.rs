@@ -19,6 +19,15 @@ pub struct OrderedList {
 }
 
 impl NodeValue for OrderedList {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::List {
+            ordered: true,
+            start: Some(self.start),
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         let mut attrs = node.attrs.clone();
         let start;
@@ -42,6 +51,15 @@ pub struct BulletList {
 }
 
 impl NodeValue for BulletList {
+    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::List {
+            ordered: false,
+            start: None,
+            children: ctx.map_children(&node.children),
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
         fmt.open("ul", &node.attrs);
