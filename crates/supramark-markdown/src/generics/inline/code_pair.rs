@@ -13,7 +13,7 @@
 //!
 //! ```rust
 //! use supramark_markdown::generics::inline::code_pair;
-//! use supramark_markdown::{MarkdownIt, Node, NodeValue, Renderer};
+//! use supramark_markdown::{MarkdownParser, Node, NodeValue, Renderer};
 //!
 //! #[derive(Debug)]
 //! struct Ferris;
@@ -25,7 +25,7 @@
 //!     }
 //! }
 //!
-//! let md = &mut MarkdownIt::new();
+//! let md = &mut MarkdownParser::new();
 //! code_pair::add_with::<'%'>(md, |_| Node::new(Ferris));
 //! let html = md.parse("hello %world%").render();
 //! assert_eq!(html.trim(), "hello 🦀world🦀");
@@ -42,9 +42,9 @@
 //!
 //! If you define two structures with the same marker, only the first one will work.
 //!
-use crate::parser::extset::{InlineRootExt, MarkdownItExt};
+use crate::parser::extset::{InlineRootExt, MarkdownParserExt};
 use crate::parser::inline::{InlineRule, InlineState, Text};
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
 #[derive(Debug, Default)]
 struct CodePairCache<const MARKER: char> {
@@ -55,9 +55,9 @@ impl<const MARKER: char> InlineRootExt for CodePairCache<MARKER> {}
 
 #[derive(Debug)]
 struct CodePairConfig<const MARKER: char>(fn(usize) -> Node);
-impl<const MARKER: char> MarkdownItExt for CodePairConfig<MARKER> {}
+impl<const MARKER: char> MarkdownParserExt for CodePairConfig<MARKER> {}
 
-pub fn add_with<const MARKER: char>(md: &mut MarkdownIt, f: fn(length: usize) -> Node) {
+pub fn add_with<const MARKER: char>(md: &mut MarkdownParser, f: fn(length: usize) -> Node) {
     md.ext.insert(CodePairConfig::<MARKER>(f));
 
     md.inline.add_rule::<CodePairScanner<MARKER>>();

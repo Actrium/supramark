@@ -10,7 +10,7 @@ use crate::common::utils::find_indent_of;
 use crate::parser::block::{BlockRule, BlockState};
 use crate::plugins::cmark::block::hr::HrScanner;
 use crate::plugins::cmark::block::paragraph::Paragraph;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct OrderedList {
@@ -92,7 +92,7 @@ impl NodeValue for ListItem {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block.add_rule::<ListScanner>().after::<HrScanner>();
 }
 

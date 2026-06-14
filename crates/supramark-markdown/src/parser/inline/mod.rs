@@ -18,7 +18,7 @@ pub use builtin::skip_text::{Text, TextSpecial};
 use crate::common::ruler::Ruler;
 use crate::common::TypeKey;
 use crate::parser::extset::{InlineRootExtSet, RootExtSet};
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
 use super::node::NodeEmpty;
 
@@ -129,7 +129,7 @@ impl InlineParser {
         src: String,
         srcmap: Vec<(usize, usize)>,
         node: Node,
-        md: &MarkdownIt,
+        md: &MarkdownParser,
         root_ext: &mut RootExtSet,
         inline_ext: &mut InlineRootExtSet,
     ) -> Node {

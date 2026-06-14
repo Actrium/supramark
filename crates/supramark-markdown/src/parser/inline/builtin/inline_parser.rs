@@ -1,7 +1,7 @@
 use crate::parser::block::builtin::BlockParserRule;
 use crate::parser::core::{CoreRule, Root};
 use crate::parser::extset::{InlineRootExtSet, RootExtSet};
-use crate::{MarkdownIt, Node, NodeValue};
+use crate::{MarkdownParser, Node, NodeValue};
 
 #[derive(Debug)]
 /// Temporary node which gets replaced with inline nodes when
@@ -25,7 +25,7 @@ impl InlineRoot {
 // this token is supposed to be replaced by one or many actual tokens by inline rule
 impl NodeValue for InlineRoot {}
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.add_rule::<InlineParserRule>()
         .after::<BlockParserRule>()
         .before_all();
@@ -33,8 +33,8 @@ pub fn add(md: &mut MarkdownIt) {
 
 pub struct InlineParserRule;
 impl CoreRule for InlineParserRule {
-    fn run(root: &mut Node, md: &MarkdownIt) {
-        fn walk_recursive(node: &mut Node, md: &MarkdownIt, root_ext: &mut RootExtSet) {
+    fn run(root: &mut Node, md: &MarkdownParser) {
+        fn walk_recursive(node: &mut Node, md: &MarkdownParser, root_ext: &mut RootExtSet) {
             let mut idx = 0;
             while idx < node.children.len() {
                 let child = &mut node.children[idx];

@@ -24,7 +24,7 @@
 //!
 //! ```rust
 //! use supramark_markdown::generics::inline::emph_pair;
-//! use supramark_markdown::{MarkdownIt, Node, NodeValue, Renderer};
+//! use supramark_markdown::{MarkdownParser, Node, NodeValue, Renderer};
 //!
 //! #[derive(Debug)]
 //! struct Superscript;
@@ -36,7 +36,7 @@
 //!     }
 //! }
 //!
-//! let md = &mut MarkdownIt::new();
+//! let md = &mut MarkdownParser::new();
 //! emph_pair::add_with::<'^', 1, true>(md, || Node::new(Superscript));
 //!
 //! let html = md.parse("e^iπ^+1=0").render();
@@ -50,17 +50,17 @@ use std::cmp::min;
 
 use crate::common::sourcemap::SourcePos;
 use crate::parser::core::CoreRule;
-use crate::parser::extset::{MarkdownItExt, NodeExt};
+use crate::parser::extset::{MarkdownParserExt, NodeExt};
 use crate::parser::inline::builtin::InlineParserRule;
 use crate::parser::inline::{InlineRule, InlineState, Text};
-use crate::{MarkdownIt, Node, NodeValue};
+use crate::{MarkdownParser, Node, NodeValue};
 
 #[derive(Debug, Default)]
 struct PairConfig<const MARKER: char> {
     inserted: bool,
     fns: [Option<fn() -> Node>; 3],
 }
-impl<const MARKER: char> MarkdownItExt for PairConfig<MARKER> {}
+impl<const MARKER: char> MarkdownParserExt for PairConfig<MARKER> {}
 
 #[derive(Debug, Default)]
 struct OpenersBottom<const MARKER: char>([usize; 6]);
@@ -88,7 +88,7 @@ pub struct EmphMarker {
 impl NodeValue for EmphMarker {}
 
 pub fn add_with<const MARKER: char, const LENGTH: u8, const CAN_SPLIT_WORD: bool>(
-    md: &mut MarkdownIt,
+    md: &mut MarkdownParser,
     f: fn() -> Node,
 ) {
     let pair_config = md.ext.get_or_insert_default::<PairConfig<MARKER>>();
@@ -290,7 +290,7 @@ fn is_odd_match(opener: &EmphMarker, closer: &EmphMarker) -> bool {
 #[doc(hidden)]
 pub struct FragmentsJoin;
 impl CoreRule for FragmentsJoin {
-    fn run(node: &mut Node, _: &MarkdownIt) {
+    fn run(node: &mut Node, _: &MarkdownParser) {
         node.walk_mut(|node, _| fragments_join(node));
     }
 }

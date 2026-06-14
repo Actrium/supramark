@@ -7,7 +7,7 @@ use regex::Regex;
 use super::utils::blocks::*;
 use super::utils::regexps::*;
 use crate::parser::block::{BlockRule, BlockState};
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct HtmlBlock {
@@ -22,7 +22,7 @@ impl NodeValue for HtmlBlock {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block.add_rule::<HtmlBlockScanner>();
 }
 

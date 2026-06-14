@@ -7,7 +7,7 @@ use crate::parser::extset::RenderExt;
 use crate::parser::inline::InlineRoot;
 use crate::plugins::cmark::block::heading::HeadingScanner;
 use crate::plugins::cmark::block::list::ListScanner;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct Table {
@@ -132,7 +132,7 @@ impl NodeValue for TableCell {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block
         .add_rule::<TableScanner>()
         .before::<ListScanner>()
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn require_pipe_or_colon_in_align_row() {
-        let md = &mut crate::MarkdownIt::new();
+        let md = &mut crate::MarkdownParser::new();
         crate::plugins::extra::tables::add(md);
         let html = md.parse("foo\n---\nbar").render();
         assert_eq!(html.trim(), "foo\n---\nbar");

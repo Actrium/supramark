@@ -6,7 +6,7 @@
 use crate::parser::block::{BlockRule, BlockState};
 use crate::parser::inline::InlineRoot;
 use crate::plugins::cmark::block::paragraph::ParagraphScanner;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct SetextHeader {
@@ -35,7 +35,7 @@ impl NodeValue for SetextHeader {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block
         .add_rule::<LHeadingScanner>()
         .before::<ParagraphScanner>()

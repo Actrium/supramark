@@ -5,8 +5,8 @@
 //! <https://spec.commonmark.org/0.30/#code-fence>
 use crate::common::utils::unescape_all;
 use crate::parser::block::{BlockRule, BlockState};
-use crate::parser::extset::MarkdownItExt;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::parser::extset::MarkdownParserExt;
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct CodeFence {
@@ -46,7 +46,7 @@ impl NodeValue for CodeFence {
 
 #[derive(Debug, Clone, Copy)]
 struct FenceSettings(&'static str);
-impl MarkdownItExt for FenceSettings {}
+impl MarkdownParserExt for FenceSettings {}
 
 impl Default for FenceSettings {
     fn default() -> Self {
@@ -54,11 +54,11 @@ impl Default for FenceSettings {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block.add_rule::<FenceScanner>();
 }
 
-pub fn set_lang_prefix(md: &mut MarkdownIt, lang_prefix: &'static str) {
+pub fn set_lang_prefix(md: &mut MarkdownParser, lang_prefix: &'static str) {
     md.ext.insert(FenceSettings(lang_prefix));
 }
 

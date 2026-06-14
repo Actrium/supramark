@@ -1,13 +1,13 @@
 use crate::parser::core::{CoreRule, Root};
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.add_rule::<BlockParserRule>().before_all();
 }
 
 pub struct BlockParserRule;
 impl CoreRule for BlockParserRule {
-    fn run(root: &mut Node, md: &MarkdownIt) {
+    fn run(root: &mut Node, md: &MarkdownParser) {
         let mut node = std::mem::take(root);
         let data = node.cast_mut::<Root>().unwrap();
         let source = std::mem::take(&mut data.content);

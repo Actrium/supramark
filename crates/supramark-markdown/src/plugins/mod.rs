@@ -7,7 +7,7 @@
 //!
 //! Add each plugin you need by invoking `add` function like this:
 //! ```rust
-//! let md = &mut supramark_markdown::MarkdownIt::new();
+//! let md = &mut supramark_markdown::MarkdownParser::new();
 //! supramark_markdown::plugins::cmark::add(md);
 //! supramark_markdown::plugins::extra::add(md);
 //! supramark_markdown::plugins::html::add(md);

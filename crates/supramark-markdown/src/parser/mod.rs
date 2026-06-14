@@ -19,7 +19,7 @@
 //! it by pushing your own function in that vector that manipulate the state (String)
 //! in any way you like.
 //!
-//! MarkdownIt parser consists of three Rule Chains:
+//! MarkdownParser parser consists of three Rule Chains:
 //!  - [inline] (where functions get executed on every character)
 //!  - [block] (where functions get executed on every line)
 //!  - [core] (where functions get executed once per document)
@@ -27,7 +27,7 @@
 //! You can extend each one of these chains by using
 //! [md.inline.add_rule](inline::InlineParser::add_rule),
 //! [md.block.add_rule](block::BlockParser::add_rule) or
-//! [md.add_rule](crate::MarkdownIt::add_rule) respectively.
+//! [md.add_rule](crate::MarkdownParser::add_rule) respectively.
 //!
 //! These are examples of the rules in each chain (view source to see implementation):
 //!  - [inline rule](crate::plugins::cmark::inline::autolink) - autolink

@@ -17,7 +17,7 @@ use crate::common::utils::normalize_reference;
 use crate::generics::inline::full_link;
 use crate::parser::block::{BlockRule, BlockState};
 use crate::parser::extset::RootExt;
-use crate::{MarkdownIt, Node, NodeValue};
+use crate::{MarkdownParser, Node, NodeValue};
 
 /// Storage for parsed references
 ///
@@ -27,9 +27,9 @@ use crate::{MarkdownIt, Node, NodeValue};
 /// use supramark_markdown::parser::block::builtin::BlockParserRule;
 /// use supramark_markdown::parser::core::{CoreRule, Root};
 /// use supramark_markdown::plugins::cmark::block::reference::{ReferenceMap, DefaultReferenceMap, CustomReferenceMap};
-/// use supramark_markdown::{MarkdownIt, Node};
+/// use supramark_markdown::{MarkdownParser, Node};
 ///
-/// let md = &mut MarkdownIt::new();
+/// let md = &mut MarkdownParser::new();
 /// supramark_markdown::plugins::cmark::add(md);
 ///
 /// #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ use crate::{MarkdownIt, Node, NodeValue};
 ///
 /// struct AddCustomReferences;
 /// impl CoreRule for AddCustomReferences {
-///     fn run(root: &mut Node, _: &MarkdownIt) {
+///     fn run(root: &mut Node, _: &MarkdownParser) {
 ///         let data = root.cast_mut::<Root>().unwrap();
 ///         data.ext.insert(ReferenceMap::new(RefMapOverride::default()));
 ///     }
@@ -75,9 +75,9 @@ use crate::{MarkdownIt, Node, NodeValue};
 /// ```rust
 /// use supramark_markdown::parser::core::{CoreRule, Root};
 /// use supramark_markdown::plugins::cmark::block::reference::{ReferenceMap, DefaultReferenceMap};
-/// use supramark_markdown::{MarkdownIt, Node};
+/// use supramark_markdown::{MarkdownParser, Node};
 ///
-/// let md = &mut MarkdownIt::new();
+/// let md = &mut MarkdownParser::new();
 /// supramark_markdown::plugins::cmark::add(md);
 ///
 /// let ast = md.parse("[hello]: world");
@@ -197,7 +197,7 @@ impl ReferenceMapEntry {
 }
 
 /// Add plugin that parses markdown link references
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.block.add_rule::<ReferenceScanner>();
 }
 

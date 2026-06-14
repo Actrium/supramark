@@ -12,10 +12,10 @@ pub mod strikethrough;
 pub mod syntect;
 pub mod tables;
 
-use crate::MarkdownIt;
+use crate::MarkdownParser;
 
 /// Enable the GFM-style extras Supramark ships with.
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     strikethrough::add(md);
     tables::add(md);
     #[cfg(feature = "linkify")]

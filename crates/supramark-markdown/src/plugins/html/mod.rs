@@ -9,7 +9,7 @@
 //!  - or took some care to sanitize html yourself
 //!
 //! ```rust
-//! let md = &mut supramark_markdown::MarkdownIt::new();
+//! let md = &mut supramark_markdown::MarkdownParser::new();
 //! supramark_markdown::plugins::cmark::add(md);
 //! supramark_markdown::plugins::html::add(md);
 //!
@@ -21,9 +21,9 @@ pub mod html_block;
 pub mod html_inline;
 mod utils;
 
-use crate::MarkdownIt;
+use crate::MarkdownParser;
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     html_inline::add(md);
     html_block::add(md);
 }

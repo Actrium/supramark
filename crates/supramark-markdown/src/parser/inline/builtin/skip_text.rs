@@ -4,7 +4,7 @@
 use regex::{self, Regex};
 
 use crate::parser::inline::{InlineRule, InlineState};
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 /// Plain text AST node.
@@ -40,7 +40,7 @@ impl NodeValue for TextSpecial {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.inline.add_rule::<TextScanner>().before_all();
 }
 

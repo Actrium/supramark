@@ -1,8 +1,8 @@
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
 /// Each member of core rule chain must implement this trait
 pub trait CoreRule: 'static {
-    fn run(root: &mut Node, md: &MarkdownIt);
+    fn run(root: &mut Node, md: &MarkdownParser);
 }
 
 macro_rules! rule_builder {

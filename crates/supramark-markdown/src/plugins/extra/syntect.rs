@@ -4,10 +4,10 @@ use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
 
 use crate::parser::core::CoreRule;
-use crate::parser::extset::MarkdownItExt;
+use crate::parser::extset::MarkdownParserExt;
 use crate::plugins::cmark::block::code::CodeBlock;
 use crate::plugins::cmark::block::fence::CodeFence;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct SyntectSnippet {
@@ -22,7 +22,7 @@ impl NodeValue for SyntectSnippet {
 
 #[derive(Debug, Clone, Copy)]
 struct SyntectSettings(&'static str);
-impl MarkdownItExt for SyntectSettings {}
+impl MarkdownParserExt for SyntectSettings {}
 
 impl Default for SyntectSettings {
     fn default() -> Self {
@@ -30,17 +30,17 @@ impl Default for SyntectSettings {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.add_rule::<SyntectRule>();
 }
 
-pub fn set_theme(md: &mut MarkdownIt, theme: &'static str) {
+pub fn set_theme(md: &mut MarkdownParser, theme: &'static str) {
     md.ext.insert(SyntectSettings(theme));
 }
 
 pub struct SyntectRule;
 impl CoreRule for SyntectRule {
-    fn run(root: &mut Node, md: &MarkdownIt) {
+    fn run(root: &mut Node, md: &MarkdownParser) {
         let ss = SyntaxSet::load_defaults_newlines();
         let ts = ThemeSet::load_defaults();
         let theme = &ts.themes[md

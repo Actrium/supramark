@@ -1,6 +1,6 @@
 //! Add source mapping to resulting HTML, looks like this: `<stuff data-sourcepos="1:1-2:3">`.
 //! ```rust
-//! let md = &mut supramark_markdown::MarkdownIt::new();
+//! let md = &mut supramark_markdown::MarkdownParser::new();
 //! supramark_markdown::plugins::cmark::add(md);
 //! supramark_markdown::plugins::sourcepos::add(md);
 //!
@@ -11,9 +11,9 @@ use crate::common::sourcemap::SourceWithLineStarts;
 use crate::parser::block::builtin::BlockParserRule;
 use crate::parser::core::{CoreRule, Root};
 use crate::parser::inline::builtin::InlineParserRule;
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.add_rule::<SyntaxPosRule>()
         .after::<BlockParserRule>()
         .after::<InlineParserRule>();
@@ -22,7 +22,7 @@ pub fn add(md: &mut MarkdownIt) {
 #[doc(hidden)]
 pub struct SyntaxPosRule;
 impl CoreRule for SyntaxPosRule {
-    fn run(root: &mut Node, _: &MarkdownIt) {
+    fn run(root: &mut Node, _: &MarkdownParser) {
         let source = root.cast::<Root>().unwrap().content.as_str();
         let mapping = SourceWithLineStarts::new(source);
 
@@ -44,7 +44,7 @@ mod tests {
     fn header_test() {
         // same as doctest, keep in sync!
         // used for code coverage and quicker rust-analyzer hints
-        let md = &mut crate::MarkdownIt::new();
+        let md = &mut crate::MarkdownParser::new();
         crate::plugins::cmark::add(md);
         crate::plugins::sourcepos::add(md);
 

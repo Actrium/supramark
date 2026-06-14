@@ -9,7 +9,7 @@ use crate::parser::core::{CoreRule, Root};
 use crate::parser::extset::RootExt;
 use crate::parser::inline::builtin::InlineParserRule;
 use crate::parser::inline::{InlineRule, InlineState, TextSpecial};
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 static SCHEME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)(?:^|[^a-z0-9.+-])([a-z][a-z0-9.+-]*)$").unwrap());
@@ -30,7 +30,7 @@ impl NodeValue for Linkified {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     md.add_rule::<LinkifyPrescan>().before::<InlineParserRule>();
 
     md.inline.add_rule::<LinkifyScanner>();
@@ -49,7 +49,7 @@ struct LinkifyPosition {
 #[doc(hidden)]
 pub struct LinkifyPrescan;
 impl CoreRule for LinkifyPrescan {
-    fn run(root: &mut Node, _: &MarkdownIt) {
+    fn run(root: &mut Node, _: &MarkdownParser) {
         let root_data = root.cast_mut::<Root>().unwrap();
         let source = root_data.content.as_str();
         let finder = LinkFinder::new();

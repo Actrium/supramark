@@ -1,6 +1,6 @@
 //! Strikethrough syntax (like `~~this~~`)
 use crate::generics::inline::emph_pair;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct Strikethrough {
@@ -22,6 +22,6 @@ impl NodeValue for Strikethrough {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     emph_pair::add_with::<'~', 2, true>(md, || Node::new(Strikethrough { marker: '~' }));
 }

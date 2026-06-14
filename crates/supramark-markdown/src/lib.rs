@@ -48,7 +48,7 @@ mod parser;
 mod plugins;
 mod supramark;
 
-pub(crate) use parser::main::MarkdownIt;
+pub(crate) use parser::main::MarkdownParser;
 pub(crate) use parser::node::{Node, NodeValue};
 pub(crate) use parser::renderer::Renderer;
 pub use supramark::{

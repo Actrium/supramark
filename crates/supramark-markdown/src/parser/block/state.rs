@@ -3,7 +3,7 @@
 use crate::common::sourcemap::SourcePos;
 use crate::common::utils::calc_right_whitespace_with_tabstops;
 use crate::parser::extset::RootExtSet;
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
 #[derive(Debug)]
 #[readonly::make]
@@ -18,7 +18,7 @@ where
 
     /// Link to parser instance.
     #[readonly]
-    pub md: &'a MarkdownIt,
+    pub md: &'a MarkdownParser,
 
     pub root_ext: &'b mut RootExtSet,
 
@@ -102,7 +102,7 @@ pub struct LineOffset {
 }
 
 impl<'a, 'b> BlockState<'a, 'b> {
-    pub fn new(src: &'b str, md: &'a MarkdownIt, root_ext: &'b mut RootExtSet, node: Node) -> Self {
+    pub fn new(src: &'b str, md: &'a MarkdownParser, root_ext: &'b mut RootExtSet, node: Node) -> Self {
         let mut result = Self {
             src,
             md,

@@ -2,7 +2,7 @@ use crate::plugins::cmark::block::fence::CodeFence;
 use crate::plugins::extra::tables::{
     ColumnAlignment, TableBody, TableCell, TableHead, TableRow,
 };
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -314,8 +314,8 @@ fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
     }
 }
 
-fn create_parser(options: ParseOptions) -> MarkdownIt {
-    let mut md = MarkdownIt::new();
+fn create_parser(options: ParseOptions) -> MarkdownParser {
+    let mut md = MarkdownParser::new();
     crate::plugins::cmark::add(&mut md);
 
     if options.gfm_tables {
@@ -330,7 +330,7 @@ fn create_parser(options: ParseOptions) -> MarkdownIt {
 
 fn map_document(
     source: &str,
-    md: &MarkdownIt,
+    md: &MarkdownParser,
     index: &OffsetIndex,
 ) -> (Vec<SupramarkNode>, Vec<Diagnostic>) {
     let lines = LineSpan::scan(source);
@@ -493,7 +493,7 @@ fn map_document(
 }
 
 fn map_markdown_fragment(
-    md: &MarkdownIt,
+    md: &MarkdownParser,
     source: &str,
     start: usize,
     end: usize,
@@ -1272,7 +1272,7 @@ fn map_math_block(
 
 fn map_footnote_definition(
     source: &str,
-    md: &MarkdownIt,
+    md: &MarkdownParser,
     lines: &[LineSpan<'_>],
     start_line: usize,
     index: &OffsetIndex,
@@ -1323,7 +1323,7 @@ fn parse_footnote_definition_line(line: &LineSpan<'_>) -> Option<(String, usize)
 
 fn map_definition_list(
     source: &str,
-    md: &MarkdownIt,
+    md: &MarkdownParser,
     lines: &[LineSpan<'_>],
     start_line: usize,
     index: &OffsetIndex,
@@ -1417,7 +1417,7 @@ fn map_definition_list(
 }
 
 fn map_markdown_fragment_as_inline(
-    md: &MarkdownIt,
+    md: &MarkdownParser,
     source: &str,
     start: usize,
     end: usize,

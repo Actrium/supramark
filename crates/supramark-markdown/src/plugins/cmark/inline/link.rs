@@ -4,7 +4,7 @@
 //!
 //! <https://spec.commonmark.org/0.30/#links>
 use crate::generics::inline::full_link;
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct Link {
@@ -36,7 +36,7 @@ impl NodeValue for Link {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     full_link::add::<false>(md, |href, title| {
         Node::new(Link {
             url: href.unwrap_or_default(),

@@ -5,17 +5,17 @@ use crate::common::sourcemap::SourcePos;
 use crate::common::TypeKey;
 use crate::parser::block::{self, BlockParser};
 use crate::parser::core::{Root, *};
-use crate::parser::extset::MarkdownItExtSet;
+use crate::parser::extset::MarkdownParserExtSet;
 use crate::parser::inline::{self, InlineParser};
 use crate::parser::linkfmt::{LinkFormatter, MDLinkFormatter};
 use crate::Node;
 
-type RuleFn = fn(&mut Node, &MarkdownIt);
+type RuleFn = fn(&mut Node, &MarkdownParser);
 
 #[derive(Derivative)]
 #[derivative(Debug)]
 /// Main parser struct, created once and reused for parsing multiple documents.
-pub struct MarkdownIt {
+pub struct MarkdownParser {
     /// Block-level tokenizer.
     pub block: BlockParser,
 
@@ -26,7 +26,7 @@ pub struct MarkdownIt {
     pub link_formatter: Box<dyn LinkFormatter>,
 
     /// Storage for custom data used in plugins.
-    pub ext: MarkdownItExtSet,
+    pub ext: MarkdownParserExtSet,
 
     /// Maximum depth of the generated AST, exists to prevent recursion
     /// (if markdown source reaches this depth, deeply nested structures
@@ -42,7 +42,7 @@ pub struct MarkdownIt {
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
-impl MarkdownIt {
+impl MarkdownParser {
     pub fn new() -> Self {
         Self::default()
     }
@@ -75,13 +75,13 @@ impl MarkdownIt {
     }
 }
 
-impl Default for MarkdownIt {
+impl Default for MarkdownParser {
     fn default() -> Self {
         let mut md = Self {
             block: BlockParser::new(),
             inline: InlineParser::new(),
             link_formatter: Box::new(MDLinkFormatter::new()),
-            ext: MarkdownItExtSet::new(),
+            ext: MarkdownParserExtSet::new(),
             max_nesting: 100,
             ruler: Ruler::new(),
             max_indent: i32::MAX,

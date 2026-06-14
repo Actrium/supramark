@@ -4,7 +4,7 @@ use crate::common::sourcemap::SourcePos;
 use crate::common::utils::is_punct_char;
 use crate::parser::extset::{InlineRootExtSet, RootExtSet};
 use crate::parser::inline::Text;
-use crate::{MarkdownIt, Node};
+use crate::{MarkdownParser, Node};
 
 #[derive(Debug, Clone, Copy)]
 /// Information about emphasis delimiter run returned from [InlineState::scan_delims].
@@ -35,7 +35,7 @@ where
 
     /// Link to parser instance.
     #[readonly]
-    pub md: &'a MarkdownIt,
+    pub md: &'a MarkdownParser,
 
     /// Current node, your rule is supposed to add children to it.
     pub node: Node,
@@ -64,7 +64,7 @@ impl<'a, 'b> InlineState<'a, 'b> {
     pub fn new(
         src: String,
         srcmap: Vec<(usize, usize)>,
-        md: &'a MarkdownIt,
+        md: &'a MarkdownParser,
         root_ext: &'b mut RootExtSet,
         inline_ext: &'b mut InlineRootExtSet,
         node: Node,

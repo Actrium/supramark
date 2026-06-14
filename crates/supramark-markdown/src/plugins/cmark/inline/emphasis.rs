@@ -5,7 +5,7 @@
 //! <https://spec.commonmark.org/0.30/#emphasis-and-strong-emphasis>
 use crate::generics::inline::emph_pair;
 use crate::supramark::{AstV2Ctx, SupramarkNode};
-use crate::{MarkdownIt, Node, NodeValue, Renderer};
+use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 #[derive(Debug)]
 pub struct Em {
@@ -47,7 +47,7 @@ impl NodeValue for Strong {
     }
 }
 
-pub fn add(md: &mut MarkdownIt) {
+pub fn add(md: &mut MarkdownParser) {
     emph_pair::add_with::<'*', 1, true>(md, || Node::new(Em { marker: '*' }));
     emph_pair::add_with::<'_', 1, false>(md, || Node::new(Em { marker: '_' }));
     emph_pair::add_with::<'*', 2, true>(md, || Node::new(Strong { marker: '*' }));
