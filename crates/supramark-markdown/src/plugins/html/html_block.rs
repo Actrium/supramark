@@ -15,6 +15,19 @@ pub struct HtmlBlock {
 }
 
 impl NodeValue for HtmlBlock {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Raw {
+            format: "html".to_owned(),
+            value: self.content.trim_end_matches('\n').to_owned(),
+            block: true,
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
         fmt.cr();
         fmt.text_raw(&self.content);

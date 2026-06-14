@@ -317,6 +317,7 @@ fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
 fn create_parser(options: ParseOptions) -> MarkdownParser {
     let mut md = MarkdownParser::new();
     crate::plugins::cmark::add(&mut md);
+    crate::plugins::html::add(&mut md);
     crate::plugins::extra::math::add(&mut md);
     crate::plugins::extra::footnote::add(&mut md);
     crate::plugins::extra::ext::add(&mut md);
@@ -1252,18 +1253,6 @@ fn parse_tuple2(raw: &str) -> Option<[f64; 2]> {
         return None;
     }
     Some([first, second])
-}
-
-pub(crate) fn is_raw_html_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with("<!--") || trimmed.starts_with("<!") {
-        return true;
-    }
-    let mut chars = trimmed.chars();
-    if chars.next() != Some('<') {
-        return false;
-    }
-    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '/'))
 }
 
 #[derive(Debug)]

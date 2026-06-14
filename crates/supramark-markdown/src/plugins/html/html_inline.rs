@@ -11,6 +11,19 @@ pub struct HtmlInline {
 }
 
 impl NodeValue for HtmlInline {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::Raw {
+            format: "html".to_owned(),
+            value: self.content.clone(),
+            block: false,
+            position: ctx.position(node),
+        }])
+    }
+
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
         fmt.text_raw(&self.content);
     }

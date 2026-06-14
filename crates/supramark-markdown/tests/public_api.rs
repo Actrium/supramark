@@ -281,6 +281,51 @@ fn public_api_preserves_raw_html_blocks() {
 }
 
 #[test]
+fn public_api_preserves_multiline_raw_html_blocks() {
+    let ast = parse("<div>\n  <p>x</p>\n</div>\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Raw {
+        format,
+        value,
+        block,
+        ..
+    } = &children[0]
+    else {
+        panic!("expected raw html block, got {children:?}");
+    };
+
+    assert_eq!(format, "html");
+    assert_eq!(value, "<div>\n  <p>x</p>\n</div>");
+    assert!(*block);
+}
+
+#[test]
+fn public_api_preserves_inline_raw_html() {
+    let ast = parse("text <span>x</span> y\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph {
+        children: paragraph,
+        ..
+    } = &children[0]
+    else {
+        panic!("expected paragraph, got {children:?}");
+    };
+
+    let has_inline_raw = paragraph.iter().any(|node| {
+        matches!(
+            node,
+            SupramarkNode::Raw { format, value, block, .. }
+                if format == "html" && value == "<span>" && !block
+        )
+    });
+    assert!(has_inline_raw, "expected inline raw html, got {paragraph:?}");
+}
+
+#[test]
 fn public_api_reports_unclosed_extension_blocks() {
     let ast = parse(":::map\ncenter: [0, 0]\n");
     let SupramarkNode::Root {

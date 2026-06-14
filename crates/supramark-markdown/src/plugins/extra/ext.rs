@@ -1,16 +1,15 @@
-//! Supramark extension blocks and raw HTML, as block rules.
+//! Supramark extension blocks, as block rules.
 //!
 //! `:::name` containers and `%%%name` inputs capture their content verbatim
 //! (opaque) and dispatch by name; an unclosed opener yields an Unsupported node
-//! carrying a diagnostic. Single-line raw HTML becomes a Raw node. Migrated
-//! from the document-level prescan so the whole document parses in one pass.
+//! carrying a diagnostic. Migrated from the document-level prescan so the whole
+//! document parses in one pass.
 use crate::parser::block::{BlockRule, BlockState};
-use crate::supramark::{build_extension_node, is_raw_html_line, parse_extension_open, ExtensionOpen};
+use crate::supramark::{build_extension_node, parse_extension_open, ExtensionOpen};
 use crate::{MarkdownParser, Node, NodeValue, Renderer};
 
 pub fn add(md: &mut MarkdownParser) {
     md.block.add_rule::<ExtensionScanner>();
-    md.block.add_rule::<RawHtmlScanner>();
 }
 
 // ---- :::container / %%%input ----
@@ -79,48 +78,5 @@ impl BlockRule for ExtensionScanner {
                 Some((node, state.line_max - state.line))
             }
         }
-    }
-}
-
-// ---- single-line raw HTML ----
-
-#[derive(Debug)]
-pub struct RawHtml {
-    value: String,
-}
-
-impl NodeValue for RawHtml {
-    fn to_ast_v2(
-        &self,
-        node: &Node,
-        ctx: &crate::supramark::AstV2Ctx<'_>,
-    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
-        Some(vec![crate::supramark::SupramarkNode::Raw {
-            format: "html".to_owned(),
-            value: self.value.clone(),
-            block: true,
-            position: ctx.position(node),
-        }])
-    }
-
-    fn render(&self, _node: &Node, fmt: &mut dyn Renderer) {
-        fmt.text_raw(&self.value);
-        fmt.cr();
-    }
-}
-
-#[doc(hidden)]
-pub struct RawHtmlScanner;
-
-impl BlockRule for RawHtmlScanner {
-    fn run(state: &mut BlockState) -> Option<(Node, usize)> {
-        let line = state.get_line(state.line);
-        if !is_raw_html_line(line) {
-            return None;
-        }
-        let node = Node::new(RawHtml {
-            value: line.trim().to_owned(),
-        });
-        Some((node, 1))
     }
 }
