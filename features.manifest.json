@@ -119,7 +119,7 @@
       "kind": "supramark",
       "description": "Renderer-side code highlighting metadata and optional engines.",
       "dependsOn": ["commonmark"],
-      "cargoFeatures": ["syntect"],
+      "cargoFeatures": [],
       "tsPackages": ["@supramark/feature-code-highlight"],
       "renderers": ["code-highlight"]
     }
