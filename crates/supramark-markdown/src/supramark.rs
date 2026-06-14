@@ -142,7 +142,7 @@ pub enum SupramarkNode {
         engine: String,
         code: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        meta: Option<String>,
+        meta: Option<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         position: Option<SourcePosition>,
     },
@@ -820,7 +820,7 @@ fn map_fence(fence: &CodeFence, position: Option<SourcePosition>) -> SupramarkNo
     let info = fence.info.trim();
     let mut parts = info.split_whitespace();
     let lang = parts.next().map(str::to_owned);
-    let meta = {
+    let meta_raw = {
         let rest = parts.collect::<Vec<_>>().join(" ");
         (!rest.is_empty()).then_some(rest)
     };
@@ -829,16 +829,49 @@ fn map_fence(fence: &CodeFence, position: Option<SourcePosition>) -> SupramarkNo
         SupramarkNode::Diagram {
             engine: engine.to_owned(),
             code: fence.content.clone(),
-            meta,
+            meta: meta_raw.as_deref().and_then(parse_diagram_meta),
             position,
         }
     } else {
         SupramarkNode::Code {
             value: fence.content.clone(),
             lang,
-            meta,
+            meta: meta_raw,
             position,
         }
+    }
+}
+
+/// Parse the fence info string remainder (everything after the language token)
+/// into a structured JSON object.
+///
+/// Syntax: whitespace-separated items. Each item is split on its first `=` into
+/// key/value; a double-quote wrapped value has the quotes stripped. A bare item
+/// without `=` becomes `key = true`. An empty/whitespace-only remainder yields
+/// `None` so the field is omitted rather than serialized as an empty object.
+fn parse_diagram_meta(meta: &str) -> Option<serde_json::Value> {
+    let mut object = serde_json::Map::new();
+    for item in meta.split_whitespace() {
+        if let Some((key, value)) = item.split_once('=') {
+            if key.is_empty() {
+                continue;
+            }
+            let value = value
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(value);
+            object.insert(
+                key.to_owned(),
+                serde_json::Value::String(value.to_owned()),
+            );
+        } else {
+            object.insert(item.to_owned(), serde_json::Value::Bool(true));
+        }
+    }
+    if object.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(object))
     }
 }
 

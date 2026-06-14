@@ -55,6 +55,38 @@ fn public_api_serializes_diagrams_and_tables() {
 }
 
 #[test]
+fn public_api_parses_diagram_meta_into_object() {
+    let ast = parse("```mermaid theme=dark zoom=3 wide title=\"hi\"\ngraph TD; A-->B;\n```\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Diagram { engine, meta, .. } = &children[0] else {
+        panic!("expected diagram, got {children:?}");
+    };
+    assert_eq!(engine, "mermaid");
+    let meta = meta.as_ref().expect("diagram meta object");
+    assert_eq!(meta["theme"], serde_json::json!("dark"));
+    assert_eq!(meta["zoom"], serde_json::json!("3"));
+    assert_eq!(meta["wide"], serde_json::json!(true));
+    assert_eq!(meta["title"], serde_json::json!("hi"));
+}
+
+#[test]
+fn public_api_omits_empty_diagram_meta() {
+    let ast = parse("```mermaid
+graph TD; A-->B;
+```
+");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Diagram { meta, .. } = &children[0] else {
+        panic!("expected diagram");
+    };
+    assert!(meta.is_none());
+}
+
+#[test]
 fn public_api_omits_absent_optional_fields() {
     let json = serde_json::to_string(&parse("- plain item\n")).expect("serialize ast");
 

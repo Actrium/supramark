@@ -290,7 +290,7 @@ interface DiagramNode extends SupramarkBaseNode {
   type: 'diagram';
   engine: string;
   code: string;
-  meta?: string;
+  meta?: Record<string, unknown>;
 }
 ```
 
@@ -299,7 +299,7 @@ interface DiagramNode extends SupramarkBaseNode {
 - diagram 来自 fenced code block。
 - `engine` 是 canonical engine id，必须小写。
 - `code` 不包含 opening/closing fence。
-- `meta` 是 info string 中 engine 后剩余的原始字符串。
+- `meta` 由 info string 中 engine 之后剩余部分解析为结构化对象：按空白拆项，每项以第一个 `=` 切 key/value（value 可用双引号包裹，去引号后保存）；无 `=` 的裸 token 记为 `key=true`。剩余部分为空时省略 `meta`（不输出空对象）。
 - renderer 根据 `engine` 分发；parser 不调用 Mermaid、PlantUML、Vega、D2 等渲染引擎。
 
 内置 engine id：
