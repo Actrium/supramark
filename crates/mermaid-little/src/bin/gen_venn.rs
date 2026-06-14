@@ -22,6 +22,9 @@ fn main() {
     }
     match mermaid_little::convert_with_id(&source, &id) {
         Ok(s) => fs::write(out_path, &s).unwrap(),
-        Err(e) => { eprintln!("ERR: {:?}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("ERR: {:?}", e);
+            std::process::exit(1);
+        }
     }
 }

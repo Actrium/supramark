@@ -3,7 +3,7 @@ import { ActivityIndicator, Dimensions, StyleSheet, Text, View } from 'react-nat
 import { SvgXml } from 'react-native-svg';
 import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/core';
 import { type DiagramRenderResult } from '@supramark/engines';
-import { createReactNativeDiagramEngine, getNativeEngineAdapter } from '@supramark/engines/rn';
+import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
 import { normalizeSvg, normalizeSvgLight } from './svgUtils';
 
 export interface DiagramNodeProps {
@@ -20,27 +20,6 @@ export interface DiagramNodeProps {
 
 const defaultDiagramEngine = createReactNativeDiagramEngine();
 
-// RN engine support matrix:
-//   - 'dot' / 'graphviz' → handled by createReactNativeDiagramEngine
-//     (graphviz-anywhere-rn native FFI, no DOM, no WebView).
-//   - 'd2' / 'mermaid' / 'plantuml' → available IF the host registers
-//     the engine's native FFI adapter at startup via
-//     `registerNativeEngineAdapter({ engine, render, ... })` from
-//     `@supramark/engines/rn`. The native FFI crates live at
-//     `crates/<engine>-little/packages/native/` and are consumed
-//     through per-engine native-rn npm wrappers (planned).
-//   - everything else (echarts / vega-lite) → unsupported on RN in
-//     this build. The hidden-WebView worker
-//     (@supramark/rn-diagram-worker) was retired in the 2026-05
-//     cleanup; native FFI bindings are tracked per-engine in the
-//     respective crates/<engine>/UPSTREAM.md.
-const BUILTIN_SUPPORTED_ENGINES = new Set(['dot', 'graphviz']);
-
-function isEngineSupported(normalizedEngine: string): boolean {
-  if (BUILTIN_SUPPORTED_ENGINES.has(normalizedEngine)) return true;
-  return getNativeEngineAdapter(normalizedEngine) !== undefined;
-}
-
 export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig }) => {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,18 +32,6 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
     setSvg(null);
 
     const normalizedEngine = String(node.engine || '').toLowerCase();
-
-    if (!isEngineSupported(normalizedEngine)) {
-      setError(
-        `Engine "${node.engine}" is not yet supported on React Native. ` +
-          'Built-in support: dot / graphviz. For mermaid / plantuml / d2, ' +
-          'install the corresponding @kookyleo/supramark-*-native-rn package ' +
-          'and call registerNativeEngineAdapter() at startup.'
-      );
-      setLoading(false);
-      return;
-    }
-
     const options = buildRenderOptions(node.engine, node.meta, diagramConfig);
     const renderPromise: Promise<DiagramRenderResult> = defaultDiagramEngine.render({
       engine: normalizedEngine,
@@ -85,22 +52,14 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
           return;
         }
 
-        if (result.format === 'svg') {
-          let normalized;
-          try {
-            normalized = result.payload.includes('<style')
-              ? normalizeSvg(result.payload)
-              : normalizeSvgLight(result.payload);
-          } catch (err) {
-            setError(`SVG normalization failed: ${err}`);
-            setLoading(false);
-            return;
-          }
-
+        try {
+          const normalized = result.payload.includes('<style')
+            ? normalizeSvg(result.payload)
+            : normalizeSvgLight(result.payload);
           setSvg(normalized);
           setLoading(false);
-        } else {
-          setError(`Unsupported diagram format: ${result.format}`);
+        } catch (err) {
+          setError(`SVG normalization failed: ${err}`);
           setLoading(false);
         }
       })

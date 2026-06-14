@@ -37,7 +37,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest",
+    "test": "vitest run",
     "test:ui": "vitest --ui",
     "lint": "eslint src --ext .ts,.tsx",
     "fmt": "prettier --write src"

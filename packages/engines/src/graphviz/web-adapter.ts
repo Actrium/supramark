@@ -16,7 +16,7 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
       return {
         graphvizVersion: graphviz.version(),
         engines: ['dot', 'neato', 'fdp', 'sfdp', 'circo', 'twopi', 'osage', 'patchwork'],
-        formats: ['svg', 'dot', 'json', 'xdot', 'plain'],
+        formats: ['svg'],
       };
     },
   };

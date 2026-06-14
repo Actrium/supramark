@@ -2,14 +2,13 @@
 
 ## 背景
 
-当前仓库中的图表渲染仍处于过渡态：
+当前仓库中的图表渲染已经收敛到 `@supramark/engines`：
 
-- React Native 侧仍保留 `@supramark/rn-diagram-worker`
-- Web 侧仍保留 `@supramark/web-diagram`
-- 部分图表已经开始转入本地 `lib -> svg` 渲染
-- 部分图表仍依赖隐藏 WebView 或浏览器端脚本注入
+- React Native 侧通过 native FFI adapter 或 JS SVG-string engine 输出 SVG；
+- Web 侧通过 wasm / JS engine 输出 SVG；
+- renderer 只消费 SVG，不直接维护图表库运行环境。
 
-这会导致同一个 diagram family 在不同平台上走不同链路，职责分散，后续维护成本高。
+这份文档保留为架构约束：新增 diagram family 必须接入统一 engine 路线。
 
 ## 目标
 
@@ -63,11 +62,11 @@ render({
   - 调用：`@supramark/engines`
   - 输出：React DOM / SSR HTML 与 SVG 展示
 
-Renderer 侧不再负责：
+Renderer 侧不负责：
 
 - 自己引 Mermaid / Vega / ECharts 等渲染库
 - 自己拼接脚本并扫描 DOM
-- 自己维护 WebView/worker 型图表执行环境
+- 自己维护额外的图表执行环境
 
 ## 目标结构
 
@@ -87,20 +86,14 @@ Renderer 侧不再负责：
   └─ 负责 AST -> React/HTML + 展示 SVG
 ```
 
-在这个结构下：
+在这个结构下，`@supramark/engines` 是唯一 diagram 渲染入口。
 
-- `@supramark/engines` 是唯一 diagram 渲染入口
-- `@supramark/rn-diagram-worker` 最终应删除
-- `@supramark/web-diagram` 最终应删除
-
-## 过渡原则
-
-在完全迁移完成前，允许存在过渡方案，但必须遵守以下原则：
+## 维护原则
 
 1. 新增 diagram 能力时，不再扩散到新的 renderer 私有实现。
-2. 任何已完成本地 `lib -> svg` 的 family，都优先迁入 `@supramark/engines`。
-3. `@supramark/rn` 与 `@supramark/web` 即使暂时保留 fallback，也应优先通过 `@supramark/engines.render()` 获取结果。
-4. `rn-diagram-worker` 与 `web-diagram` 只作为未迁移 family 的临时兼容层，不再作为长期架构继续扩展。
+2. 任何 `source -> svg` 能力都应迁入 `@supramark/engines`。
+3. `@supramark/rn` 与 `@supramark/web` 只通过 `@supramark/engines.render()` 获取结果。
+4. 平台差异只体现在 engine adapter 与 SVG 展示层。
 
 ## 迁移顺序
 
@@ -128,17 +121,15 @@ Renderer 侧不再负责：
 
 ### 第三阶段：删除过渡层
 
-- 删除 `@supramark/rn-diagram-worker`
-- 删除 `@supramark/web-diagram`
-- 删除依赖 WebView / DOM 扫描 / 脚本注入的 diagram 渲染路径
+- 删除旧 worker / DOM 扫描 / 脚本注入型 diagram 渲染路径
 
 ## 验收标准
 
 满足以下条件时，可以认为 diagram 架构收敛完成：
 
 1. 所有 diagram family 都能通过 `@supramark/engines.render()` 返回 SVG。
-2. `@supramark/rn` 不再依赖 `@supramark/rn-diagram-worker`。
-3. `@supramark/web` 不再依赖 `@supramark/web-diagram`。
+2. `@supramark/rn` 不依赖额外图表执行容器。
+3. `@supramark/web` 不依赖额外图表执行容器。
 4. React Native 与 Web 的 diagram 渲染入口一致，只保留展示层差异。
 5. SSR、CSR、RN 示例都走同一条 `diagram-engine -> svg -> renderer display` 链路。
 

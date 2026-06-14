@@ -186,8 +186,8 @@ pub fn parse(source: &str) -> Result<GitGraphDiagram> {
             }
             branch_heads.entry(name.clone()).or_insert(head.clone());
             current_branch = name;
-        } else if let Some(rest) = strip_keyword(line, "checkout")
-            .or_else(|| strip_keyword(line, "switch"))
+        } else if let Some(rest) =
+            strip_keyword(line, "checkout").or_else(|| strip_keyword(line, "switch"))
         {
             let name = parse_ident(rest);
             if branch_heads.contains_key(&name) {
@@ -390,7 +390,12 @@ fn strip_frontmatter(source: &str) -> FrontmatterData {
             }
         }
         if trimmed_line.starts_with("title:") {
-            title = Some(trimmed_line["title:".len()..].trim().trim_matches('"').to_string());
+            title = Some(
+                trimmed_line["title:".len()..]
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
         } else if trimmed_line.starts_with("config:") {
             config_indent = Some(indent);
         } else if config_indent.is_some() && trimmed_line.starts_with("theme:") {
@@ -412,21 +417,27 @@ fn strip_frontmatter(source: &str) -> FrontmatterData {
                 rotate = Some(false);
             }
         } else if gitgraph_indent.is_some() && trimmed_line.starts_with("showBranches:") {
-            let v = trimmed_line["showBranches:".len()..].trim().trim_matches('"');
+            let v = trimmed_line["showBranches:".len()..]
+                .trim()
+                .trim_matches('"');
             if v == "true" {
                 show_branches = Some(true);
             } else if v == "false" {
                 show_branches = Some(false);
             }
         } else if gitgraph_indent.is_some() && trimmed_line.starts_with("showCommitLabel:") {
-            let v = trimmed_line["showCommitLabel:".len()..].trim().trim_matches('"');
+            let v = trimmed_line["showCommitLabel:".len()..]
+                .trim()
+                .trim_matches('"');
             if v == "true" {
                 show_commit_label = Some(true);
             } else if v == "false" {
                 show_commit_label = Some(false);
             }
         } else if gitgraph_indent.is_some() && trimmed_line.starts_with("parallelCommits:") {
-            let v = trimmed_line["parallelCommits:".len()..].trim().trim_matches('"');
+            let v = trimmed_line["parallelCommits:".len()..]
+                .trim()
+                .trim_matches('"');
             if v == "true" {
                 parallel_commits = Some(true);
             } else if v == "false" {
@@ -442,7 +453,9 @@ fn strip_frontmatter(source: &str) -> FrontmatterData {
                 main_branch_name = Some(v);
             }
         } else if gitgraph_indent.is_some() && trimmed_line.starts_with("mainBranchOrder:") {
-            let v = trimmed_line["mainBranchOrder:".len()..].trim().trim_matches('"');
+            let v = trimmed_line["mainBranchOrder:".len()..]
+                .trim()
+                .trim_matches('"');
             if let Ok(n) = v.parse::<i64>() {
                 main_branch_order = Some(n);
             }
@@ -477,7 +490,8 @@ fn strip_init_directives(source: &str) -> (Option<String>, Option<bool>, String,
             had_any = true;
             let block = &s[idx..idx + end + 3];
             // Inspect the directive payload.
-            if let Some(t) = scan_value(block, "'theme'").or_else(|| scan_value(block, "\"theme\"")) {
+            if let Some(t) = scan_value(block, "'theme'").or_else(|| scan_value(block, "\"theme\""))
+            {
                 theme = Some(t);
             }
             if scan_value(block, "'rotateCommitLabel'")
@@ -602,10 +616,7 @@ fn parse_ident(s: &str) -> String {
         }
         return after_quote.to_string();
     }
-    s.split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string()
+    s.split_whitespace().next().unwrap_or("").to_string()
 }
 
 fn parse_order_after(s: &str) -> Option<i64> {
@@ -659,9 +670,7 @@ fn parse_commit_args(s: &str) -> Result<(Option<String>, CommitKind, Vec<String>
 /// distinguishes "user wrote `tag:`" from "user did not", because
 /// upstream suppresses the default `cherry-pick:<id>` tag whenever any
 /// `tag:` was supplied (even when its value is empty).
-fn parse_cherrypick_args(
-    s: &str,
-) -> Result<(String, Option<String>, Vec<String>, bool)> {
+fn parse_cherrypick_args(s: &str) -> Result<(String, Option<String>, Vec<String>, bool)> {
     let mut id: Option<String> = None;
     let mut parent: Option<String> = None;
     let mut tags: Vec<String> = Vec::new();
@@ -702,9 +711,7 @@ fn parse_cherrypick_args(
 /// always bare identifiers per upstream's grammar.
 fn take_word(s: &str) -> (String, &str) {
     let s = s.trim_start();
-    let end = s
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(s.len());
+    let end = s.find(|c: char| c.is_whitespace()).unwrap_or(s.len());
     (s[..end].to_string(), &s[end..])
 }
 

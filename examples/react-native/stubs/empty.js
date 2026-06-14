@@ -1,8 +1,8 @@
-// Stub for web-only wasm packages on the RN bundle. RN routes diagrams
-// through the per-engine native FFI wrappers (@kookyleo/supramark-*-native-rn);
-// the *-web packages must never load on this platform but engines/src/*
-// resolves them statically. Re-exporting nothing leaves any `await import(...)`
-// call resolvable to an empty object, and downstream code in
-// @supramark/engines/src/*/index.ts already throws a clear error if the
-// expected entry points are missing.
+// Stub for wasm web packages on the RN bundle. RN routes D2 / Mermaid /
+// PlantUML through native FFI wrappers, while ECharts / Vega-Lite use pure JS
+// SVG-string engines. The *-web wasm packages must never load on RN, but
+// engines/src/* can still resolve those names statically. Re-exporting
+// nothing leaves any accidental `await import(...)` resolvable to an empty
+// object, and downstream code throws a clear error if the expected entry
+// points are missing.
 module.exports = {};

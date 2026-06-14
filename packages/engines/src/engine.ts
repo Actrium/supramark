@@ -2,6 +2,7 @@ import { isGraphvizDiagramEngine, renderGraphvizSvg } from './graphviz';
 import { renderMathJaxSvg } from './mathjax';
 import { renderMermaidSvg } from './mermaid';
 import type {
+  DiagramErrorInfo,
   DiagramEngineOptions,
   DiagramEngineType,
   DiagramRenderFn,
@@ -32,34 +33,24 @@ class LocalDiagramEngine implements DiagramRenderService {
       switch (normalizedEngine) {
         case 'mermaid': {
           const payload = await renderMermaidSvg(params.code, params.options);
-          return {
-            id,
-            engine: normalizedEngine,
-            success: true,
-            format: 'svg',
-            payload,
-          };
+          return this.svg(id, normalizedEngine, payload);
         }
         case 'math': {
           const payload = await renderMathJaxSvg(params.code, {
             displayMode: params.options?.displayMode === true,
           });
-          return {
-            id,
-            engine: normalizedEngine,
-            success: true,
-            format: 'svg',
-            payload,
-          };
+          return this.svg(id, normalizedEngine, payload);
         }
         case 'echarts': {
           const render = await this.getEchartsRender();
           if (!render) return this.unsupported(id, normalizedEngine, params.engine);
           const payload = await render(params.code, params.options);
-          return { id, engine: normalizedEngine, success: true, format: 'svg', payload };
+          return this.svg(id, normalizedEngine, payload);
         }
         case 'vega-lite':
         case 'vegalite':
+        case 'chart':
+        case 'chartjs':
         case 'vega': {
           const render = await this.getVegaLiteRender();
           if (!render) return this.unsupported(id, normalizedEngine, params.engine);
@@ -68,77 +59,57 @@ class LocalDiagramEngine implements DiagramRenderService {
               ? { ...(params.options ?? {}), dialect: 'vega' as const }
               : params.options;
           const payload = await render(params.code, opts);
-          return { id, engine: normalizedEngine, success: true, format: 'svg', payload };
+          return this.svg(id, normalizedEngine, payload);
         }
         case 'plantuml': {
           const render = await this.getPlantumlRender();
           if (!render) return this.unsupported(id, normalizedEngine, params.engine);
           const payload = await render(params.code, params.options);
-          return { id, engine: normalizedEngine, success: true, format: 'svg', payload };
+          return this.svg(id, normalizedEngine, payload);
         }
         case 'd2': {
           const render = await this.getD2Render();
           if (!render) return this.unsupported(id, normalizedEngine, params.engine);
           const payload = await render(params.code, params.options);
-          return { id, engine: normalizedEngine, success: true, format: 'svg', payload };
+          return this.svg(id, normalizedEngine, payload);
         }
         default: {
           if (isGraphvizDiagramEngine(normalizedEngine)) {
             const adapter = await this.getGraphvizAdapter();
             if (!adapter) {
-              return {
+              return this.error(
                 id,
-                engine: normalizedEngine,
-                success: false,
-                format: 'error',
-                payload:
-                  'Graphviz adapter is not configured for @supramark/engines.',
-                error: {
-                  code: 'unsupported_engine',
-                  message: `${params.engine} requires a Graphviz adapter`,
-                  details:
-                    'Use @supramark/engines/web or @supramark/engines/rn to create the engine.',
-                },
-              };
+                normalizedEngine,
+                'Graphviz adapter is not configured for @supramark/engines.',
+                'unsupported_engine',
+                `${params.engine} requires a Graphviz adapter`,
+                'Use @supramark/engines/web or @supramark/engines/rn to create the engine.'
+              );
             }
 
             const payload = await renderGraphvizSvg(params.code, params.options, adapter);
-            return {
-              id,
-              engine: normalizedEngine,
-              success: true,
-              format: 'svg',
-              payload,
-            };
+            return this.svg(id, normalizedEngine, payload);
           }
 
-          return {
+          return this.error(
             id,
-            engine: normalizedEngine,
-            success: false,
-            format: 'error',
-            payload: `Unsupported diagram engine: ${params.engine}`,
-            error: {
-              code: 'unsupported_engine',
-              message: `${params.engine} is not supported by @supramark/engines`,
-            },
-          };
+            normalizedEngine,
+            `Unsupported diagram engine: ${params.engine}`,
+            'unsupported_engine',
+            `${params.engine} is not supported by @supramark/engines`
+          );
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return {
+      return this.error(
         id,
-        engine: normalizedEngine,
-        success: false,
-        format: 'error',
-        payload: message,
-        error: {
-          code: 'render_error',
-          message: `${params.engine} rendering failed`,
-          details: message,
-        },
-      };
+        normalizedEngine,
+        message,
+        'render_error',
+        `${params.engine} rendering failed`,
+        message
+      );
     }
   }
 
@@ -194,19 +165,51 @@ class LocalDiagramEngine implements DiagramRenderService {
     return this.d2RenderPromise;
   }
 
-  private unsupported(id: string, normalized: string, original: DiagramEngineType): DiagramRenderResult {
+  private svg(id: string, engine: string, payload: string): DiagramRenderResult {
     return {
       id,
-      engine: normalized,
+      engine,
+      success: true,
+      format: 'svg',
+      payload,
+    };
+  }
+
+  private error(
+    id: string,
+    engine: string,
+    payload: string,
+    code: DiagramErrorInfo['code'],
+    message: string,
+    details?: string
+  ): DiagramRenderResult {
+    return {
+      id,
+      engine,
       success: false,
       format: 'error',
-      payload: `Unsupported diagram engine: ${original}`,
+      payload,
       error: {
-        code: 'unsupported_engine',
-        message: `${original} runtime not configured for @supramark/engines`,
-        details: `Pass \`${normalized}: { render, loadRender }\` to createDiagramEngine() or ensure the peer dependency is installed.`,
+        code,
+        message,
+        details,
       },
     };
+  }
+
+  private unsupported(
+    id: string,
+    normalized: string,
+    original: DiagramEngineType
+  ): DiagramRenderResult {
+    return this.error(
+      id,
+      normalized,
+      `Unsupported diagram engine: ${original}`,
+      'unsupported_engine',
+      `${original} runtime not configured for @supramark/engines`,
+      `Pass \`${normalized}: { render, loadRender }\` to createDiagramEngine() or ensure the peer dependency is installed.`
+    );
   }
 }
 

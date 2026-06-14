@@ -188,7 +188,11 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             push_item(
                 &mut d.items,
                 &mut stack,
-                DiagramItem::Autonumber { start, step, visible },
+                DiagramItem::Autonumber {
+                    start,
+                    step,
+                    visible,
+                },
             );
             continue;
         }
@@ -256,8 +260,7 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             continue;
         }
         if let Some(rest) = strip_kw(line, "else") {
-            if let Some(Frame::Alt { branches } | Frame::Critical { branches }) = stack.last_mut()
-            {
+            if let Some(Frame::Alt { branches } | Frame::Critical { branches }) = stack.last_mut() {
                 branches.push(AltBranch {
                     label: rest.trim().to_string(),
                     items: Vec::new(),
@@ -286,10 +289,7 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
             });
             continue;
         }
-        if eq_keyword(line, "and")
-            || line.starts_with("and ")
-            || line.starts_with("and\t")
-        {
+        if eq_keyword(line, "and") || line.starts_with("and ") || line.starts_with("and\t") {
             let label = strip_kw(line, "and")
                 .map(|r| r.trim().to_string())
                 .unwrap_or_default();
@@ -324,7 +324,10 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
         if let Some(rest) = strip_kw(line, "create") {
             let rest = rest.trim_start();
             let (actor, _kind) = if let Some(r) = strip_kw(rest, "actor") {
-                (parse_actor_decl(r.trim(), ActorType::Actor, current_box), "actor")
+                (
+                    parse_actor_decl(r.trim(), ActorType::Actor, current_box),
+                    "actor",
+                )
             } else if let Some(r) = strip_kw(rest, "participant") {
                 (
                     parse_actor_decl(r.trim(), ActorType::Participant, current_box),
@@ -336,11 +339,7 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
                     "participant",
                 )
             };
-            push_item(
-                &mut d.items,
-                &mut stack,
-                DiagramItem::Create(actor.clone()),
-            );
+            push_item(&mut d.items, &mut stack, DiagramItem::Create(actor.clone()));
             add_actor(&mut d, actor, true);
             continue;
         }
@@ -586,7 +585,7 @@ fn parse_links_directive(rest: &str) -> Option<(String, Vec<(String, String)>)> 
         }
         let key = body[key_start..i].to_string();
         i += 1; // closing quote
-        // Skip whitespace then `:`.
+                // Skip whitespace then `:`.
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
@@ -842,7 +841,6 @@ fn strip_wrap_prefix(s: &str) -> (bool, &str) {
     }
 }
 
-
 fn parse_message_line(s: &str) -> Option<Message> {
     // Token order matters: longer tokens come first so that
     // e.g. `-->` does not pre-empt `--|\` or `-->>` does not pre-empt
@@ -918,11 +916,7 @@ fn parse_message_line(s: &str) -> Option<Message> {
         (false, true) => Some(CentralConnection::AtTo),
         (false, false) => None,
     };
-    let from = from_no_cc
-        .trim()
-        .trim_end_matches('+')
-        .trim()
-        .to_string();
+    let from = from_no_cc.trim().trim_end_matches('+').trim().to_string();
     let (mut activate, deactivate, after2) = strip_activation(after_no_cc);
     // Mirror upstream jison: central-connection AtTo (`signal '()' actor`)
     // and Dual (`'()' signal '()'`) both emit `activate: true` on the
@@ -990,8 +984,8 @@ fn truncate_at_first_unescaped_semicolon(s: &str) -> &str {
                 let c = bytes[j];
                 if c == b'#' {
                     let inner = &s[j + 1..i];
-                    let is_alnum = !inner.is_empty()
-                        && inner.bytes().all(|b| b.is_ascii_alphanumeric());
+                    let is_alnum =
+                        !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_alphanumeric());
                     let is_signed_num = (inner.starts_with('+') || inner.starts_with('-'))
                         && inner[1..].bytes().all(|b| b.is_ascii_digit());
                     if is_alnum || is_signed_num {

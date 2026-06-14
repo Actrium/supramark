@@ -1392,9 +1392,11 @@ fn measure_lines_box(lines: &[&str], font_size: f64, bold: bool) -> (f64, f64) {
 /// Small marker on `LNode` kept local here — stashes a flag in `extra`
 /// so the renderer can skip invisible divider pseudo-nodes without
 /// mutating the struct shape.
+#[allow(dead_code)]
 trait NodeSkip {
     fn implicit_skip_render(&mut self, flag: bool);
 }
+#[allow(dead_code)]
 impl NodeSkip for LNode {
     fn implicit_skip_render(&mut self, flag: bool) {
         if flag {
@@ -1440,7 +1442,6 @@ mod tests {
     /// No transitions => both nodes get suffix -0.
     #[test]
     fn check_node_width_no_min() {
-        use crate::render::svg_state::render;
         let mmd = "stateDiagram-v2\n  state \"A long long name\" as long1\n  state \"A\" as longlonglongid\n";
         let d = parse(mmd).unwrap();
         let theme = get_theme("default");

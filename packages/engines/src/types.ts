@@ -1,5 +1,6 @@
 export type DiagramEngineType = 'mermaid' | 'math' | 'dot' | 'graphviz' | string;
 
+/** Public render result format. Successful renders are always SVG. */
 export type DiagramRenderFormat = 'svg' | 'error';
 
 export interface DiagramErrorInfo {
@@ -12,6 +13,7 @@ export interface DiagramRenderResult {
   id: string;
   engine: DiagramEngineType;
   success: boolean;
+  /** `success: true` returns `svg`; failures return `error`. */
   format: DiagramRenderFormat;
   payload: string;
   error?: DiagramErrorInfo;
@@ -49,7 +51,7 @@ export interface GraphvizDiagramOptions {
 export interface GraphvizCapabilities {
   graphvizVersion?: string;
   engines?: string[];
-  formats?: string[];
+  formats?: Array<'svg'>;
 }
 
 export interface GraphvizRenderAdapter {

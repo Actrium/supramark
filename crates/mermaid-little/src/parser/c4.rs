@@ -17,9 +17,7 @@
 //! strings, or `$key="value"` key-value pairs.
 
 use crate::error::MermaidError;
-use crate::model::c4::{
-    C4Boundary, C4Diagram, C4Rel, C4Shape, C4Subtype, C4Text,
-};
+use crate::model::c4::{C4Boundary, C4Diagram, C4Rel, C4Shape, C4Subtype, C4Text};
 use crate::preprocess;
 
 /// Parse a C4 source document into a [`C4Diagram`].
@@ -340,9 +338,18 @@ fn dispatch_macro(
             label: C4Text { text: label },
             descr: C4Text { text: descr },
             techn: C4Text { text: techn },
-            sprite: kvs.iter().find(|(k, _)| k == "sprite").map(|(_, v)| v.clone()),
-            tags: kvs.iter().find(|(k, _)| k == "tags").map(|(_, v)| v.clone()),
-            link: kvs.iter().find(|(k, _)| k == "link").map(|(_, v)| v.clone()),
+            sprite: kvs
+                .iter()
+                .find(|(k, _)| k == "sprite")
+                .map(|(_, v)| v.clone()),
+            tags: kvs
+                .iter()
+                .find(|(k, _)| k == "tags")
+                .map(|(_, v)| v.clone()),
+            link: kvs
+                .iter()
+                .find(|(k, _)| k == "link")
+                .map(|(_, v)| v.clone()),
             parent_boundary: current_parent.clone(),
             bg_color: None,
             font_color: None,
@@ -390,7 +397,11 @@ fn dispatch_macro(
             (
                 {
                     let t = pos_text(args, 2);
-                    if t.is_empty() { default_type.to_string() } else { t }
+                    if t.is_empty() {
+                        default_type.to_string()
+                    } else {
+                        t
+                    }
                 },
                 pos_text(args, 3),
             )
@@ -405,7 +416,11 @@ fn dispatch_macro(
             } else {
                 let t = pos_text(args, 2);
                 (
-                    if t.is_empty() { default_type.to_string() } else { t },
+                    if t.is_empty() {
+                        default_type.to_string()
+                    } else {
+                        t
+                    },
                     String::new(),
                 )
             }
@@ -416,8 +431,14 @@ fn dispatch_macro(
             label: C4Text { text: label },
             b_type: C4Text { text: b_type_text },
             descr: C4Text { text: descr_text },
-            tags: kvs.iter().find(|(k, _)| k == "tags").map(|(_, v)| v.clone()),
-            link: kvs.iter().find(|(k, _)| k == "link").map(|(_, v)| v.clone()),
+            tags: kvs
+                .iter()
+                .find(|(k, _)| k == "tags")
+                .map(|(_, v)| v.clone()),
+            link: kvs
+                .iter()
+                .find(|(k, _)| k == "link")
+                .map(|(_, v)| v.clone()),
             parent_boundary: current_parent.clone(),
             node_type: node_type.map(str::to_string),
             bg_color: None,
@@ -472,9 +493,18 @@ fn dispatch_macro(
             label: C4Text { text: label },
             techn: C4Text { text: techn },
             descr: C4Text { text: descr },
-            sprite: kvs.iter().find(|(k, _)| k == "sprite").map(|(_, v)| v.clone()),
-            tags: kvs.iter().find(|(k, _)| k == "tags").map(|(_, v)| v.clone()),
-            link: kvs.iter().find(|(k, _)| k == "link").map(|(_, v)| v.clone()),
+            sprite: kvs
+                .iter()
+                .find(|(k, _)| k == "sprite")
+                .map(|(_, v)| v.clone()),
+            tags: kvs
+                .iter()
+                .find(|(k, _)| k == "tags")
+                .map(|(_, v)| v.clone()),
+            link: kvs
+                .iter()
+                .find(|(k, _)| k == "link")
+                .map(|(_, v)| v.clone()),
             text_color: None,
             line_color: None,
             offset_x: None,

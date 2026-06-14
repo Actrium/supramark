@@ -77,10 +77,10 @@ onChange={(e) => setMarkdown(e.target.value)}
 如果需要更好的性能，可以预先解析 AST：
 
 \`\`\`typescript
-import { Supramark, parseMarkdown } from '@supramark/web/client';
+import { Supramark, parse } from '@supramark/web/client';
 
 // 在组件外或 useEffect 中解析
-const ast = await parseMarkdown('# Hello World');
+const ast = await parse('# Hello World');
 
 function App() {
 return <Supramark ast={ast} markdown="" />;
@@ -177,7 +177,7 @@ hello('Supramark');
 ### Weather 卡片
 
 :::weather
-city: Shanghai
+location: Shanghai
 condition: Cloudy
 tempC: 22
 :::

@@ -12,10 +12,17 @@ fn gen_fixture_svg() {
         let mut id = String::from("ref-");
         let mut last = false;
         for c in rel.chars() {
-            if c.is_ascii_alphanumeric() { id.push(c); last = false; }
-            else if !last { id.push('-'); last = true; }
+            if c.is_ascii_alphanumeric() {
+                id.push(c);
+                last = false;
+            } else if !last {
+                id.push('-');
+                last = true;
+            }
         }
-        while id.ends_with('-') { id.pop(); }
+        while id.ends_with('-') {
+            id.pop();
+        }
         match mermaid_little::convert_with_id(&source, &id) {
             Ok(svg) => {
                 let out = format!("/tmp/our_{}.svg", num);

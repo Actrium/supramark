@@ -79,8 +79,8 @@ export function listNativeEngines(): string[] {
  * Run a native render through the registered adapter. Idempotently
  * triggers the adapter's metrics-callback installer on first use.
  *
- * Returns `null` if no adapter is registered for `engine`, letting
- * callers fall back to an error / WebView / unsupported message.
+   * Returns `null` if no adapter is registered for `engine`, letting
+   * callers fall back to an error / unsupported message.
  */
 export async function renderViaNative(
   engine: string,

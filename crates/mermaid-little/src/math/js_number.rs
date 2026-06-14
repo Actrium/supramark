@@ -83,7 +83,7 @@ fn is_exact_tie(v: f64, even_below_str: &str) -> bool {
         // Subnormals / inf / NaN — out of scope here.
         return false;
     }
-    let sig: u128 = ((1u128 << 52) | raw_mant as u128);
+    let sig: u128 = (1u128 << 52) | raw_mant as u128;
     let pow = raw_exp - 1023 - 52; // v = sig * 2^pow
 
     // Decode midpoint string `even_below_str + "5"` as m / 10^(k+1),

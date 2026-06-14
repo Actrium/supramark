@@ -26,6 +26,8 @@ import type {
   SupramarkFootnoteDefinitionNode,
   SupramarkDefinitionListNode,
   SupramarkDefinitionItemNode,
+  SupramarkDefinitionTermNode,
+  SupramarkDefinitionDescriptionNode,
   SupramarkDiagramConfig,
   SupramarkConfig,
   SupramarkCodeHighlightResult,
@@ -34,7 +36,7 @@ import type {
 import { type DiagramRenderResult, type DiagramRenderService } from '@supramark/engines';
 import { createWebDiagramEngine } from '@supramark/engines/web';
 import {
-  parseMarkdown,
+  parse,
   isFeatureEnabled,
   isDiagramFeatureEnabled,
   getFeatureOptionsAs,
@@ -91,6 +93,21 @@ type CodeHighlightTask = {
   theme?: string;
 };
 
+function getDefinitionTerms(item: SupramarkDefinitionItemNode): SupramarkDefinitionTermNode[] {
+  return item.children.filter(
+    (child): child is SupramarkDefinitionTermNode => child.type === 'definition_term'
+  );
+}
+
+function getDefinitionDescriptions(
+  item: SupramarkDefinitionItemNode
+): SupramarkDefinitionDescriptionNode[] {
+  return item.children.filter(
+    (child): child is SupramarkDefinitionDescriptionNode =>
+      child.type === 'definition_description'
+  );
+}
+
 const defaultDiagramEngine = createWebDiagramEngine();
 
 // Admonition 默认主题（仅在未给出自定义 className 时生效）。
@@ -144,7 +161,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
 
     (async () => {
       try {
-        const parsed = ast ?? (await parseMarkdown(markdown, { config }));
+        const parsed = ast ?? (await parse(markdown, { config }));
         const renderedMap = await preRenderAll(
           collectRenderTasks(parsed.children, config),
           diagramEngine
@@ -596,23 +613,33 @@ function renderNode(
           <div key={key} className={classNames.paragraph}>
             {list.children.map((item, index) => {
               const defItem = item as SupramarkDefinitionItemNode;
-              const termContent = renderInlineNodes(
-                defItem.term,
-                classNames,
-                rendered,
-                highlighted,
-                config
-              );
+              const terms = getDefinitionTerms(defItem);
+              const descriptions = getDefinitionDescriptions(defItem);
               return (
-                <p key={index} className={classNames.paragraph}>
-                  <strong>{termContent}</strong>{' '}
-                  {defItem.descriptions.map((descNodes, idx) => (
-                    <span key={idx}>
-                      {renderInlineNodes(descNodes, classNames, rendered, highlighted, config)}
-                      {idx < defItem.descriptions.length - 1 ? ' ' : null}
-                    </span>
+                <div key={index} className={classNames.paragraph}>
+                  {terms.map((term, termIndex) => (
+                    <p key={`term-${termIndex}`} className={classNames.paragraph}>
+                      <strong>
+                        {renderInlineNodes(term.children, classNames, rendered, highlighted, config)}
+                      </strong>
+                    </p>
                   ))}
-                </p>
+                  {descriptions.map((description, descriptionIndex) => (
+                    <div key={`description-${descriptionIndex}`}>
+                      {description.children.map((child, childIndex) =>
+                        renderNode(
+                          child,
+                          childIndex,
+                          classNames,
+                          rendered,
+                          highlighted,
+                          config,
+                          containerRenderers
+                        )
+                      )}
+                    </div>
+                  ))}
+                </div>
               );
             })}
           </div>
@@ -622,21 +649,30 @@ function renderNode(
         <dl key={key} className={classNames.paragraph}>
           {list.children.map((item, index) => {
             const defItem = item as SupramarkDefinitionItemNode;
-            const termContent = renderInlineNodes(
-              defItem.term,
-              classNames,
-              rendered,
-              highlighted,
-              config
-            );
+            const terms = getDefinitionTerms(defItem);
+            const descriptions = getDefinitionDescriptions(defItem);
             return (
               <React.Fragment key={index}>
-                <dt>
-                  <strong>{termContent}</strong>
-                </dt>
-                {defItem.descriptions.map((descNodes, idx) => (
+                {terms.map((term, termIndex) => (
+                  <dt key={`term-${termIndex}`}>
+                    <strong>
+                      {renderInlineNodes(term.children, classNames, rendered, highlighted, config)}
+                    </strong>
+                  </dt>
+                ))}
+                {descriptions.map((description, idx) => (
                   <dd key={idx}>
-                    {renderInlineNodes(descNodes, classNames, rendered, highlighted, config)}
+                    {description.children.map((child, childIndex) =>
+                      renderNode(
+                        child,
+                        childIndex,
+                        classNames,
+                        rendered,
+                        highlighted,
+                        config,
+                        containerRenderers
+                      )
+                    )}
                     {isCompact ? null : <br />}
                   </dd>
                 ))}
@@ -935,14 +971,6 @@ function collectRenderTasks(nodes: SupramarkNode[], config?: SupramarkConfig): R
       if ('children' in node && Array.isArray((node as { children?: SupramarkNode[] }).children)) {
         walk((node as { children: SupramarkNode[] }).children);
       }
-
-      if (node.type === 'definition_item') {
-        const item = node as SupramarkDefinitionItemNode;
-        walk(item.term);
-        for (const description of item.descriptions) {
-          walk(description);
-        }
-      }
     }
   }
 
@@ -976,14 +1004,6 @@ function collectCodeHighlightTasks(
 
       if ('children' in node && Array.isArray((node as { children?: SupramarkNode[] }).children)) {
         walk((node as { children: SupramarkNode[] }).children);
-      }
-
-      if (node.type === 'definition_item') {
-        const item = node as SupramarkDefinitionItemNode;
-        walk(item.term);
-        for (const description of item.descriptions) {
-          walk(description);
-        }
       }
     }
   }
@@ -1076,6 +1096,8 @@ const PRE_RENDERED_DIAGRAM_ENGINES = new Set([
   'vega-lite',
   'vegalite',
   'vega',
+  'chart',
+  'chartjs',
   'plantuml',
   'd2',
 ]);

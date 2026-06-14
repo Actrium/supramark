@@ -3,6 +3,7 @@ import {
   GRAPHVIZ_LAYOUT_ENGINES,
   pickGraphvizDiagramOptions,
 } from './graphviz';
+import { loadEchartsSvgRender, loadVegaLiteSvgRender } from './js-chart-loaders';
 import { getNativeEngineAdapter, renderViaNative } from './rn-native-adapter';
 import type {
   DiagramEngineOptions,
@@ -32,9 +33,10 @@ export interface ReactNativeDiagramEngineOptions extends DiagramEngineOptions {
  *      installs an adapter.
  *   2. **Graphviz layout adapter** (`options.graphviz.{adapter,loadAdapter}`) —
  *      defaults to `@kookyleo/graphviz-anywhere-rn`.
- *   3. **Inner engine** — for unrecognised engines, falls through to
- *      the cross-platform `createDiagramEngine` (most pure-JS engines
- *      report "unsupported on RN" here).
+ *   3. **JS SVG engines** — ECharts and Vega/Vega-Lite use the same
+ *      source -> SVG-string route as Web.
+ *   4. **Inner engine** — for unrecognised engines, falls through to the
+ *      cross-platform `createDiagramEngine` unsupported response.
  */
 export function createReactNativeDiagramEngine(
   options: ReactNativeDiagramEngineOptions = {}
@@ -45,6 +47,14 @@ export function createReactNativeDiagramEngine(
     graphviz: {
       adapter: graphviz.adapter,
       loadAdapter: graphviz.loadAdapter ?? createReactNativeGraphvizAdapterLoader(),
+    },
+    echarts: {
+      render: options.echarts?.render,
+      loadRender: options.echarts?.loadRender ?? loadEchartsSvgRender,
+    },
+    vegaLite: {
+      render: options.vegaLite?.render,
+      loadRender: options.vegaLite?.loadRender ?? loadVegaLiteSvgRender,
     },
   });
 

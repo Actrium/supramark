@@ -1,4 +1,4 @@
-// Position information (compatible with unist)
+// Position information (compatible with unist, extended for AST v2 source maps)
 export interface Position {
   start: Point;
   end: Point;
@@ -8,6 +8,8 @@ export interface Point {
   line: number;
   column: number;
   offset?: number;
+  byte_offset?: number;
+  utf16_offset?: number;
 }
 
 export type SupramarkNodeType =
@@ -27,9 +29,13 @@ export type SupramarkNodeType =
   | 'footnote_definition'
   | 'definition_list'
   | 'definition_item'
+  | 'definition_term'
+  | 'definition_description'
   | 'table'
   | 'table_row'
   | 'table_cell'
+  | 'raw'
+  | 'unsupported'
   // Inline-level nodes
   | 'text'
   | 'strong'
@@ -42,10 +48,26 @@ export type SupramarkNodeType =
   | 'delete' // GFM strikethrough
   | 'footnote_reference';
 
+export type DiagnosticSeverity = 'info' | 'warning' | 'error';
+
+export interface SupramarkDiagnostic {
+  code: string;
+  severity: DiagnosticSeverity;
+  message: string;
+  position?: Position;
+  data?: Record<string, unknown>;
+}
+
+export interface SupramarkParserInfo {
+  name: string;
+  version?: string;
+}
+
 export interface SupramarkBaseNode {
   type: SupramarkNodeType;
   position?: Position; // Optional source position information
   data?: Record<string, unknown>; // Plugin custom data
+  diagnostics?: SupramarkDiagnostic[];
 }
 
 export interface SupramarkTextNode extends SupramarkBaseNode {
@@ -56,7 +78,7 @@ export interface SupramarkTextNode extends SupramarkBaseNode {
 /**
  * Diagram 引擎标识符
  *
- * - 与 parseMarkdown() 中 isDiagramLanguage() 的列表保持一致；
+ * - 与 parse() 中 isDiagramLanguage() 的列表保持一致；
  * - 允许扩展字符串，方便宿主添加自定义引擎。
  */
 export const BUILT_IN_DIAGRAM_ENGINES = [
@@ -89,7 +111,12 @@ export interface SupramarkDiagramNode extends SupramarkBaseNode {
 export interface SupramarkMapMarker {
   lat: number;
   lng: number;
+  label?: string;
+  id?: string;
+  data?: Record<string, unknown>;
 }
+
+export type SupramarkExtensionMode = 'transparent' | 'opaque';
 
 /**
  * 通用容器节点（统一表达 :::xxx）
@@ -104,7 +131,9 @@ export interface SupramarkMapMarker {
 export interface SupramarkContainerNode extends SupramarkParentNode {
   type: 'container';
   name: string;
+  mode?: SupramarkExtensionMode;
   params?: string;
+  value?: string;
   data?: Record<string, unknown>;
 }
 
@@ -121,7 +150,9 @@ export interface SupramarkContainerNode extends SupramarkParentNode {
 export interface SupramarkInputNode extends SupramarkParentNode {
   type: 'input';
   name: string;
+  mode?: SupramarkExtensionMode;
   params?: string;
+  value?: string;
   data?: Record<string, unknown>;
 }
 
@@ -347,16 +378,17 @@ export interface SupramarkDefinitionListNode extends SupramarkParentNode {
   children: SupramarkDefinitionItemNode[];
 }
 
-/**
- * 定义列表中的单个条目。
- *
- * - term: 术语部分（通常是一个行内节点序列）
- * - descriptions: 描述段落列表，每个元素是一组块级/行内节点
- */
-export interface SupramarkDefinitionItemNode extends SupramarkBaseNode {
+export interface SupramarkDefinitionItemNode extends SupramarkParentNode {
   type: 'definition_item';
-  term: SupramarkNode[];
-  descriptions: SupramarkNode[][];
+  children: Array<SupramarkDefinitionTermNode | SupramarkDefinitionDescriptionNode>;
+}
+
+export interface SupramarkDefinitionTermNode extends SupramarkParentNode {
+  type: 'definition_term';
+}
+
+export interface SupramarkDefinitionDescriptionNode extends SupramarkParentNode {
+  type: 'definition_description';
 }
 
 /**
@@ -372,13 +404,13 @@ export type SupramarkAdmonitionKind = (typeof SUPRAMARK_ADMONITION_KINDS)[number
 export interface SupramarkListNode extends SupramarkParentNode {
   type: 'list';
   ordered: boolean;
-  start: number | null;
+  start?: number;
   tight?: boolean;
 }
 
 export interface SupramarkListItemNode extends SupramarkParentNode {
   type: 'list_item';
-  checked?: boolean | null;
+  checked?: boolean;
 }
 
 export interface SupramarkBlockquoteNode extends SupramarkParentNode {
@@ -407,7 +439,7 @@ export interface SupramarkLinkNode extends SupramarkParentNode {
 export interface SupramarkImageNode extends SupramarkBaseNode {
   type: 'image';
   url: string;
-  alt?: string;
+  alt: string;
   title?: string;
 }
 
@@ -435,6 +467,21 @@ export interface SupramarkTableCellNode extends SupramarkParentNode {
   header?: boolean;
 }
 
+export interface SupramarkRawNode extends SupramarkBaseNode {
+  type: 'raw';
+  format: string;
+  value: string;
+  block: boolean;
+}
+
+export interface SupramarkUnsupportedNode extends SupramarkParentNode {
+  type: 'unsupported';
+  syntax: string;
+  reason: string;
+  value?: string;
+  diagnostics?: SupramarkDiagnostic[];
+}
+
 // Node type unions
 export type SupramarkBlockNode =
   | SupramarkParagraphNode
@@ -444,6 +491,8 @@ export type SupramarkBlockNode =
   | SupramarkFootnoteDefinitionNode
   | SupramarkDefinitionListNode
   | SupramarkDefinitionItemNode
+  | SupramarkDefinitionTermNode
+  | SupramarkDefinitionDescriptionNode
   | SupramarkListNode
   | SupramarkListItemNode
   | SupramarkBlockquoteNode
@@ -453,7 +502,9 @@ export type SupramarkBlockNode =
   | SupramarkInputNode // %%% extensions (form, survey, etc.)
   | SupramarkTableNode
   | SupramarkTableRowNode
-  | SupramarkTableCellNode;
+  | SupramarkTableCellNode
+  | SupramarkRawNode
+  | SupramarkUnsupportedNode;
 
 export type SupramarkInlineNode =
   | SupramarkTextNode
@@ -465,10 +516,15 @@ export type SupramarkInlineNode =
   | SupramarkLinkNode
   | SupramarkImageNode
   | SupramarkBreakNode
-  | SupramarkDeleteNode;
+  | SupramarkDeleteNode
+  | SupramarkRawNode
+  | SupramarkUnsupportedNode;
 
 export type SupramarkNode = SupramarkRootNode | SupramarkBlockNode | SupramarkInlineNode;
 
 export interface SupramarkRootNode extends SupramarkParentNode {
   type: 'root';
+  ast_version: 2;
+  diagnostics: SupramarkDiagnostic[];
+  parser?: SupramarkParserInfo;
 }

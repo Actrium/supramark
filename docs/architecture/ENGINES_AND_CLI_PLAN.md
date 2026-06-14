@@ -190,7 +190,7 @@ export interface RenderSpec {
 
 export function createRender(spec: RenderSpec) {
   return async (markdown: string, options?: RenderOptions): Promise<string> => {
-    const ast = await parseMarkdown(markdown, { config: toSupramarkConfig(spec.features) });
+    const ast = await parse(markdown, { config: toSupramarkConfig(spec.features) });
     // 预渲染所有 diagram/math 节点
     // 序列化为 HTML string
     // 返回
@@ -202,7 +202,7 @@ export function createRender(spec: RenderSpec) {
 // src/runtime/createSupramark.tsx
 export function createSupramark(spec: RenderSpec): React.FC<SupramarkProps> {
   return function Supramark({ markdown, theme, className }) {
-    // 内部调 parseMarkdown + 预渲染 + 遍历 AST 出 React 树
+    // 内部调 parse + 预渲染 + 遍历 AST 出 React 树
     // 所有 engines / features 已经固化在 spec 里
   };
 }
@@ -556,12 +556,12 @@ import { Supramark } from '@/generated/supramark';
 |---|---|
 | `@supramark/core` | 无变动。AST / parser / feature 契约稳定 |
 | `@supramark/engines` | **大重构**：删 `engine.ts` / `web.ts` / `rn.ts` / provider；加 runtime / types / 各 engine 独立目录 / subtype codegen |
-| `@supramark/web` | **简化**：`Supramark.tsx` 不再自造 DiagramRenderService；runtime 层迁到 `diagram-engine/runtime`；保留 `Supramark` 薄壳（由 `createSupramark` 生成） |
+| `@supramark/web` | **简化**：`Supramark.tsx` 不再自造 DiagramRenderService；runtime 层迁到 `@supramark/engines`；保留 `Supramark` 薄壳（由 `createSupramark` 生成） |
 | `@supramark/rn` | **简化**：同上 |
 | `@supramark/feature-*` | 不变。 |
 | `@supramark/feature-diagram-plantuml` | **删除**。`DIAGRAM_ENGINE_TARGET.md` 早定的淘汰项 |
-| `@supramark/rn-diagram-worker` | **删除**。WebView 过渡方案正式退场 |
-| `@supramark/web-diagram` | **删除**。空壳包 |
+| 旧 RN diagram worker 包 | **删除**。旧 RN worker 过渡方案正式退场 |
+| 旧 Web diagram helper 包 | **删除**。空壳包 |
 | `@supramark/cli` | **新增** |
 | `examples/react-web-csr` | 迁到 config + generated 流程 |
 | `examples/react-web` | 同上 |
@@ -576,7 +576,7 @@ import { Supramark } from '@/generated/supramark';
 | **3** | 从 `origin/fix/graph` 移植 ECharts + Vega-Lite；subtype codegen 脚本 | 5 个 engine 全部可用；`echarts/<N>.ts` 自动产出 | ✅ |
 | **4** | `@supramark/cli` 包 | bin 可跑，5 个 preset 可用 | ✅ |
 | **5** | `web`/`rn` 的 Supramark 简化 | 组件变薄，接口迁到 spec 驱动 | ⚠️ 会影响 examples |
-| **6** | 删 PlantUML + rn-diagram-worker + web-diagram | 三个包在仓库消失 | ✅ |
+| **6** | 删 PlantUML 旧实现 + 旧 RN worker 包 + 旧 Web helper 包 | 三个包在仓库消失 | ✅ |
 | **7** | examples 迁到 config 流程 | 所有示例跑新架构 | ⚠️ 需要 Phase 5 先完成 |
 | **8** | 目录重组（见 §10） | 纯 `git mv` + workspace 配置更新 | ✅ 独立 PR |
 

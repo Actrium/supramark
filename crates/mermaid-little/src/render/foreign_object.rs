@@ -71,10 +71,7 @@ pub fn contains_katex_marker(s: &str) -> bool {
 /// The label is the raw .mmd label (XML-escaped — `&` → `&amp;` etc.).
 /// `font` controls bbox measurement.
 #[cfg(feature = "katex")]
-pub fn try_render_katex_label(
-    label: &str,
-    font: &HtmlLabelFont<'_>,
-) -> Option<(String, f64, f64)> {
+pub fn try_render_katex_label(label: &str, font: &HtmlLabelFont<'_>) -> Option<(String, f64, f64)> {
     if !contains_katex_marker(label) {
         return None;
     }

@@ -93,8 +93,8 @@ fn strip_semantics(s: &str) -> String {
 /// elements like `<br/>` stay untouched.
 fn expand_self_closing(s: &str) -> String {
     const TAGS: &[&str] = &[
-        "path", "line", "svg", "rect", "g", "polygon", "polyline", "circle", "ellipse",
-        "text", "tspan", "defs", "clipPath", "use",
+        "path", "line", "svg", "rect", "g", "polygon", "polyline", "circle", "ellipse", "text",
+        "tspan", "defs", "clipPath", "use",
     ];
     let mut out = String::with_capacity(s.len() + 16);
     let bytes = s.as_bytes();
@@ -231,7 +231,15 @@ mod tests {
         // would have been dropped by the time we see it in production).
         let raw = r#"<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html"></span></span></span>"#;
         let got = sanitize(raw);
-        assert!(!got.contains("<semantics>"), "semantics not stripped: {}", got);
-        assert!(!got.contains("<annotation"), "annotation not stripped: {}", got);
+        assert!(
+            !got.contains("<semantics>"),
+            "semantics not stripped: {}",
+            got
+        );
+        assert!(
+            !got.contains("<annotation"),
+            "annotation not stripped: {}",
+            got
+        );
     }
 }

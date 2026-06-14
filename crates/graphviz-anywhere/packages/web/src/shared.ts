@@ -20,8 +20,10 @@ export const KNOWN_TEXT_FORMATS = [
   'plain',
 ] as const;
 
-export type GraphvizEngine = (typeof KNOWN_ENGINES)[number] | (string & {});
-export type GraphvizFormat = (typeof KNOWN_TEXT_FORMATS)[number] | (string & {});
+type CustomStringLiteral = string & Record<never, never>;
+
+export type GraphvizEngine = (typeof KNOWN_ENGINES)[number] | CustomStringLiteral;
+export type GraphvizFormat = (typeof KNOWN_TEXT_FORMATS)[number] | CustomStringLiteral;
 export type GraphvizErrorLevel = 'error' | 'warning';
 export type GraphvizAttributeValue = string | number | boolean | { html: string };
 

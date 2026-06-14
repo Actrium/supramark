@@ -88,7 +88,11 @@ mod tests {
     fn renders_alpha() {
         let out = render("\\alpha", true).expect("render");
         assert!(out.contains("<math"), "expected MathML, got: {}", out);
-        assert!(out.contains("katex-html"), "expected katex-html, got: {}", out);
+        assert!(
+            out.contains("katex-html"),
+            "expected katex-html, got: {}",
+            out
+        );
     }
 
     /// All five formula shapes that appear in the failing demo fixtures

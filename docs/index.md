@@ -188,10 +188,10 @@ docs/
     * @returns Parsed AST
     * @example
     * ```ts
-    * const ast = await parseMarkdown('# Hello')
+    * const ast = await parse('# Hello')
     * ```
     */
-   export async function parseMarkdown(...)
+   export async function parse(...)
    ````
 2. 运行 `npm run docs:generate:api`
 3. 检查生成的 `docs/api/*.md` 文件

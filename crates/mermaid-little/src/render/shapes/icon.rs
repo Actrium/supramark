@@ -49,7 +49,10 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     let (lw, lh) = if has_label {
         crate::render::foreign_object::measure_html_markup_label(&for_measure, &font, 200.0, true)
     } else {
-        (0.0, crate::render::foreign_object::measure_html_markup_label("", &font, 200.0, true).1)
+        (
+            0.0,
+            crate::render::foreign_object::measure_html_markup_label("", &font, 200.0, true).1,
+        )
     };
 
     let gap = if has_label { 8.0 } else { 0.0 };

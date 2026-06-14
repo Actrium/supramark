@@ -226,10 +226,7 @@ mod tests {
     #[test]
     fn meaningful_drift_fails() {
         // 0.5 is not within tolerance for values near 100.
-        assert!(!svg_match_tolerant(
-            "<g x=\"100.0\"/>",
-            "<g x=\"100.5\"/>"
-        ));
+        assert!(!svg_match_tolerant("<g x=\"100.0\"/>", "<g x=\"100.5\"/>"));
     }
 
     #[test]
@@ -279,9 +276,8 @@ mod tests {
         let mut out = String::new();
         let mut i = 0;
         while i + 3 <= input.len() {
-            let n = ((input[i] as u32) << 16)
-                | ((input[i + 1] as u32) << 8)
-                | (input[i + 2] as u32);
+            let n =
+                ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | (input[i + 2] as u32);
             out.push(CHARS[((n >> 18) & 0x3f) as usize] as char);
             out.push(CHARS[((n >> 12) & 0x3f) as usize] as char);
             out.push(CHARS[((n >> 6) & 0x3f) as usize] as char);

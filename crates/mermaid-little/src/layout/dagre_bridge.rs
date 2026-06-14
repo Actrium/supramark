@@ -323,6 +323,7 @@ fn build_cluster_anchors(
 /// Populate a dagre graph from a `LayoutData`. Self-edges are expanded
 /// using the upstream pattern (two label-rect helper nodes + three
 /// stitched edges).
+#[allow(dead_code)]
 fn build_graph(data: &LayoutData) -> Graph<NodeLabel, EdgeLabel> {
     build_graph_filtered(data, &std::collections::HashSet::new())
 }
@@ -330,6 +331,7 @@ fn build_graph(data: &LayoutData) -> Graph<NodeLabel, EdgeLabel> {
 /// Variant of `build_graph` that skips nodes whose ids are in `excluded`.
 /// Used by the outer pass when isolated clusters have pre-computed layouts
 /// and their children are excluded from the outer dagre graph.
+#[allow(dead_code)]
 fn build_graph_filtered<'a>(
     data: &LayoutData,
     excluded: &std::collections::HashSet<&'a str>,
@@ -478,8 +480,8 @@ fn build_graph_filtered_ex<'a>(
             // gets re-inserted at the end of the edge list). Classify
             // such edges as rewritten too, so they sit at the tail and
             // dagre's pre-rank ordering matches upstream's binding.
-            let touches_cluster = all_cluster_ids.contains(effective_src)
-                || all_cluster_ids.contains(effective_dst);
+            let touches_cluster =
+                all_cluster_ids.contains(effective_src) || all_cluster_ids.contains(effective_dst);
             if touches_cluster || dagre_src != effective_src || dagre_dst != effective_dst {
                 rewritten.push(idx);
             } else {
@@ -726,6 +728,7 @@ fn expand_self_edge_owned(
 
 /// Pull post-layout coordinates out of `g` and paint them back onto a
 /// fresh copy of `data.nodes`, preserving original index order.
+#[allow(dead_code)]
 fn collect_nodes(data: &LayoutData, g: &Graph<NodeLabel, EdgeLabel>) -> Vec<Node> {
     data.nodes
         .iter()
@@ -1616,6 +1619,7 @@ fn root_cluster_ids(data: &LayoutData) -> Vec<String> {
 }
 
 /// Return the direct children (non-cluster node ids) of a given cluster.
+#[allow(dead_code)]
 fn direct_children<'a>(cluster_id: &str, data: &'a LayoutData) -> Vec<&'a Node> {
     data.nodes
         .iter()
@@ -3500,8 +3504,8 @@ fn shape_uses_polygon_intersect(shape: Option<&str>) -> bool {
 /// Returns 0.0 if the node has no label text.
 fn icon_label_width(node: &Node) -> f64 {
     use crate::render::foreign_object::{
-        markdown_label_to_html, measure_html_markup_label, replace_fa_icons,
-        string_label_to_html, HtmlLabelFont,
+        markdown_label_to_html, measure_html_markup_label, replace_fa_icons, string_label_to_html,
+        HtmlLabelFont,
     };
     let label = match node.label.as_deref() {
         Some(s) if !s.is_empty() => s,

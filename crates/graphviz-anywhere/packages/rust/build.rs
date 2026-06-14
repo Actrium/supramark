@@ -335,8 +335,7 @@ fn try_github_release() -> bool {
 
 fn main() {
     let target = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
-    let target_arch =
-        env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "unknown".to_string());
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "unknown".to_string());
 
     println!("cargo:rerun-if-env-changed=GRAPHVIZ_ANYWHERE_DIR");
     println!("cargo:rerun-if-env-changed=GRAPHVIZ_NATIVE_DIR");
@@ -361,16 +360,10 @@ fn main() {
     // ── Descriptive panic message ─────────────────────────────────────────────
     let expected_asset = target_triple_to_asset_name(&target)
         .map(|a| format!("  GitHub release asset : {a}"))
-        .unwrap_or_else(|| {
-            format!("  GitHub release asset : (none known for target {target:?})")
-        });
+        .unwrap_or_else(|| format!("  GitHub release asset : (none known for target {target:?})"));
 
     let expected_prebuilt = target_triple_to_prebuilt_subdir(&target)
-        .map(|(sub, lib)| {
-            format!(
-                "  prebuilt path        : packages/rust/prebuilt/{sub}/{lib}"
-            )
-        })
+        .map(|(sub, lib)| format!("  prebuilt path        : packages/rust/prebuilt/{sub}/{lib}"))
         .unwrap_or_else(|| {
             "  prebuilt path        : (no prebuilt mapping for this target)".to_string()
         });
@@ -379,10 +372,7 @@ fn main() {
     let expected_output = if output_dirs.is_empty() {
         "  output/ path         : (no output mapping for this target)".to_string()
     } else {
-        format!(
-            "  output/ path(s)      : {}",
-            output_dirs.join(", ")
-        )
+        format!("  output/ path(s)      : {}", output_dirs.join(", "))
     };
 
     panic!(

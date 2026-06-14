@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Supramark } from '@supramark/web/client';
 
 // Register weather container hook (must be imported before using)
-import '@supramark/feature-weather';
+import { renderWeatherContainerWeb } from '@supramark/feature-weather';
 
 import './App.css';
 
@@ -52,7 +52,7 @@ hello('Supramark');
 ### Weather 卡片
 
 :::weather
-city: Shanghai
+location: Shanghai
 condition: Cloudy
 tempC: 22
 :::
@@ -108,7 +108,11 @@ function App() {
             </div>
           </div>
           <div className="markdown-preview">
-            <Supramark markdown={markdown} theme={theme === 'none' ? undefined : theme} />
+            <Supramark
+              markdown={markdown}
+              theme={theme === 'none' ? undefined : theme}
+              containerRenderers={{ weather: renderWeatherContainerWeb }}
+            />
           </div>
         </div>
       </div>

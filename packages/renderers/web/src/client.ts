@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { Supramark, parseMarkdown } from '@supramark/web/client';
+ * import { Supramark, parse } from '@supramark/web/client';
  *
  * function App() {
  *   const [markdown, setMarkdown] = useState('# Hello World');
@@ -24,9 +24,9 @@
  * @example
  * ```typescript
  * // 预解析 AST 然后传入（性能优化）
- * import { Supramark, parseMarkdown } from '@supramark/web/client';
+ * import { Supramark, parse } from '@supramark/web/client';
  *
- * const ast = await parseMarkdown('# Hello World');
+ * const ast = await parse('# Hello World');
  *
  * function App() {
  *   return <Supramark ast={ast} markdown="" />;
@@ -50,5 +50,5 @@ export {
 } from './classNames.js';
 
 // 核心解析功能（可选，浏览器中也可以解析 Markdown）
-export { parseMarkdown } from '@supramark/core';
+export { parse } from '@supramark/core';
 export type { SupramarkRootNode, SupramarkNode } from '@supramark/core';

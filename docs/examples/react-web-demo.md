@@ -15,7 +15,7 @@
   - 标题层级（H1-H4）；
   - 列表与任务列表；
   - 代码块（多行代码）；
-  - 图表示例：使用 ` ```mermaid` 代码块，在浏览器中通过 Mermaid.js 渲染为 SVG。
+  - 图表示例：使用 ` ```mermaid` 等代码块生成 `diagram` 节点，并通过 `@supramark/engines` 渲染为 SVG。
 - 所有示例数据来自 `examples/demos.mjs`，从各个 Feature 包中聚合示例数据。
 
 ## 运行方式
@@ -41,15 +41,15 @@ PORT=8080 npm run start
 - 使用 React 的 `createElement` API 构建组件树（无需 JSX）；
 - 使用 `react-dom/server` 的 `renderToString()` 进行服务端渲染（SSR）；
 - 在服务端解析 URL 参数来决定展示哪个页面（菜单页或详情页）；
-- 使用 `@supramark/web` 的 `parseMarkdown()` 预先解析 Markdown 为 AST；
+- 使用 `@supramark/web` 的 `parse()` 预先解析 Markdown 为 AST；
 - 将 `<Supramark markdown={...} ast={...} />` 组件渲染为 HTML；
-- 使用 `buildDiagramSupportScripts()` 注入 Mermaid 渲染脚本，使图表在浏览器中自动渲染。
+- 使用 `@supramark/web` 的 SVG 渲染管线展示图表；具体图表库只由 `@supramark/engines` 管理。
 
 ## 与核心库的关系
 
 - 示例程序依赖：
   - `@supramark/core`：提供 AST 与解析能力；
-  - `@supramark/web`：提供 `<Supramark />` React 组件、`parseMarkdown()` 和 `buildDiagramSupportScripts()` 等工具。
+  - `@supramark/web`：提供 `<Supramark />` React 组件与 `parse()` 等工具。
 
 这个示例适合用于：
 
@@ -59,7 +59,7 @@ PORT=8080 npm run start
 
 ## 与 React Native 示例的关系
 
-- `examples/react-native`：使用 `@supramark/rn` + `@supramark/rn-diagram-worker` 在 React Native 中渲染 Markdown 和图表；
+- `examples/react-native`：使用 `@supramark/rn` + `@supramark/engines` 在 React Native 中渲染 Markdown 和图表；
 - `examples/react-web`：使用 `@supramark/web` 在浏览器环境中渲染 Markdown 和图表：
   - 两者共享 supramark AST 与插件体系；
-  - 图表渲染细节分别由 RN 的 headless WebView 与 Web 端 Mermaid 脚本封装，对业务代码透明。
+  - 图表渲染细节由 `@supramark/engines` 统一封装，对业务代码透明。

@@ -1,0 +1,18 @@
+{
+  "name": "node-parser",
+  "description": "Parser-only profile for Node tooling and AST conformance tests.",
+  "features": [
+    "commonmark",
+    "gfm.table",
+    "gfm.strikethrough",
+    "gfm.task_list",
+    "math",
+    "footnote",
+    "definition_list",
+    "raw_html",
+    "diagram",
+    "container",
+    "input"
+  ],
+  "targets": ["node"]
+}

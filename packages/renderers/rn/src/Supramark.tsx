@@ -27,12 +27,14 @@ import type {
   SupramarkFootnoteDefinitionNode,
   SupramarkDefinitionListNode,
   SupramarkDefinitionItemNode,
+  SupramarkDefinitionTermNode,
+  SupramarkDefinitionDescriptionNode,
   SupramarkConfig,
   SupramarkCodeHighlightResult,
   SupramarkCodeHighlighter,
 } from '@supramark/core';
 import {
-  parseMarkdown,
+  parse,
   isFeatureEnabled,
   isDiagramFeatureEnabled,
   getFeatureOptionsAs,
@@ -51,6 +53,21 @@ import {
 import { ErrorBoundary, ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 
 type RenderedNode = any;
+
+function getDefinitionTerms(item: SupramarkDefinitionItemNode): SupramarkDefinitionTermNode[] {
+  return item.children.filter(
+    (child): child is SupramarkDefinitionTermNode => child.type === 'definition_term'
+  );
+}
+
+function getDefinitionDescriptions(
+  item: SupramarkDefinitionItemNode
+): SupramarkDefinitionDescriptionNode[] {
+  return item.children.filter(
+    (child): child is SupramarkDefinitionDescriptionNode =>
+      child.type === 'definition_description'
+  );
+}
 
 export interface ContainerRendererRN {
   (args: {
@@ -91,7 +108,7 @@ export interface SupramarkProps {
    * 当用户点击 HTML Page 卡片时的回调。
    *
    * - node.data.html 为完整 HTML 内容；
-   * - 宿主可以在回调中打开新的页面 / Modal / WebView。
+   * - 宿主可以在回调中打开新的页面 / Modal / 外部浏览器。
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
 }
@@ -138,7 +155,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     let cancelled = false;
     (async () => {
       try {
-        const parsed = ast ?? (await parseMarkdown(markdown, { config }));
+        const parsed = ast ?? (await parse(markdown, { config }));
         const highlightedMap = await preHighlightAll(
           collectCodeHighlightTasks(parsed.children, config, codeHighlightTheme),
           codeHighlighter
@@ -422,15 +439,29 @@ function renderNode(
           <View key={key} style={styles.list}>
             {list.children.map((item, index) => {
               const defItem = item as SupramarkDefinitionItemNode;
+              const terms = getDefinitionTerms(defItem);
+              const descriptions = getDefinitionDescriptions(defItem);
               return (
                 <View key={index} style={styles.listItem}>
-                  <Text style={[styles.listItemText, { fontWeight: '600' }]}>
-                    {renderInlineNodes(defItem.term, styles, highlighted, config)}
-                  </Text>
-                  {defItem.descriptions.map((descNodes, idx) => (
-                    <Text key={idx} style={styles.listItemText}>
-                      {renderInlineNodes(descNodes, styles, highlighted, config)}
+                  {terms.map((term, termIndex) => (
+                    <Text key={`term-${termIndex}`} style={[styles.listItemText, { fontWeight: '600' }]}>
+                      {renderInlineNodes(term.children, styles, highlighted, config)}
                     </Text>
+                  ))}
+                  {descriptions.map((description, descriptionIndex) => (
+                    <View key={`description-${descriptionIndex}`}>
+                      {description.children.map((child, childIndex) =>
+                        renderNode(
+                          child,
+                          childIndex,
+                          styles,
+                          highlighted,
+                          config,
+                          onOpenHtmlPage,
+                          containerRenderers
+                        )
+                      )}
+                    </View>
                   ))}
                 </View>
               );
@@ -442,16 +473,30 @@ function renderNode(
         <View key={key} style={styles.list}>
           {list.children.map((item, index) => {
             const defItem = item as SupramarkDefinitionItemNode;
+            const terms = getDefinitionTerms(defItem);
+            const descriptions = getDefinitionDescriptions(defItem);
             return (
               <View key={index} style={styles.listItem}>
-                <Text style={[styles.listItemText, { fontWeight: '600' }]}>
-                  {renderInlineNodes(defItem.term, styles, highlighted, config)}
-                </Text>
-                {defItem.descriptions.map((descNodes, idx) => (
-                  <Text key={idx} style={styles.listItemText}>
-                    {renderInlineNodes(descNodes, styles, highlighted, config)}
-                    {isCompact ? '' : '\n'}
+                {terms.map((term, termIndex) => (
+                  <Text key={`term-${termIndex}`} style={[styles.listItemText, { fontWeight: '600' }]}>
+                    {renderInlineNodes(term.children, styles, highlighted, config)}
                   </Text>
+                ))}
+                {descriptions.map((description, idx) => (
+                  <View key={idx}>
+                    {description.children.map((child, childIndex) =>
+                      renderNode(
+                        child,
+                        childIndex,
+                        styles,
+                        highlighted,
+                        config,
+                        onOpenHtmlPage,
+                        containerRenderers
+                      )
+                    )}
+                    {isCompact ? null : <Text style={styles.listItemText}>{'\n'}</Text>}
+                  </View>
                 ))}
               </View>
             );
@@ -754,14 +799,6 @@ function collectCodeHighlightTasks(
 
       if ('children' in node && Array.isArray((node as { children?: SupramarkNode[] }).children)) {
         walk((node as { children: SupramarkNode[] }).children);
-      }
-
-      if (node.type === 'definition_item') {
-        const item = node as SupramarkDefinitionItemNode;
-        walk(item.term);
-        for (const description of item.descriptions) {
-          walk(description);
-        }
       }
     }
   }

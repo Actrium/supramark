@@ -37,7 +37,7 @@
 
 **精度兜底机制**：sweep_all `src/bin/sweep_all.rs:131` 使用 `svg_match::svg_match_tolerant`（abs_tol=1e-6 / rel_tol=1e-9）。fixture 23 残余 2 ULP 差（如 `113.18381131849323` vs `113.18381131849321`，diff = 2e-14）远低于 1e-6 阈值，自动 pass。可能源头：Set/Map 迭代序、累加序、QuickJS vs V8 中间寄存器精度（中间 80-bit x87 vs SSE2 64-bit）— 不是 Math.* 库函数，已 byte-exact 验证。继续追到 0 ULP 收益小、风险高，按"细微精度差忽略"收尾。
 
-**架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node、不依赖 DOM/webview。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
+**架构**：仅依赖嵌入式 JS 引擎（rquickjs），不依赖 node 或浏览器 DOM。KaTeX 0.16.45 `renderToString` 走 `toMarkup` 路径无 DOM 依赖；cytoscape headless + cose-bilkent 仅需 15 LOC stub（console + setTimeout no-ops），同样无 DOM。DOMPurify 等价由 Rust 重写。Cargo `katex` / `cose_bilkent` feature 各自独立 gate，关闭时不影响默认 build。
 
 W16-A 子 agent 实现了 sequence box + create/destroy 渲染骨架，但因改动过大引入严重回归（134→9/140），已全部回滚到 68dee74。W16-C 重新增量实现，逐 commit 推进，最终达到 140/140 无回归。
 

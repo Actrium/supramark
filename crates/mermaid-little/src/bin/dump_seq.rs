@@ -13,7 +13,9 @@ fn id_for(rel: &str) -> String {
             last_was_sep = true;
         }
     }
-    if id.ends_with('-') { id.pop(); }
+    if id.ends_with('-') {
+        id.pop();
+    }
     id
 }
 

@@ -307,7 +307,10 @@ mod tests {
         let s = cstr.to_str().unwrap();
         assert!(!s.is_empty());
         // Sanity: starts with a digit (semver-shaped).
-        assert!(s.chars().next().unwrap().is_ascii_digit(), "version = {s:?}");
+        assert!(
+            s.chars().next().unwrap().is_ascii_digit(),
+            "version = {s:?}"
+        );
     }
 
     #[test]
@@ -315,12 +318,7 @@ mod tests {
         let src = b"graph TD; A-->B";
         let mut out_len: usize = 0;
         let rc = unsafe {
-            supramark_mermaid_render(
-                src.as_ptr(),
-                src.len(),
-                std::ptr::null_mut(),
-                &mut out_len,
-            )
+            supramark_mermaid_render(src.as_ptr(), src.len(), std::ptr::null_mut(), &mut out_len)
         };
         assert_eq!(rc, SUPRAMARK_MERMAID_ERR_NULL_INPUT);
     }
@@ -329,9 +327,8 @@ mod tests {
     fn null_input_with_nonzero_len_is_rejected() {
         let mut out_buf: *mut u8 = std::ptr::null_mut();
         let mut out_len: usize = 0;
-        let rc = unsafe {
-            supramark_mermaid_render(std::ptr::null(), 42, &mut out_buf, &mut out_len)
-        };
+        let rc =
+            unsafe { supramark_mermaid_render(std::ptr::null(), 42, &mut out_buf, &mut out_len) };
         assert_eq!(rc, SUPRAMARK_MERMAID_ERR_NULL_INPUT);
         assert!(out_buf.is_null());
         assert_eq!(out_len, 0);

@@ -133,7 +133,7 @@ log_info "Found ${#GV_STATIC_LIBS[@]} static libraries"
 #   -sMODULARIZE=1        → factory-function export (ES6 default)
 #   -sEXPORT_ES6=1
 #   -sEXPORT_NAME=...     → factory name; picked up by loader glue
-#   -sENVIRONMENT=web,webview,worker,node
+#   -sENVIRONMENT=web,worker,node
 #   -sALLOW_MEMORY_GROWTH=1
 #   -sFILESYSTEM=0        → drop the emscripten FS shim we don't need
 #   -sSTRICT=1            → strict emscripten mode, drops legacy JS APIs
@@ -169,7 +169,7 @@ EMBIND_LINK_FLAGS=(
     -sMODULARIZE=1
     -sEXPORT_ES6=1
     -sEXPORT_NAME=VizModule
-    -sENVIRONMENT=web,webview,worker,node
+    -sENVIRONMENT=web,worker,node
     -sALLOW_MEMORY_GROWTH=1
     -sFILESYSTEM=0
     -sSTRICT=1

@@ -69,7 +69,8 @@
   },
   "license": "Apache-2.0",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test __tests__"
   },
   "dependencies": {
     "@kookyleo/graphviz-anywhere-web": "workspace:*",
@@ -105,6 +106,9 @@
     }
   },
   "devDependencies": {
+    "echarts": "^5.5.0",
+    "vega": "^5.30.0",
+    "vega-lite": "^5.21.0",
     "typescript": "^5.5.0"
   }
 }

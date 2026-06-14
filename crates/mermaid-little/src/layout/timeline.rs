@@ -814,6 +814,7 @@ pub(crate) fn compute_bbox(nodes: &[LaidNode], _lines: &[LaidLine]) -> (f64, f64
     (x0, y0, x1 - x0, y1 - y0)
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_px(s: &str) -> Option<f64> {
     let trimmed = s.trim();
     let num = trimmed.trim_end_matches("px");

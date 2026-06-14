@@ -730,7 +730,7 @@ fn compute_viewbox(
                         &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, ry, w, h,
                     );
                 }
-"icon" => {
+                "icon" => {
                     expand(
                         &mut min_x,
                         &mut min_y,
@@ -744,7 +744,9 @@ fn compute_viewbox(
                     let label_text = n.label.as_deref().unwrap_or("");
                     if label_text.is_empty() {
                         let (_, lh) = measure_html_markup_label("", &font, 200.0, true);
-                        expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, 0.0, lh);
+                        expand(
+                            &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, 0.0, lh,
+                        );
                     } else {
                         let is_markdown = n.label_type.as_deref() == Some("markdown");
                         let label_escaped = if is_markdown {
@@ -752,7 +754,8 @@ fn compute_viewbox(
                         } else {
                             crate::render::foreign_object::string_label_to_html(label_text)
                         };
-                        let processed = crate::render::foreign_object::replace_fa_icons(&label_escaped);
+                        let processed =
+                            crate::render::foreign_object::replace_fa_icons(&label_escaped);
                         let node_bold = n
                             .css_styles
                             .as_deref()
@@ -765,18 +768,14 @@ fn compute_viewbox(
                         } else {
                             font.clone()
                         };
-                        let (lw, lh) = measure_html_markup_label(&processed, &label_font, 200.0, true);
-                        expand(&mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh);
+                        let (lw, lh) =
+                            measure_html_markup_label(&processed, &label_font, 200.0, true);
+                        expand(
+                            &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh,
+                        );
                     }
                     expand(
-                        &mut min_x,
-                        &mut min_y,
-                        &mut max_x,
-                        &mut max_y,
-                        0.0,
-                        0.0,
-                        80.0,
-                        80.0,
+                        &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, 80.0, 80.0,
                     );
                 }
                 _ => {
@@ -825,10 +824,8 @@ fn compute_viewbox(
             // ends up with — otherwise the viewBox grows as if it contained
             // the raw `$$..$$` source text.
             let (lw, lh) = if crate::render::foreign_object::contains_katex_marker(&processed) {
-                match crate::render::foreign_object::try_render_katex_label(
-                    &processed,
-                    &label_font,
-                ) {
+                match crate::render::foreign_object::try_render_katex_label(&processed, &label_font)
+                {
                     Some((_, w, h)) => (w, h),
                     None => measure_html_markup_label(&processed, &label_font, 200.0, true),
                 }
@@ -2407,6 +2404,7 @@ fn render_helper_node(node: &UNode, theme: &ThemeVariables) -> String {
 }
 
 /// Return true if `node_id`'s parent is `cluster_id`.
+#[allow(dead_code)]
 fn node_parent_is(node_id: Option<&str>, cluster_id: &str, l: &FlowchartLayout) -> bool {
     let id = match node_id {
         Some(s) => s,
@@ -3342,8 +3340,7 @@ fn render_edge_label(e: &UEdge, html_labels: bool, l: &FlowchartLayout) -> Strin
         let (_, lh) = measure_html_label("X", &HtmlLabelFont::default(), 200.0, true);
         (0.0, lh, None)
     } else {
-        let (w, h) =
-            measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true);
+        let (w, h) = measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true);
         (w, h, None)
     };
     let dagre_lx = e.label_x.unwrap_or(0.0);

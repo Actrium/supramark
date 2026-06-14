@@ -315,8 +315,13 @@ mod tests {
                 &mut len as *mut usize,
             )
         };
-        assert_eq!(rc, SUPRAMARK_PLANTUML_ERR_RENDER.max(SUPRAMARK_PLANTUML_OK).min(rc),
-            "render returned unexpected non-zero code {rc}");
+        assert_eq!(
+            rc,
+            SUPRAMARK_PLANTUML_ERR_RENDER
+                .max(SUPRAMARK_PLANTUML_OK)
+                .min(rc),
+            "render returned unexpected non-zero code {rc}"
+        );
         // Either OK with a populated buffer, or a documented render
         // failure (e.g. graphviz not in PATH on stripped CI). We
         // require OK on a developer machine but tolerate

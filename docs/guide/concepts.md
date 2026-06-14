@@ -8,7 +8,7 @@ Supramark 是一个跨平台的 Markdown 渲染引擎，专为 React Native 和 
 
 - 🎯 **统一的 AST** - 跨平台一致的抽象语法树
 - 🧩 **模块化 Features** - 按需启用的功能扩展
-- 📱 **原生渲染** - React Native 无需 WebView
+- 📱 **原生渲染** - React Native 直接消费 SVG / native adapter 输出
 - 🌐 **Web 支持** - React 组件开箱即用
 
 ## AST（抽象语法树）
@@ -22,7 +22,7 @@ AST 是 Markdown 文档的结构化表示，将文本解析为树状数据结构
 const markdown = `# Hello World\n\nThis is **bold** text.`;
 
 // 解析为 AST
-const ast = parseMarkdown(markdown);
+const ast = parse(markdown);
 // {
 //   type: 'root',
 //   children: [
@@ -135,9 +135,9 @@ const config = {
 Markdown 文本 → AST
 
 ```typescript
-import { parseMarkdown } from '@supramark/core';
+import { parse } from '@supramark/core';
 
-const ast = await parseMarkdown(markdown, { config });
+const ast = await parse(markdown, { config });
 ```
 
 ### 2. 渲染阶段
@@ -185,10 +185,10 @@ Web 和 RN 使用相同的 API：
 
 ### 重度依赖处理
 
-某些功能依赖浏览器环境（如图表渲染）：
+某些功能依赖较重的渲染引擎（如图表渲染）：
 
-- **Web**: 直接使用 Mermaid、Vega 等库
-- **RN**: 使用 Headless WebView Worker 后台渲染
+- **Web**: `@supramark/engines/web` 输出 SVG
+- **RN**: `@supramark/engines/rn` 通过 native FFI adapter 或 JS SVG-string engine 输出 SVG
 
 ## 扩展性
 
@@ -242,10 +242,10 @@ Supramark 自动缓存解析结果：
 
 ```typescript
 // 第一次解析
-const ast1 = await parseMarkdown(markdown); // 较慢
+const ast1 = await parse(markdown); // 较慢
 
 // 相同内容第二次解析
-const ast2 = await parseMarkdown(markdown); // 从缓存获取
+const ast2 = await parse(markdown); // 从缓存获取
 ```
 
 ### 增量渲染

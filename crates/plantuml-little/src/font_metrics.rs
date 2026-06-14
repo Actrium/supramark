@@ -207,7 +207,10 @@ mod tests {
         ];
         for (text, size, bold, java_w) in cases {
             let ours = text_width(text, "SansSerif", *size, *bold, false);
-            assert!((ours - java_w).abs() < 0.001, "text=\"{text}\" ours={ours:.4} java={java_w:.4}");
+            assert!(
+                (ours - java_w).abs() < 0.001,
+                "text=\"{text}\" ours={ours:.4} java={java_w:.4}"
+            );
         }
     }
 }

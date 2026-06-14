@@ -36,11 +36,10 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     }
   }
 
-  // RN 不走 web wasm 路径 — diagram 都由 @kookyleo/supramark-<engine>-native-rn
-  // 经原生 FFI 渲染。但 @supramark/engines/src/*/index.ts 仍静态引用了对应的
-  // *-web 包名，Metro 不会跳过未调用的 `await import(...)`，所以把这些 web 入口
-  // 短路到一个空的 stub，让 RN 端 bundle 通过。运行时由 createReactNativeDiagramEngine
-  // 选路，永远不会真的访问 stub 的导出。
+  // RN 不加载 wasm web 包。D2 / Mermaid / PlantUML 走 native FFI adapter；
+  // ECharts / Vega-Lite 走纯 JS SVG-string engine。@supramark/engines/src/*
+  // 仍静态引用了部分 *-web 包名，Metro 不会跳过未调用的 `await import(...)`，
+  // 所以仅把这些 wasm/web 入口短路到空 stub。
   if (/^@kookyleo\/(d2|mermaid|plantuml)-little-web$|^@kookyleo\/graphviz-anywhere-web$/.test(moduleName)) {
     return {
       filePath: path.resolve(projectRoot, 'stubs/empty.js'),

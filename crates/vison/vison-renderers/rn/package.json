@@ -31,9 +31,16 @@
   },
   "peerDependencies": {
     "react": ">=18.0.0",
-    "react-native": ">=0.72.0"
+    "react-native": ">=0.72.0",
+    "react-native-markdown-display": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-native-markdown-display": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "react-native-markdown-display": "^7.0.2",
     "typescript": "^5.5.0"
   },
   "keywords": [

@@ -46,13 +46,21 @@ fn overbrace_text() {
 
 #[test]
 fn cases_environment() {
-    let rust = render(r"\begin{cases} a &\text{if } b \\ c &\text{if } d \end{cases}", true).unwrap();
+    let rust = render(
+        r"\begin{cases} a &\text{if } b \\ c &\text{if } d \end{cases}",
+        true,
+    )
+    .unwrap();
     assert_eq!(rust, baseline("cases"));
 }
 
 #[test]
 fn integral() {
-    let rust = render(r"\int_{-\infty}^\infty \hat{f}(\xi)\,e^{2 \pi i \xi x}\,d\xi", true).unwrap();
+    let rust = render(
+        r"\int_{-\infty}^\infty \hat{f}(\xi)\,e^{2 \pi i \xi x}\,d\xi",
+        true,
+    )
+    .unwrap();
     assert_eq!(rust, baseline("integral"));
 }
 
@@ -65,8 +73,7 @@ fn integral() {
 #[test]
 fn end_to_end_lowercase_greek() {
     use mermaid_little::katex::render_label;
-    let label =
-        r"$$\alpha\beta\gamma\delta\epsilon\zeta\eta\theta\iota\kappa\lambda\mu\nu\xi\omicron\pi\rho\sigma\tau\upsilon\phi\chi\psi\omega$$";
+    let label = r"$$\alpha\beta\gamma\delta\epsilon\zeta\eta\theta\iota\kappa\lambda\mu\nu\xi\omicron\pi\rho\sigma\tau\upsilon\phi\chi\psi\omega$$";
     let rust = render_label(label).unwrap();
 
     // Extract the span body from the reference SVG so the test stays
@@ -104,7 +111,11 @@ fn diff_then_panic(rust: &str, mermaid: &str) {
             );
         }
     }
-    panic!("lengths differ: rust={} mermaid={}", rust.len(), mermaid.len());
+    panic!(
+        "lengths differ: rust={} mermaid={}",
+        rust.len(),
+        mermaid.len()
+    );
 }
 
 fn extract_node_label_body(svg: &str, after_id_substring: &str) -> String {

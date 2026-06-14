@@ -44,7 +44,7 @@ export interface VisonSpec {
   children?: VisonSpec[];
 }
 
-export interface VisonContainerData {
+export interface VisonContainerData extends Record<string, unknown> {
   /** Successfully-parsed Vison spec, or `undefined` when the body
    *  failed to parse (in which case `parseError` carries the reason). */
   spec?: VisonSpec;
@@ -103,11 +103,6 @@ export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {
           },
         },
       },
-      parser: {
-        markdownIt: {
-          containerName: 'vison',
-        },
-      },
       examples: [
         {
           type: 'container',
@@ -125,6 +120,26 @@ export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {
     },
   },
 
+  renderers: {
+    web: {
+      platform: 'web',
+      infrastructure: {
+        needsClientScript: false,
+        needsWorker: false,
+        needsCache: false,
+      },
+      dependencies: [],
+    },
+    rn: {
+      platform: 'rn',
+      infrastructure: {
+        needsWorker: false,
+        needsCache: false,
+      },
+      dependencies: [],
+    },
+  },
+
   examples: visonExamples,
 
   testing: {
@@ -133,7 +148,11 @@ export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {
         {
           name: 'Vison container with valid JSON body',
           input: ':::vison\n{ "version": "1", "type": "text", "props": { "text": "hi" } }\n:::',
-          expected: (output: unknown) => output !== null,
+          expected: {
+            type: 'container',
+            name: 'vison',
+          } as SupramarkVisonContainerNode,
+          options: { typeOnly: true },
         },
       ],
     },

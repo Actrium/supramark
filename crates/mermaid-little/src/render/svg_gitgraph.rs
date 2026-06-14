@@ -59,37 +59,41 @@ pub fn render(
     // `showBranches: false` skips the entire group entirely (mirroring
     // upstream `if (gitGraphConfig.showBranches) drawBranches(...)`).
     if d.config.show_branches {
-    out.push_str("<g>");
-    for bp in &l.branches {
-        let bbox_w = bp.label_width;
-        let bbox_h = bp.label_height;
-        let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
-        let cidx = color_idx(bp.index);
-
-        if l.is_tb || l.is_bt {
-            // Vertical line: x=pos, y between DEFAULT_POS and max_pos.
-            // BT swaps the line's y1/y2 endpoints (y1=max_pos, y2=DEFAULT_POS).
-            let line_x = bp.pos;
-            let (line_y1, line_y2) = if l.is_bt {
-                (l.max_pos, crate::layout::gitgraph::DEFAULT_POS)
+        out.push_str("<g>");
+        for bp in &l.branches {
+            let bbox_w = bp.label_width;
+            let bbox_h = bp.label_height;
+            let rotate_pad = if d.config.rotate_commit_label {
+                30.0
             } else {
-                (crate::layout::gitgraph::DEFAULT_POS, l.max_pos)
+                0.0
             };
-            // Branch label rect: TB → top (y=0), BT → bottom (y=maxPos).
-            let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
-            let bkg_y = if l.is_bt { l.max_pos } else { 0.0 };
-            let bkg_w = bbox_w + 18.0;
-            let bkg_h = bbox_h + 4.0;
-            let label_translate_x = bp.pos - bbox_w / 2.0 - 5.0;
-            let label_translate_y = bkg_y;
-            out.push_str(&format!(
+            let cidx = color_idx(bp.index);
+
+            if l.is_tb || l.is_bt {
+                // Vertical line: x=pos, y between DEFAULT_POS and max_pos.
+                // BT swaps the line's y1/y2 endpoints (y1=max_pos, y2=DEFAULT_POS).
+                let line_x = bp.pos;
+                let (line_y1, line_y2) = if l.is_bt {
+                    (l.max_pos, crate::layout::gitgraph::DEFAULT_POS)
+                } else {
+                    (crate::layout::gitgraph::DEFAULT_POS, l.max_pos)
+                };
+                // Branch label rect: TB → top (y=0), BT → bottom (y=maxPos).
+                let bkg_x = bp.pos - bbox_w / 2.0 - 10.0;
+                let bkg_y = if l.is_bt { l.max_pos } else { 0.0 };
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                let label_translate_x = bp.pos - bbox_w / 2.0 - 5.0;
+                let label_translate_y = bkg_y;
+                out.push_str(&format!(
                 r#"<line x1="{x}" y1="{y1}" x2="{x}" y2="{y2}" class="branch branch{idx}"></line>"#,
                 x = fmt_num(line_x),
                 y1 = fmt_num(line_y1),
                 y2 = fmt_num(line_y2),
                 idx = cidx,
             ));
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<rect class="branchLabelBkg label{idx}" style="" rx="4" ry="4" x="{x}" y="{y}" width="{w}" height="{h}"></rect>"#,
                 idx = cidx,
                 x = fmt_num(bkg_x),
@@ -97,31 +101,31 @@ pub fn render(
                 w = fmt_num(bkg_w),
                 h = fmt_num(bkg_h),
             ));
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text>{tspans}</text></g></g>"#,
                 idx = cidx,
                 tx = fmt_num(label_translate_x),
                 ty = fmt_num(label_translate_y),
                 tspans = render_branch_tspans(&bp.name),
             ));
-        } else {
-            let bkg_x = -bbox_w - 4.0 - rotate_pad;
-            let bkg_y = -bbox_h / 2.0 + 10.0;
-            let bkg_w = bbox_w + 18.0;
-            let bkg_h = bbox_h + 4.0;
-            let spine_y = bp.pos - 2.0;
-            let label_translate_x = -bbox_w - 14.0 - rotate_pad;
-            let label_translate_y = spine_y - bbox_h / 2.0 - 2.0;
-            let bkg_translate_x = -19.0;
-            let bkg_translate_y = spine_y - 12.0;
+            } else {
+                let bkg_x = -bbox_w - 4.0 - rotate_pad;
+                let bkg_y = -bbox_h / 2.0 + 10.0;
+                let bkg_w = bbox_w + 18.0;
+                let bkg_h = bbox_h + 4.0;
+                let spine_y = bp.pos - 2.0;
+                let label_translate_x = -bbox_w - 14.0 - rotate_pad;
+                let label_translate_y = spine_y - bbox_h / 2.0 - 2.0;
+                let bkg_translate_x = -19.0;
+                let bkg_translate_y = spine_y - 12.0;
 
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<line x1="0" y1="{sy}" x2="{maxp}" y2="{sy}" class="branch branch{idx}"></line>"#,
                 sy = fmt_num(spine_y),
                 maxp = fmt_num(l.max_pos),
                 idx = cidx,
             ));
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<rect class="branchLabelBkg label{idx}" style="" rx="4" ry="4" x="{x}" y="{y}" width="{w}" height="{h}" transform="translate({tx}, {ty})"></rect>"#,
                 idx = cidx,
                 x = fmt_num(bkg_x),
@@ -131,16 +135,16 @@ pub fn render(
                 tx = fmt_num(bkg_translate_x),
                 ty = fmt_num(bkg_translate_y),
             ));
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<g class="branchLabel"><g class="label branch-label{idx}" transform="translate({tx}, {ty})"><text>{tspans}</text></g></g>"#,
                 idx = cidx,
                 tx = fmt_num(label_translate_x),
                 ty = fmt_num(label_translate_y),
                 tspans = render_branch_tspans(&bp.name),
             ));
+            }
         }
-    }
-    out.push_str("</g>");
+        out.push_str("</g>");
     }
 
     // ── Arrows: walk commits in chronological order; for each commit
@@ -192,8 +196,8 @@ pub fn render(
             //     color (the override at upstream line 734 / 704).
             //   - TB non-rerouted with source.x > dest.x AND merge
             //     non-primary: source-branch color (line 704).
-            let is_merge_2nd = matches!(c.kind, CommitKind::Merge)
-                && c.parents.first() != Some(parent_id);
+            let is_merge_2nd =
+                matches!(c.kind, CommitKind::Merge) && c.parents.first() != Some(parent_id);
             let reroute_axis_swap = if l.is_tb || l.is_bt {
                 pa.cx > pb.cx
             } else {
@@ -457,7 +461,8 @@ pub fn render(
                     );
                     let transform = format!(
                         "translate(12,12) rotate(45, {},{})",
-                        fmt_num(c.cx), fmt_num(c.pos),
+                        fmt_num(c.cx),
+                        fmt_num(c.pos),
                     );
                     out.push_str(&format!(
                         r#"<polygon class="tag-label-bkg" points="{p}" transform="{tr}"></polygon>"#,
@@ -471,7 +476,8 @@ pub fn render(
                     ));
                     let tag_translate = format!(
                         "translate(14,14) rotate(45, {},{})",
-                        fmt_num(c.cx), fmt_num(c.pos),
+                        fmt_num(c.cx),
+                        fmt_num(c.pos),
                     );
                     out.push_str(&format!(
                         r#"<text y="{ty}" class="tag-label" x="{tx}" transform="{tr}">{label}</text>"#,
@@ -639,26 +645,42 @@ fn build_arrow_path_rerouted(
         } else if p1x < p2x {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(line_x - radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(line_x), fmt_num(p1y + offset),
-                fmt_num(line_x), fmt_num(p2y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(line_x + offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(line_x - radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(line_x),
+                fmt_num(p1y + offset),
+                fmt_num(line_x),
+                fmt_num(p2y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(line_x + offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(line_x + radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(line_x), fmt_num(p1y + offset),
-                fmt_num(line_x), fmt_num(p2y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(line_x - offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(line_x + radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(line_x),
+                fmt_num(p1y + offset),
+                fmt_num(line_x),
+                fmt_num(p2y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(line_x - offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     } else {
@@ -670,26 +692,42 @@ fn build_arrow_path_rerouted(
         if p1y < p2y {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(line_y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(line_y),
-                fmt_num(p2x - radius), fmt_num(line_y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(line_y + offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(line_y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(line_y),
+                fmt_num(p2x - radius),
+                fmt_num(line_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(line_y + offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(line_y + radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(line_y),
-                fmt_num(p2x - radius), fmt_num(line_y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(line_y - offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(line_y + radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(line_y),
+                fmt_num(p2x - radius),
+                fmt_num(line_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(line_y - offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     }
@@ -713,7 +751,13 @@ fn build_arrow_path_tb(
         && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
 
     if (p1x - p2x).abs() < f64::EPSILON {
-        return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
+        return format!(
+            "M {} {} L {} {}",
+            fmt_num(p1x),
+            fmt_num(p1y),
+            fmt_num(p2x),
+            fmt_num(p2y)
+        );
     }
 
     if p1x < p2x {
@@ -722,21 +766,31 @@ fn build_arrow_path_tb(
             // M p1 L p1.x p2.y-r A20...0 p1.x+off p2.y L p2
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             // M p1 L p2.x-r p1.y A20...1 p2.x p1.y+off L p2
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x - radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y + offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x - radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y + offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     } else {
@@ -744,20 +798,30 @@ fn build_arrow_path_tb(
         if is_merge_secondary {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x - offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x - offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x + radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y + offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x + radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y + offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     }
@@ -781,7 +845,13 @@ fn build_arrow_path_bt(
         && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
 
     if (p1x - p2x).abs() < f64::EPSILON {
-        return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
+        return format!(
+            "M {} {} L {} {}",
+            fmt_num(p1x),
+            fmt_num(p1y),
+            fmt_num(p2x),
+            fmt_num(p2y)
+        );
     }
 
     if p1x < p2x {
@@ -789,41 +859,61 @@ fn build_arrow_path_bt(
             // M p1 L p1.x p2.y+r A20...1 p1.x+off p2.y L p2
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y + radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y + radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             // M p1 L p2.x-r p1.y A20...0 p2.x p1.y-off L p2
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x - radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y - offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x - radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y - offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     } else {
         if is_merge_secondary {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y + radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x - offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y + radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x - offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x + radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y - offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x + radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y - offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     }
@@ -850,7 +940,13 @@ fn build_arrow_path(
         && commit_b.parents.first().map(|s| s.as_str()) != Some(_commit_a.id.as_str());
 
     if (p1y - p2y).abs() < f64::EPSILON {
-        return format!("M {} {} L {} {}", fmt_num(p1x), fmt_num(p1y), fmt_num(p2x), fmt_num(p2y));
+        return format!(
+            "M {} {} L {} {}",
+            fmt_num(p1x),
+            fmt_num(p1y),
+            fmt_num(p2x),
+            fmt_num(p2y)
+        );
     }
 
     if p1y < p2y {
@@ -862,21 +958,31 @@ fn build_arrow_path(
             // p1.y < p2.y, secondary parent: horizontal, arc down.
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x - radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y + offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x - radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y + offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             // Normal downward: vertical, arc right.
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y - radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y - radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     } else {
@@ -885,21 +991,31 @@ fn build_arrow_path(
             // Secondary parent rising: horizontal then arc up.
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 0, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p2x - radius), fmt_num(p1y),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p2x), fmt_num(p1y - offset),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p2x - radius),
+                fmt_num(p1y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p2x),
+                fmt_num(p1y - offset),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         } else {
             // Normal upward: vertical then arc.
             format!(
                 "M {} {} L {} {} A {} {}, 0, 0, 1, {} {} L {} {}",
-                fmt_num(p1x), fmt_num(p1y),
-                fmt_num(p1x), fmt_num(p2y + radius),
-                fmt_num(radius), fmt_num(radius),
-                fmt_num(p1x + offset), fmt_num(p2y),
-                fmt_num(p2x), fmt_num(p2y),
+                fmt_num(p1x),
+                fmt_num(p1y),
+                fmt_num(p1x),
+                fmt_num(p2y + radius),
+                fmt_num(radius),
+                fmt_num(radius),
+                fmt_num(p1x + offset),
+                fmt_num(p2y),
+                fmt_num(p2x),
+                fmt_num(p2y),
             )
         }
     }
@@ -978,10 +1094,7 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         .unwrap_or("\"trebuchet ms\", verdana, arial, sans-serif");
     let ff = minify_font_family(ff_raw);
     let ff = ff.as_str();
-    let fs = theme
-        .font_size
-        .as_deref()
-        .unwrap_or("16px");
+    let fs = theme.font_size.as_deref().unwrap_or("16px");
     let text_color = theme.text_color.as_deref().unwrap_or("#333");
     let error_bkg = theme.error_bkg_color.as_deref().unwrap_or("#552222");
     let error_text = theme.error_text_color.as_deref().unwrap_or("#552222");
@@ -995,20 +1108,14 @@ fn style_block(id: &str, theme: &ThemeVariables) -> String {
         .as_deref()
         .unwrap_or("#ffffde");
     let commit_label_color = theme.commit_label_color.as_deref().unwrap_or("#000021");
-    let commit_label_size = theme
-        .commit_label_font_size
-        .as_deref()
-        .unwrap_or("10px");
+    let commit_label_size = theme.commit_label_font_size.as_deref().unwrap_or("10px");
     let tag_label_bg = theme.tag_label_background.as_deref().unwrap_or("#ECECFF");
     let tag_label_border = theme
         .tag_label_border
         .as_deref()
         .unwrap_or("hsl(240, 60%, 86.2745098039%)");
     let tag_label_color = theme.tag_label_color.as_deref().unwrap_or("#131300");
-    let tag_label_size = theme
-        .tag_label_font_size
-        .as_deref()
-        .unwrap_or("10px");
+    let tag_label_size = theme.tag_label_font_size.as_deref().unwrap_or("10px");
 
     const GIT0: [&str; 8] = [
         "hsl(240, 100%, 46.2745098039%)",

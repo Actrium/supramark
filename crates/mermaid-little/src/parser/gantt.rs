@@ -389,12 +389,18 @@ fn strip_frontmatter(source: &str, d: &mut GanttDiagram) -> String {
     for line in body.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("displayMode:") {
-            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            let v = rest
+                .trim()
+                .trim_matches(|c: char| c == '"' || c == '\'')
+                .to_string();
             if !v.is_empty() {
                 d.display_mode = Some(v);
             }
         } else if let Some(rest) = line.strip_prefix("title:") {
-            let v = rest.trim().trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            let v = rest
+                .trim()
+                .trim_matches(|c: char| c == '"' || c == '\'')
+                .to_string();
             if !v.is_empty() && d.meta.title.is_none() {
                 d.meta.title = Some(v);
             }

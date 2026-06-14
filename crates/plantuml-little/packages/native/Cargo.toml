@@ -37,14 +37,3 @@ plantuml-little = { path = "../..", default-features = false, features = ["metri
 # from the same `cdylib` so a single `dlopen` / static-link surface
 # satisfies the host's "install metrics, then render" sequence.
 font-metrics = { path = "../../../font-metrics", default-features = false, features = ["metrics-ffi-callback"] }
-
-[profile.release]
-# Mirror plantuml-little's own release profile — opt-level z + LTO is
-# what the upstream maintainer ships, and the staticlib size of the
-# native wrapper is dominated by plantuml-little + graphviz-anywhere
-# bytes anyway.
-opt-level = "z"
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"

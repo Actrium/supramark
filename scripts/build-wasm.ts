@@ -45,6 +45,11 @@ const TARGETS: WasmTarget[] = [
     cwd: 'crates/mermaid-little/packages/web',
     label: '@kookyleo/mermaid-little-web',
   },
+  {
+    id: 'markdown',
+    cwd: 'crates/supramark-markdown/packages/web',
+    label: '@supramark/markdown-web',
+  },
 ];
 
 const ROOT = process.cwd();
@@ -85,7 +90,7 @@ async function buildOne(target: WasmTarget): Promise<void> {
       RUSTFLAGS: '',
       CARGO_BUILD_RUSTFLAGS: '',
     };
-    const proc = spawn('npm', ['run', 'build'], { cwd, stdio: 'inherit', env });
+    const proc = spawn('bun', ['run', 'build'], { cwd, stdio: 'inherit', env });
     proc.on('exit', code => {
       if (code === 0) resolve();
       else reject(new Error(`${target.label} build failed (exit ${code})`));

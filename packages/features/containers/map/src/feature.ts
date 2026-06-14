@@ -11,7 +11,13 @@ import { mapExamples } from './examples.js';
 interface MapContainerData {
   center: [number, number];
   zoom?: number;
-  marker?: { lat: number; lng: number };
+  markers?: Array<{
+    lat: number;
+    lng: number;
+    label?: string;
+    id?: string;
+    data?: Record<string, unknown>;
+  }>;
   meta?: Record<string, unknown>;
 }
 
@@ -63,7 +69,7 @@ export const mapFeature: SupramarkFeature<SupramarkMapContainerNode> = {
           },
           data: {
             type: 'object',
-            description: '地图数据，包含中心点 center、缩放 zoom 和标记 marker。',
+            description: '地图数据，包含中心点 center、缩放 zoom 和标记数组 markers。',
           },
           children: {
             type: 'array',
@@ -82,7 +88,7 @@ export const mapFeature: SupramarkFeature<SupramarkMapContainerNode> = {
           data: {
             center: [39.9042, 116.4074],
             zoom: 12,
-            marker: { lat: 39.9042, lng: 116.4074 },
+            markers: [{ lat: 39.9042, lng: 116.4074 }],
           },
           children: [],
         } as SupramarkMapContainerNode,
@@ -133,6 +139,7 @@ export const mapFeature: SupramarkFeature<SupramarkMapContainerNode> = {
           input: {
             type: 'container',
             name: 'map',
+            mode: 'opaque',
             data: { center: [0, 0] },
             children: [],
           } as SupramarkMapContainerNode,

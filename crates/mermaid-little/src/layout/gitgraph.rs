@@ -121,7 +121,11 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     let order = sort_branches_by_order(d);
     let mut branch_positions: Vec<BranchPosition> = Vec::with_capacity(d.branches.len());
     let mut pos: f64 = 0.0;
-    let rotate_term = if d.config.rotate_commit_label { 40.0 } else { 0.0 };
+    let rotate_term = if d.config.rotate_commit_label {
+        40.0
+    } else {
+        0.0
+    };
     for (idx, &orig_idx) in order.iter().enumerate() {
         let b = &d.branches[orig_idx];
         // Multi-line branch names are emitted as one `<tspan>` per line
@@ -161,8 +165,7 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         .iter()
         .map(|c| font_metrics::text_width(&c.id, FONT_FAMILY, LABEL_SIZE, false, false))
         .collect();
-    let commit_label_text_height =
-        font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
+    let commit_label_text_height = font_metrics::line_height(FONT_FAMILY, LABEL_SIZE, false, false);
 
     let iter_indices: Vec<usize> = if is_bt {
         (0..d.commits.len()).rev().collect()
@@ -206,7 +209,11 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
                         let take = match closest {
                             None => true,
                             Some(cur) => {
-                                if is_bt { candidate <= cur } else { candidate >= cur }
+                                if is_bt {
+                                    candidate <= cur
+                                } else {
+                                    candidate >= cur
+                                }
                             }
                         };
                         if take {
@@ -227,12 +234,10 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
         let bp = branch_positions
             .iter()
             .find(|bp| bp.name == c.branch)
-            .ok_or_else(|| {
-                crate::error::MermaidError::Parse {
-                    line: 0,
-                    col: 0,
-                    message: format!("commit references unknown branch '{}'", c.branch),
-                }
+            .ok_or_else(|| crate::error::MermaidError::Parse {
+                line: 0,
+                col: 0,
+                message: format!("commit references unknown branch '{}'", c.branch),
             })?;
         let lane = bp.pos;
         let (cx, cy) = if is_vert {
@@ -278,12 +283,24 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     let mut acc = |x: f64, y: f64, w: f64, h: f64| {
-        if x < min_x { min_x = x; }
-        if y < min_y { min_y = y; }
-        if x + w > max_x { max_x = x + w; }
-        if y + h > max_y { max_y = y + h; }
+        if x < min_x {
+            min_x = x;
+        }
+        if y < min_y {
+            min_y = y;
+        }
+        if x + w > max_x {
+            max_x = x + w;
+        }
+        if y + h > max_y {
+            max_y = y + h;
+        }
     };
-    let rotate_pad = if d.config.rotate_commit_label { 30.0 } else { 0.0 };
+    let rotate_pad = if d.config.rotate_commit_label {
+        30.0
+    } else {
+        0.0
+    };
 
     // Per-branch line spine + label background + label text.
     // `showBranches: false` short-circuits this whole section.
@@ -366,7 +383,12 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
                 acc(rect_x, rect_y, lw + 2.0 * py, lh + 2.0 * py);
                 acc(0.0, 0.0, lw, lh);
             } else {
-                acc(c.pos_with_offset - lw / 2.0 - py, c.cy + 13.5, lw + 2.0 * py, lh + 2.0 * py);
+                acc(
+                    c.pos_with_offset - lw / 2.0 - py,
+                    c.cy + 13.5,
+                    lw + 2.0 * py,
+                    lh + 2.0 * py,
+                );
                 acc(0.0, 0.0, lw, lh);
             }
         }
@@ -437,10 +459,18 @@ pub fn layout(d: &GitGraphDiagram, _theme: &ThemeVariables) -> Result<GitGraphLa
 
     if let Some(title) = d.meta.title.as_deref() {
         let title_w = font_metrics::text_width(title, FONT_FAMILY, LABEL_SIZE, false, false);
-        if title_w > max_x { max_x = title_w; }
-        if 0.0 < min_x { min_x = 0.0; }
-        if label_h > max_y { max_y = label_h; }
-        if 0.0 < min_y { min_y = 0.0; }
+        if title_w > max_x {
+            max_x = title_w;
+        }
+        if 0.0 < min_x {
+            min_x = 0.0;
+        }
+        if label_h > max_y {
+            max_y = label_h;
+        }
+        if 0.0 < min_y {
+            min_y = 0.0;
+        }
     }
 
     let pad = 8.0;

@@ -36,6 +36,7 @@ pub fn parse_with_state(source: &str, id_cnt_start: u64, rng_state: u32) -> Resu
 
 // ─── Lexer ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     /// `block-beta` or `block` at the head of the source.
@@ -97,6 +98,7 @@ impl<'a> Lexer<'a> {
     fn peek(&self) -> Option<u8> {
         self.src.get(self.pos).copied()
     }
+    #[allow(dead_code)]
     fn bump(&mut self) -> Option<u8> {
         let b = self.peek();
         if b.is_some() {
@@ -729,6 +731,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn new_anon_id(&mut self, prefix: &str) -> String {
         self.id_cnt += 1;
         format!("{}-{}", prefix, self.id_cnt)

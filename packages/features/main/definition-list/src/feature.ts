@@ -13,7 +13,8 @@ import { makeFeatureConfigHelpers } from '@supramark/core';
  * 定义列表语法支持（Term + 多段描述）的规范定义。
  *
  * - 复用 core 中 `definition_list` / `definition_item` AST；
- * - 解析逻辑由 markdown-it-deflist + core 管线实现；
+ * - AST v2 中 definition_item 通过 children 承载 definition_term / definition_description；
+ * - 解析逻辑由 supramark-markdown AST v2 parser 实现；
  * - 渲染逻辑由 @supramark/rn / @supramark/web 负责。
  *
  * @example
@@ -71,15 +72,6 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
         } as SupramarkDefinitionListNode,
       ],
     },
-
-    // 可选：如果需要自定义解析器
-    // parser: {
-    //   engine: 'markdown-it',
-    //   markdownIt: {
-    //     plugin: yourPlugin,
-    //     tokenMapper: (token, context) => { /* ... */ }
-    //   }
-    // },
 
     // 可选：验证规则
     // validator: {
@@ -179,8 +171,21 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
             children: [
               {
                 type: 'definition_item',
-                term: [{ type: 'text', value: 'Term' }],
-                descriptions: [[{ type: 'text', value: 'Definition' }]],
+                children: [
+                  {
+                    type: 'definition_term',
+                    children: [{ type: 'text', value: 'Term' }],
+                  },
+                  {
+                    type: 'definition_description',
+                    children: [
+                      {
+                        type: 'paragraph',
+                        children: [{ type: 'text', value: 'Definition' }],
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           } as SupramarkDefinitionListNode,
@@ -196,8 +201,21 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
             children: [
               {
                 type: 'definition_item',
-                term: [{ type: 'text', value: 'API' }],
-                descriptions: [[{ type: 'text', value: '应用程序接口' }]],
+                children: [
+                  {
+                    type: 'definition_term',
+                    children: [{ type: 'text', value: 'API' }],
+                  },
+                  {
+                    type: 'definition_description',
+                    children: [
+                      {
+                        type: 'paragraph',
+                        children: [{ type: 'text', value: '应用程序接口' }],
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           } as SupramarkDefinitionListNode,
@@ -232,8 +250,8 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
             return items.some(
               (item: any) =>
                 item.type === 'definition_item' &&
-                Array.isArray(item.descriptions) &&
-                item.descriptions.length >= 1
+                Array.isArray(item.children) &&
+                item.children.some((child: any) => child.type === 'definition_description')
             );
           },
           platforms: ['web', 'rn'],
@@ -294,7 +312,7 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
         },
         {
           name: 'SupramarkDefinitionItemNode',
-          description: '定义列表项 AST 节点接口，包含术语和定义',
+          description: '定义列表项 AST 节点接口，通过 children 包含术语和定义描述',
           fields: [
             {
               name: 'type',
@@ -303,15 +321,9 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
               required: true,
             },
             {
-              name: 'term',
-              type: 'SupramarkNode[]',
-              description: '术语内容节点数组（通常包含 text 节点）',
-              required: true,
-            },
-            {
-              name: 'descriptions',
-              type: 'SupramarkNode[][]',
-              description: '定义内容的二维数组，支持一个术语有多个定义段落',
+              name: 'children',
+              type: 'Array<SupramarkDefinitionTermNode | SupramarkDefinitionDescriptionNode>',
+              description: '按源码顺序排列的 definition_term 与 definition_description 子节点',
               required: true,
             },
           ],

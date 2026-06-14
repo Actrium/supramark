@@ -260,8 +260,16 @@ mod tests {
             ("Short\nMuchLonger", 14, FontFamily::SourceSansPro),
             ("MuchLonger\nShort", 14, FontFamily::SourceSansPro),
             ("\u{4E2D}\n\u{6587}", 16, FontFamily::SourceSansPro),
-            ("\u{4E2D}\u{6587}\u{6DF7}\u{5408}\nABC123", 16, FontFamily::SourceSansPro),
-            ("\u{4E00}\u{4E8C}\u{4E09}\n\u{56DB}\u{4E94}\n\u{516D}", 14, FontFamily::SourceCodePro),
+            (
+                "\u{4E2D}\u{6587}\u{6DF7}\u{5408}\nABC123",
+                16,
+                FontFamily::SourceSansPro,
+            ),
+            (
+                "\u{4E00}\u{4E8C}\u{4E09}\n\u{56DB}\u{4E94}\n\u{516D}",
+                14,
+                FontFamily::SourceCodePro,
+            ),
             ("Hello\nWorld", 20, FontFamily::SourceSansPro),
             ("", 14, FontFamily::SourceSansPro),
             ("\n", 14, FontFamily::SourceSansPro),
@@ -296,10 +304,7 @@ mod tests {
                     .map(|line| r_per.measure_precise(font, line))
                     .collect();
 
-                let max_w = per_line
-                    .iter()
-                    .map(|(w, _)| *w)
-                    .fold(0.0_f64, f64::max);
+                let max_w = per_line.iter().map(|(w, _)| *w).fold(0.0_f64, f64::max);
 
                 // single-line height (asc + desc) — same for all lines (same font)
                 let single_h = per_line.first().map(|(_, h)| *h).unwrap_or(0.0);

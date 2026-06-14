@@ -34,7 +34,7 @@ Supramark 采用分层架构，从底层到上层分为：
 图表链路正在从“平台各自渲染”收敛到“统一 engine 产出 SVG，再由各平台消费”。
 
 - 架构目标文档见 [../architecture/DIAGRAM_ENGINE_TARGET.md](../architecture/DIAGRAM_ENGINE_TARGET.md)
-- 当前文档中关于 `Headless WebView Worker`、浏览器端脚本渲染的内容，应视为过渡态说明，不是最终目标架构
+- 图表渲染不再通过额外执行容器，RN 与 Web 都消费 `@supramark/engines` 输出的 SVG
 
 ## 核心层（@supramark/core）
 
@@ -74,29 +74,16 @@ interface ParagraphNode extends BaseNode {
 
 #### 2. 解析器
 
-支持两种解析引擎：
-
-**Unified/Remark（Node/Web）**
+解析层收敛为单一 public contract：
 
 ```typescript
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
+import { parse } from '@supramark/core';
 
-const processor = unified().use(remarkParse).use(/* Feature plugins */);
+const ast = await parse(source);
 ```
 
-**Markdown-it（React Native）**
-
-```typescript
-import MarkdownIt from 'markdown-it';
-
-const md = new MarkdownIt().use(/* Feature plugins */);
-```
-
-为什么两个引擎？
-
-- Unified: Web 环境首选，生态完善
-- Markdown-it: RN 环境友好，无需 polyfill
+`@supramark/core` 只是 facade：加载 Rust `supramark-markdown` 产物，并执行 AST 后处理插件。
+真正的源码扫描、rule、source map 和 AST v2 构建在 `crates/supramark-markdown` 中完成。
 
 #### 3. Feature 注册器
 
@@ -124,14 +111,10 @@ interface SupramarkFeature {
   // 元信息
   metadata: FeatureMetadata;
 
-  // 语法定义（可选）
-  syntax?: {
-    remarkPlugins?: Plugin[];
-    markdownItPlugins?: Plugin[];
+  // 语法与 AST 合同
+  syntax: {
+    ast: ASTNodeDefinition;
   };
-
-  // AST 节点定义
-  nodes?: ASTNodeDefinition[];
 
   // 渲染器
   renderers?: {
@@ -241,18 +224,16 @@ function DiagramRenderer({ code }: { code: string }) {
 **RN 端**：
 
 ```typescript
-// 使用 Headless WebView Worker
-import { useDiagramRender } from '@supramark/rn-diagram-worker'
+import { createReactNativeDiagramEngine } from '@supramark/engines/rn'
 
-function DiagramRenderer({ code }: { code: string }) {
-  const { svg } = useDiagramRender({ engine: 'mermaid', code })
-  return <SvgImage source={{ uri: svg }} />
+const engine = createReactNativeDiagramEngine()
+
+async function renderDiagram(code: string) {
+  return engine.render({ engine: 'mermaid', code })
 }
 ```
 
-## Headless WebView Worker
-
-### 架构
+## RN SVG Engine
 
 ```
 ┌────────────────────────────────┐
@@ -266,43 +247,28 @@ function DiagramRenderer({ code }: { code: string }) {
 │                     │   │        │
 │                     ↓   ↓        │
 │  ┌─────────────────────────────┐│
-│  │ DiagramRenderProvider       ││
-│  │   render({ engine, code })  ││
+│  │ @supramark/engines/rn      ││
+│  │ render({ engine, code })   ││
 │  └─────────────────────────────┘│
 │                ↓                 │
-│        postMessage()             │
-└────────────────│─────────────────┘
-                 │
-                 ↓
-┌────────────────────────────────┐
-│   Headless WebView Worker      │
-│  ┌──────────────────────────┐  │
-│  │  Rendering Engines       │  │
-│  │  ├─ Mermaid.js           │  │
-│  │  ├─ Vega.js              │  │
-│  │  ├─ PlantUML             │  │
-│  │  └─ KaTeX/MathJax        │  │
-│  └──────────────────────────┘  │
+│ native FFI / JS SVG-string       │
 │                ↓                │
-│        Generate SVG/PNG         │
-│                ↓                │
-│        postMessage(result)      │
+│        Generate SVG             │
 └─────────────────────────────────┘
 ```
 
 ### 工作流程
 
 1. RN 组件请求渲染图表
-2. DiagramRenderProvider 发送消息到 WebView
-3. WebView 内的 JS 引擎渲染图表
-4. 返回 SVG/PNG 数据
-5. RN 组件展示结果
+2. `@supramark/engines/rn` 路由到 native FFI adapter 或 JS SVG-string engine
+3. engine 返回 SVG
+4. RN 组件通过 `react-native-svg` 展示结果
 
 优点：
 
-- 单个 WebView 服务所有图表
-- 后台渲染，不阻塞 UI
-- 支持所有浏览器图表库
+- 图表渲染入口统一
+- RN 不需要额外执行容器
+- renderer 只负责展示 SVG
 
 ## 数据流
 
@@ -311,7 +277,7 @@ function DiagramRenderer({ code }: { code: string }) {
 ```
 Markdown Text
     ↓
-parseMarkdown()
+parse()
     ↓
 Apply Feature Plugins
     ↓
@@ -332,7 +298,7 @@ Platform-specific Output
 const markdown = `# Hello\n\nThis is **bold** text.`
 
 // 2. 解析
-const ast = await parseMarkdown(markdown)
+const ast = await parse(markdown)
 /*
 {
   type: 'root',
@@ -375,7 +341,7 @@ const ast = await parseMarkdown(markdown)
 ```typescript
 const cache = new Map<string, SupramarkNode>();
 
-async function parseMarkdown(markdown: string, config: Config) {
+async function parse(markdown: string, config: Config) {
   const cacheKey = hash(markdown + JSON.stringify(config));
 
   if (cache.has(cacheKey)) {
@@ -453,9 +419,9 @@ if (!result.valid) {
 ### 单元测试
 
 ```typescript
-describe('parseMarkdown', () => {
+describe('parse', () => {
   it('should parse headings', async () => {
-    const ast = await parseMarkdown('# Title');
+    const ast = await parse('# Title');
     expect(ast.children[0].type).toBe('heading');
   });
 });
@@ -491,9 +457,9 @@ it('should match snapshot', () => {
 
 覆盖特定节点的渲染器
 
-### 3. 自定义插件
+### 3. 自定义解析能力
 
-编写 remark/markdown-it 插件
+扩展 AST v2 规范、Rust parser rule，或编写 AST 后处理插件
 
 ### 4. 自定义样式
 

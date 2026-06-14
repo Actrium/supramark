@@ -5,7 +5,7 @@ Supramark 核心包：AST 类型定义、Markdown 解析与插件系统。
 ## 功能特性
 
 - **AST 定义**：统一的抽象语法树类型系统
-- **Markdown 解析**：基于 markdown-it 的扩展解析器
+- **Markdown 解析**：基于 Rust `supramark-markdown` 的 AST v2 解析器
 - **插件系统**：标准化的功能扩展接口
 - **缓存优化**：LRU 缓存机制提升性能
 - **跨平台支持**：面向 React Native、Web、CLI 的统一抽象
@@ -19,10 +19,10 @@ npm install @supramark/core
 ## 快速开始
 
 ```typescript
-import { parse, type SupramarkNode } from '@supramark/core';
+import { parse, type SupramarkRootNode } from '@supramark/core';
 
 // 解析 Markdown
-const ast: SupramarkNode = parse('# Hello **Supramark**!');
+const ast: SupramarkRootNode = await parse('# Hello **Supramark**!');
 ```
 
 ## 核心接口

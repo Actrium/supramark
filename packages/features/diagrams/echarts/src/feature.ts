@@ -11,10 +11,9 @@ import { diagramEchartsExamples } from './examples.js';
  *
  * - Reuses the generic `diagram` AST node.
  * - Matches diagrams with `engine === 'echarts'`.
- * - Web rendering goes through `@supramark/engines/echarts`. ECharts
- *   itself is a JS chart library (canvas / SVG renderer), so unlike
- *   the *-little engines there is no Rust port today; the RN path is
- *   unsupported in this build.
+ * - Rendering goes through `@supramark/engines/echarts`. ECharts itself is
+ *   a JS chart library; Supramark uses its SVG SSR path so Web and RN share
+ *   the same source -> SVG-string contract.
  *
  * @example
  * ```markdown
@@ -28,8 +27,8 @@ export const diagramEchartsFeature = defineDiagramFeature({
   engineId: 'echarts',
   name: 'Diagram (ECharts)',
   description:
-    'ECharts diagrams rendered to SVG through @supramark/engines + the JS echarts library (Web only).',
-  tags: ['diagram', 'echarts', 'chart', 'web-only'],
+    'ECharts diagrams rendered to SVG through @supramark/engines + the JS echarts library.',
+  tags: ['diagram', 'echarts', 'chart', 'svg'],
   web: {
     dependencies: [
       {
@@ -41,17 +40,19 @@ export const diagramEchartsFeature = defineDiagramFeature({
     ],
   },
   rn: {
-    // Web-only feature today. RN path is unsupported in this build:
-    // ECharts has no Rust port and the WebView worker has been
-    // retired. Replacement is a future @wuba/react-native-echarts
-    // integration. Until then, RN renders return "unsupported on RN".
     infrastructure: { needsCache: true },
     dependencies: [
+      {
+        name: 'echarts',
+        version: '^5.0.0',
+        type: 'npm',
+        optional: false,
+      },
       {
         name: 'react-native-svg',
         version: '^13.0.0',
         type: 'npm',
-        optional: true,
+        optional: false,
       },
     ],
   },
@@ -64,18 +65,15 @@ export const diagramEchartsFeature = defineDiagramFeature({
   readme: `
 # Diagram (ECharts) Feature
 
-Apache ECharts diagrams as fenced code blocks (Web only in this build).
+Apache ECharts diagrams as fenced code blocks.
 
 - Syntax: \`\\\`\\\`echarts\` fenced code blocks containing an ECharts
   option JSON.
 - AST: parsed into a \`diagram\` node with \`engine = "echarts"\`,
   \`code\` carrying the option string.
-- Rendering: on Web, \`@supramark/engines/echarts\` consumes the
-  upstream JS \`echarts\` library and produces SVG. On RN, ECharts is
-  currently **unsupported** — the WebView worker was retired in
-  2026-05; a planned native path uses
-  \`@wuba/react-native-echarts\` (mature open-source RN wrapper over
-  Skia / SVG).
+- Rendering: on Web and RN, \`@supramark/engines/echarts\` consumes the
+  upstream JS \`echarts\` library through its SVG SSR mode and produces
+  SVG markup for the platform renderer.
   `.trim(),
   bestPractices: [
     'Use the same ECharts option shape as your front-end project for shared debugging.',
@@ -83,9 +81,9 @@ Apache ECharts diagrams as fenced code blocks (Web only in this build).
   ],
   faq: [
     {
-      question: 'Why is ECharts Web-only in supramark?',
+      question: 'How does ECharts render on RN?',
       answer:
-        'ECharts has no Rust port; the engine that produces SVG runs in a JS host. The hidden-WebView worker that previously bridged this on RN was retired in 2026-05. The replacement plan is to wire @wuba/react-native-echarts (a mature RN wrapper over Skia / SVG) in a follow-up.',
+        'Supramark uses ECharts SVG SSR mode and hands the resulting SVG string to react-native-svg.',
     },
   ],
 });

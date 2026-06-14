@@ -276,7 +276,7 @@ divider → View
 * 禁止事件
 * 禁止动画（含 shadow / transform）
 * 禁止复杂布局系统
-* 禁止 WebView / Canvas
+* 禁止浏览器容器 / Canvas
 * 禁止扩展未定义字段
 
 ---

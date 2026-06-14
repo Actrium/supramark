@@ -214,7 +214,11 @@ impl Metrics for FfiCallbackMetrics {
         // reconstruct from `size`; this matches `host_callback.rs`
         // which also tolerates older Safari leaving these fields
         // out.
-        let ascent = if ascent.is_finite() { ascent } else { size * 0.8 };
+        let ascent = if ascent.is_finite() {
+            ascent
+        } else {
+            size * 0.8
+        };
         let descent = if descent.is_finite() {
             descent
         } else {
@@ -231,32 +235,22 @@ impl Metrics for FfiCallbackMetrics {
 
 #[cfg(test)]
 mod tests {
-    //! The callback slot is process-global, so these tests would
-    //! interfere if run concurrently — we keep the surface tiny (one
-    //! "no callback installed" check that runs first, then one
-    //! "install + invoke" check) and rely on serial execution.
-    //! Cargo's per-process default `--test-threads=1` is not
-    //! guaranteed; instead, the second test installs its callback
-    //! and never uninstalls, which leaves the global in a defined
-    //! state. The fallback test runs in a separate test binary or
-    //! must run before the install test — sequence is enforced by
-    //! alphabetical-by-name test order (a_ prefix < b_ prefix).
-    //!
-    //! For determinism across rustc versions that may reorder tests,
-    //! the install test does **not** assume the slot was empty
-    //! beforehand; the fallback test runs the measurement before
-    //! ever calling `install_ffi_metrics_callback`.
+    //! The callback slot is process-global, so tests must serialize
+    //! access and reset the slot before each assertion.
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn reset_callback_slot() {
+        CALLBACK.store(std::ptr::null_mut(), Ordering::Release);
+    }
 
     #[test]
     fn a_fallback_when_no_callback_installed() {
-        // This test must run before `b_installed_callback_invoked`
-        // because the callback slot is process-global. The `a_` /
-        // `b_` prefix nudges alphabetical ordering; if cargo test
-        // ever reorders, swap to a single combined test.
-        // Sanity guard:
-        assert!(CALLBACK.load(Ordering::Acquire).is_null(), "callback slot must be empty at start of test; if you see this, another test installed a callback and tests must be made order-independent");
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        reset_callback_slot();
 
         let m = FfiCallbackMetrics;
         let res = m.measure("Hello", "SansSerif", 12.0, false, false);
@@ -293,6 +287,8 @@ mod tests {
 
     #[test]
     fn b_installed_callback_invoked() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        reset_callback_slot();
         install_ffi_metrics_callback(mock_measure);
         let before = MOCK_CALL_COUNT.load(Ordering::SeqCst);
 
@@ -300,7 +296,11 @@ mod tests {
         let res = m.measure("ab", "SansSerif", 14.0, true, false);
 
         let after = MOCK_CALL_COUNT.load(Ordering::SeqCst);
-        assert_eq!(after, before + 1, "mock callback should have been invoked exactly once");
+        assert_eq!(
+            after,
+            before + 1,
+            "mock callback should have been invoked exactly once"
+        );
         // `text_len + 100`: "ab".len() == 2, so width == 102.
         assert!((res.width - 102.0).abs() < 1e-9, "width={}", res.width);
         assert!((res.ascent - 15.0).abs() < 1e-9, "ascent={}", res.ascent);

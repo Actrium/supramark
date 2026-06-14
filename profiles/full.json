@@ -1,0 +1,23 @@
+{
+  "name": "full",
+  "description": "All currently known Supramark parser and renderer-facing capabilities.",
+  "features": [
+    "commonmark",
+    "gfm.table",
+    "gfm.strikethrough",
+    "gfm.task_list",
+    "math",
+    "footnote",
+    "definition_list",
+    "raw_html",
+    "diagram",
+    "container.admonition",
+    "container.map",
+    "container.html",
+    "container.weather",
+    "container.vison",
+    "input",
+    "code_highlight"
+  ],
+  "targets": ["node", "web", "rn", "wasm"]
+}

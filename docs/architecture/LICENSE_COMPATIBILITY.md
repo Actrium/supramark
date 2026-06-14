@@ -26,6 +26,8 @@
 | `crates/d2-little/web-wasm` → npm `@kookyleo/d2-little-web` | `MPL-2.0` | 同上 | |
 | `crates/mermaid-little` → crate `mermaid-little` | `MIT` | mermaid-js (MIT) | 纯 Rust 重写 |
 | `crates/mermaid-little/web-wasm` → npm `@kookyleo/mermaid-little-web` | `MIT` | 同上 | step 4 新发 |
+| `crates/supramark-markdown` → crate `supramark-markdown` | **`Apache-2.0 AND MIT`** | markdown-it-rust/markdown-it (MIT) | 自有 AST v2 + parse 编排（Apache-2.0）叠加改编自 markdown-it-rust 的 parser core（MIT）；AND 表示两协议同时约束，二者均在白名单 |
+| `crates/supramark-markdown/packages/web` → npm `@supramark/markdown-web` | 同上（`Apache-2.0 AND MIT`） | 同上 | wasm 封装，协议随 crate 一致 |
 | `crates/plantuml-little` → crate `plantuml-little` | **`GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT`** | PlantUML (GPL-3 / LGPL-3) | 上游主动选择 5-way OR 多协议；reimplementation，目标 byte-exact parity；supramark 以 Apache-2.0 分支消费 |
 | `crates/plantuml-little/packages/web` → npm `@kookyleo/plantuml-little-web` | 同上（5-way OR） | 同上 | npm 发布时仍保留 OR 表达式；下游可选择最宽松分支 |
 | `crates/graphviz-anywhere/graphviz/` (submodule) | **`EPL-1.0`** | Graphviz (EPL-1.0 / CPL-1.0) | 不发布；只作为 link 目标；与 Apache 文件目录隔离；目前是空目录占位（待 step 4 装回 submodule） |

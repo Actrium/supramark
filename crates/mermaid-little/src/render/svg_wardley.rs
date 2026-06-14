@@ -931,7 +931,6 @@ fn html_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::layout::wardley as layout_mod_test;
     use crate::parser::wardley as parser_mod;
     use crate::theme::get_theme;

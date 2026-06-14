@@ -561,6 +561,7 @@ fn displayed_member_text_local(text: &str) -> String {
 /// Emit one `<g class="label">` child inside members- or methods-group.
 /// The inner foreignObject layout matches upstream `addText()` for a
 /// single-line html label (`numberOfLines = 1` → translate(0, -bbox_h/2)).
+#[allow(dead_code)]
 fn render_class_text_row(m: &crate::model::class::ClassMember) -> String {
     render_class_text_row_indexed(m, 0, 1)
 }

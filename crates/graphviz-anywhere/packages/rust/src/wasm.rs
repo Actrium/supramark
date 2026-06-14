@@ -63,11 +63,7 @@ fn format_name(format: Format) -> &'static str {
     }
 }
 
-pub(crate) fn render(
-    dot: &str,
-    engine: Engine,
-    format: Format,
-) -> Result<Vec<u8>, GraphvizError> {
+pub(crate) fn render(dot: &str, engine: Engine, format: Format) -> Result<Vec<u8>, GraphvizError> {
     js_render(dot, engine_name(engine), format_name(format))
         .map(|s| s.into_bytes())
         .map_err(|_| GraphvizError::RenderFailed)

@@ -1,6 +1,6 @@
-import type { FeatureExample } from '@supramark/core';
+import type { ExampleDefinition } from '@supramark/core';
 
-export const visonExamples: FeatureExample[] = [
+export const visonExamples: ExampleDefinition[] = [
   {
     name: 'Hello card',
     description: 'Minimal Vison card with a single text block.',

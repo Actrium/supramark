@@ -668,6 +668,7 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
     (vx, vy, vw.max(1.0), vh.max(1.0), content_center_x)
 }
 
+#[allow(dead_code)]
 fn viewbox(b: &Bounds, pad: f64) -> (f64, f64, f64, f64) {
     let w = (b.width + 2.0 * pad).max(1.0);
     let h = (b.height + 2.0 * pad).max(1.0);

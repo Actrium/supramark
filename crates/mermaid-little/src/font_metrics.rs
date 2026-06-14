@@ -252,7 +252,10 @@ mod tests {
         assert!((w_mono - w_courier).abs() < 1e-10, "Courier maps to mono");
         let w_courier_new = char_width('a', "Courier New", 12.0, false, false);
         let w_sans = char_width('a', "SansSerif", 12.0, false, false);
-        assert!((w_courier_new - w_sans).abs() < 1e-10, "Courier New maps to sans");
+        assert!(
+            (w_courier_new - w_sans).abs() < 1e-10,
+            "Courier New maps to sans"
+        );
         let w3 = char_width('a', "SansSerif", 12.0, false, false);
         let w4 = char_width('a', "Dialog", 12.0, false, false);
         assert!((w3 - w4).abs() < 1e-10);
@@ -305,7 +308,13 @@ mod tests {
         for l in &labels {
             let (w, _h) = measure_html_label(l, &font, 200.0, true);
             let w16 = text_width(l, "sans-serif", 16.0, false, false);
-            eprintln!("label={:40} fo_w={:20} w16={:20} w16+50={}", l, w, w16, w16 + 50.0);
+            eprintln!(
+                "label={:40} fo_w={:20} w16={:20} w16+50={}",
+                l,
+                w,
+                w16,
+                w16 + 50.0
+            );
         }
     }
 }
@@ -325,9 +334,18 @@ mod extra_tests {
 
     #[test]
     fn measure_markdown_segments() {
-        eprintln!("Text: = {}", text_width("Text: ", "sans-serif", 14.0, false, false));
-        eprintln!("Bolded text (bold) = {}", text_width("Bolded text", "sans-serif", 14.0, true, false));
-        eprintln!("italicized text = {}", text_width("italicized text", "sans-serif", 14.0, false, false));
+        eprintln!(
+            "Text: = {}",
+            text_width("Text: ", "sans-serif", 14.0, false, false)
+        );
+        eprintln!(
+            "Bolded text (bold) = {}",
+            text_width("Bolded text", "sans-serif", 14.0, true, false)
+        );
+        eprintln!(
+            "italicized text = {}",
+            text_width("italicized text", "sans-serif", 14.0, false, false)
+        );
         let sum = text_width("Text: ", "sans-serif", 14.0, false, false)
             + text_width("Bolded text", "sans-serif", 14.0, true, false)
             + text_width(" ", "sans-serif", 14.0, false, false)
@@ -341,7 +359,9 @@ mod cjk_recovery_tests {
     use super::*;
 
     fn cjk_sample() -> String {
-        ['\u{63D0}', '\u{4EA4}', '\u{7533}', '\u{8BF7}'].iter().collect()
+        ['\u{63D0}', '\u{4EA4}', '\u{7533}', '\u{8BF7}']
+            .iter()
+            .collect()
     }
 
     #[test]
@@ -358,7 +378,10 @@ mod cjk_recovery_tests {
         let mangled: String = s.bytes().map(|b| b as char).collect();
         let w_mangled = text_width(&mangled, "sans-serif", 14.0, false, false);
         let w_clean = text_width(&s, "sans-serif", 14.0, false, false);
-        assert!((w_mangled - w_clean).abs() < 1e-6, "mangled={w_mangled}, clean={w_clean}");
+        assert!(
+            (w_mangled - w_clean).abs() < 1e-6,
+            "mangled={w_mangled}, clean={w_clean}"
+        );
     }
 
     #[test]
@@ -369,14 +392,20 @@ mod cjk_recovery_tests {
             .chars()
             .map(|c| char_width(c, "sans-serif", 14.0, false, false))
             .sum();
-        assert!((w - expected).abs() < 1e-9, "latin-1 perturbed: {w} vs {expected}");
+        assert!(
+            (w - expected).abs() < 1e-9,
+            "latin-1 perturbed: {w} vs {expected}"
+        );
     }
 
     #[test]
     fn pure_ascii_unaffected() {
         let w = text_width("Hello", "sans-serif", 14.0, false, false);
         assert!(w > 0.0);
-        let direct: f64 = "Hello".chars().map(|c| char_width(c, "sans-serif", 14.0, false, false)).sum();
+        let direct: f64 = "Hello"
+            .chars()
+            .map(|c| char_width(c, "sans-serif", 14.0, false, false))
+            .sum();
         assert!((w - direct).abs() < 1e-9);
     }
 }
@@ -389,6 +418,9 @@ mod debug_note_width {
         let full = "Important information! You can write\nnotes.";
         let w = text_width(full, "sans-serif", 14.0, false, false);
         let note_w = w + 30.0;
-        assert!((note_w - 333.48828125).abs() < 0.01, "note_w = {note_w} expected 333.48828125");
+        assert!(
+            (note_w - 333.48828125).abs() < 0.01,
+            "note_w = {note_w} expected 333.48828125"
+        );
     }
 }

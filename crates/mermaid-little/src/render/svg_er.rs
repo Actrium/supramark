@@ -1285,6 +1285,7 @@ fn html_escape(s: &str) -> String {
 
 /// HTML-escape a relationship role label, but preserve `<br ...>` break tags
 /// (normalising them to `<br/>`) as upstream mermaid markdown processing does.
+#[allow(dead_code)]
 fn escape_label_keeping_br(s: &str) -> String {
     use crate::layout::er::split_br;
     let parts = split_br(s);
@@ -1354,7 +1355,6 @@ fn escape_bare_ampersands(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::layout::er as layout_er;
     use crate::parser::er as parser_er;
     use crate::theme::get_theme;

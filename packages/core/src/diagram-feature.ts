@@ -77,8 +77,8 @@ export interface DefineDiagramFeatureSpec {
 
   /**
    * Whether to also emit a smoke render test on the RN platform. Defaults
-   * to `false` (most diagram engines are Web-only or have unsupported RN
-   * paths in this build).
+   * to `false`; features opt in once their RN adapter or JS SVG renderer is
+   * available in the test environment.
    */
   rnRenderTest?: boolean;
 

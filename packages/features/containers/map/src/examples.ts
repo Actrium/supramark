@@ -6,7 +6,7 @@ import type { ExampleDefinition } from '@supramark/core';
  * 使用 :::map 容器定义一张地图卡片：
  * - center: 地图中心点；
  * - zoom: 缩放级别；
- * - marker: 单个标记点。
+ * - marker: 单个输入标记点，AST v2 输出为 data.markers[]。
  */
 export const mapExamples: ExampleDefinition[] = [
   {

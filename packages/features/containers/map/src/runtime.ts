@@ -134,10 +134,12 @@ registerContainerHook({
     const mapNode: SupramarkContainerNode = {
       type: 'container',
       name: 'map',
+      mode: 'opaque',
+      value: raw,
       data: {
         center: resolvedCenter,
         zoom: parsed.zoom,
-        marker,
+        markers: marker ? [marker] : undefined,
         meta: parsed.meta,
       },
       children: [],

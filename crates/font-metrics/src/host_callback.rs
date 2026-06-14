@@ -47,12 +47,8 @@ extern "C" {
     /// `canvas.getContext('2d').measureText(text)` or the
     /// `react-native-skia` equivalent.
     #[wasm_bindgen(js_namespace = supramark, js_name = measureText, catch)]
-    fn js_measure_text(
-        family: &str,
-        text: &str,
-        size: f64,
-        bold: bool,
-    ) -> Result<JsValue, JsValue>;
+    fn js_measure_text(family: &str, text: &str, size: f64, bold: bool)
+        -> Result<JsValue, JsValue>;
 }
 
 /// Adapter that defers every measurement to a host-supplied callback

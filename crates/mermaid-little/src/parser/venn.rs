@@ -139,7 +139,10 @@ pub fn parse(source: &str) -> Result<VennDiagram> {
 
 /// `<id_list> [BRACKET_LABEL] [: NUMERIC]`
 /// Returns sorted (alphabetically) sets.
-fn parse_subset_args(rest: &str, _min: usize) -> Result<(Vec<String>, Option<String>, Option<f64>)> {
+fn parse_subset_args(
+    rest: &str,
+    _min: usize,
+) -> Result<(Vec<String>, Option<String>, Option<f64>)> {
     let mut s = rest.trim_start();
 
     // Identifier list (comma-separated).
@@ -183,7 +186,10 @@ fn parse_subset_args(rest: &str, _min: usize) -> Result<(Vec<String>, Option<Str
 /// identifier list followed by another bare identifier, treat the list
 /// as the targets and the trailing as id. Most fixtures we care about
 /// use the indent-mode form: `text "Item 1"` or `text id["Long Label"]`.
-fn parse_text_args(rest: &str, _current: &Option<Vec<String>>) -> Result<(Option<Vec<String>>, String, Option<String>)> {
+fn parse_text_args(
+    rest: &str,
+    _current: &Option<Vec<String>>,
+) -> Result<(Option<Vec<String>>, String, Option<String>)> {
     let s = rest.trim();
     // First token: identifier or string.
     let (first, after) = read_identifier_or_string(s)?;
@@ -250,7 +256,11 @@ fn parse_style_args(rest: &str, lineno: usize) -> Result<(Vec<String>, Vec<(Stri
     parse_style_fields(s, targets, lineno)
 }
 
-fn parse_style_fields(s: &str, targets: Vec<String>, lineno: usize) -> Result<(Vec<String>, Vec<(String, String)>)> {
+fn parse_style_fields(
+    s: &str,
+    targets: Vec<String>,
+    lineno: usize,
+) -> Result<(Vec<String>, Vec<(String, String)>)> {
     let mut s = s.trim_start();
     let mut fields = Vec::<(String, String)>::new();
     while !s.is_empty() {
@@ -271,7 +281,6 @@ fn parse_style_fields(s: &str, targets: Vec<String>, lineno: usize) -> Result<(V
             s = after_comma.trim_start();
             continue;
         }
-        s = after;
         break;
     }
     let mut targets_sorted = targets;
@@ -401,7 +410,6 @@ fn read_bracket_label(s: &str) -> Result<(String, &str)> {
 
 /// Read a numeric literal `[+-]?(\d+(\.\d+)?|\.\d+)`.
 fn read_numeric(s: &str) -> Result<(f64, &str)> {
-    let mut end = 0;
     let bytes = s.as_bytes();
     let mut i = 0;
     if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
@@ -416,7 +424,7 @@ fn read_numeric(s: &str) -> Result<(f64, &str)> {
             i += 1;
         }
     }
-    end = i;
+    let end = i;
     if end == 0 || (end == 1 && (bytes[0] == b'+' || bytes[0] == b'-')) {
         return Err(MermaidError::Parse {
             line: 0,
@@ -462,7 +470,11 @@ fn extract_init_directives(source: &str, d: &mut VennDiagram) -> String {
                 continue;
             }
         }
-        let len = source[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        let len = source[i..]
+            .chars()
+            .next()
+            .map(|c| c.len_utf8())
+            .unwrap_or(1);
         out.push_str(&source[i..i + len]);
         i += len;
     }

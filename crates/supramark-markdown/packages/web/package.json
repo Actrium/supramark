@@ -1,0 +1,45 @@
+{
+  "name": "@supramark/markdown-web",
+  "version": "0.1.0",
+  "description": "Web/Node wasm wrapper for supramark-markdown AST v2 parsing.",
+  "type": "module",
+  "license": "Apache-2.0 AND MIT",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./src/node.ts",
+      "import": "./dist/node.js",
+      "default": "./dist/node.js"
+    },
+    "./wasm": {
+      "types": "./src/wasm/supramark_markdown_web.d.ts",
+      "import": "./dist/wasm/supramark_markdown_web.js"
+    },
+    "./node-wasm": {
+      "types": "./src/node-wasm/supramark_markdown_web.d.ts",
+      "import": "./dist/node-wasm/supramark_markdown_web.js",
+      "default": "./dist/node-wasm/supramark_markdown_web.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build:wasm:browser": "bun ../../../../scripts/wasm-pack.ts build --target bundler --no-pack --out-dir dist/wasm --out-name supramark_markdown_web && rm -f dist/wasm/.gitignore",
+    "build:wasm:node": "bun ../../../../scripts/wasm-pack.ts build --target nodejs --no-pack --out-dir dist/node-wasm --out-name supramark_markdown_web && rm -f dist/node-wasm/.gitignore",
+    "build:wasm": "bun run build:wasm:browser && bun run build:wasm:node",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "bun run build:wasm && bun run build:ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

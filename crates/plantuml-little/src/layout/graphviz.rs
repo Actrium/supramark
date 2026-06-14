@@ -523,8 +523,62 @@ fn render_dot_to_svg_native(dot_src: &str) -> Result<String, Error> {
     let _guard = crate::dot::graphviz::gv_lock();
     let ctx = GraphvizContext::new()
         .map_err(|e| Error::Layout(format!("failed to create graphviz context: {e}")))?;
+    let _stderr_silencer = StderrSilencer::new();
     ctx.render_to_string(dot_src, Engine::Dot, Format::Svg)
         .map_err(|e| Error::Layout(format!("graphviz render failed: {e}")))
+}
+
+#[cfg(unix)]
+struct StderrSilencer {
+    saved_fd: libc::c_int,
+}
+
+#[cfg(unix)]
+impl StderrSilencer {
+    fn new() -> Option<Self> {
+        unsafe {
+            let saved_fd = libc::dup(libc::STDERR_FILENO);
+            if saved_fd < 0 {
+                return None;
+            }
+
+            let null_fd = libc::open(b"/dev/null\0".as_ptr().cast(), libc::O_WRONLY);
+            if null_fd < 0 {
+                libc::close(saved_fd);
+                return None;
+            }
+
+            let redirected = libc::dup2(null_fd, libc::STDERR_FILENO);
+            libc::close(null_fd);
+            if redirected < 0 {
+                libc::close(saved_fd);
+                return None;
+            }
+
+            Some(Self { saved_fd })
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for StderrSilencer {
+    fn drop(&mut self) {
+        unsafe {
+            libc::fflush(std::ptr::null_mut());
+            libc::dup2(self.saved_fd, libc::STDERR_FILENO);
+            libc::close(self.saved_fd);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct StderrSilencer;
+
+#[cfg(not(unix))]
+impl StderrSilencer {
+    fn new() -> Option<Self> {
+        None
+    }
 }
 
 /// Run Graphviz dot layout, returning node coordinates and edge paths.

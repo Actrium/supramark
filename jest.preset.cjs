@@ -59,9 +59,9 @@ module.exports = {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 
-  // 允许转换 ESM 模块（unified, remark, etc.）
+  // 允许转换少量仍以 ESM 发布的测试依赖。
   transformIgnorePatterns: [
-    'node_modules/(?!(unified|remark.*|micromark.*|mdast.*|unist.*|vfile.*|bail|trough|is-plain-obj|zwitch|devlop|character-entities.*|escape-string-regexp|markdown-table|property-information|space-separated-tokens|comma-separated-tokens|hast-util.*|web-namespaces|decode-named-character-reference|ccount|longest-streak|@types)/)',
+    'node_modules/(?!(escape-string-regexp|@types)/)',
   ],
 
   // 代码覆盖率配置

@@ -42,7 +42,6 @@ fn read_known_ignored() -> std::collections::HashSet<String> {
 
 fn main() {
     let ignored = read_known_ignored();
-    let mut categories: Vec<(String, Vec<(String, bool, String)>)> = Vec::new();
     let mut by_cat: std::collections::BTreeMap<String, Vec<(String, bool, String)>> =
         std::collections::BTreeMap::new();
 
@@ -58,22 +57,6 @@ fn main() {
                 continue;
             }
             let cat_name = cat.file_name().to_string_lossy().to_string();
-            let key = format!("{}/{}", basep.file_name().unwrap().to_string_lossy(), cat_name);
-            let key = format!(
-                "{}/{}",
-                basep
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                cat_name
-            );
-            let _ = key;
-            let cat_key = format!(
-                "{}/{}",
-                basep.file_name().unwrap().to_string_lossy(),
-                cat_name
-            );
-            let _ = cat_key;
             let cat_disp = format!(
                 "{}/{}",
                 basep.file_name().unwrap().to_string_lossy(),
@@ -114,17 +97,19 @@ fn main() {
                 })) {
                     Ok(Ok(s)) => s,
                     Ok(Err(e)) => {
-                        by_cat
-                            .entry(cat_disp.clone())
-                            .or_default()
-                            .push((stem, false, format!("error: {}", e)));
+                        by_cat.entry(cat_disp.clone()).or_default().push((
+                            stem,
+                            false,
+                            format!("error: {}", e),
+                        ));
                         continue;
                     }
                     Err(_) => {
-                        by_cat
-                            .entry(cat_disp.clone())
-                            .or_default()
-                            .push((stem, false, "panic".into()));
+                        by_cat.entry(cat_disp.clone()).or_default().push((
+                            stem,
+                            false,
+                            "panic".into(),
+                        ));
                         continue;
                     }
                 };
@@ -165,5 +150,4 @@ fn main() {
         }
     }
     println!("==== TOTAL: {}/{} ====", total_p, total_t);
-    let _ = categories;
 }

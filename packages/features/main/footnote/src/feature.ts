@@ -93,15 +93,6 @@ export const footnoteFeature: SupramarkFeature<
       ],
     },
 
-    // 可选：如果需要自定义解析器
-    // parser: {
-    //   engine: 'markdown-it',
-    //   markdownIt: {
-    //     plugin: yourPlugin,
-    //     tokenMapper: (token, context) => { /* ... */ }
-    //   }
-    // },
-
     // 可选：验证规则
     // validator: {
     //   validate: (node) => {

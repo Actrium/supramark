@@ -14,6 +14,8 @@
 resolver = "2"
 
 members = [
+    "crates/supramark-markdown",
+    "crates/supramark-markdown/packages/web",
     "crates/dagre",
     "crates/graphviz-anywhere/packages/rust",
     "crates/graphviz-anywhere/examples/rust",
@@ -42,6 +44,13 @@ exclude = []
 # upstream-merged crates continue to resolve their own settings.
 [workspace.metadata.supramark]
 plan = "docs/architecture/LICENSE_COMPATIBILITY.md"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
 
 # ── Path overrides ─────────────────────────────────────────────────────
 # plantuml-little and mermaid-little declare their dependency on

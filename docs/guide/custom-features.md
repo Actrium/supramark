@@ -134,64 +134,28 @@ npm run build --workspace @supramark/feature-xxx
 
 如果只是复用现有节点（如 `diagram` 的新引擎），可以略过这一步。
 
-### 4.2 `createMarkdownIt`：注册所需插件 / 容器
+### 4.2 parser rule：进入 `supramark-markdown`
 
-在 `packages/core/src/plugin.ts` 的 `createMarkdownIt(config)` 中：
-
-- 使用 `isFeatureEnabled` / `getFeatureOptionsAs` 判断 Feature 是否启用；
-- 根据 Feature 注册对应 markdown-it 插件或容器，例如：
+`@supramark/core` 的公开解析入口只有：
 
 ```ts
-// 示例：Admonition
-if (isFeatureOn('@supramark/feature-admonition')) {
-  const adOptions =
-    getFeatureOptionsAs<AdmonitionOptions>(config, '@supramark/feature-admonition') ?? {};
-  const kinds = adOptions.kinds?.length ? adOptions.kinds : SUPRAMARK_ADMONITION_KINDS;
-  for (const kind of kinds) {
-    container(md, kind, {});
-  }
-}
-
-// 示例：HTML Page
-if (isFeatureOn('@supramark/feature-html-page')) {
-  container(md, 'html', {}); // :::html
-}
+parse(source: string): Promise<SupramarkRootNode>
 ```
 
-### 4.3 `parseMarkdown`：从 token 映射到 AST
+如果 Feature 需要新增 Markdown 语法识别，不在 TS 中注册 parser hook，而是在
+`crates/supramark-markdown` 中补充 rule / scanner / AST builder，并让输出继续符合
+`docs/architecture/ast-spec.md`。
 
-在同一文件中，找到 `export async function parseMarkdown(...)`：
+常见判断：
 
-- 对 **块级 token** 在主循环中增加分支；
-- 对 **行内 token** 在 `mapInlineTokens` 里增加分支；
-- 必要时维护自己的状态（类似 Definition List 的 `currentDefList` / `currentDefItem`）。
+- 复用 fenced code 的新图表引擎：通常只需要在 AST builder 中识别 info string。
+- 复用 `:::` / `%%%` 扩展承载点：优先输出 `container` / `input` 节点，并把结构化信息放入 `data`。
+- 新的 Markdown 语义节点：先更新 AST v2 规范，再更新 Rust parser 与 TS 类型。
 
-示例：HTML Page 容器：
+### 4.3 `parse` facade：只做加载与后处理
 
-```ts
-// parseMarkdown 中
-if (token.type === 'container_html_open') {
-  insideHtmlContainer = true;
-  let html = '';
-  if (token.map && token.map.length === 2) {
-    const [start, end] = token.map;
-    const innerStart = start + 1;
-    const innerEnd = end - 1 > innerStart ? end - 1 : end;
-    html = sourceLines.slice(innerStart, innerEnd).join('\n');
-  }
-  const htmlPage: SupramarkHtmlPageNode = { type: 'html_page', html };
-  const parentForHtml = stack[stack.length - 1];
-  parentForHtml.children.push(htmlPage);
-  continue;
-}
-if (token.type === 'container_html_close') {
-  insideHtmlContainer = false;
-  continue;
-}
-if (insideHtmlContainer) {
-  continue; // 容器内部 token 已由 html_page 节点承载
-}
-```
+`packages/core/src/plugin.ts` 只负责加载 `@supramark/markdown-web` / native binding，并在解析完成后执行
+AST 后处理插件。不要在这里重新引入 token 映射或语法分词逻辑。
 
 完成后，重新构建 core：
 
@@ -250,7 +214,7 @@ npm run build --workspace @supramark/core
 2. 扩展 props（如 `onOpenHtmlPage`、`diagramConfig`）；
 3. 在 `renderNode` / `renderInlineNode` 中增加新 `case`：
    - 直接渲染为 DOM；
-   - 或渲染为带 `data-*` 标记的占位元素，由浏览器脚本（如 `@supramark/web-diagram`、`mathSupport.ts`）完成真实渲染。
+   - 或交给 `@supramark/engines` 产出 SVG，再由 Web renderer 展示。
 
 示例：diagram 占位：
 
@@ -267,10 +231,7 @@ case 'diagram': {
 }
 ```
 
-对于需要额外脚本的 Feature（如 Math / 各类图表），通常会在对应 Web 包中提供 helper，例如：
-
-- `@supramark/web-diagram`：`buildDiagramSupportScripts()`
-- `@supramark/web`：`mathSupport.ts` 自动注入 KaTeX。
+对于需要重渲染能力的 Feature（如 Math / 各类图表），优先在 `@supramark/engines` 内实现 engine，并让 Web / RN renderer 只消费 SVG 输出。
 
 ---
 
@@ -349,7 +310,7 @@ React Native / React Web 示例中通过菜单展示这些 demo。
 - `docs/features/xxx.md`：语法 / AST / 配置 / 示例；
 - 如涉及 AST 变更：更新 `docs/architecture/ast-spec.md`；
 - 如涉及 Feature 配置：在 `docs/FEATURE_LIFECYCLE_AND_CONFIG.md` 中补充；
-- 如有特殊运行时约束（例如 Html Page 需要宿主提供 WebView），在文档中明确写出。
+- 如有特殊运行时约束（例如 Html Page 需要宿主提供隔离页面容器），在文档中明确写出。
 
 ---
 
@@ -378,13 +339,10 @@ npm run quality
 目前的设计是：
 
 - Feature 负责：**规范 + 配置 + 能力发现**；
-- `packages/core/src/plugin.ts` 负责：具体的 MarkdownIt 插件注册与 token→AST 映射（手写逻辑）。
+- `crates/supramark-markdown` 负责：源码扫描、语法 rule、source map 与 AST v2 输出；
+- `packages/core/src/plugin.ts` 负责：加载 parser、执行 AST 后处理插件。
 
-未来可以逐步演进为：
-
-- 在 Feature 中声明 MarkdownIt hook（如 container / block / inline 处理器）；
-- 由 `FeatureRegistry` 统一读取这些 hook，并在 `createMarkdownIt` / `parseMarkdown` 中自动注册；
-- 解析管线不再显式知道某个 Feature 的名字，只通过“谁注册了什么 hook”工作。
+新增语法能力时，先确定它是否能落在现有 AST v2 承载点上；不能落下时再扩展规范和 parser。
 
 这类能力会在后续版本逐步引入；当前阶段建议先严格按照本指南的步骤实现功能，优先保证：
 

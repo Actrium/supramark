@@ -12,7 +12,9 @@ import { plantumlExamples } from './examples.js';
  * - Reuses the generic `diagram` AST node.
  * - Matches diagrams with `engine === 'plantuml'`.
  * - On Web, `@supramark/engines` calls `@kookyleo/plantuml-little-web`
- *   (Rust → wasm) to turn `@startuml … @enduml` source into SVG.
+ *   (Rust → wasm) to turn `@startuml ... @enduml` source into SVG.
+ * - On RN, hosts import `@kookyleo/supramark-plantuml-native-rn`,
+ *   which registers the plantuml-little native FFI adapter.
  *
  * @example
  * ```markdown
@@ -28,7 +30,7 @@ export const plantumlFeature = defineDiagramFeature({
   engineId: 'plantuml',
   name: 'Diagram (PlantUML)',
   description:
-    'PlantUML UML diagrams rendered to SVG through @supramark/engines + plantuml-little-web.',
+    'PlantUML UML diagrams rendered to SVG through @supramark/engines + plantuml-little.',
   tags: ['diagram', 'plantuml', 'uml'],
   web: {
     dependencies: [
@@ -66,7 +68,7 @@ export const plantumlFeature = defineDiagramFeature({
   readme: `
 # Diagram (PlantUML) Feature
 
-AST modelling + Web rendering for PlantUML diagrams.
+AST modelling + Web / RN rendering for PlantUML diagrams.
 
 - Syntax: \`\\\`\\\`plantuml\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with \`engine = "plantuml"\`,
@@ -75,10 +77,9 @@ AST modelling + Web rendering for PlantUML diagrams.
   \`@kookyleo/plantuml-little-web\` (Rust → wasm). Graphviz layout for
   the diagram families that need it is served by
   \`@kookyleo/graphviz-anywhere-web\` through a host-installed
-  \`globalThis.__graphviz_anywhere_render\` bridge. On RN, plantuml
-  is currently **unsupported** — the legacy WebView worker was
-  retired in 2026-05; replacement is a plantuml-little native FFI
-  binding tracked in \`crates/plantuml-little/UPSTREAM.md\`.
+  \`globalThis.__graphviz_anywhere_render\` bridge. On RN, hosts import
+  \`@kookyleo/supramark-plantuml-native-rn\`, which registers the
+  plantuml-little native FFI adapter and returns the same SVG contract.
   `.trim(),
   bestPractices: [
     'Wrap source in @startuml / @enduml so the same fence renders consistently across hosts.',
@@ -88,7 +89,7 @@ AST modelling + Web rendering for PlantUML diagrams.
     {
       question: 'How is PlantUML rendered?',
       answer:
-        'On Web, @kookyleo/plantuml-little-web (Rust → wasm) converts the source to SVG. Graphviz-backed layout is bridged through @kookyleo/graphviz-anywhere-web via a globalThis.__graphviz_anywhere_render bridge installed by the engine loader.',
+        'On Web, @kookyleo/plantuml-little-web (Rust → wasm) converts the source to SVG. Graphviz-backed layout is bridged through @kookyleo/graphviz-anywhere-web via a globalThis.__graphviz_anywhere_render bridge installed by the engine loader. On RN, @kookyleo/supramark-plantuml-native-rn registers the native FFI adapter with @supramark/engines/rn.',
     },
     {
       question: 'Why do you need a Graphviz bridge?',

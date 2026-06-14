@@ -1342,28 +1342,6 @@ PODS:
     - ReactNativeDependencies
   - react-native-maps (1.14.0):
     - React-Core
-  - react-native-webview (13.8.6):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - React-NativeModulesApple (0.81.5):
     - hermes-engine
     - React-callinvoker
@@ -1872,7 +1850,6 @@ DEPENDENCIES:
   - "React-Mapbuffer (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon`)"
   - "React-microtasksnativemodule (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)"
   - "react-native-maps (from `../../../node_modules/.pnpm/react-native-maps@1.14.0_react-native-web@0.21.2_react-dom@19.2.3_react@19.1.0__react@19.1.0__us2t2oykhobqde56jetrvtovue/node_modules/react-native-maps`)"
-  - "react-native-webview (from `../../../node_modules/.pnpm/react-native-webview@13.8.6_react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cl_piznqwpshlpyjs67kwi7yozbjy/node_modules/react-native-webview`)"
   - "React-NativeModulesApple (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-oscompat (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/oscompat`)"
   - "React-perflogger (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/reactperflogger`)"
@@ -1998,8 +1975,6 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-maps:
     :path: "../../../node_modules/.pnpm/react-native-maps@1.14.0_react-native-web@0.21.2_react-dom@19.2.3_react@19.1.0__react@19.1.0__us2t2oykhobqde56jetrvtovue/node_modules/react-native-maps"
-  react-native-webview:
-    :path: "../../../node_modules/.pnpm/react-native-webview@13.8.6_react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cl_piznqwpshlpyjs67kwi7yozbjy/node_modules/react-native-webview"
   React-NativeModulesApple:
     :path: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.28.5_@react-native-community+cli@20.0.2_typescript@5.3.3__@_h4mjkxxlx7rszxuh7x2der7zuu/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-oscompat:
@@ -2117,7 +2092,6 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 603c18db65844bb81dbe62fee8fcc976eaeb7108
   React-microtasksnativemodule: d77e0c426fce34c23227394c96ca1033b30c813c
   react-native-maps: cbf2f03bfeebfd7ec45966b066db13a075fd2af3
-  react-native-webview: e8cfa74ba2fb0428eaddb3cb3c16921e00b1f949
   React-NativeModulesApple: 1664340b8750d64e0ef3907c5e53d9481f74bcbd
   React-oscompat: ce47230ed20185e91de62d8c6d139ae61763d09c
   React-perflogger: b1af3cfb3f095f819b2814910000392a8e17ba9f

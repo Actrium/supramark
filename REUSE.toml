@@ -72,6 +72,21 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "kookyleo <kookyleo@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0"
 
+# ── crates/supramark-markdown parser core — derived from markdown-it-rust ───
+# Upstream-derived parser core files remain MIT-licensed. Supramark AST v2
+# output files in the same crate inherit the repository Apache-2.0 default.
+[[annotations]]
+path = [
+    "crates/supramark-markdown/LICENSE",
+    "crates/supramark-markdown/src/common/**",
+    "crates/supramark-markdown/src/generics/**",
+    "crates/supramark-markdown/src/parser/**",
+    "crates/supramark-markdown/src/plugins/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Alex Kocharin and markdown-it contributors"
+SPDX-License-Identifier = "MIT"
+
 # Cross-validation reference data — generated from upstream dagre.js
 # fixtures. Treat as data (not source). dagre.js is MIT.
 [[annotations]]

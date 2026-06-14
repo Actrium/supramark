@@ -10,7 +10,7 @@
 
 ### `packages/core`
 
-- 功能：AST 类型定义、插件接口、markdown-it/unified 解析管线，以及 KaTeX 等依赖。
+- 功能：AST v2 类型定义、插件接口、Rust `supramark-markdown` 解析 facade，以及 KaTeX 等依赖。
 - 工具链：提供 `tsc` 构建、Jest 测试、TypeDoc 文档生成任务，是其他渲染层与 Feature 包的基础。
 
 ### 渲染器层 `packages/renderers/`
@@ -20,22 +20,12 @@
 #### `packages/renderers/rn`
 
 - 功能：React Native 渲染层，把 supramark AST 映射成 RN 组件并内置 Markdown / Math / Diagram 等渲染。
-- 依赖：直接依赖 `@supramark/core`，对 `@supramark/rn-diagram-worker` 与 `react-native-svg` 定义可选 peer 依赖。
-
-#### `packages/renderers/rn-diagram-worker`
-
-- 功能：封装隐藏 WebView 的后台图表渲染服务，面向 Mermaid / PlantUML / Vega 等引擎输出 SVG/PNG。
-- 依赖：声明 `react-native-webview`、`react`/`react-native` 的 peer 依赖，供渲染层按需接入。
+- 依赖：直接依赖 `@supramark/core` 与 `@supramark/engines`，并通过 `react-native-svg` 展示 SVG 图表。
 
 #### `packages/renderers/web`
 
 - 功能：提供 `<Supramark />` React 组件（client/server），以及与 Web 图表产物的集成。
-- 依赖：依赖 `@supramark/core` 与 `@supramark/web-diagram`，暴露多入口 exports 适应浏览器与 SSR。
-
-#### `packages/renderers/web-diagram`
-
-- 功能：浏览器端的图表渲染辅助模块，封装 Mermaid 等库供 `@supramark/web` 使用。
-- 特性：结构精简，仅提供单一入口，构建脚本占位。
+- 依赖：依赖 `@supramark/core` 与 `@supramark/engines`，暴露多入口 exports 适应浏览器与 SSR。
 
 ## Feature 扩展体系
 

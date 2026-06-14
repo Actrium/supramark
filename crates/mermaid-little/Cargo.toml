@@ -149,10 +149,3 @@ roxmltree = "0.20"
 # stack byte-for-byte. Production consumers explicitly opt into one
 # of the `metrics-*` impls instead (see [features] above).
 mermaid-little = { path = ".", features = ["metrics-ttf-parser"] }
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"

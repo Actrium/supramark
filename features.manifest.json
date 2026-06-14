@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "features": {
+    "commonmark": {
+      "kind": "markdown",
+      "description": "CommonMark core block and inline syntax.",
+      "cargoFeatures": ["commonmark"],
+      "tsPackages": ["@supramark/feature-core-markdown"]
+    },
+    "gfm.table": {
+      "kind": "markdown",
+      "description": "GFM tables.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["gfm-table"],
+      "tsPackages": ["@supramark/feature-gfm"]
+    },
+    "gfm.strikethrough": {
+      "kind": "markdown",
+      "description": "GFM strikethrough.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["gfm-strikethrough"],
+      "tsPackages": ["@supramark/feature-gfm"]
+    },
+    "gfm.task_list": {
+      "kind": "markdown",
+      "description": "GFM task list items.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["gfm-task-list"],
+      "tsPackages": ["@supramark/feature-gfm"]
+    },
+    "math": {
+      "kind": "markdown",
+      "description": "Inline and block TeX math.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["math"],
+      "tsPackages": ["@supramark/feature-math"],
+      "renderers": ["math"]
+    },
+    "footnote": {
+      "kind": "markdown",
+      "description": "Footnote references and definitions.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["footnote"],
+      "tsPackages": ["@supramark/feature-footnote"]
+    },
+    "definition_list": {
+      "kind": "markdown",
+      "description": "Definition list syntax.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["definition-list"],
+      "tsPackages": ["@supramark/feature-definition-list"]
+    },
+    "raw_html": {
+      "kind": "markdown",
+      "description": "Raw HTML preservation.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["raw-html"]
+    },
+    "diagram": {
+      "kind": "supramark",
+      "description": "Fenced diagram blocks mapped to AST v2 diagram nodes.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["diagram"],
+      "renderers": ["diagram"]
+    },
+    "container": {
+      "kind": "supramark",
+      "description": "Generic :::container block scanner.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["container"]
+    },
+    "input": {
+      "kind": "supramark",
+      "description": "Generic %%%input block scanner.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["input"]
+    },
+    "container.admonition": {
+      "kind": "supramark",
+      "description": "Admonition containers such as note, tip, warning, danger.",
+      "dependsOn": ["container"],
+      "cargoFeatures": ["container-admonition"],
+      "tsPackages": ["@supramark/feature-admonition"],
+      "containerNames": ["note", "tip", "info", "warning", "danger"]
+    },
+    "container.map": {
+      "kind": "supramark",
+      "description": "Opaque :::map container.",
+      "dependsOn": ["container"],
+      "cargoFeatures": ["container-map"],
+      "tsPackages": ["@supramark/feature-map"],
+      "containerNames": ["map"]
+    },
+    "container.html": {
+      "kind": "supramark",
+      "description": "Opaque :::html container.",
+      "dependsOn": ["container", "raw_html"],
+      "cargoFeatures": ["container-html"],
+      "tsPackages": ["@supramark/feature-html-page"],
+      "containerNames": ["html"]
+    },
+    "container.weather": {
+      "kind": "supramark",
+      "description": "Host-rendered weather container.",
+      "dependsOn": ["container"],
+      "cargoFeatures": ["container-weather"],
+      "tsPackages": ["@supramark/feature-weather"],
+      "containerNames": ["weather"]
+    },
+    "container.vison": {
+      "kind": "supramark",
+      "description": "Opaque Vison card container.",
+      "dependsOn": ["container"],
+      "cargoFeatures": ["container-vison"],
+      "tsPackages": ["@supramark/feature-card-vison"],
+      "containerNames": ["vison"]
+    },
+    "code_highlight": {
+      "kind": "supramark",
+      "description": "Renderer-side code highlighting metadata and optional engines.",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": ["syntect"],
+      "tsPackages": ["@supramark/feature-code-highlight"],
+      "renderers": ["code-highlight"]
+    }
+  }
+}

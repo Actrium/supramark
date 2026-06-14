@@ -74,7 +74,7 @@ struct MsgRender {
     line_start_y: f64,
     text_x: f64,
     /// Y of the FIRST text line. Subsequent lines step by `line_step`.
-    text_y_first: f64,
+    _text_y_first: f64,
     line_step: f64,
     /// Raw starty for message text (before rounding) — upstream computes
     /// each line independently as `round(starty + 10 + n*lh + 5)`.
@@ -125,7 +125,7 @@ struct NoteRender {
     rect_h: f64,
     text_x: f64,
     /// Y of the first text line. Subsequent lines step by `line_step`.
-    text_y_first: f64,
+    _text_y_first: f64,
     line_step: f64,
     /// Raw starty for note text (before rounding) — upstream computes
     /// each line independently as `round(starty + n*lh + margin/2)`.
@@ -176,7 +176,7 @@ struct LoopSection {
     divider_y: f64,
     label: String,
     label_y: f64,
-    label_idx: usize,
+    _label_idx: usize,
 }
 
 /// Per-rect block geometry — `rect rgb(r,g,b) ... end`. Mirrors the
@@ -263,12 +263,7 @@ fn extract_first_katex_body(text: &str) -> String {
     String::new()
 }
 
-pub fn render(
-    d: &SequenceDiagram,
-    _l: &SequenceLayout,
-    theme: &Theme,
-    id: &str,
-) -> Result<String> {
+pub fn render(d: &SequenceDiagram, _l: &SequenceLayout, theme: &Theme, id: &str) -> Result<String> {
     // ── Eligibility gate ────────────────────────────────────────────
     //
     // Byte-exact path covers two visual archetypes: `Participant`
@@ -276,10 +271,8 @@ pub fn render(
     // Other archetypes — boundary/control/entity/database/collections/
     // queue — drop to placeholder. Items must all be solid- or dotted-
     // arrow messages with no `box`, `create`, `destroy` features.
-    if !d
-        .actors
-        .iter()
-        .all(|a| matches!(
+    if !d.actors.iter().all(|a| {
+        matches!(
             a.actor_type,
             ActorType::Participant
                 | ActorType::Actor
@@ -289,8 +282,8 @@ pub fn render(
                 | ActorType::Database
                 | ActorType::Queue
                 | ActorType::Collections
-        ))
-    {
+        )
+    }) {
         return Ok(placeholder(d, id));
     }
     // Reject any item we can't render byte-exactly.
@@ -388,13 +381,12 @@ pub fn render(
             // sequenceRenderer.ts:1145-1156 (ACTIVE_START / ACTIVE_END).
             DiagramItem::Activate(_) | DiagramItem::Deactivate(_) => true,
             DiagramItem::Create(_) | DiagramItem::Destroy(_) => true,
-            _ => false,
         })
     }
     if !only_supported_items(&d.items) {
         return Ok(placeholder(d, id));
     }
-    
+
     // Need at least one actor. Empty items list is valid — just renders
     // the actor box(es) without any messages.
     if d.actors.is_empty() {
@@ -648,9 +640,7 @@ pub fn render(
                 // and to `msg.from` again — both reduce to msg.from
                 // for the 2-actor case, so a single contribution
                 // suffices.
-                if note.placement_actors.len() == 2
-                    && matches!(placement, NotePlacement::Over)
-                {
+                if note.placement_actors.len() == 2 && matches!(placement, NotePlacement::Over) {
                     let from_id = &note.placement_actors[0];
                     let to_id = &note.placement_actors[1];
                     let (Some(&from_i), Some(&to_i)) = (
@@ -861,14 +851,8 @@ pub fn render(
             let label_w = if has_katex(label) {
                 0.0
             } else {
-                crate::font_metrics::text_width(
-                    label,
-                    "sans-serif",
-                    text_font_size,
-                    false,
-                    false,
-                )
-                .round()
+                crate::font_metrics::text_width(label, "sans-serif", text_font_size, false, false)
+                    .round()
             };
             let min_width = total_width.max(label_w + 2.0 * cfg.wrap_padding);
             let mut bx_margin = cfg.box_text_margin;
@@ -919,11 +903,23 @@ pub fn render(
             height: actor_h,
             starty: if !d.boxes.is_empty() {
                 let tf_size = cfg.message_font_size as f64;
-                let max_bth = d.boxes.iter().map(|bx| {
-                    crate::font_metrics::line_height("sans-serif", tf_size, false, false).round()
-                }).fold(0.0_f64, f64::max);
-                box_margin + if d.boxes.iter().any(|b| !b.label.is_empty()) { max_bth } else { 0.0 }
-            } else { 0.0 },
+                let max_bth = d
+                    .boxes
+                    .iter()
+                    .map(|_| {
+                        crate::font_metrics::line_height("sans-serif", tf_size, false, false)
+                            .round()
+                    })
+                    .fold(0.0_f64, f64::max);
+                box_margin
+                    + if d.boxes.iter().any(|b| !b.label.is_empty()) {
+                        max_bth
+                    } else {
+                        0.0
+                    }
+            } else {
+                0.0
+            },
             cnt: i + 1,
             links: a.links.clone(),
             class_name: a.class_name.clone(),
@@ -967,7 +963,7 @@ pub fn render(
     let max_box_text_height = if has_boxes {
         let text_font_size = cfg.message_font_size as f64;
         let mut h = 0.0_f64;
-        for bx in &d.boxes {
+        for _ in &d.boxes {
             let label_h =
                 crate::font_metrics::line_height("sans-serif", text_font_size, false, false)
                     .round();
@@ -987,13 +983,17 @@ pub fn render(
     // the actor top rects and the box.y origin down.
     let has_box_titles = has_boxes && d.boxes.iter().any(|b| !b.label.is_empty());
     let box_y = if has_boxes {
-        box_margin + if has_box_titles { max_box_text_height } else { 0.0 }
+        box_margin
+            + if has_box_titles {
+                max_box_text_height
+            } else {
+                0.0
+            }
     } else {
         0.0
     };
 
     if has_boxes {
-
         // Compute box.x and box.width from actor positions.
         // Upstream: box.x = prevWidth + prevMargin when first actor in box
         // is encountered. box.width = prevWidth_at_last_actor + box.margin - box.x.
@@ -1044,9 +1044,7 @@ pub fn render(
         let bx_y = 0.0_f64;
         // box.height will be set later after vertical pass.
         // We store partial geometry and finalize after the vertical pass.
-        for (bi, (bx_x, bx_w, _bx_margin, label, fill)) in
-            box_geom.into_iter().enumerate()
-        {
+        for (_bi, (bx_x, bx_w, _bx_margin, label, fill)) in box_geom.into_iter().enumerate() {
             let box_padding = box_margin * 2.0;
             let startx = bx_x - box_padding;
             let starty = bx_y - box_padding * 0.25;
@@ -1233,7 +1231,10 @@ pub fn render(
     fn flatten<'a>(items: &'a [DiagramItem], out: &mut Vec<WalkEvent<'a>>) {
         for it in items {
             match it {
-                DiagramItem::Loop { label, items: inner } => {
+                DiagramItem::Loop {
+                    label,
+                    items: inner,
+                } => {
                     out.push(WalkEvent::LoopStart {
                         keyword: "loop",
                         label,
@@ -1241,7 +1242,10 @@ pub fn render(
                     flatten(inner, out);
                     out.push(WalkEvent::LoopEnd);
                 }
-                DiagramItem::Opt { label, items: inner } => {
+                DiagramItem::Opt {
+                    label,
+                    items: inner,
+                } => {
                     out.push(WalkEvent::LoopStart {
                         keyword: "opt",
                         label,
@@ -1249,7 +1253,10 @@ pub fn render(
                     flatten(inner, out);
                     out.push(WalkEvent::LoopEnd);
                 }
-                DiagramItem::Break { label, items: inner } => {
+                DiagramItem::Break {
+                    label,
+                    items: inner,
+                } => {
                     out.push(WalkEvent::LoopStart {
                         keyword: "break",
                         label,
@@ -1369,7 +1376,9 @@ pub fn render(
                     if let DiagramItem::Message(m) = it {
                         let from_actor = actors.iter().find(|a| a.id == m.from);
                         let to_actor = actors.iter().find(|a| a.id == m.to);
-                        let (Some(fa), Some(ta)) = (from_actor, to_actor) else { continue };
+                        let (Some(fa), Some(ta)) = (from_actor, to_actor) else {
+                            continue;
+                        };
                         let fa_cx = fa.x + fa.width / 2.0;
                         let ta_cx = ta.x + ta.width / 2.0;
                         let is_self = m.from == m.to;
@@ -1581,7 +1590,7 @@ pub fn render(
                     divider_y,
                     label: bracketed,
                     label_y: label_y_input,
-                    label_idx,
+                    _label_idx: label_idx,
                 });
                 continue;
             }
@@ -1700,12 +1709,9 @@ pub fn render(
             if let Some(actor) = actors.iter().find(|a| &a.id == actor_id) {
                 let centre = actor.x + actor.width / 2.0;
                 // Render-pass activation (used for anchor `<g>` emission).
-                let render_stacked = activations
-                    .iter()
-                    .filter(|a| &a.actor == actor_id)
-                    .count() as f64;
-                let render_x =
-                    centre + ((render_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+                let render_stacked =
+                    activations.iter().filter(|a| &a.actor == actor_id).count() as f64;
+                let render_x = centre + ((render_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
                 let anchor_idx = activation_anchors.len();
                 // ACTIVE_START events are appended to the parser stream
                 // AFTER the addMessage that carries the `+` suffix —
@@ -1725,8 +1731,7 @@ pub fn render(
                     .iter()
                     .filter(|a| &a.actor == actor_id)
                     .count() as f64;
-                let layout_x =
-                    centre + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+                let layout_x = centre + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
                 layout_activations.push(LayoutActivation {
                     startx: layout_x,
                     stopx: layout_x + ACTIVATION_WIDTH,
@@ -1761,10 +1766,7 @@ pub fn render(
                 // class N = `actorActivations(msg.from).length` taken
                 // POST-splice (sequenceRenderer.ts:1122) — i.e. the
                 // remaining same-actor slots after pop, mod 3.
-                let remaining = activations
-                    .iter()
-                    .filter(|a| &a.actor == actor_id)
-                    .count() as u32;
+                let remaining = activations.iter().filter(|a| &a.actor == actor_id).count() as u32;
                 activation_anchors[slot.anchor_idx].1 = Some(ActivationRect {
                     x: slot.startx,
                     y: starty,
@@ -1802,7 +1804,12 @@ pub fn render(
         }
         // Autonumber: update running counters/visibility, no SVG output
         // of its own — it occupies an item-id slot but doesn't draw.
-        if let DiagramItem::Autonumber { start, step, visible } = item {
+        if let DiagramItem::Autonumber {
+            start,
+            step,
+            visible,
+        } = item
+        {
             if let Some(s) = start {
                 auto_seq_index = *s;
             }
@@ -1822,17 +1829,16 @@ pub fn render(
             // For `Note over A,B` (2 actors, Over) — resolve the
             // second actor here so the cross-actor span branch below
             // can compute the upstream `else`-branch geometry.
-            let to_actor_for_over: Option<&_> = if note.placement_actors.len() == 2
-                && matches!(placement, NotePlacement::Over)
-            {
-                let to_id = &note.placement_actors[1];
-                match d.actors.iter().position(|a| &a.id == to_id) {
-                    Some(i) => Some(&actors[i]),
-                    None => return Ok(placeholder(d, id)),
-                }
-            } else {
-                None
-            };
+            let to_actor_for_over: Option<&_> =
+                if note.placement_actors.len() == 2 && matches!(placement, NotePlacement::Over) {
+                    let to_id = &note.placement_actors[1];
+                    match d.actors.iter().position(|a| &a.id == to_id) {
+                        Some(i) => Some(&actors[i]),
+                        None => return Ok(placeholder(d, id)),
+                    }
+                } else {
+                    None
+                };
             // buildNoteModel for single-actor placement.
             // Optional `:wrap:` prefix triggers a two-stage wrap:
             //   1. First wrapLabel(msg.text, conf.width, noteFont)
@@ -1844,7 +1850,12 @@ pub fn render(
             //      for emission.
             let should_wrap = note.wrap && !note.text.is_empty();
             let intermediate_text = if should_wrap {
-                wrap_label(&note.text, cfg.width, "trebuchet ms", cfg.message_font_size as f64)
+                wrap_label(
+                    &note.text,
+                    cfg.width,
+                    "trebuchet ms",
+                    cfg.message_font_size as f64,
+                )
             } else {
                 note.text.clone()
             };
@@ -1878,9 +1889,7 @@ pub fn render(
                     note_w = if should_wrap {
                         cfg.width.max(text_w)
                     } else {
-                        from_actor
-                            .width
-                            .max(text_w + 2.0 * cfg.note_margin)
+                        from_actor.width.max(text_w + 2.0 * cfg.note_margin)
                     };
                     note_x = from_actor.x + (from_actor.width + actor_margin) / 2.0;
                 }
@@ -1893,12 +1902,9 @@ pub fn render(
                     note_w = if should_wrap {
                         cfg.width.max(text_w + 2.0 * cfg.note_margin)
                     } else {
-                        from_actor
-                            .width
-                            .max(text_w + 2.0 * cfg.note_margin)
+                        from_actor.width.max(text_w + 2.0 * cfg.note_margin)
                     };
-                    note_x = from_actor.x - note_w
-                        + (from_actor.width - actor_margin) / 2.0;
+                    note_x = from_actor.x - note_w + (from_actor.width - actor_margin) / 2.0;
                 }
                 NotePlacement::Over => {
                     if let Some(to_actor) = to_actor_for_over {
@@ -1948,7 +1954,10 @@ pub fn render(
                     "trebuchet ms",
                     cfg.message_font_size as f64,
                 );
-                split_br(&final_text).iter().map(|s| s.to_string()).collect()
+                split_br(&final_text)
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
             } else {
                 intermediate_lines.iter().map(|s| s.to_string()).collect()
             };
@@ -2001,7 +2010,7 @@ pub fn render(
                 rect_w: note_w,
                 rect_h: note_h,
                 text_x,
-                text_y_first,
+                _text_y_first: text_y_first,
                 line_step: lh_unrounded,
                 starty_raw: note_starty_raw,
                 margin_half: note_margin_half,
@@ -2086,18 +2095,21 @@ pub fn render(
         let wrap_effective = m.wrap || cfg.wrap;
         let final_msg_text = if wrap_effective {
             let max_w = (bounded_width + 2.0 * cfg.wrap_padding).max(cfg.width);
-            wrap_label(
-                &m.text,
-                max_w,
-                "sans-serif",
-                cfg.message_font_size as f64,
-            )
+            wrap_label(&m.text, max_w, "sans-serif", cfg.message_font_size as f64)
         } else {
             m.text.clone()
         };
         let msg_lines = split_br(&final_msg_text);
-        let n_lines = if has_katex(&m.text) { 1.0 } else { msg_lines.len() as f64 };
-        let text_dims_height = if has_katex(&m.text) { 0.0 } else { line_height * n_lines };
+        let n_lines = if has_katex(&m.text) {
+            1.0
+        } else {
+            msg_lines.len() as f64
+        };
+        let text_dims_height = if has_katex(&m.text) {
+            0.0
+        } else {
+            line_height * n_lines
+        };
         let starty_for_msg = vertical;
         vertical += 10.0;
         if !has_katex(&m.text) {
@@ -2156,32 +2168,59 @@ pub fn render(
         // affects bounds_startx/bounds_stopx which are already
         // correct from the actor x-positioning pass.
         fn is_drawn_type(t: &ActorType) -> bool {
-            matches!(t, ActorType::Actor | ActorType::Control | ActorType::Entity | ActorType::Database)
+            matches!(
+                t,
+                ActorType::Actor | ActorType::Control | ActorType::Entity | ActorType::Database
+            )
         }
         if pending_create_actor.is_some() {
             if ta.x < fa.x {
-                let adj = if is_drawn_type(&ta.actor_type) { 18.0 + 3.0 } else { ta.width / 2.0 + 3.0 };
+                let adj = if is_drawn_type(&ta.actor_type) {
+                    18.0 + 3.0
+                } else {
+                    ta.width / 2.0 + 3.0
+                };
                 stopx += adj;
             } else {
-                let adj = if is_drawn_type(&ta.actor_type) { 18.0 + 3.0 } else { ta.width / 2.0 + 3.0 };
+                let adj = if is_drawn_type(&ta.actor_type) {
+                    18.0 + 3.0
+                } else {
+                    ta.width / 2.0 + 3.0
+                };
                 stopx -= adj;
             }
         }
         for did in &pending_destroy_actors {
             if did == &m.from {
                 if fa.x < ta.x {
-                    let adj = if is_drawn_type(&fa.actor_type) { 18.0 } else { fa.width / 2.0 };
+                    let adj = if is_drawn_type(&fa.actor_type) {
+                        18.0
+                    } else {
+                        fa.width / 2.0
+                    };
                     startx += adj;
                 } else {
-                    let adj = if is_drawn_type(&fa.actor_type) { 18.0 } else { fa.width / 2.0 };
+                    let adj = if is_drawn_type(&fa.actor_type) {
+                        18.0
+                    } else {
+                        fa.width / 2.0
+                    };
                     startx -= adj;
                 }
             } else if did == &m.to {
                 if ta.x < fa.x {
-                    let adj = if is_drawn_type(&ta.actor_type) { 18.0 + 3.0 } else { ta.width / 2.0 + 3.0 };
+                    let adj = if is_drawn_type(&ta.actor_type) {
+                        18.0 + 3.0
+                    } else {
+                        ta.width / 2.0 + 3.0
+                    };
                     stopx += adj;
                 } else {
-                    let adj = if is_drawn_type(&ta.actor_type) { 18.0 + 3.0 } else { ta.width / 2.0 + 3.0 };
+                    let adj = if is_drawn_type(&ta.actor_type) {
+                        18.0 + 3.0
+                    } else {
+                        ta.width / 2.0 + 3.0
+                    };
                     stopx -= adj;
                 }
             }
@@ -2197,8 +2236,10 @@ pub fn render(
             Some(CentralConnection::AtFrom) | Some(CentralConnection::Dual)
         ) {
             startx += 4.0;
-            if matches!(m.arrow, Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted))
-                && !is_arrow_to_right
+            if matches!(
+                m.arrow,
+                Some(ArrowType::BiSolid) | Some(ArrowType::BiDotted)
+            ) && !is_arrow_to_right
             {
                 startx -= 6.0;
             }
@@ -2263,11 +2304,7 @@ pub fn render(
                     stopx += 4.0;
                 }
             }
-            if has_arrowhead
-                || has_crosshead
-                || has_pointhead
-                || is_bidir
-                || has_forward_solid_half
+            if has_arrowhead || has_crosshead || has_pointhead || is_bidir || has_forward_solid_half
             {
                 if is_arrow_to_right {
                     stopx -= 3.0;
@@ -2634,7 +2671,7 @@ pub fn render(
             arrow: m.arrow.unwrap_or(ArrowType::SolidArrow),
             line_start_y,
             text_x,
-            text_y_first,
+            _text_y_first: text_y_first,
             line_step,
             starty_raw: starty_for_msg,
             y_offset: 15.0,
@@ -2663,8 +2700,6 @@ pub fn render(
         let cd_ta_x = ta.x;
         let cd_ta_width = ta.width;
         let cd_fa_x = fa.x;
-        let cd_to_left = to_left;
-        let cd_from_right = from_right;
         let cd_ta_actor_type = ta.actor_type.clone();
         if let Some(actor_id) = pending_create_actor.take() {
             if let Some(ar) = actors.iter_mut().find(|a| a.id == actor_id) {
@@ -2695,7 +2730,11 @@ pub fn render(
             let mut cd_minx = startx.min(stopx);
             let mut cd_maxx = startx.max(stopx);
             if had_create {
-                let adj = if is_drawn_type(&cd_ta_actor_type) { 18.0 + 3.0 } else { cd_ta_width / 2.0 + 3.0 };
+                let adj = if is_drawn_type(&cd_ta_actor_type) {
+                    18.0 + 3.0
+                } else {
+                    cd_ta_width / 2.0 + 3.0
+                };
                 if cd_ta_x >= cd_fa_x {
                     cd_maxx = cd_maxx.max(stopx + 2.0 * adj);
                 } else {
@@ -2745,10 +2784,7 @@ pub fn render(
             cur_vert: f64,
             slot_idx: usize,
         ) {
-            let stacked = activations
-                .iter()
-                .filter(|a| a.actor == actor_id)
-                .count() as f64;
+            let stacked = activations.iter().filter(|a| a.actor == actor_id).count() as f64;
             // x = actor.x + actor.width/2 + ((stackedSize-1) * activationWidth) / 2
             // (sequenceRenderer.ts:151). stackedSize starts at 0 → x = centre - 5.
             let x = actor_centre + ((stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
@@ -2763,15 +2799,43 @@ pub fn render(
         }
         match m.central_connection {
             Some(CentralConnection::AtTo) => {
-                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
+                push_activation(
+                    &mut activations,
+                    &mut activation_anchors,
+                    &m.to,
+                    ta_cx,
+                    vertical,
+                    idx + 1,
+                );
             }
             Some(CentralConnection::AtFrom) => {
-                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical, idx + 1);
+                push_activation(
+                    &mut activations,
+                    &mut activation_anchors,
+                    &m.from,
+                    fa_cx,
+                    vertical,
+                    idx + 1,
+                );
             }
             Some(CentralConnection::Dual) => {
                 // CC then CCR. Order matters: to-side first per jison.350-352.
-                push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
-                push_activation(&mut activations, &mut activation_anchors, &m.from, fa_cx, vertical, idx + 2);
+                push_activation(
+                    &mut activations,
+                    &mut activation_anchors,
+                    &m.to,
+                    ta_cx,
+                    vertical,
+                    idx + 1,
+                );
+                push_activation(
+                    &mut activations,
+                    &mut activation_anchors,
+                    &m.from,
+                    fa_cx,
+                    vertical,
+                    idx + 2,
+                );
             }
             None => {}
         }
@@ -2779,13 +2843,19 @@ pub fn render(
             // `+` suffix → activeStart{actor: to} (jison.333). Mirrors
             // ACTIVE_START — pushes BOTH the render-pass anchor AND the
             // layout-pass bounds entry.
-            push_activation(&mut activations, &mut activation_anchors, &m.to, ta_cx, vertical, idx + 1);
+            push_activation(
+                &mut activations,
+                &mut activation_anchors,
+                &m.to,
+                ta_cx,
+                vertical,
+                idx + 1,
+            );
             let layout_stacked = layout_activations
                 .iter()
                 .filter(|a| a.actor == m.to)
                 .count() as f64;
-            let layout_x =
-                ta_cx + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
+            let layout_x = ta_cx + ((layout_stacked - 1.0) * ACTIVATION_WIDTH) / 2.0;
             layout_activations.push(LayoutActivation {
                 startx: layout_x,
                 stopx: layout_x + ACTIVATION_WIDTH,
@@ -2808,10 +2878,7 @@ pub fn render(
                     starty = stopy - 6.0;
                     stopy += 12.0;
                 }
-                let remaining = activations
-                    .iter()
-                    .filter(|a| a.actor == m.from)
-                    .count() as u32;
+                let remaining = activations.iter().filter(|a| a.actor == m.from).count() as u32;
                 activation_anchors[slot.anchor_idx].1 = Some(ActivationRect {
                     x: slot.startx,
                     y: starty,
@@ -2927,11 +2994,7 @@ pub fn render(
     //   const extraVertForTitle = title ? 40 : 0;
     //   viewBox y = -(diagramMarginY + extraVertForTitle)
     //   viewBox height = svgHeight + extraVertForTitle
-    let has_title = d
-        .title
-        .as_ref()
-        .map(|s| !s.is_empty())
-        .unwrap_or(false);
+    let has_title = d.title.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
     let extra_vert_for_title = if has_title { 40.0 } else { 0.0 };
     let vb_x = bounds_startx - dia_margin_x;
     let vb_y = -dia_margin_y - extra_vert_for_title;
@@ -2951,9 +3014,7 @@ pub fn render(
     push_num(&mut out, svg_width);
     out.push(' ');
     push_num(&mut out, vb_height);
-    out.push_str(
-        "\" role=\"graphics-document document\" aria-roledescription=\"sequence\"",
-    );
+    out.push_str("\" role=\"graphics-document document\" aria-roledescription=\"sequence\"");
     let acc_title = d.meta.acc_title.as_deref();
     let acc_descr = d.meta.acc_descr.as_deref();
     if acc_descr.is_some() {
@@ -3087,24 +3148,26 @@ pub fn render(
             let actor_bottom_y = a.destroy_y.unwrap_or(bottom_y);
             let emit_empty = footer_empty_switch_id == Some(a.id.as_str());
             match a.actor_type {
-                ActorType::Participant => emit_actor_bottom_participant(&mut out, a, actor_bottom_y, emit_empty),
+                ActorType::Participant => {
+                    emit_actor_bottom_participant(&mut out, a, actor_bottom_y, emit_empty)
+                }
                 // Actor / Boundary / Control / Entity all emit empty
                 // <g></g> placeholder for their bottom group's `line2`
                 // (lowered to front). Bodies emit later, after defs.
-                ActorType::Actor
-                | ActorType::Boundary
-                | ActorType::Control
-                | ActorType::Entity => out.push_str("<g></g>"),
+                ActorType::Actor | ActorType::Boundary | ActorType::Control | ActorType::Entity => {
+                    out.push_str("<g></g>")
+                }
                 // Database / Queue / Collections bottom groups are FULL —
                 // upstream `drawActorTypeXxx` appends body shape + text
                 // directly inside the lowered `<g>` instead of emitting a
                 // body group later. So we emit the complete body here.
-                ActorType::Database => emit_actor_database_bottom_group(&mut out, a, actor_bottom_y),
+                ActorType::Database => {
+                    emit_actor_database_bottom_group(&mut out, a, actor_bottom_y)
+                }
                 ActorType::Queue => emit_actor_queue_bottom_group(&mut out, a, actor_bottom_y),
                 ActorType::Collections => {
                     emit_actor_collections_bottom_group(&mut out, a, actor_bottom_y)
                 }
-                _ => unreachable!("gated above"),
             }
         }
     }
@@ -3144,14 +3207,7 @@ pub fn render(
         let lifeline_y2 = a.destroy_y.unwrap_or(lifeline_y2_default);
         match a.actor_type {
             ActorType::Participant => {
-                emit_actor_top_participant(
-                    &mut out,
-                    a,
-                    lifeline_y2,
-                    rank,
-                    root_counter,
-                    popup,
-                );
+                emit_actor_top_participant(&mut out, a, lifeline_y2, rank, root_counter, popup);
                 root_counter += 1;
             }
             // Boundary uses the same lifeline-only top group as Actor — body
@@ -3159,14 +3215,7 @@ pub fn render(
             // is identical to Actor (centerY = actor.height + 15 = 80).
             ActorType::Actor | ActorType::Boundary => {
                 let centery = a.create_y.unwrap_or(a.starty) + a.height + 15.0;
-                emit_actor_top_lifeline_actor(
-                    &mut out,
-                    a,
-                    centery,
-                    lifeline_y2,
-                    rank,
-                    popup,
-                )
+                emit_actor_top_lifeline_actor(&mut out, a, centery, lifeline_y2, rank, popup)
             }
             // Control / Entity use centerY = actor_y + 75 (vs Actor's
             // actor.height + 15). Same `<g><line .../></g>` shape, body
@@ -3180,25 +3229,11 @@ pub fn render(
             // `boxplusLineGroup`). No separate body emission later — top
             // group is self-contained.
             ActorType::Database => {
-                emit_actor_database_top_group(
-                    &mut out,
-                    a,
-                    lifeline_y2,
-                    rank,
-                    root_counter,
-                    popup,
-                );
+                emit_actor_database_top_group(&mut out, a, lifeline_y2, rank, root_counter, popup);
                 root_counter += 1;
             }
             ActorType::Queue => {
-                emit_actor_queue_top_group(
-                    &mut out,
-                    a,
-                    lifeline_y2,
-                    rank,
-                    root_counter,
-                    popup,
-                );
+                emit_actor_queue_top_group(&mut out, a, lifeline_y2, rank, root_counter, popup);
                 root_counter += 1;
             }
             ActorType::Collections => {
@@ -3212,7 +3247,6 @@ pub fn render(
                 );
                 root_counter += 1;
             }
-            _ => unreachable!("gated above"),
         }
     }
 
@@ -3444,17 +3478,8 @@ fn compute_stick_ids(d: &SequenceDiagram, n_actors_total: usize) -> StickIds {
     // Build first-appearance map per (kind, raw_n). DOM body order is:
     // top bodies (decl order, Actor only), then bottom bodies (decl
     // order, Actor only).
-    let mut torso_map: std::collections::HashMap<usize, usize> =
-        std::collections::HashMap::new();
-    let mut arms_map: std::collections::HashMap<usize, usize> =
-        std::collections::HashMap::new();
-    let mut next_torso = 0usize;
-    let mut next_arms = 0usize;
-    let mut next_global = |next: &mut usize| -> usize {
-        let v = *next;
-        *next += 2; // each (torso/arms) pair occupies 2 slots in the global counter
-        v
-    };
+    let mut torso_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut arms_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     // Actually mermaid normalisation increments PER PREFIX independently
     // (one global counter for `actor-man-torso`, another for
     // `actor-man-arms`), but they advance in DOM order interleaved. Re-
@@ -3465,11 +3490,10 @@ fn compute_stick_ids(d: &SequenceDiagram, n_actors_total: usize) -> StickIds {
     // string), and the closure increments `next` for each NEW key,
     // torso/arms COUNT TOGETHER. So pair (torso first then arms) on
     // first appearance maps to 0, 1; second pair → 2, 3; etc.
-    let _ = (next_torso, next_arms, &mut next_global);
     let mut next = 0usize;
-    let mut take = |map: &mut std::collections::HashMap<usize, usize>,
-                    next: &mut usize,
-                    raw_n: usize|
+    let take = |map: &mut std::collections::HashMap<usize, usize>,
+                next: &mut usize,
+                raw_n: usize|
      -> usize {
         if let Some(&v) = map.get(&raw_n) {
             v
@@ -3752,11 +3776,22 @@ fn emit_actor_entity_body(out: &mut String, a: &ActorRender, actor_y: f64, is_fo
 
     // Outer <g>. Attribute order: class, name, transform, [data-* if top].
     out.push_str("<g class=\"actor ");
-    out.push_str(if is_footer { "actor-bottom" } else { "actor-top" });
+    out.push_str(if is_footer {
+        "actor-bottom"
+    } else {
+        "actor-top"
+    });
     out.push_str("\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" transform=\"translate(0, ");
-    push_num(out, if is_footer { RADIUS } else { RADIUS / 2.0 - 5.0 });
+    push_num(
+        out,
+        if is_footer {
+            RADIUS
+        } else {
+            RADIUS / 2.0 - 5.0
+        },
+    );
     out.push_str(")\"");
     if !is_footer {
         out.push_str(" data-et=\"participant\" data-type=\"entity\" data-id=\"");
@@ -3854,7 +3889,9 @@ fn emit_actor_database_bottom_group(out: &mut String, a: &ActorRender, bottom_y:
     // Cylinder <g class="actor actor-bottom" style="stroke: #9370DB;" transform="translate(w4,ry)">
     // Note: style is set via `cylinderGroup.style("stroke", actorBorder)`
     // (default theme classic). attribute order: class, style, transform.
-    out.push_str("<g class=\"actor actor-bottom\" style=\"stroke: #9370DB;\" transform=\"translate(");
+    out.push_str(
+        "<g class=\"actor actor-bottom\" style=\"stroke: #9370DB;\" transform=\"translate(",
+    );
     push_num(out, w4);
     out.push_str(", ");
     push_num(out, ry);
@@ -3940,9 +3977,7 @@ fn emit_actor_database_top_group(
     push_num(out, center);
     out.push_str("\" y2=\"");
     push_num(out, bottom_y);
-    out.push_str(
-        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
-    );
+    out.push_str("\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
@@ -4120,9 +4155,7 @@ fn emit_actor_queue_top_group(
     push_num(out, center);
     out.push_str("\" y2=\"");
     push_num(out, bottom_y);
-    out.push_str(
-        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
-    );
+    out.push_str("\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
@@ -4131,7 +4164,9 @@ fn emit_actor_queue_top_group(
     // <g id="root-N" class="actor actor-top" data-et=... data-type="queue" data-id=X>
     out.push_str("<g id=\"root-");
     out.push_str(&root_index.to_string());
-    out.push_str("\" class=\"actor actor-top\" data-et=\"participant\" data-type=\"queue\" data-id=\"");
+    out.push_str(
+        "\" class=\"actor actor-top\" data-et=\"participant\" data-type=\"queue\" data-id=\"",
+    );
     out.push_str(&xml_escape(&a.id));
     out.push_str("\">");
 
@@ -4248,9 +4283,7 @@ fn emit_actor_collections_top_group(
     push_num(out, center);
     out.push_str("\" y2=\"");
     push_num(out, bottom_y);
-    out.push_str(
-        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
-    );
+    out.push_str("\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
@@ -4493,9 +4526,7 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
         "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
     );
     out.push_str(&attr_escape(FONT_FAMILY));
-    out.push_str(
-        "; font-size: 16px; font-weight: 400;\" class=\"labelText\">",
-    );
+    out.push_str("; font-size: 16px; font-weight: 400;\" class=\"labelText\">");
     out.push_str(lr.keyword);
     out.push_str("</text>");
     // Block title `[Loopy]` centred in the top row.
@@ -4508,21 +4539,16 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
     // tspan=true (default in getTextObj3) ⇒ wraps text in <tspan x=…>.
     let title_x = lr.startx + LABEL_BOX_W / 2.0 + (lr.stopx - lr.startx) / 2.0;
     let title_y_input = lr.starty + 10.0 + 5.0; // boxMargin + boxTextMargin
-    // Multi-line title (wrapped via wrap_label when too wide for the
-    // block's available width). Each `<br/>` split becomes its own
-    // `<text>` element with `tspan: true`. yfunc per upstream drawText
-    // (mermaid.js:136811): line k's y = round(y_input +
-    // (prevTextHeight + textHeight + textMargin) / 2) where prev=text=
-    // k * line_h_unrounded after k iterations.
+                                                // Multi-line title (wrapped via wrap_label when too wide for the
+                                                // block's available width). Each `<br/>` split becomes its own
+                                                // `<text>` element with `tspan: true`. yfunc per upstream drawText
+                                                // (mermaid.js:136811): line k's y = round(y_input +
+                                                // (prevTextHeight + textHeight + textMargin) / 2) where prev=text=
+                                                // k * line_h_unrounded after k iterations.
     let title_lines = split_br(&lr.title);
     // Per-line bbox.height ≈ 18.625 for sans-serif 16px (font_metrics
     // line_height returns the unrounded value).
-    let lh_unrounded = crate::font_metrics::line_height(
-        "sans-serif",
-        16.0,
-        false,
-        false,
-    );
+    let lh_unrounded = crate::font_metrics::line_height("sans-serif", 16.0, false, false);
     if has_katex(&lr.title) {
         // drawKatex on loopText: foreignObject is centred between
         // startx..stopx and y is `round(starty)` of the loopModel —
@@ -4541,13 +4567,9 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
             push_num(out, title_x);
             out.push_str("\" y=\"");
             push_num(out, title_y);
-            out.push_str(
-                "\" text-anchor=\"middle\" style=\"font-family: ",
-            );
+            out.push_str("\" text-anchor=\"middle\" style=\"font-family: ");
             out.push_str(&attr_escape(FONT_FAMILY));
-            out.push_str(
-                "; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"",
-            );
+            out.push_str("; font-size: 16px; font-weight: 400;\" class=\"loopText\"><tspan x=\"");
             push_num(out, title_x);
             out.push_str("\">");
             out.push_str(&xml_escape(line));
@@ -4571,13 +4593,9 @@ fn emit_loop(out: &mut String, lr: &LoopRender) {
         push_num(out, sec_x);
         out.push_str("\" y=\"");
         push_num(out, sec_y);
-        out.push_str(
-            "\" text-anchor=\"middle\" style=\"font-family: ",
-        );
+        out.push_str("\" text-anchor=\"middle\" style=\"font-family: ");
         out.push_str(&attr_escape(FONT_FAMILY));
-        out.push_str(
-            "; font-size: 16px; font-weight: 400;\" class=\"loopText\">",
-        );
+        out.push_str("; font-size: 16px; font-weight: 400;\" class=\"loopText\">");
         out.push_str(&xml_escape(&sec.label));
         out.push_str("</text>");
     }
@@ -4648,7 +4666,9 @@ fn emit_note(out: &mut String, n: &NoteRender) {
             "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
         );
         out.push_str(&attr_escape(FONT_FAMILY));
-        out.push_str("; font-size: 16px; font-weight: 400;\" class=\"noteText\" dy=\"1em\"><tspan x=\"");
+        out.push_str(
+            "; font-size: 16px; font-weight: 400;\" class=\"noteText\" dy=\"1em\"><tspan x=\"",
+        );
         push_num(out, n.text_x);
         out.push_str("\">");
         if line_text.is_empty() {
@@ -4699,9 +4719,7 @@ fn emit_actor_top_lifeline_actor(
     push_num(out, cx);
     out.push_str("\" y2=\"");
     push_num(out, bottom_y);
-    out.push_str(
-        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
-    );
+    out.push_str("\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
@@ -4734,13 +4752,7 @@ fn emit_actor_box_text_footer_empty(out: &mut String, cx: f64, cy: f64) {
     out.push_str("\" width=\"0\" height=\"0\"><div style=\"height: 100%; width: 100%;\"><div style=\"text-align: center; vertical-align: middle;\"></div></div></foreignObject></switch>");
 }
 
-fn emit_actor_box_text_ex(
-    out: &mut String,
-    cx: f64,
-    cy: f64,
-    description: &str,
-    _is_footer: bool,
-) {
+fn emit_actor_box_text_ex(out: &mut String, cx: f64, cy: f64, description: &str, _is_footer: bool) {
     let lines = split_br(description);
     let n = lines.len();
     let font_size = 16.0_f64;
@@ -4755,8 +4767,7 @@ fn emit_actor_box_text_ex(
         {
             match crate::katex::render_label(description) {
                 Ok(html) => out.push_str(&html),
-                Err(_) => out
-                    .push_str("MathML is unsupported in this environment."),
+                Err(_) => out.push_str("MathML is unsupported in this environment."),
             }
         }
         #[cfg(not(feature = "katex"))]
@@ -4806,7 +4817,10 @@ fn try_render_seq_katex(text: &str) -> Option<(String, f64, f64)> {
         Ok(html) => {
             let font = crate::render::foreign_object::HtmlLabelFont::default();
             let (w, h) = crate::render::foreign_object::measure_html_markup_label(
-                &html, &font, f64::INFINITY, false,
+                &html,
+                &font,
+                f64::INFINITY,
+                false,
             );
             Some((html, w, h))
         }
@@ -4823,14 +4837,7 @@ fn try_render_seq_katex(_text: &str) -> Option<(String, f64, f64)> {
 /// upstream `drawKatex` output for note/message/loop label. `w` and `h`
 /// are the raw (unrounded) measurements; the helper rounds the value
 /// going into each attribute / centring computation independently.
-fn emit_katex_foreign_object(
-    out: &mut String,
-    html: &str,
-    w: f64,
-    h: f64,
-    cx: f64,
-    y: f64,
-) {
+fn emit_katex_foreign_object(out: &mut String, html: &str, w: f64, h: f64, cx: f64, y: f64) {
     out.push_str("<foreignObject height=\"");
     push_num(out, h.round());
     out.push_str("\" width=\"");
@@ -4927,17 +4934,13 @@ fn emit_actor_top_participant(
     push_num(out, cx);
     out.push_str("\" y2=\"");
     push_num(out, bottom_y);
-    out.push_str(
-        "\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"",
-    );
+    out.push_str("\" class=\"actor-line 200\" stroke-width=\"0.5px\" stroke=\"#999\" name=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\" data-et=\"life-line\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
     out.push_str("\"></line><g id=\"root-");
     out.push_str(&root_index.to_string());
-    out.push_str(
-        "\" data-et=\"participant\" data-type=\"participant\" data-id=\"",
-    );
+    out.push_str("\" data-et=\"participant\" data-type=\"participant\" data-id=\"");
     out.push_str(&xml_escape(&a.id));
     let (fill, base_cls) = actor_rect_style(a);
     out.push_str("\"><rect x=\"");
@@ -4970,12 +4973,22 @@ fn emit_actor_top_participant(
 ///   - rect.height = 20 + 30 * N    (N = link count, no header text)
 ///   - text.x = actor.x + 10
 ///   - text.y of link n = actor.height + 30 * (n + 1)
-fn emit_actor_popup(out: &mut String, a: &ActorRender, rank: usize, force_menus: bool, mirror: bool) {
+fn emit_actor_popup(
+    out: &mut String,
+    a: &ActorRender,
+    rank: usize,
+    force_menus: bool,
+    mirror: bool,
+) {
     let panel_x = a.x;
     let panel_y = a.height; // actor box bottom in the top group.
     let n_links = a.links.len() as f64;
     let panel_h = 20.0 + 30.0 * n_links;
-    let display = if force_menus { "block !important" } else { "none" };
+    let display = if force_menus {
+        "block !important"
+    } else {
+        "none"
+    };
 
     out.push_str("<g id=\"actor");
     out.push_str(&rank.to_string());
@@ -5008,9 +5021,7 @@ fn emit_actor_popup(out: &mut String, a: &ActorRender, rank: usize, force_menus:
         push_num(out, text_x);
         out.push_str("\" y=\"");
         push_num(out, text_y);
-        out.push_str(
-            "\" style=\"text-anchor: start; font-weight: 400; font-family: ",
-        );
+        out.push_str("\" style=\"text-anchor: start; font-weight: 400; font-family: ");
         out.push_str(&attr_escape(ACTOR_FONT_FAMILY));
         out.push_str(
             ";\" dominant-baseline=\"central\" alignment-baseline=\"central\" class=\"actor\"><tspan x=\"",
@@ -5046,22 +5057,13 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
     // `has_arrowhead`: upstream attaches `marker-end="...arrowhead"` for
     // SOLID / DOTTED only — the `_OPEN` variants (`->`, `-->`) get no
     // marker-end and instead match the messageLine class only.
-    let has_arrowhead = matches!(
-        m.arrow,
-        ArrowType::SolidArrow | ArrowType::DottedArrow
-    );
+    let has_arrowhead = matches!(m.arrow, ArrowType::SolidArrow | ArrowType::DottedArrow);
     // Cross arrows (`-x`, `--x`) emit `marker-end="...crosshead"` instead
     // of `arrowhead`. Otherwise they share the same line geometry +
     // attribute order as the solid/dotted arrowhead variants (the arrow
     // gap toward the receiver lifeline is identical).
-    let has_crosshead = matches!(
-        m.arrow,
-        ArrowType::SolidCross | ArrowType::DottedCross
-    );
-    let has_pointhead = matches!(
-        m.arrow,
-        ArrowType::SolidPoint | ArrowType::DottedPoint
-    );
+    let has_crosshead = matches!(m.arrow, ArrowType::SolidCross | ArrowType::DottedCross);
+    let has_pointhead = matches!(m.arrow, ArrowType::SolidPoint | ArrowType::DottedPoint);
     // Bidirectional arrows (`<<->>`, `<<-->>`) carry arrowheads on both
     // ends → both `marker-start` AND `marker-end="...arrowhead"`.
     let is_bidir = matches!(m.arrow, ArrowType::BiSolid | ArrowType::BiDotted);
@@ -5130,7 +5132,9 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
                 "\" text-anchor=\"middle\" dominant-baseline=\"middle\" alignment-baseline=\"middle\" style=\"font-family: ",
             );
             out.push_str(&attr_escape(FONT_FAMILY));
-            out.push_str("; font-size: 16px; font-weight: 400;\" class=\"messageText\" dy=\"1em\">");
+            out.push_str(
+                "; font-size: 16px; font-weight: 400;\" class=\"messageText\" dy=\"1em\">",
+            );
             if line_text.is_empty() {
                 // Upstream `drawText` substitutes a zero-width space (U+200B)
                 // for empty lines so the bbox is still measurable.
@@ -5149,7 +5153,11 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         // point shift right by +10 to clear the arrow head and make
         // room for the sequence-number circle on the source side.
         // Without autonumber, no shift is applied (upstream byte-exact).
-        let start_offset = if half_marker_start.is_some() && m.seq_index.is_some() { 10.0 } else { 0.0 };
+        let start_offset = if half_marker_start.is_some() && m.seq_index.is_some() {
+            10.0
+        } else {
+            0.0
+        };
         let lsx = m.self_line_start_x;
         let sx = m.self_startx;
         let lsy = m.line_start_y;
@@ -5228,76 +5236,76 @@ fn emit_message(out: &mut String, id: &str, m: &MsgRender) {
         out.push_str("\">");
         out.push_str("</path>");
     } else {
-    out.push_str("<line x1=\"");
-    push_num(out, m.line_x1);
-    out.push_str("\" y1=\"");
-    push_num(out, m.line_start_y);
-    out.push_str("\" x2=\"");
-    push_num(out, m.line_x2);
-    out.push_str("\" y2=\"");
-    push_num(out, m.line_start_y);
-    // Attribute order, observed in reference SVGs (depends on which of
-    // `style.fill` / `style.stroke-dasharray` upstream set last):
-    //
-    //   * Dashed + has_arrowhead (`-->>` arrow):
-    //       y2="..." style="stroke-dasharray: 3, 3; fill: none;" class=...
-    //       stroke-width="2" stroke="none" marker-end="..."
-    //   * Solid + has_arrowhead (`->>`):
-    //       y2="..." class=... stroke-width="2" stroke="none"
-    //       style="fill: none;" marker-end="..."
-    //   * Dashed + open (`-->`):
-    //       y2="..." style="stroke-dasharray: 3, 3; fill: none;" class=...
-    //       stroke-width="2" stroke="none"
-    //   * Solid + open (`->`): style="fill: none;" still after class —
-    //     same shape as solid+arrowhead minus `marker-end`.
-    if is_dashed {
-        out.push_str("\" style=\"stroke-dasharray: 3, 3; fill: none;");
-    }
-    out.push_str("\" class=\"messageLine");
-    out.push_str(if is_dashed { "1" } else { "0" });
-    out.push_str("\" data-et=\"message\" data-id=\"i");
-    out.push_str(&m.idx.to_string());
-    out.push_str("\" data-from=\"");
-    out.push_str(&attr_escape(&m.from));
-    out.push_str("\" data-to=\"");
-    out.push_str(&attr_escape(&m.to));
-    if is_dashed {
-        out.push_str("\" stroke-width=\"2\" stroke=\"none");
-    } else {
-        out.push_str("\" stroke-width=\"2\" stroke=\"none\" style=\"fill: none;");
-    }
-    if is_bidir {
-        out.push_str("\" marker-start=\"url(#");
-        out.push_str(id);
-        out.push_str("-arrowhead)\" marker-end=\"url(#");
-        out.push_str(id);
-        out.push_str("-arrowhead)\">");
-    } else if has_arrowhead {
-        out.push_str("\" marker-end=\"url(#");
-        out.push_str(id);
-        out.push_str("-arrowhead)\">");
-    } else if has_crosshead {
-        out.push_str("\" marker-end=\"url(#");
-        out.push_str(id);
-        out.push_str("-crosshead)\">");
-    } else if has_pointhead {
-        out.push_str("\" marker-end=\"url(#");
-        out.push_str(id);
-        out.push_str("-filled-head)\">");
-    } else if let Some(marker) = half_marker_end {
-        out.push_str("\" marker-end=\"url(#");
-        out.push_str(id);
-        out.push_str(marker);
-        out.push_str(")\">");
-    } else if let Some(marker) = half_marker_start {
-        out.push_str("\" marker-start=\"url(#");
-        out.push_str(id);
-        out.push_str(marker);
-        out.push_str(")\">");
-    } else {
-        out.push_str("\">");
-    }
-    out.push_str("</line>");
+        out.push_str("<line x1=\"");
+        push_num(out, m.line_x1);
+        out.push_str("\" y1=\"");
+        push_num(out, m.line_start_y);
+        out.push_str("\" x2=\"");
+        push_num(out, m.line_x2);
+        out.push_str("\" y2=\"");
+        push_num(out, m.line_start_y);
+        // Attribute order, observed in reference SVGs (depends on which of
+        // `style.fill` / `style.stroke-dasharray` upstream set last):
+        //
+        //   * Dashed + has_arrowhead (`-->>` arrow):
+        //       y2="..." style="stroke-dasharray: 3, 3; fill: none;" class=...
+        //       stroke-width="2" stroke="none" marker-end="..."
+        //   * Solid + has_arrowhead (`->>`):
+        //       y2="..." class=... stroke-width="2" stroke="none"
+        //       style="fill: none;" marker-end="..."
+        //   * Dashed + open (`-->`):
+        //       y2="..." style="stroke-dasharray: 3, 3; fill: none;" class=...
+        //       stroke-width="2" stroke="none"
+        //   * Solid + open (`->`): style="fill: none;" still after class —
+        //     same shape as solid+arrowhead minus `marker-end`.
+        if is_dashed {
+            out.push_str("\" style=\"stroke-dasharray: 3, 3; fill: none;");
+        }
+        out.push_str("\" class=\"messageLine");
+        out.push_str(if is_dashed { "1" } else { "0" });
+        out.push_str("\" data-et=\"message\" data-id=\"i");
+        out.push_str(&m.idx.to_string());
+        out.push_str("\" data-from=\"");
+        out.push_str(&attr_escape(&m.from));
+        out.push_str("\" data-to=\"");
+        out.push_str(&attr_escape(&m.to));
+        if is_dashed {
+            out.push_str("\" stroke-width=\"2\" stroke=\"none");
+        } else {
+            out.push_str("\" stroke-width=\"2\" stroke=\"none\" style=\"fill: none;");
+        }
+        if is_bidir {
+            out.push_str("\" marker-start=\"url(#");
+            out.push_str(id);
+            out.push_str("-arrowhead)\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str("-arrowhead)\">");
+        } else if has_arrowhead {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str("-arrowhead)\">");
+        } else if has_crosshead {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str("-crosshead)\">");
+        } else if has_pointhead {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str("-filled-head)\">");
+        } else if let Some(marker) = half_marker_end {
+            out.push_str("\" marker-end=\"url(#");
+            out.push_str(id);
+            out.push_str(marker);
+            out.push_str(")\">");
+        } else if let Some(marker) = half_marker_start {
+            out.push_str("\" marker-start=\"url(#");
+            out.push_str(id);
+            out.push_str(marker);
+            out.push_str(")\">");
+        } else {
+            out.push_str("\">");
+        }
+        out.push_str("</line>");
     }
 
     // Central-connection `()` circles. Mirrors upstream
@@ -5391,23 +5399,12 @@ fn wrap_label(label: &str, max_width: f64, family: &str, font_size: f64) -> Stri
     let n = words.len();
     for (index, word) in words.iter().enumerate() {
         let word_with_sp = format!("{} ", word);
-        let word_length = crate::font_metrics::text_width(
-            &word_with_sp,
-            family,
-            font_size,
-            false,
-            false,
-        );
-        let next_line_length = crate::font_metrics::text_width(
-            &next_line,
-            family,
-            font_size,
-            false,
-            false,
-        );
+        let word_length =
+            crate::font_metrics::text_width(&word_with_sp, family, font_size, false, false);
+        let next_line_length =
+            crate::font_metrics::text_width(&next_line, family, font_size, false, false);
         if word_length > max_width {
-            let (hyphenated, remaining) =
-                break_string(word, max_width, '-', family, font_size);
+            let (hyphenated, remaining) = break_string(word, max_width, '-', family, font_size);
             completed_lines.push(next_line.clone());
             for h in hyphenated {
                 completed_lines.push(h);
@@ -5450,13 +5447,8 @@ fn break_string(
     for (index, &ch) in chars.iter().enumerate() {
         let mut next_line = current_line.clone();
         next_line.push(ch);
-        let line_width = crate::font_metrics::text_width(
-            &next_line,
-            family,
-            font_size,
-            false,
-            false,
-        );
+        let line_width =
+            crate::font_metrics::text_width(&next_line, family, font_size, false, false);
         if line_width >= max_width {
             let is_last = index + 1 == n;
             let hyphenated = if is_last {
@@ -5751,4 +5743,3 @@ fn placeholder(d: &SequenceDiagram, id: &str) -> String {
          role=\"graphics-document document\" aria-roledescription=\"sequence\"></svg>"
     )
 }
-

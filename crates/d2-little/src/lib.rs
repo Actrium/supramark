@@ -205,14 +205,13 @@ pub fn compile(
     let owned_metrics: Option<Box<dyn crate::textmeasure::D2Metrics>> = if opts.metrics.is_some() {
         None
     } else {
-        Some(
-            crate::textmeasure::default_d2_metrics()
-                .map_err(|e| format!("metrics init: {}", e))?,
-        )
+        Some(crate::textmeasure::default_d2_metrics().map_err(|e| format!("metrics init: {}", e))?)
     };
     let metrics: &dyn crate::textmeasure::D2Metrics = match opts.metrics.as_deref() {
         Some(m) => m,
-        None => owned_metrics.as_deref().expect("owned_metrics set when opts.metrics is None"),
+        None => owned_metrics
+            .as_deref()
+            .expect("owned_metrics set when opts.metrics is None"),
     };
     let mut diagram = compile_graph(&mut g, theme_id, sketch, metrics)?;
 

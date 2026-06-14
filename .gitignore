@@ -9,6 +9,8 @@ coverage/
 # Production
 dist/
 build/
+!crates/graphviz-anywhere/packages/web/dist/
+!crates/graphviz-anywhere/packages/web/dist/viz.wasm
 
 # Rust
 target/
@@ -19,6 +21,7 @@ target/
 # Misc
 .DS_Store
 *.log
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -53,3 +56,6 @@ android/.gradle/
 
 # Local tool state
 .claude/
+.supramark-build/
+packages/core/src/generated/
+crates/supramark-markdown/src/generated/

@@ -26,7 +26,7 @@ export const htmlPageExamples: ExampleDefinition[] = [
   </head>
   <body>
     <h1>这是一个独立 HTML 页面</h1>
-    <p>它可以包含自己的 CSS 和 JS，在宿主提供的 WebView / ShadowDOM 容器中单独运行。</p>
+    <p>它可以包含自己的 CSS 和 JS，在宿主提供的隔离页面或 ShadowDOM 容器中单独运行。</p>
   </body>
 </html>
 :::

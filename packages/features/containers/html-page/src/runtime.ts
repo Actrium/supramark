@@ -22,6 +22,8 @@ registerContainerHook({
     const htmlPage: SupramarkContainerNode = {
       type: 'container',
       name: 'html',
+      mode: 'opaque',
+      value: html,
       data: { html },
       children: [],
     };

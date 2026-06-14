@@ -36,13 +36,32 @@ const SMALL: f64 = 1e-10;
 //
 // Plain IEEE-754 ops (powi, abs, min, max, fract, comparisons) are NOT
 // rerouted: the hardware path is identical across V8 and Rust.
-#[inline] fn fsqrt(x: f64) -> f64 { libm::sqrt(x) }
-#[inline] fn facos(x: f64) -> f64 { libm::acos(x) }
-#[inline] fn fsin(x: f64) -> f64 { libm::sin(x) }
-#[inline] fn fcos(x: f64) -> f64 { libm::cos(x) }
-#[inline] fn fatan2(y: f64, x: f64) -> f64 { libm::atan2(y, x) }
-#[inline] fn ffloor(x: f64) -> f64 { libm::floor(x) }
-#[inline] fn fround(x: f64) -> f64 {
+#[inline]
+fn fsqrt(x: f64) -> f64 {
+    libm::sqrt(x)
+}
+#[inline]
+fn facos(x: f64) -> f64 {
+    libm::acos(x)
+}
+#[inline]
+fn fsin(x: f64) -> f64 {
+    libm::sin(x)
+}
+#[inline]
+fn fcos(x: f64) -> f64 {
+    libm::cos(x)
+}
+#[inline]
+fn fatan2(y: f64, x: f64) -> f64 {
+    libm::atan2(y, x)
+}
+#[inline]
+fn ffloor(x: f64) -> f64 {
+    libm::floor(x)
+}
+#[inline]
+fn fround(x: f64) -> f64 {
     // V8 Math.round: round-half-to-+infinity (toward +∞ on .5).
     // libm::round is round-half-away-from-zero (e.g. -0.5 -> -1.0),
     // which differs from V8 only on negative .5 values. Emulate V8's
@@ -108,7 +127,11 @@ pub fn layout(d: &VennDiagram, theme: &ThemeVariables) -> Result<VennLayout> {
     let svg_h = 450.0_f64;
     let reference_w = 1600.0_f64;
     let scale = svg_w / reference_w;
-    let title_h = if d.meta.title.is_some() { 48.0 * scale } else { 0.0 };
+    let title_h = if d.meta.title.is_some() {
+        48.0 * scale
+    } else {
+        0.0
+    };
     // VennDiagram component's hardcoded internal default — drives the
     // visible circles, paths, and label positions.
     let padding_visible = 15.0_f64;
@@ -221,8 +244,7 @@ pub fn layout(d: &VennDiagram, theme: &ThemeVariables) -> Result<VennLayout> {
     // Visible label centres come from the padding=15 circles…
     let text_centres = compute_text_centres(&circle_map, &areas_vec);
     // …text-node centres come from the padding=8 circles.
-    let text_centres_text_node =
-        compute_text_centres(&circle_map_text_node, &areas_vec);
+    let text_centres_text_node = compute_text_centres(&circle_map_text_node, &areas_vec);
 
     for a in &areas_vec {
         let circles_for_area: Vec<Circle> = a
@@ -478,7 +500,11 @@ fn intersection_area(circles: &[Circle], stats: &mut AreaStats) -> f64 {
             p.angle = fatan2(p.x - centre.0, p.y - centre.1);
         }
         // Sort descending by angle.
-        inner_points.sort_by(|a, b| b.angle.partial_cmp(&a.angle).unwrap_or(std::cmp::Ordering::Equal));
+        inner_points.sort_by(|a, b| {
+            b.angle
+                .partial_cmp(&a.angle)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let n = inner_points.len();
         let mut p2 = inner_points[n - 1].clone();
@@ -600,7 +626,11 @@ fn arcs_to_path(arcs: &[Arc], round: Option<i32>) -> String {
         );
     }
     // multi-arc
-    let mut out = format!("\nM {} {}", fmt_num(r(arcs[0].p2.0)), fmt_num(r(arcs[0].p2.1)));
+    let mut out = format!(
+        "\nM {} {}",
+        fmt_num(r(arcs[0].p2.0)),
+        fmt_num(r(arcs[0].p2.1))
+    );
     for arc in arcs {
         let radius = r(arc.circle.radius);
         out.push_str(&format!(
@@ -668,7 +698,10 @@ struct OrderedMap {
 
 impl OrderedMap {
     fn new() -> Self {
-        Self { keys: Vec::new(), values: Vec::new() }
+        Self {
+            keys: Vec::new(),
+            values: Vec::new(),
+        }
     }
     fn insert(&mut self, k: String, v: Circle) {
         if let Some(idx) = self.keys.iter().position(|x| x == &k) {
@@ -679,10 +712,16 @@ impl OrderedMap {
         }
     }
     fn get(&self, k: &str) -> Option<&Circle> {
-        self.keys.iter().position(|x| x == k).map(|i| &self.values[i])
+        self.keys
+            .iter()
+            .position(|x| x == k)
+            .map(|i| &self.values[i])
     }
     fn get_mut(&mut self, k: &str) -> Option<&mut Circle> {
-        self.keys.iter().position(|x| x == k).map(|i| &mut self.values[i])
+        self.keys
+            .iter()
+            .position(|x| x == k)
+            .map(|i| &mut self.values[i])
     }
     fn keys(&self) -> impl Iterator<Item = &String> {
         self.keys.iter()
@@ -690,6 +729,7 @@ impl OrderedMap {
     fn iter(&self) -> impl Iterator<Item = (&String, &Circle)> {
         self.keys.iter().zip(self.values.iter())
     }
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         self.keys.len()
     }
@@ -707,7 +747,11 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
             if !order.iter().any(|x| x == setid) {
                 order.push(setid.clone());
                 circles_data.push((
-                    Circle { x: 1e10, y: 1e10, radius: r },
+                    Circle {
+                        x: 1e10,
+                        y: 1e10,
+                        radius: r,
+                    },
                     area.size,
                 ));
             }
@@ -747,10 +791,7 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
     let mut most_overlapped: Vec<(String, f64)> = order
         .iter()
         .map(|s| {
-            let total: f64 = set_overlaps[s]
-                .iter()
-                .map(|(_, sz, w)| sz * w)
-                .sum();
+            let total: f64 = set_overlaps[s].iter().map(|(_, sz, w)| sz * w).sum();
             (s.clone(), total)
         })
         .collect();
@@ -804,8 +845,16 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
                 let p2 = *output.get(&overlap[k].0).unwrap();
                 let d2 = distance_from_intersect_area(set_radius, p2.radius, overlap[k].1);
                 let extra = circle_circle_intersection(
-                    &Circle { x: p1.x, y: p1.y, radius: d1 },
-                    &Circle { x: p2.x, y: p2.y, radius: d2 },
+                    &Circle {
+                        x: p1.x,
+                        y: p1.y,
+                        radius: d1,
+                    },
+                    &Circle {
+                        x: p2.x,
+                        y: p2.y,
+                        radius: d2,
+                    },
                 );
                 points.extend(extra);
             }
@@ -836,7 +885,8 @@ fn greedy_layout(areas: &[Area]) -> OrderedMap {
                 cur.x = p.0;
                 cur.y = p.1;
             }
-            let snapshot: BTreeMap<String, Circle> = output.iter().map(|(k, v)| (k.clone(), *v)).collect();
+            let snapshot: BTreeMap<String, Circle> =
+                output.iter().map(|(k, v)| (k.clone(), *v)).collect();
             let mut l = 0.0_f64;
             for a in &pair_areas {
                 let lc = &snapshot[&a.sets[0]];
@@ -941,7 +991,11 @@ where
 
     for i in 0..n {
         let mut p = x0.to_vec();
-        p[i] = if p[i] != 0.0 { p[i] * params.non_zero_delta } else { params.zero_delta };
+        p[i] = if p[i] != 0.0 {
+            p[i] * params.non_zero_delta
+        } else {
+            params.zero_delta
+        };
         let val = f(&p);
         simplex.push(p);
         fx_vec.push(val);
@@ -955,7 +1009,11 @@ where
     for _ in 0..max_iters {
         // Sort simplex ascending by fx.
         let mut order: Vec<usize> = (0..=n).collect();
-        order.sort_by(|a, b| fx_vec[*a].partial_cmp(&fx_vec[*b]).unwrap_or(std::cmp::Ordering::Equal));
+        order.sort_by(|a, b| {
+            fx_vec[*a]
+                .partial_cmp(&fx_vec[*b])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let new_simplex: Vec<Vec<f64>> = order.iter().map(|&i| simplex[i].clone()).collect();
         let new_fx: Vec<f64> = order.iter().map(|&i| fx_vec[i]).collect();
         simplex = new_simplex;
@@ -984,12 +1042,24 @@ where
         let worst = simplex[n].clone();
 
         // reflected = (1+rho)*centroid + (-rho)*worst
-        weighted_sum(&mut reflected, 1.0 + params.rho, &centroid, -params.rho, &worst);
+        weighted_sum(
+            &mut reflected,
+            1.0 + params.rho,
+            &centroid,
+            -params.rho,
+            &worst,
+        );
         let fx_reflected = f(&reflected);
 
         if fx_reflected < fx_vec[0] {
             // expand
-            weighted_sum(&mut expanded, 1.0 + params.chi, &centroid, -params.chi, &worst);
+            weighted_sum(
+                &mut expanded,
+                1.0 + params.chi,
+                &centroid,
+                -params.chi,
+                &worst,
+            );
             let fx_expanded = f(&expanded);
             if fx_expanded < fx_reflected {
                 simplex[n] = expanded.clone();
@@ -1001,7 +1071,13 @@ where
         } else if fx_reflected >= fx_vec[n - 1] {
             let mut should_reduce = false;
             if fx_reflected > fx_vec[n] {
-                weighted_sum(&mut contracted, 1.0 + params.psi, &centroid, -params.psi, &worst);
+                weighted_sum(
+                    &mut contracted,
+                    1.0 + params.psi,
+                    &centroid,
+                    -params.psi,
+                    &worst,
+                );
                 let fx_contracted = f(&contracted);
                 if fx_contracted < fx_vec[n] {
                     simplex[n] = contracted.clone();
@@ -1032,7 +1108,13 @@ where
                 for i in 1..=n {
                     let s0 = simplex[0].clone();
                     let mut new_pt = vec![0.0; n];
-                    weighted_sum(&mut new_pt, 1.0 - params.sigma, &s0, params.sigma, &simplex[i]);
+                    weighted_sum(
+                        &mut new_pt,
+                        1.0 - params.sigma,
+                        &s0,
+                        params.sigma,
+                        &simplex[i],
+                    );
                     simplex[i] = new_pt;
                     fx_vec[i] = f(&simplex[i]);
                 }
@@ -1045,7 +1127,11 @@ where
 
     // Sort once more for return.
     let mut order: Vec<usize> = (0..=n).collect();
-    order.sort_by(|a, b| fx_vec[*a].partial_cmp(&fx_vec[*b]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|a, b| {
+        fx_vec[*a]
+            .partial_cmp(&fx_vec[*b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let best = order[0];
     NelderMeadResult {
         x: simplex[best].clone(),
@@ -1070,11 +1156,8 @@ struct ClusterCircle {
     radius: f64,
 }
 
-fn normalize_solution(
-    solution: &OrderedMap,
-    orientation: f64,
-) -> Vec<ClusterCircle> {
-    let mut circles: Vec<ClusterCircle> = solution
+fn normalize_solution(solution: &OrderedMap, orientation: f64) -> Vec<ClusterCircle> {
+    let circles: Vec<ClusterCircle> = solution
         .iter()
         .map(|(k, c)| ClusterCircle {
             setid: k.clone(),
@@ -1099,8 +1182,7 @@ fn normalize_solution(
         for j in (i + 1)..n {
             let max_d = circles[i].radius + circles[j].radius;
             let d = fsqrt(
-                (circles[i].x - circles[j].x).powi(2)
-                    + (circles[i].y - circles[j].y).powi(2),
+                (circles[i].x - circles[j].x).powi(2) + (circles[i].y - circles[j].y).powi(2),
             );
             if d + 1e-10 < max_d {
                 let ri = find(&mut parent, i);
@@ -1174,8 +1256,8 @@ fn add_cluster(
         x_offset = return_bounds.x_max - bounds.x_min + spacing;
     } else {
         x_offset = return_bounds.x_max - bounds.x_max;
-        let centring = (bounds.x_max - bounds.x_min) / 2.0
-            - (return_bounds.x_max - return_bounds.x_min) / 2.0;
+        let centring =
+            (bounds.x_max - bounds.x_min) / 2.0 - (return_bounds.x_max - return_bounds.x_min) / 2.0;
         if centring < 0.0 {
             x_offset += centring;
         }
@@ -1184,8 +1266,8 @@ fn add_cluster(
         y_offset = return_bounds.y_max - bounds.y_min + spacing;
     } else {
         y_offset = return_bounds.y_max - bounds.y_max;
-        let centring = (bounds.y_max - bounds.y_min) / 2.0
-            - (return_bounds.y_max - return_bounds.y_min) / 2.0;
+        let centring =
+            (bounds.y_max - bounds.y_min) / 2.0 - (return_bounds.y_max - return_bounds.y_min) / 2.0;
         if centring < 0.0 {
             y_offset += centring;
         }
@@ -1228,13 +1310,22 @@ fn bounding_box(cluster: &[ClusterCircle]) -> BoundingBox {
             y_min = c.y - c.radius;
         }
     }
-    BoundingBox { x_min, x_max, y_min, y_max }
+    BoundingBox {
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+    }
 }
 
 fn orientate_circles(circles: &mut Vec<ClusterCircle>, orientation: f64) {
     // Sort largest radius first. Note: Array.sort in V8 is stable, so
     // ties resolve by original (insertion) order.
-    circles.sort_by(|a, b| b.radius.partial_cmp(&a.radius).unwrap_or(std::cmp::Ordering::Equal));
+    circles.sort_by(|a, b| {
+        b.radius
+            .partial_cmp(&a.radius)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     if circles.is_empty() {
         return;
@@ -1332,11 +1423,7 @@ fn scale_solution(
 // ---------------------------------------------------------------------------
 // Text-centre computation (diagram.js port).
 
-fn circle_margin(
-    current: (f64, f64),
-    interior: &[Circle],
-    exterior: &[Circle],
-) -> f64 {
+fn circle_margin(current: (f64, f64), interior: &[Circle], exterior: &[Circle]) -> f64 {
     let mut margin = interior[0].radius - dist_xy((interior[0].x, interior[0].y), current);
     for i in 1..interior.len() {
         let m = interior[i].radius - dist_xy((interior[i].x, interior[i].y), current);
@@ -1431,9 +1518,7 @@ fn compute_text_centre_one(interior: &[Circle], exterior: &[Circle]) -> (f64, f6
     (sx / n, sy / n, false)
 }
 
-fn get_overlapping_circles(
-    circles: &BTreeMap<String, Circle>,
-) -> BTreeMap<String, Vec<String>> {
+fn get_overlapping_circles(circles: &BTreeMap<String, Circle>) -> BTreeMap<String, Vec<String>> {
     let mut ret: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let ids: Vec<String> = circles.keys().cloned().collect();
     for id in &ids {

@@ -6,9 +6,14 @@
   "license": "Apache-2.0",
   "workspaces": [
     "packages/core",
+    "packages/cli",
+    "packages/engines",
     "packages/renderers/*",
-    "packages/features/*",
-    "packages/features/*/*",
+    "packages/features/core-markdown",
+    "packages/features/main/*",
+    "packages/features/containers/*",
+    "packages/features/diagrams/*",
+    "packages/features/cards/*",
     "examples/react-native",
     "examples/react-web-csr",
     "crates/*/packages/web",
@@ -18,7 +23,7 @@
   ],
   "scripts": {
     "build": "bun run --workspaces build",
-    "test": "bun run --workspaces --if-present test",
+    "test": "bun run build:wasm markdown && bun run --workspaces --if-present test",
     "test:core": "bun run --filter @supramark/core test",
     "test:features": "bun run --filter '@supramark/feature-*' test",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx && bun run features:lint",
@@ -35,6 +40,7 @@
     "quality": "bun run license:check && bun scripts/project-quality.ts",
     "license:check": "bun scripts/license-check.ts",
     "build:wasm": "bun scripts/build-wasm.ts",
+    "build:profile": "bun scripts/build-profile.ts",
     "feature:preview:web": "bun scripts/feature-preview-web.ts"
   },
   "devDependencies": {

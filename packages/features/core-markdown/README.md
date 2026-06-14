@@ -58,7 +58,7 @@ Core Markdown Feature 通过 selector 匹配的节点包括（但不限于）：
 ## 开发状态
 
 - [x] AST 定义（在 `@supramark/core` 中完成）
-- [x] 解析器实现（markdown-it 主线）
+- [x] 解析器实现（`supramark-markdown` AST v2 主线）
 - [x] RN 渲染器
 - [x] Web 渲染器
 - [x] Feature 元数据与接口定义

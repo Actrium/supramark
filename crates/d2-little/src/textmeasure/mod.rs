@@ -161,7 +161,6 @@ pub fn default_d2_metrics() -> Result<Box<dyn D2Metrics>, String> {
     }
 }
 
-
 /// Resolve an HTML header tag (`h1` … `h6`) to its scaled font size.
 pub fn header_to_font_size(base_font_size: i32, header: &str) -> i32 {
     match header {

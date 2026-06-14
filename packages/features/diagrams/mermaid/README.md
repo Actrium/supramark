@@ -16,7 +16,7 @@ graph TD
 - AST：统一解析为 `diagram` 节点，`engine` 为 `mermaid`。
 - 渲染：
   - **Web**：`@supramark/engines` 调用 `@kookyleo/mermaid-little-web`（Rust → wasm）输出 SVG，零 DOM / 零 headless 浏览器 / 零 upstream JS Mermaid bundle。
-  - **RN**：当前 **未支持**。隐藏 WebView 方案（`@supramark/rn-diagram-worker`）已于 2026-05 退役；后续替代方案是 `mermaid-little` 的 native FFI 绑定（追踪 `crates/mermaid-little/UPSTREAM.md`）。
+  - **RN**：宿主在启动时导入 `@kookyleo/supramark-mermaid-native-rn`，由 side-effect 注册 `mermaid-little` native FFI adapter；最终同样返回 SVG 字符串并交给 `react-native-svg` 显示。
 
 本包当前主要用于：
 

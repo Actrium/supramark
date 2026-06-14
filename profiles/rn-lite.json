@@ -1,0 +1,14 @@
+{
+  "name": "rn-lite",
+  "description": "Small React Native profile with core markdown, GFM basics, diagrams, and safe containers.",
+  "features": [
+    "commonmark",
+    "gfm.table",
+    "gfm.strikethrough",
+    "gfm.task_list",
+    "diagram",
+    "container.admonition",
+    "container.map"
+  ],
+  "targets": ["rn"]
+}

@@ -18,7 +18,7 @@
 use crate::error::Result;
 use crate::layout::venn::VennLayout;
 use crate::model::venn::VennDiagram;
-use crate::render::rough::{RoughGenerator, RoughOptions, to_paths};
+use crate::render::rough::{to_paths, RoughGenerator, RoughOptions};
 use crate::theme::ThemeVariables;
 
 pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str) -> Result<String> {
@@ -170,7 +170,7 @@ pub fn render(d: &VennDiagram, l: &VennLayout, theme: &ThemeVariables, id: &str)
                     label = escape_text(&area.render_label),
                 ));
             } else {
-            out.push_str(&format!(
+                out.push_str(&format!(
                 r#"<g class="venn-area venn-circle venn-set-{i}" data-venn-sets="{sets}"><path style="fill-opacity: {op}; fill: {fill}; stroke: {stroke}; stroke-width: {sw}; stroke-opacity: 0.95;" d="{d}"></path><text class="label" text-anchor="middle" dy=".35em" x="{tx}" y="{ty}" style="fill: {tfill}; font-size: {fs}px;"><tspan x="{tx}" y="{ty}" dy="0.35em">{label}</tspan></text></g>"#,
                 i = i % 8,
                 sets = area.sets.join("_"),

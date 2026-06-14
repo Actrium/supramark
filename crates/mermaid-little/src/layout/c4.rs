@@ -85,7 +85,7 @@ pub struct LaidShape {
     pub height: f64,
     pub margin: f64,
     pub label: TextBlock,
-    pub typ: TextBlock,         // ['type'] in upstream
+    pub typ: TextBlock, // ['type'] in upstream
     pub techn: TextBlock,
     pub descr: TextBlock,
     /// `<<typeC4Shape>>` text block (italic, smaller font).
@@ -192,7 +192,7 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
         shapes_out: Vec::new(),
         boundaries_out: Vec::new(),
         elements_out: Vec::new(),
-        rels_out: Vec::new(),
+        _rels_out: Vec::new(),
         global_max_x: conf.diagram_margin_x,
         global_max_y: conf.diagram_margin_y,
     };
@@ -270,7 +270,13 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
             // calcC4ShapeTextWH for label: not wrapped (textLimitWidth = own width).
             // Upstream: textLimitWidth = calculateTextWidth(rel.label.text, relConf).
             // With wrap off (default rel doesn't wrap): single line, width = textWidth.
-            let lab_w = round_w(fm_text_width(&label_block.text, &mf_fam, mf_sz, false, false));
+            let lab_w = round_w(fm_text_width(
+                &label_block.text,
+                &mf_fam,
+                mf_sz,
+                false,
+                false,
+            ));
             let lab_h = round_w(fm_line_height(&mf_fam, mf_sz, false, false));
             label_block.width = lab_w;
             label_block.height = lab_h;
@@ -279,7 +285,13 @@ pub fn layout(diag: &C4Diagram) -> C4Layout {
             let has_techn = !rel.techn.text.is_empty();
             if has_techn {
                 techn_block.text = rel.techn.text.clone();
-                let tw = round_w(fm_text_width(&techn_block.text, &mf_fam, mf_sz, false, false));
+                let tw = round_w(fm_text_width(
+                    &techn_block.text,
+                    &mf_fam,
+                    mf_sz,
+                    false,
+                    false,
+                ));
                 let th = round_w(fm_line_height(&mf_fam, mf_sz, false, false));
                 techn_block.width = tw;
                 techn_block.height = th;
@@ -459,7 +471,7 @@ struct LayoutState<'a> {
     shapes_out: Vec<LaidShape>,
     boundaries_out: Vec<LaidBoundary>,
     elements_out: Vec<LaidElement>,
-    rels_out: Vec<LaidRel>,
+    _rels_out: Vec<LaidRel>,
     global_max_x: f64,
     global_max_y: f64,
 }
@@ -486,7 +498,7 @@ impl<'a> LayoutState<'a> {
             let image_h = 0.0;
             let _ = (image_w, image_h);
             // Boundary label (boundaryFont, fontSize +2, bold).
-            let bf_fam = self.conf.boundaryFontFamily();
+            let bf_fam = self.conf.boundary_font_family();
             let bf_sz = self.conf.boundary_font_size;
             let label_text = bnd.label.text.clone();
             let (label_w, label_h, _) =
@@ -529,7 +541,7 @@ impl<'a> LayoutState<'a> {
             } else {
                 let x0 = if (current_bounds.data.stopx.unwrap_or(0.0)
                     - current_bounds.data.startx.unwrap_or(0.0))
-                    .abs()
+                .abs()
                     > f64::EPSILON
                 {
                     current_bounds.data.stopx.unwrap_or(0.0) + self.conf.diagram_margin_x
@@ -610,7 +622,10 @@ impl<'a> LayoutState<'a> {
                     .clone()
                     .unwrap_or_else(|| "#444444".to_string());
                 let bg = bnd.bg_color.clone().unwrap_or_else(|| "none".to_string());
-                let font_color = bnd.font_color.clone().unwrap_or_else(|| "black".to_string());
+                let font_color = bnd
+                    .font_color
+                    .clone()
+                    .unwrap_or_else(|| "black".to_string());
                 let laid = LaidBoundary {
                     idx: b_idx,
                     alias: bnd.alias.clone(),
@@ -639,8 +654,12 @@ impl<'a> LayoutState<'a> {
             let pbx = parent_bounds.data.stopx.unwrap_or(0.0);
             parent_bounds.data.stopy = Some((cb_stopy + self.conf.c4_shape_margin).max(pby));
             parent_bounds.data.stopx = Some((cb_stopx + self.conf.c4_shape_margin).max(pbx));
-            self.global_max_x = self.global_max_x.max(parent_bounds.data.stopx.unwrap_or(0.0));
-            self.global_max_y = self.global_max_y.max(parent_bounds.data.stopy.unwrap_or(0.0));
+            self.global_max_x = self
+                .global_max_x
+                .max(parent_bounds.data.stopx.unwrap_or(0.0));
+            self.global_max_y = self
+                .global_max_y
+                .max(parent_bounds.data.stopy.unwrap_or(0.0));
         }
     }
 
@@ -656,7 +675,13 @@ impl<'a> LayoutState<'a> {
             // upstream: c4ShapeTypeConf.fontSize = c4ShapeTypeConf.fontSize - 2;
             // measured text is `'«' + kind + '»'`
             let type_meas_text = format!("\u{ab}{}\u{bb}", kind);
-            let type_w = round_w(fm_text_width(&type_meas_text, &cf_fam, cf_sz - 2.0, false, false));
+            let type_w = round_w(fm_text_width(
+                &type_meas_text,
+                &cf_fam,
+                cf_sz - 2.0,
+                false,
+                false,
+            ));
             let type_h = (cf_sz - 2.0) + 2.0; // upstream: c4ShapeTypeConf.fontSize + 2
 
             let mut type_c4 = TextBlock::default();
@@ -671,8 +696,8 @@ impl<'a> LayoutState<'a> {
             let mut image_y = 0.0;
             let mut image_w = 0.0;
             let mut image_h = 0.0;
-            let needs_image = matches!(kind.as_str(), "person" | "external_person")
-                || s.sprite.is_some();
+            let needs_image =
+                matches!(kind.as_str(), "person" | "external_person") || s.sprite.is_some();
             if needs_image {
                 image_w = 48.0;
                 image_h = 48.0;
@@ -696,8 +721,11 @@ impl<'a> LayoutState<'a> {
             yy = label.y_offset + label.height;
 
             // ── Type [type]
-            let mut typ = TextBlock::default();
-            let has_type = !s.descr.text.is_empty() || (kind.starts_with("container") || kind.starts_with("component") || kind.contains("container") || kind.contains("component"));
+            let has_type = !s.descr.text.is_empty()
+                || (kind.starts_with("container")
+                    || kind.starts_with("component")
+                    || kind.contains("container")
+                    || kind.contains("component"));
             // Upstream: prefers c4Shape.type if set, else techn; for our parser
             // Person/System fill `descr` only; Container/Component fill `techn`
             // and `descr`. The DOM emits type before descr only when techn is
@@ -769,7 +797,10 @@ impl<'a> LayoutState<'a> {
                 .border_color
                 .clone()
                 .unwrap_or_else(|| default_border_color(&kind).to_string());
-            let font_color = s.font_color.clone().unwrap_or_else(|| "#FFFFFF".to_string());
+            let font_color = s
+                .font_color
+                .clone()
+                .unwrap_or_else(|| "#FFFFFF".to_string());
 
             let laid = LaidShape {
                 idx: s_idx,
@@ -882,7 +913,6 @@ pub(crate) fn split_line_breaks(text: &str) -> Vec<String> {
     out
 }
 
-
 // Width round mirrors Math.round used in calculateTextDimensions.
 // JS `Math.round` rounds half toward +∞: 0.5 → 1, -0.5 → 0.
 fn round_w(w: f64) -> f64 {
@@ -994,7 +1024,7 @@ impl C4Conf {
     fn shape_font_size(&self, _kind: &str) -> f64 {
         self.default_font_size
     }
-    fn boundaryFontFamily(&self) -> String {
+    fn boundary_font_family(&self) -> String {
         self.boundary_font_family.clone()
     }
 }

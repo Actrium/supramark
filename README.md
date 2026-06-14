@@ -10,18 +10,18 @@
 
 - 把常见的 Markdown 扩展（GFM、数学公式、Mermaid 等）整合成统一的「解析 + 渲染」能力；
 - 在宿主 App 中以内置插件的方式提供能力，小程序 / 会话只通过配置声明需要的 feature；
-- 对于 Mermaid / PlantUML / Vega 等重依赖浏览器环境的图表，使用「单 WebView 后台渲染 + 前台 SVG/图片展示」的模式，避免到处堆 WebView。
+- 图表统一走 `@supramark/engines`，输出 SVG 字符串后交给 Web / RN renderer 展示。
 
 ## 项目结构
 
 - `packages/core` （npm: `@supramark/core`）  
-  - 定义 supramark 的 AST、插件接口与基础解析管线；  
-  - 设计上与 remark 的 mdast 结构尽量对齐，用于在 Node/Web 侧集成 unified/remark 生态；  
-  - 同时提供一个面向 RN 的 markdown-it 解析实现，作为在 React Native 环境下的默认实现（无需额外 bundler hack）。
+  - 定义 supramark 的 AST v2、插件接口与解析 facade；  
+  - 通过 Rust `supramark-markdown` canonical parser 输出带 source map 的 AST v2；  
+  - 公开入口收敛为 `parse(source) -> AST v2`，Web/Node/RN 渲染层只消费同一份 AST 合同。
 - `packages/rn` （npm: `@supramark/rn`）  
   - React Native 渲染层：把 supramark AST 映射为 RN 组件树，内置对基础 Markdown / Math / 脚注 / 定义列表 / Admonition / Emoji / 各类 diagram 等的默认渲染。  
-- `packages/rn-diagram-worker` （npm: `@supramark/rn-diagram-worker`）  
-  - 使用单个隐藏 WebView 的图表渲染服务（headless WebView worker），统一为 Mermaid / PlantUML / Vega 等提供渲染能力，并以 Promise 形式返回 SVG/PNG 结果。
+- `packages/engines` （npm: `@supramark/engines`）  
+  - 图表与公式渲染的统一出口：Web / RN 均消费 `render({ engine, code }) -> SVG | error`。
 
 其它目录：
 
@@ -51,12 +51,12 @@ npm run docs:build
 
 更多设计说明和各插件介绍见 `docs/` 目录。
 
-## Headless WebView 图表渲染方案（概要）
+## SVG 图表渲染方案（概要）
 
-- 宿主 App 内由 `@supramark/rn-diagram-worker` 自行创建并管理一个隐藏的 WebView，作为「图表渲染引擎」（worker）。  
-- RN 端通过 `DiagramRenderProvider` + `useDiagramRender()` 提供 `render({ engine, code }) => Promise<{ format, payload }>` 的服务；  
-- WebView 内统一接收请求（`engine` + `code`），调用各自的 JS 库（Mermaid / Vega 等）生成 **SVG 为主** 的渲染结果（必要时可降级为 PNG），再通过 `postMessage` 回传；  
-- 前台 supramark-RN 组件只负责展示结果（例如用 `react-native-svg` 渲染 SVG，或 `<Image />` 展示 base64 PNG），完全不关心 WebView 细节和具体图表引擎。
+- `@supramark/engines` 是唯一图表/公式渲染出口，接口为 `render({ engine, code }) => Promise<{ format: 'svg' | 'error', payload }>`；
+- Web / RN renderer 统一只消费 SVG；
+- wasm、native FFI、JS SVG-string engine 都是 `@supramark/engines` 内部 adapter 细节；
+- 前台 renderer 只负责展示 SVG（RN 使用 `react-native-svg`），不持有具体图表库。
 
 当前仓库只包含基础骨架与接口草案，具体渲染实现和示例将在后续迭代。
 > 说明：当前仓库已包含核心解析 / 渲染管线，以及 RN / Web 示例应用，  
@@ -101,10 +101,10 @@ const result = validateFeature(myFeature, { production: true });
 
 短期（0.1.x）：
 
-- [x] 在 `@supramark/core` 中接入 Markdown 解析引擎（Node/Web 侧预留 unified/remark 管线，RN 侧提供 markdown-it 实现），并打通插件机制；
+- [x] 在 `@supramark/core` 中接入 Rust `supramark-markdown` AST v2 解析引擎，并打通解析 facade 与插件后处理机制；
 - [x] 在 AST 中正式建模 diagram 节点（Mermaid / PlantUML / Vega 等），并提供解析与占位渲染示例；
 - [x] 在 `@supramark/rn` 中实现基础的 markdown 渲染（段落、标题、列表、代码块等）；
-- [x] 在 `@supramark/rn-diagram-worker` 中接入 Mermaid 的实际渲染逻辑（通过单 WebView worker 返回 SVG 字符串），为未来更多图表引擎预留扩展点；
+- [x] 在 `@supramark/engines` 中统一 diagram 渲染出口，Web / RN 均返回 SVG 字符串；
 - [x] 创建一个 React Native 演示程序（examples/react-native，实际可运行的 native App），接入 supramark 的当前能力，用「目录 + 示例详情」的方式演示多种语法与插件；
 - [x] 在 `docs/` 中为 RN 示例工程单独写一篇使用说明（`docs/examples/native-demo.md`，说明如何运行、如何切换不同插件示例）；
 - [x] 为 React Native 和 React Web 示例创建使用说明文档（`docs/examples/native-demo.md` 和 `docs/examples/react-web-demo.md`）；
@@ -113,12 +113,12 @@ const result = validateFeature(myFeature, { production: true });
 
 中期：
 
-- [x] 支持更多图表引擎（Mermaid / PlantUML / Vega‑Lite / ECharts；DOT / Graphviz 目前为占位解析），并通过配置决定是否启用；
-- [x] 支持 LaTeX 数学公式（行内 `$...$` / 块级 `$$...$$`），集成 KaTeX（Web）与 MathJax（RN headless WebView）实现 SVG 渲染；
+- [x] 支持更多图表引擎（Mermaid / PlantUML / D2 / DOT / Graphviz / Vega‑Lite / ECharts），并通过配置决定是否启用；
+- [x] 支持 LaTeX 数学公式（行内 `$...$` / 块级 `$$...$$`），通过统一 SVG 渲染结果在 Web / RN 展示；
 - [x] 支持脚注语法（`[^1]`），在 AST 中建模脚注及回引结构，并在 RN / Web 中提供默认渲染；
 - [x] 支持定义列表（术语解释），在 AST 中增加 definition-list 相关节点，并在示例中展示用法；
 - [x] 支持提示 / 注意 / 警告等容器块（admonition/callout），统一语法并在 RN / Web 中给出默认样式；
-- [x] 支持 Emoji / 短代码（如 `:smile:` / `:rocket:`），通过 markdown-it-emoji 在 `text.value` 中直接生成 Unicode；
+- [x] 支持 Emoji / 短代码（如 `:smile:` / `:rocket:`），由 AST v2 parser 在 `text.value` 中直接生成 Unicode；
 - [ ] 设计「平台 + 小程序」的 feature 注册表、权限控制与配置格式；
 - [ ] 提供一套推荐的 supramark 插件预设（文档型、数据可视化型等）。
 - [x] 在 Node/Web 侧提供 React Web 示例（`examples/react-web` / `examples/react-web-csr`），演示在 React 应用中直接使用 `<Supramark />` 组件渲染 Markdown。

@@ -85,14 +85,7 @@ impl Metrics for D2HostMetrics {
     /// `Metrics` contract we treat embedded `\n` as a request to
     /// measure the longest line (width) + the first-line height
     /// (ascent / descent).
-    fn measure(
-        &self,
-        text: &str,
-        family: &str,
-        size: f64,
-        bold: bool,
-        italic: bool,
-    ) -> Measured {
+    fn measure(&self, text: &str, family: &str, size: f64, bold: bool, italic: bool) -> Measured {
         if !text.contains('\n') {
             return self.inner.measure(text, family, size, bold, italic);
         }

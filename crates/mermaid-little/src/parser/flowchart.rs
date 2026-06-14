@@ -2026,9 +2026,18 @@ fn parse_one_vertex(
     };
 
     let consumed = s.len() - remainder.len();
-    Some((id, shape, label, class_suffix, consumed, had_shape_data, shape_data_val))
+    Some((
+        id,
+        shape,
+        label,
+        class_suffix,
+        consumed,
+        had_shape_data,
+        shape_data_val,
+    ))
 }
 
+#[allow(dead_code)]
 fn take_until<'a>(s: &'a str, tok: &str) -> Option<(&'a str, &'a str)> {
     let end = s.find(tok)?;
     Some((&s[..end], &s[end + tok.len()..]))

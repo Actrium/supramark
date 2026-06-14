@@ -669,12 +669,12 @@ export function App() {
 
 ### 3. 实现渲染逻辑
 
-在 `diagram-worker` 中添加 Vega-Lite 渲染支持：
+在 `@supramark/engines` 中添加 Vega-Lite 渲染支持：
 
 ```typescript
-// packages/rn-diagram-worker/src/engines/vega-lite.ts
+// packages/engines/src/vega-lite/index.ts
 export async function renderVegaLite(spec: string): Promise<string> {
-  // 使用 Vega-Lite 库渲染
+  // 使用 Vega-Lite 库输出 SVG
   const view = new vega.View(vega.parse(vegaLite.compile(JSON.parse(spec)).spec));
   return await view.toSVG();
 }

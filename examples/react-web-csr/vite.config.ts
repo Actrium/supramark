@@ -40,6 +40,7 @@ export default defineConfig({
     alias: {
       'react-native': resolve(__dirname, 'src/__mocks__/react-native.ts'),
       '@react-native': resolve(__dirname, 'src/__mocks__/react-native.ts'),
+      'node:module': resolve(__dirname, 'src/__mocks__/node-module.ts'),
     },
     // `browser` must come before `module`/`main` so packages like node-fetch
     // (pulled in by vega-loader) resolve to their browser entry instead of
@@ -72,5 +73,8 @@ export default defineConfig({
       // resolved as a relative module import. Prebundling would strip it.
       '@kookyleo/d2-little-web',
     ],
+  },
+  build: {
+    chunkSizeWarningLimit: 3500,
   },
 });

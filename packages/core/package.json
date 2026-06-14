@@ -17,25 +17,18 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "tsc -p tsconfig.json --emitDeclarationOnly",
-    "test": "bun test",
+    "test": "bun run --cwd ../../crates/supramark-markdown/packages/web build && bun test",
     "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage",
+    "test:coverage": "bun run --cwd ../../crates/supramark-markdown/packages/web build && bun test --coverage",
     "docs": "typedoc",
     "docs:watch": "typedoc --watch"
   },
   "dependencies": {
-    "katex": "^0.16.9",
-    "markdown-it": "^14.0.0",
-    "markdown-it-container": "^4.0.0",
-    "markdown-it-deflist": "^3.0.0",
-    "markdown-it-emoji": "^3.0.0",
-    "markdown-it-footnote": "^4.0.0",
-    "markdown-it-texmath": "^1.0.0"
+    "@supramark/markdown-web": "workspace:*",
+    "katex": "^0.16.9"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
-    "@types/markdown-it": "^14.1.2",
-    "@types/markdown-it-emoji": "^2.0.4",
     "jest-environment-jsdom": "^30.2.0",
     "typedoc": "^0.28.15",
     "typescript": "^5.5.0"

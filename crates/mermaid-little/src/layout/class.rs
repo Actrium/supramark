@@ -669,6 +669,7 @@ fn md_emphasis_render(s: &str, as_html: bool) -> String {
     fn is_ws_or_start(c: Option<char>) -> bool {
         matches!(c, None | Some(' ') | Some('\t') | Some('\n') | Some('\r'))
     }
+    #[allow(dead_code)]
     fn is_ws_or_punct(c: Option<char>) -> bool {
         c.map(|ch| ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || is_punct(ch))
             .unwrap_or(true)
@@ -924,6 +925,7 @@ fn end_marker_name(end: RelationEnd) -> String {
 /// Crude multi-line measurement helper — counts lines, picks the
 /// longest, and hands back (width, height). Kept in a standalone fn so
 /// note-node sizing stays consistent with the upstream approach.
+#[allow(dead_code)]
 fn measure_multiline(text: &str, font: f64) -> (f64, f64) {
     let family = "trebuchet ms,verdana,arial,sans-serif";
     let lines: Vec<&str> = text.split('\n').collect();

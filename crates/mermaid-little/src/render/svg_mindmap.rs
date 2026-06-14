@@ -21,9 +21,7 @@ pub fn render(
     id: &str,
 ) -> Result<String> {
     if d.nodes.is_empty() {
-        return Err(MermaidError::Unsupported(
-            "mindmap: empty diagram".into(),
-        ));
+        return Err(MermaidError::Unsupported("mindmap: empty diagram".into()));
     }
     if d.nodes.len() == 1 {
         return match d.nodes[0].node_type {
@@ -285,7 +283,7 @@ fn render_multi(
 /// line starts with 4+ spaces), `markdownToHTML` falls through to
 /// `node.raw` so the span content is the raw text without `<p>`. For
 /// regular single-line text the span wraps `<p>{descr}</p>`.
-fn emit_label(out: &mut String, src: &MindmapNode, kind: ShapeKind, bbox_w: f64, bbox_h: f64) {
+fn emit_label(out: &mut String, src: &MindmapNode, _kind: ShapeKind, bbox_w: f64, bbox_h: f64) {
     let bkg = if src.icon.is_some() {
         r#" class="labelBkg""#
     } else {
@@ -586,8 +584,14 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         id = id,
         g0 = git0,
     ));
-    s.push_str(&format!("#{id} .section-root text{{fill:{l};}}", l = git_branch_label0));
-    s.push_str(&format!("#{id} .section-root span{{color:{c};}}", c = span_color));
+    s.push_str(&format!(
+        "#{id} .section-root text{{fill:{l};}}",
+        l = git_branch_label0
+    ));
+    s.push_str(&format!(
+        "#{id} .section-root span{{color:{c};}}",
+        c = span_color
+    ));
 
     s.push_str(&format!(
         "#{id} .icon-container{{height:100%;display:flex;justify-content:center;align-items:center;}}"
@@ -601,7 +605,8 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         .drop_shadow
         .as_deref()
         .unwrap_or("drop-shadow(1px 2px 2px rgba(185, 185, 185, 1))");
-    let scoped_drop_shadow = drop_shadow.replace("url(#drop-shadow)", &format!("url({id}-drop-shadow)"));
+    let scoped_drop_shadow =
+        drop_shadow.replace("url(#drop-shadow)", &format!("url({id}-drop-shadow)"));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].mindmap-node{{filter:{ds};}}",
         ds = scoped_drop_shadow,
@@ -616,7 +621,11 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         f = neo_root_fill,
     ));
     let neo_root_label = if theme_str.contains("redux") {
-        theme.node_border.as_deref().unwrap_or("#9370DB").to_string()
+        theme
+            .node_border
+            .as_deref()
+            .unwrap_or("#9370DB")
+            .to_string()
     } else {
         c_scale_label(theme, if theme_str == "neutral" { 1 } else { 0 })
     };
@@ -626,7 +635,10 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     ));
 
     let node_border = theme.node_border.as_deref().unwrap_or("#9370DB");
-    s.push_str(&format!("#{id} .node .neo-node{{stroke:{nb};}}", nb = node_border));
+    s.push_str(&format!(
+        "#{id} .node .neo-node{{stroke:{nb};}}",
+        nb = node_border
+    ));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].node rect,#{id} [data-look=\"neo\"].cluster rect,#{id} [data-look=\"neo\"].node polygon{{stroke:{nb};filter:{ds};}}",
         nb = node_border, ds = scoped_drop_shadow,
@@ -645,18 +657,21 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     ));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].node circle{{stroke:{nb};filter:{ds};}}",
-        nb = node_border, ds = scoped_drop_shadow,
+        nb = node_border,
+        ds = scoped_drop_shadow,
     ));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].node circle .state-start{{fill:#000000;}}"
     ));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].icon-shape .icon{{fill:{nb};filter:{ds};}}",
-        nb = node_border, ds = scoped_drop_shadow,
+        nb = node_border,
+        ds = scoped_drop_shadow,
     ));
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].icon-shape .icon-neo path{{stroke:{nb};filter:{ds};}}",
-        nb = node_border, ds = scoped_drop_shadow,
+        nb = node_border,
+        ds = scoped_drop_shadow,
     ));
     s.push_str(&format!(
         "#{id} :root{{--mermaid-font-family:{ff};}}",
@@ -702,9 +717,7 @@ fn write_section_block(
         "#{id} .section-edge-{sec}{{stroke:{c};}}",
         c = scale,
     ));
-    s.push_str(&format!(
-        "#{id} .edge-depth-{sec}{{stroke-width:{sw};}}",
-    ));
+    s.push_str(&format!("#{id} .edge-depth-{sec}{{stroke-width:{sw};}}",));
     s.push_str(&format!(
         "#{id} .section-{sec} line{{stroke:{li};stroke-width:3;}}",
         li = scale_inv,
@@ -720,7 +733,11 @@ fn write_section_block(
         scale.clone()
     };
     let neo_stroke = if matches!(theme_str, "redux" | "redux-dark") {
-        theme.node_border.as_deref().unwrap_or("#9370DB").to_string()
+        theme
+            .node_border
+            .as_deref()
+            .unwrap_or("#9370DB")
+            .to_string()
     } else {
         scale.clone()
     };
@@ -729,7 +746,11 @@ fn write_section_block(
         f = neo_fill, st = neo_stroke, sw = stroke_width,
     ));
     let neo_edge = if theme_str.contains("redux") || theme_str == "neo-dark" {
-        theme.node_border.as_deref().unwrap_or("#9370DB").to_string()
+        theme
+            .node_border
+            .as_deref()
+            .unwrap_or("#9370DB")
+            .to_string()
     } else {
         scale.clone()
     };
@@ -738,9 +759,20 @@ fn write_section_block(
         e = neo_edge,
     ));
     let neo_text = if matches!(theme_str, "redux" | "redux-dark") {
-        theme.node_border.as_deref().unwrap_or("#9370DB").to_string()
+        theme
+            .node_border
+            .as_deref()
+            .unwrap_or("#9370DB")
+            .to_string()
     } else {
-        c_scale_label(theme, if theme_str == "neutral" { 1 } else { i as usize })
+        c_scale_label(
+            theme,
+            if theme_str == "neutral" {
+                1
+            } else {
+                i as usize
+            },
+        )
     };
     s.push_str(&format!(
         "#{id} [data-look=\"neo\"].mindmap-node.section-{sec} text{{fill:{t};}}",
@@ -904,8 +936,7 @@ fn encode_data_points(ep: EdgePoints) -> String {
 
 /// Standard base64 encode (the alphabet `btoa` uses) WITH `=` padding.
 fn base64_encode(input: &[u8]) -> String {
-    const CHARS: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
     let mut i = 0;
     while i + 3 <= input.len() {

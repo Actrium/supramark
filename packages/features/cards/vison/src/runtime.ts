@@ -42,7 +42,9 @@ registerContainerHook({
     const node: SupramarkContainerNode = {
       type: 'container',
       name: 'vison',
-      data: data as Record<string, unknown>,
+      mode: 'opaque',
+      value: source,
+      data,
       children: [],
     };
     const parent = ctx.stack[ctx.stack.length - 1];

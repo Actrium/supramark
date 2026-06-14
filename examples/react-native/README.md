@@ -10,7 +10,7 @@
 - 代码块（多行代码展示）；
 - 数学公式（Math / LaTeX）；
 - 脚注、定义列表、Admonition、Emoji 等；
-- 图表示例：使用 ` ```mermaid` / ` ```plantuml` / ` ```vega-lite` / ` ```echarts` 等代码块生成 `diagram` 节点；其中 Mermaid 在 RN 端本地渲染为 SVG，其他图表仍走 headless WebView 管线。
+- 图表示例：使用 ` ```mermaid` / ` ```plantuml` / ` ```vega-lite` / ` ```echarts` 等代码块生成 `diagram` 节点；ECharts 与 Vega-Lite 走 JS SVG-string engine，Mermaid / PlantUML / D2 走 native FFI adapter，最终都交给 `react-native-svg` 显示。
 
 选择左侧的某一项，可以在右侧看到：
 

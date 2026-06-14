@@ -34,7 +34,7 @@
 //! the SVG geometry is computed against the embedded DejaVu metrics
 //! regardless of the host's installed callback.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char};
 use std::os::raw::c_int;
 use std::ptr;
 use std::slice;
@@ -269,9 +269,7 @@ mod tests {
     fn render_null_input() {
         let mut out_buf: *mut c_char = ptr::null_mut();
         let mut out_len: usize = 0;
-        let rc = unsafe {
-            supramark_d2_render(ptr::null(), 0, &mut out_buf, &mut out_len)
-        };
+        let rc = unsafe { supramark_d2_render(ptr::null(), 0, &mut out_buf, &mut out_len) };
         assert_eq!(rc, SUPRAMARK_D2_ERR_NULL_INPUT);
         assert!(out_buf.is_null());
         assert_eq!(out_len, 0);
@@ -281,9 +279,7 @@ mod tests {
     #[test]
     fn render_null_outparams() {
         let src = CString::new("a").unwrap();
-        let rc = unsafe {
-            supramark_d2_render(src.as_ptr(), 0, ptr::null_mut(), ptr::null_mut())
-        };
+        let rc = unsafe { supramark_d2_render(src.as_ptr(), 0, ptr::null_mut(), ptr::null_mut()) };
         assert_eq!(rc, SUPRAMARK_D2_ERR_NULL_INPUT);
     }
 

@@ -177,7 +177,7 @@ describe('createLazyWasmRenderer', () => {
 
 describe('createServerWasmRenderer', () => {
   it('creates a renderer', () => {
-    const renderer = createServerWasmRenderer();
+    const renderer = createServerWasmRenderer({ eager: false });
     expect(renderer).toBeDefined();
   });
 

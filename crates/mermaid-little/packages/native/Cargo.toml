@@ -47,14 +47,3 @@ mermaid-little = { path = "../..", default-features = false, features = ["metric
 # rename of this crate) would not agree with what the native lib
 # advertises to the host.
 font-metrics = { path = "../../../font-metrics", features = ["metrics-ffi-callback"], package = "font-metrics" }
-
-[profile.release]
-# Inherit the parent crate's opt-for-size release profile. `panic =
-# "abort"` is important here — unwinding across the C ABI boundary
-# is undefined behaviour, so any panic must terminate the process
-# rather than unwind into the host's stack frames.
-opt-level = "z"
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"

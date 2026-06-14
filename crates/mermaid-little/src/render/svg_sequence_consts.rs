@@ -40,10 +40,7 @@ pub fn build_style(id: &str, theme: &ThemeVariables) -> String {
     let signal_color = theme.signal_color.as_deref().unwrap_or("#333");
     let signal_text = theme.signal_text_color.as_deref().unwrap_or("#333");
     let seq_number = theme.sequence_number_color.as_deref().unwrap_or("white");
-    let label_box_border = theme
-        .label_box_border_color
-        .as_deref()
-        .unwrap_or("#9370DB");
+    let label_box_border = theme.label_box_border_color.as_deref().unwrap_or("#9370DB");
     let label_box_bkg = theme.label_box_bkg_color.as_deref().unwrap_or("#ECECFF");
     let label_text = theme.label_text_color.as_deref().unwrap_or("black");
     let loop_text = theme.loop_text_color.as_deref().unwrap_or("black");
@@ -98,14 +95,22 @@ pub fn build_style(id: &str, theme: &ThemeVariables) -> String {
         id = id,
         c = error_text,
     ));
-    s.push_str(&format!("#{id} .edge-thickness-normal{{stroke-width:1px;}}"));
-    s.push_str(&format!("#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-normal{{stroke-width:1px;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-thickness-thick{{stroke-width:3.5px;}}"
+    ));
     s.push_str(&format!("#{id} .edge-pattern-solid{{stroke-dasharray:0;}}"));
     s.push_str(&format!(
         "#{id} .edge-thickness-invisible{{stroke-width:0;fill:none;}}"
     ));
-    s.push_str(&format!("#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"));
-    s.push_str(&format!("#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dashed{{stroke-dasharray:3;}}"
+    ));
+    s.push_str(&format!(
+        "#{id} .edge-pattern-dotted{{stroke-dasharray:2;}}"
+    ));
     s.push_str(&format!(
         "#{id} .marker{{fill:{c};stroke:{c};}}",
         id = id,

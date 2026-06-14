@@ -1379,6 +1379,7 @@ fn days_in_month(y: i32, m: u32) -> u32 {
     }
 }
 
+#[allow(dead_code)]
 fn ticks_from(times: Vec<f64>, axis_format: &str) -> Vec<f64> {
     // Helper kept for symmetry — actual conversion happens in
     // `generate_ticks` after the match. We just return times here.

@@ -151,7 +151,12 @@ impl<'a> TtfParserMetrics<'a> {
     }
 
     fn pick_face(&self, family: &str, bold: bool, italic: bool) -> &Face<'a> {
-        let primary = family.split(',').next().unwrap_or(family).trim().to_lowercase();
+        let primary = family
+            .split(',')
+            .next()
+            .unwrap_or(family)
+            .trim()
+            .to_lowercase();
         let is_mono = primary == "monospaced" || primary == "monospace" || primary == "courier";
         match (is_mono, bold, italic) {
             (true, true, true) => self
@@ -274,7 +279,10 @@ impl<'a> Metrics for TtfParserMetrics<'a> {
         let asc = face.ascender() as f64 / upem * size;
         let desc = face.descender().unsigned_abs() as f64 / upem * size;
         let fallback = self.missing_glyph_fallback;
-        let width: f64 = text.chars().map(|c| char_advance(face, c, size, fallback)).sum();
+        let width: f64 = text
+            .chars()
+            .map(|c| char_advance(face, c, size, fallback))
+            .sum();
         Measured {
             width,
             ascent: asc,
@@ -288,7 +296,9 @@ impl<'a> Metrics for TtfParserMetrics<'a> {
     /// lose that distinction.
     fn typo_ascent(&self, family: &str, size: f64, bold: bool, italic: bool) -> f64 {
         let face = self.pick_face(family, bold, italic);
-        let typo = face.typographic_ascender().unwrap_or_else(|| face.ascender());
+        let typo = face
+            .typographic_ascender()
+            .unwrap_or_else(|| face.ascender());
         typo as f64 / face.units_per_em() as f64 * size
     }
 }
@@ -350,7 +360,8 @@ mod tests {
             assert!(
                 (w - space).abs() > 0.001,
                 "char '{}' should have a real glyph width, got space-fallback {}",
-                ch, w,
+                ch,
+                w,
             );
         }
     }
@@ -378,5 +389,4 @@ mod tests {
             "italic sans face should have non-zero italic angle, got {italic_angle}",
         );
     }
-
 }

@@ -1609,7 +1609,7 @@ mod tests {
         ];
         for (text, exp_w) in &labels {
             let (wp, hp) = measure_html_label(text, &font_plain, f64::INFINITY, false);
-            let (wb, hb) = measure_html_label(text, &font_bold, f64::INFINITY, false);
+            let (wb, _hb) = measure_html_label(text, &font_bold, f64::INFINITY, false);
             eprintln!(
                 "label={:50} plain={:20} bold={:20} h={:10} exp={}",
                 text, wp, wb, hp, exp_w

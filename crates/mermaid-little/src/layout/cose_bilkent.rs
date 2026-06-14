@@ -453,15 +453,14 @@ impl IGeometry {
         }
 
         // Slope of the line through both centres.
-        let slope = if rect_b.center_x() == rect_a.center_x()
-            && rect_b.center_y() == rect_a.center_y()
-        {
-            // 45-degree fallback when centres coincide.
-            1.0
-        } else {
-            ((rect_b.center_y() - rect_a.center_y()) / (rect_b.center_x() - rect_a.center_x()))
-                .abs()
-        };
+        let slope =
+            if rect_b.center_x() == rect_a.center_x() && rect_b.center_y() == rect_a.center_y() {
+                // 45-degree fallback when centres coincide.
+                1.0
+            } else {
+                ((rect_b.center_y() - rect_a.center_y()) / (rect_b.center_x() - rect_a.center_x()))
+                    .abs()
+            };
 
         let mut move_by_y = slope * overlap_x;
         let mut move_by_x = overlap_y / slope;
@@ -507,10 +506,7 @@ impl IGeometry {
     /// rectangles to compute the force vector along the boundary
     /// normal (vs. the centre-distance approximation in the current
     /// `simulation_step`).
-    pub fn get_intersection2(
-        rect_a: &RectangleD,
-        rect_b: &RectangleD,
-    ) -> (PointD, PointD, bool) {
+    pub fn get_intersection2(rect_a: &RectangleD, rect_b: &RectangleD) -> (PointD, PointD, bool) {
         let p1x = rect_a.center_x();
         let p1y = rect_a.center_y();
         let p2x = rect_b.center_x();

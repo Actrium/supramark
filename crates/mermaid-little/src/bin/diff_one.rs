@@ -55,7 +55,13 @@ fn main() {
                         let lo = idx.saturating_sub(80);
                         let hi_g = (idx + 200).min(got.len());
                         let hi_e = (idx + 200).min(expected.len());
-                        println!("FAIL {} byte {} (got_len={} exp_len={})", rel, idx, got.len(), expected.len());
+                        println!(
+                            "FAIL {} byte {} (got_len={} exp_len={})",
+                            rel,
+                            idx,
+                            got.len(),
+                            expected.len()
+                        );
                         println!(" GOT: ...{}...", &got[lo..hi_g]);
                         println!(" EXP: ...{}...", &expected[lo..hi_e]);
                     }

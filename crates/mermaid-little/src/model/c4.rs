@@ -125,8 +125,12 @@ impl Default for C4Diagram {
             meta: DiagramMeta::default(),
             boundaries: vec![C4Boundary {
                 alias: "global".into(),
-                label: C4Text { text: "global".into() },
-                b_type: C4Text { text: "global".into() },
+                label: C4Text {
+                    text: "global".into(),
+                },
+                b_type: C4Text {
+                    text: "global".into(),
+                },
                 descr: C4Text::default(),
                 tags: None,
                 link: None,

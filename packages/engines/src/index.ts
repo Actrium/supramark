@@ -3,12 +3,12 @@
 
 // ── 类型 ────────────────────────────────────────────────
 export type {
-  // v0.2 统一类型
+  // Engine v2 types
   RenderOptions,
   RenderFn,
   EngineFactory,
   ErrorCode,
-  // legacy（phase 5 前 @supramark/web 仍在用）
+  // Diagram service facade
   DiagramEngineType,
   DiagramRenderFormat,
   DiagramErrorInfo,
@@ -24,7 +24,7 @@ export type {
 
 export { DiagramRenderError } from './types.js';
 
-// ── Legacy runtime（phase 5 迁完后会整批删除） ───────────
+// ── Diagram runtime facade ───────────────────────────────
 export { createDiagramEngine } from './engine.js';
 export {
   GRAPHVIZ_LAYOUT_ENGINES,

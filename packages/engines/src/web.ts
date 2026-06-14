@@ -1,14 +1,13 @@
-import echartsFactory from './echarts';
 import { createDiagramEngine } from './engine';
 import { GRAPHVIZ_LAYOUT_ENGINES, pickGraphvizDiagramOptions } from './graphviz';
 import { installHostMetricsBridge } from './host-bridge.js';
+import { loadEchartsSvgRender, loadVegaLiteSvgRender } from './js-chart-loaders';
 import type {
   DiagramEngineOptions,
   DiagramRenderFn,
   DiagramRenderService,
   GraphvizRenderAdapter,
 } from './types';
-import vegaLiteFactory from './vega-lite';
 
 export interface WebGraphvizAdapterOptions {
   adapter?: GraphvizRenderAdapter;
@@ -32,11 +31,11 @@ export function createWebDiagramEngine(
     },
     echarts: {
       render: options.echarts?.render,
-      loadRender: options.echarts?.loadRender ?? loadWebEchartsRender,
+      loadRender: options.echarts?.loadRender ?? loadEchartsSvgRender,
     },
     vegaLite: {
       render: options.vegaLite?.render,
-      loadRender: options.vegaLite?.loadRender ?? loadWebVegaLiteRender,
+      loadRender: options.vegaLite?.loadRender ?? loadVegaLiteSvgRender,
     },
     plantuml: {
       render: options.plantuml?.render,
@@ -47,39 +46,6 @@ export function createWebDiagramEngine(
       loadRender: options.d2?.loadRender ?? loadWebD2Render,
     },
   });
-}
-
-/**
- * Default web-side lazy loader for the ECharts engine. Requires `echarts`
- * to be installed as a peer dep; dynamic-imports `echarts/core` + common
- * renderers / charts / components and wires them via the engine factory.
- */
-async function loadWebEchartsRender(): Promise<DiagramRenderFn> {
-  const [core, renderers, charts, components] = await Promise.all([
-    import('echarts/core' as string),
-    import('echarts/renderers' as string),
-    import('echarts/charts' as string),
-    import('echarts/components' as string),
-  ]);
-  return echartsFactory([
-    core,
-    renderers.SVGRenderer,
-    charts.LineChart, charts.BarChart, charts.PieChart, charts.ScatterChart,
-    components.GridComponent, components.TooltipComponent,
-    components.TitleComponent, components.LegendComponent,
-  ]) as DiagramRenderFn;
-}
-
-/**
- * Default web-side lazy loader for Vega-Lite. Requires `vega` + `vega-lite`
- * peer deps.
- */
-async function loadWebVegaLiteRender(): Promise<DiagramRenderFn> {
-  const [Vega, VegaLite] = await Promise.all([
-    import('vega' as string),
-    import('vega-lite' as string),
-  ]);
-  return vegaLiteFactory([Vega, VegaLite]) as DiagramRenderFn;
 }
 
 /**
@@ -264,7 +230,7 @@ async function loadWebGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
       return {
         graphvizVersion: graphviz.version(),
         engines: ['dot', 'neato', 'fdp', 'sfdp', 'circo', 'twopi', 'osage', 'patchwork'],
-        formats: ['svg', 'dot', 'json', 'xdot', 'plain'],
+        formats: ['svg'],
       };
     },
   };

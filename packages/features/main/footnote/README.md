@@ -11,7 +11,7 @@
 
 ## 语法
 
-当前脚注语法基于 `markdown-it-footnote`：
+当前脚注语法由 `supramark-markdown` AST v2 parser 解析：
 
 ```markdown
 这里有一个脚注引用[^1]，以及一个内联脚注 ^[内联脚注内容]。
@@ -54,7 +54,7 @@ interface SupramarkFootnoteDefinitionNode {
 ## 开发状态
 
 - [x] AST 定义（在 `@supramark/core` 中完成）
-- [x] 解析器实现（集成 `markdown-it-footnote`）
+- [x] 解析器实现（集成到 `supramark-markdown`）
 - [x] RN 渲染器（基础占位渲染）
 - [x] Web 渲染器（基础占位渲染）
 - [x] Feature 元数据与接口定义

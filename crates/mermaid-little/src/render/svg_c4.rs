@@ -19,7 +19,7 @@
 //! 13. `</svg>`.
 
 use crate::error::MermaidError;
-use crate::layout::c4::{LaidBoundary, LaidElement, LaidRel, LaidShape, TextBlock, layout};
+use crate::layout::c4::{layout, LaidBoundary, LaidElement, LaidRel, LaidShape, TextBlock};
 use crate::math::js_number::js_number_to_string;
 use crate::model::c4::C4Diagram;
 use crate::theme::ThemeVariables;
@@ -103,7 +103,10 @@ pub fn render(
     }
     out.push('>');
     if let Some(d) = diagram.meta.acc_descr.as_ref() {
-        out.push_str(&format!(r#"<desc id="chart-desc-{id}">{}</desc>"#, escape_xml(d)));
+        out.push_str(&format!(
+            r#"<desc id="chart-desc-{id}">{}</desc>"#,
+            escape_xml(d)
+        ));
     }
 
     // ── 2. <style>
@@ -194,8 +197,12 @@ fn write_shape(out: &mut String, sh: &LaidShape) {
                 r#"<rect x="{x}" y="{y}" fill="{bg}" stroke="{stroke}" width="{w}" height="{h}" rx="2.5" ry="2.5" stroke-width="0.5"></rect>"#,
             ));
         }
-        "system_db" | "external_system_db" | "container_db" | "external_container_db"
-        | "component_db" | "external_component_db" => {
+        "system_db"
+        | "external_system_db"
+        | "container_db"
+        | "external_container_db"
+        | "component_db"
+        | "external_component_db" => {
             // Cylinder-style. Matches upstream's path "Mstartx,startyc0,-10 ..."
             let half = format_js_number(sh.width / 2.0);
             let neg_half = format_js_number(-(sh.width / 2.0));
@@ -208,8 +215,12 @@ fn write_shape(out: &mut String, sh: &LaidShape) {
                 r#"<path fill="none" stroke-width="0.5" stroke="{stroke}" d="M{x},{y}c0,10 {half},10 {half},10c0,0 {half},0 {half},-10"></path>"#,
             ));
         }
-        "system_queue" | "external_system_queue" | "container_queue" | "external_container_queue"
-        | "component_queue" | "external_component_queue" => {
+        "system_queue"
+        | "external_system_queue"
+        | "container_queue"
+        | "external_container_queue"
+        | "component_queue"
+        | "external_component_queue" => {
             let half = format_js_number(sh.height / 2.0);
             let neg_half = format_js_number(-(sh.height / 2.0));
             let w_str = format_js_number(sh.width);
@@ -288,7 +299,11 @@ fn write_text_block(
     let cx = format_js_number(sx + sw / 2.0);
     let cy = format_js_number(sy + block.y_offset);
     let weight = if bold { "bold" } else { "normal" };
-    let italic_attr = if italic { r#" font-style="italic""# } else { "" };
+    let italic_attr = if italic {
+        r#" font-style="italic""#
+    } else {
+        ""
+    };
     // byTspan splits the content by `lineBreakRegex = /<br\s*\/?>/gi` and
     // emits a SEPARATE <text> element per line. Each line shares the same
     // x/y but uses a per-line `dy = i*fontSize - fontSize*(n-1)/2`.

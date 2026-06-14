@@ -12,8 +12,8 @@ import { d2Examples } from './examples.js';
  * - Reuses the generic `diagram` AST node.
  * - Matches diagrams with `engine === 'd2'`.
  * - On Web, `@supramark/engines` calls `@kookyleo/d2-little-web`
- *   (Rust → wasm). d2-little ships its own pure-Rust layout engine, so
- *   no Graphviz bridge is needed (unlike plantuml).
+ *   (Rust → wasm). On RN, hosts import the d2-little native package,
+ *   which registers the same SVG contract through `@supramark/engines/rn`.
  *
  * @example
  * ```markdown
@@ -26,7 +26,7 @@ export const d2Feature = defineDiagramFeature({
   id: '@supramark/feature-d2',
   engineId: 'd2',
   name: 'Diagram (D2)',
-  description: 'D2 diagrams rendered to SVG through @supramark/engines + d2-little-web.',
+  description: 'D2 diagrams rendered to SVG through @supramark/engines.',
   tags: ['diagram', 'd2'],
   web: {
     dependencies: [
@@ -57,16 +57,16 @@ export const d2Feature = defineDiagramFeature({
   readme: `
 # Diagram (D2) Feature
 
-AST modelling + Web rendering for D2 diagrams.
+AST modelling + SVG rendering for D2 diagrams.
 
 - Syntax: \`\\\`\\\`d2\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with \`engine = "d2"\`,
   \`code\` carrying the raw D2 source.
-- Rendering: on Web, \`@supramark/engines\` calls
+- Rendering: \`@supramark/engines\` returns SVG. Web uses
   \`@kookyleo/d2-little-web\` (Rust → wasm; ships its own dagre-style
-  layout, no Graphviz bridge required). On RN, d2 is currently
-  **unsupported** — replacement is a d2-little native FFI binding
-  tracked in \`crates/d2-little/UPSTREAM.md\`.
+  layout, no Graphviz bridge required). RN hosts import
+  \`@kookyleo/supramark-d2-native-rn\` at startup, which registers the
+  d2-little native FFI adapter with \`@supramark/engines/rn\`.
   `.trim(),
   bestPractices: [
     'Keep D2 source readable; for complex layouts, use D2 containers `{}` to break the source into modules.',
@@ -76,7 +76,7 @@ AST modelling + Web rendering for D2 diagrams.
     {
       question: 'How is D2 rendered?',
       answer:
-        'On Web, @kookyleo/d2-little-web (Rust → wasm) converts the source to SVG. d2-little ships its own pure-Rust layout engine, so unlike PlantUML there is no need for a Graphviz bridge.',
+        'D2 is rendered through @supramark/engines and always returns SVG. Web uses @kookyleo/d2-little-web; RN hosts import @kookyleo/supramark-d2-native-rn to register the native FFI adapter.',
     },
     {
       question: 'How does D2 differ from mermaid / plantuml?',

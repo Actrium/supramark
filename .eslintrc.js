@@ -53,8 +53,23 @@ module.exports = {
   ignorePatterns: [
     'node_modules/',
     'dist/',
+    '**/dist/**',
+    '**/lib/**',
     'build/',
+    '**/build/**',
+    '**/output/**',
+    'target/',
+    '**/target/**',
     'generated/',
+    '**/generated/**',
+    '*.tsbuildinfo',
+    '**/*.tsbuildinfo',
+
+    // vendored/generated runtime bundles
+    'crates/d2-little/mathjax.js',
+    'crates/d2-little/setup.js',
+    'crates/mermaid-little/src/katex/vendor/**',
+    'crates/mermaid-little/src/cose_bilkent_js/**',
 
     // docs build outputs / caches
     'docs/public/typedoc/',
@@ -70,5 +85,15 @@ module.exports = {
 
     '*.config.js',
     'scripts/',
+  ],
+  overrides: [
+    {
+      files: ['crates/*/packages/react-native/src/**/*.ts'],
+      rules: {
+        // React Native TurboModule fallbacks are intentionally resolved
+        // synchronously to match the generated module contract.
+        '@typescript-eslint/no-var-requires': 'off',
+      },
+    },
   ],
 };

@@ -13,7 +13,7 @@
  * **核心设计原则**：
  * 1. **渐进式实现**：先定义接口，再逐步接入运行时
  * 2. **规范与实现分离**：Feature 描述"应该是什么"，不强制"如何实现"
- * 3. **向后兼容**：现有 parseMarkdown/render 流程优先，Feature 慢慢替换
+ * 3. **向后兼容**：现有 parse/render 流程优先，Feature 慢慢替换
  *
  * **关键限制**：
  * - core 包是**纯 TypeScript 类型定义**，不依赖 React/RN
@@ -41,8 +41,6 @@
 
 import type { SupramarkNode, SupramarkDiagramConfig, SupramarkDiagramEngineId } from './ast';
 import { warnIfUnknownDiagramEngine } from './ast';
-import type MarkdownIt from 'markdown-it';
-import type Token from 'markdown-it/lib/token.mjs';
 
 // ============================================================================
 // 顶层接口：SupramarkFeature
@@ -328,7 +326,7 @@ export interface FeatureMetadata {
  *
  * **解析器（Parser）的定位**：
  * - 在当前阶段（v0.x），parser 主要用于**文档和规范**
- * - 实际解析逻辑可能仍在 `parseMarkdown()` 中硬编码
+ * - 实际解析逻辑可能仍在 `parse()` 中硬编码
  * - 当 Feature 复用现有解析逻辑时（如 diagram 的各种 engine），parser 可以省略
  * - 未来会逐步支持通过 Feature 注册来驱动解析流程
  */
@@ -497,58 +495,25 @@ export interface NodeConstraints {
 // ----------------------------------------------------------------------------
 
 /**
- * 解析规则（支持多种解析器）
+ * 解析规则。
+ *
+ * AST v2 以后，Markdown tokenization 由 Rust `supramark-markdown` 统一负责；
+ * Feature 层只描述自定义后处理或宿主侧扩展语义。
  */
 export interface ParserRules {
   /** 解析器类型 */
-  engine: 'markdown-it' | 'custom';
-
-  /** markdown-it 解析规则 */
-  markdownIt?: MarkdownItRules;
+  engine: 'supramark-markdown' | 'custom';
 
   /** 自定义解析器 */
   custom?: CustomParserRules;
 }
 
 /**
- * markdown-it 解析规则
- */
-export interface MarkdownItRules {
-  /** 使用的 markdown-it 插件 */
-  plugin: MarkdownItPlugin;
-
-  /** 插件配置选项 */
-  options?: Record<string, unknown>;
-
-  /** Token → AST 映射函数 */
-  tokenMapper: TokenMapper;
-}
-
-/**
- * markdown-it 插件接口
- */
-export interface MarkdownItPlugin {
-  /** 插件函数 */
-  (md: MarkdownIt, options?: unknown): void;
-}
-
-/**
- * Token 映射器
- */
-export interface TokenMapper {
-  /** 映射函数 */
-  (token: Token, context: ParserContext): SupramarkNode | null;
-}
-
-/**
  * 解析器上下文
  */
 export interface ParserContext {
-  /** 当前处理的 token 列表 */
-  tokens: Token[];
-
-  /** 当前 token 索引 */
-  index: number;
+  /** 原始 Markdown 源文本 */
+  source: string;
 
   /** 父节点栈 */
   stack: SupramarkNode[];
@@ -648,7 +613,7 @@ export interface ValidationWarning {
  * - 实际的渲染逻辑仍在各平台包中实现（@supramark/rn、@supramark/web）
  *
  * **对于复杂功能（如图表）**：
- * - 可以通过 `infrastructure` 字段声明需要 WebView、Worker、客户端脚本等
+ * - 可以通过 `infrastructure` 字段声明需要 Worker、客户端脚本、native adapter 等
  * - 实际的 Worker/Script 实现仍在各平台包中
  *
  * @example
@@ -813,13 +778,8 @@ export interface InfrastructureRequirements {
   needsWorker?: boolean;
 
   /**
-   * Worker type. Note: 'webview' was removed in the 2026-05 cleanup —
-   * supramark no longer ships a hidden-WebView worker. RN engines that
-   * historically relied on one (mermaid / plantuml / d2 / echarts /
-   * vega-lite) now go through native FFI bindings or are documented as
-   * Web-only. New features should pick 'web-worker' or
-   * 'service-worker' (or omit `workerType` entirely if no worker is
-   * needed).
+   * Worker type. Rendering engines now use Web workers, service workers,
+   * JS SVG-string exporters, or native FFI adapters depending on platform.
    */
   workerType?: 'web-worker' | 'service-worker';
 

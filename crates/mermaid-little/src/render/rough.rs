@@ -1005,7 +1005,11 @@ fn arc_inner(
             r1 *= h;
             r2 *= h;
         }
-        let sign = if large_arc_flag == sweep_flag { -1.0 } else { 1.0 };
+        let sign = if large_arc_flag == sweep_flag {
+            -1.0
+        } else {
+            1.0
+        };
         let r1_pow = r1 * r1;
         let r2_pow = r2 * r2;
         let left = r1_pow * r2_pow - r1_pow * y * y - r2_pow * x * x;
@@ -1487,7 +1491,8 @@ fn ellipse_with_params(
 ) -> EllipseResponse {
     let inner = offset(0.4, 1.0, o, 1.0, rng);
     let scaled = p.increment * offset(0.1, inner, o, 1.0, rng);
-    let (ap1_all, ap1_core) = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.0, scaled, o, rng);
+    let (ap1_all, ap1_core) =
+        compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.0, scaled, o, rng);
     let mut o1 = curve_inner(&ap1_all, None, o);
     if !o.disable_multi_stroke && o.roughness != 0.0 {
         let (ap2_all, _) = compute_ellipse_points(p.increment, x, y, p.rx, p.ry, 1.5, 0.0, o, rng);
@@ -1823,7 +1828,12 @@ pub fn hachure_lines(
     hachure_step_offset: f64,
 ) -> Vec<[[f64; 2]; 2]> {
     let mut polygons_rot: Vec<Vec<[f64; 2]>> = polygons.to_vec();
-    hachure_lines_mut(&mut polygons_rot, hachure_gap, hachure_angle, hachure_step_offset)
+    hachure_lines_mut(
+        &mut polygons_rot,
+        hachure_gap,
+        hachure_angle,
+        hachure_step_offset,
+    )
 }
 
 /// In-place variant of [`hachure_lines`] — mirrors JS's

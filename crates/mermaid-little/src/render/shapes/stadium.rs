@@ -63,20 +63,15 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     // upstream handDrawnShapeStyles.ts: cssCompiledStyles + cssStyles +
     // labelStyle, dedup on key (last wins).
     let css_styles = node.css_styles.as_deref().unwrap_or(&[]);
-    let mut styles_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut styles_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for s in css_styles {
         if let Some((k, v)) = s.split_once(':') {
             styles_map.insert(k.trim().to_string(), v.trim().to_string());
         }
     }
-    let fill = styles_map
-        .get("fill")
-        .cloned()
-        .unwrap_or(main_bkg);
-    let stroke = styles_map
-        .get("stroke")
-        .cloned()
-        .unwrap_or(node_border);
+    let fill = styles_map.get("fill").cloned().unwrap_or(main_bkg);
+    let stroke = styles_map.get("stroke").cloned().unwrap_or(node_border);
     let stroke_width: f64 = styles_map
         .get("stroke-width")
         .map(|s| {

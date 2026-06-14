@@ -544,6 +544,7 @@ struct AxisTheme {
     axis_line_color: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AxisPosition {
     Left,

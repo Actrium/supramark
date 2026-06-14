@@ -46,15 +46,16 @@ export {
 } from './container-feature.js';
 
 /**
- * 默认解析器（使用 markdown-it）
+ * AST v2 parser facade.
  *
- * 跨平台兼容：支持 React Native、Web、Node.js
- * 推荐用于生产环境
- * @param markdown - Markdown 源文本
- * @param options - 解析选项（可选插件）
- * @returns Supramark AST
+ * 内部使用 Rust `supramark-markdown` parser，公开合同为
+ * `source -> SupramarkRootNode`。
+ *
+ * @param source - Markdown 源文本
+ * @param options - 解析选项（可选 AST 后处理插件）
+ * @returns Supramark AST v2
  */
-export { parseMarkdown } from './plugin.js';
+export { parse } from './plugin.js';
 
 /**
  * 预设（Presets）
@@ -80,5 +81,3 @@ export { LRUCache, createCacheKey, simpleHash, type LRUCacheOptions } from './ca
 
 export type { SupramarkNode } from './ast.js';
 export { validateFeature as coreValidateFeature } from './feature.js';
-
-// markdown-it 扩展类型定义（ambient declarations，通过 tsconfig include 自动生效）

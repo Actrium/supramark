@@ -15,16 +15,15 @@ flowchart TB
   end
 
   subgraph tsapp["📘 TS Application"]
-    Core["@supramark/core\nparseMarkdown · AST · SupramarkFeature"]
+    Core["@supramark/core\nparse · AST · SupramarkFeature"]
     Features["@supramark/feature-*\nmermaid · math · plantuml · dot · echarts ..."]
     Web["@supramark/web\nReact Web 渲染"]
     RN["@supramark/rn\nReact Native 渲染"]
   end
 
   subgraph glue["🔌 TS Integration Glue"]
-    DiagEngine["@supramark/diagram-engine\nrender({engine, code}) → SVG | error"]
+    DiagEngine["@supramark/engines\nrender({engine, code}) → SVG | error"]
     HostBridge["@supramark/engines/host-bridge\ninstallHostMetricsBridge()"]
-    Worker["rn-diagram-worker\n(过渡态)"]
   end
 
   subgraph wasm["📦 Wasm Wrappers (npm @kookyleo/*)"]
@@ -96,7 +95,7 @@ flowchart TB
 
   class Canvas,DocFonts,SVGOut,RNHost hostStyle
   class Core,Features,Web,RN tsStyle
-  class DiagEngine,HostBridge,Worker glueStyle
+  class DiagEngine,HostBridge glueStyle
   class PUWeb,MWeb,DWeb,GVWeb wasmStyle
   class PU,Mer,D2,Vison,Dagre rustStyle
   class FM,D2M,GVA foundStyle
@@ -127,9 +126,9 @@ flowchart TB
 
 胶水层（关键架构隔离）：
 
-- **`@supramark/diagram-engine`** — 唯一对外接口 `render({ engine, code }) → Promise<{ format, payload }>`，按 `engine` 字段分发到对应 wasm wrapper
+- **`@supramark/engines`** — 唯一对外接口 `render({ engine, code }) → Promise<{ format, payload }>`，按 `engine` 字段分发到对应 wasm wrapper / native adapter / JS SVG-string engine
 - **`@supramark/engines/host-bridge`** — `installHostMetricsBridge()` 把浏览器 canvas 暴露成 `globalThis.supramark.measureText(family, text, size, bold)`，wasm 端通过这个全局函数调回 host
-- **`rn-diagram-worker`** — 过渡态隐藏 WebView 后台渲染，目标是被 diagram-engine 完全替代
+- **`@supramark/engines/rn`** — RN 图表渲染入口，组合 native FFI adapter 与 JS SVG-string engine
 
 ### 📦 Wasm Wrappers (npm)
 
@@ -161,7 +160,7 @@ flowchart TB
 
 ### ① TS 应用层与 Rust 完全解耦
 
-`@supramark/core` 和 features 都不直接 import 任何 Rust crate；所有图表能力通过 `@supramark/diagram-engine` 抽象出口。这是**被动渲染**模型的核心设计：宿主通过 `<Supramark config={{ features: [...] }} />` 显式注入 feature 数组，core 不维护全局注册表。
+`@supramark/core` 和 features 都不直接 import 任何 Rust crate；所有图表能力通过 `@supramark/engines` 抽象出口。这是**被动渲染**模型的核心设计：宿主通过 `<Supramark config={{ features: [...] }} />` 显式注入 feature 数组，core 不维护全局注册表。
 
 ### ② 字体测量分两路
 

@@ -53,7 +53,7 @@ interface SupramarkMathBlockNode {
 ## 开发状态
 
 - [x] AST 定义（在 `@supramark/core` 中完成）
-- [x] 解析器实现（由 `parseMarkdown()` 集成 `markdown-it-texmath` 完成）
+- [x] 解析器实现（由 `supramark-markdown` AST v2 parser 完成）
 - [x] RN 渲染器（本地 MathJax SVG 管线已实现）
 - [x] Web 渲染器（首版 KaTeX/MathJax 管线已实现）
 - [ ] Feature 级测试用例（当前仅元数据测试）

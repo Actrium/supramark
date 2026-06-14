@@ -190,6 +190,14 @@ function isAllowed(license: string): boolean {
     const operands = stripped.split(/\s+OR\s+/).map(s => s.trim());
     if (operands.some(op => ALLOWED_LICENSES.has(op))) return true;
   }
+  // SPDX `AND` conjunction: the work is bound by ALL operands at once, so it is
+  // acceptable iff EVERY operand is on the allow-list. Covers crates that adapt
+  // code from a differently-licensed upstream, e.g. "Apache-2.0 AND MIT"
+  // (own Apache-2.0 code combined with an adapted MIT parser core).
+  if (/\bAND\b/.test(stripped)) {
+    const operands = stripped.split(/\s+AND\s+/).map(s => s.trim());
+    if (operands.every(op => ALLOWED_LICENSES.has(op))) return true;
+  }
   return false;
 }
 

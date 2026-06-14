@@ -12,7 +12,7 @@ import { makeFeatureConfigHelpers } from '@supramark/core';
  *
  * Emoji / 短代码支持（:smile: → 😄）的规范定义。
  *
- * - 使用 markdown-it-emoji 将 `:smile:` 等短代码转换为 Unicode emoji；
+ * - 由 supramark-markdown AST v2 parser 将 `:smile:` 等短代码转换为 Unicode emoji；
  * - supramark AST 不引入单独的 emoji 节点，直接体现在 `text.value` 中；
  * - 解析和渲染逻辑由 @supramark/core / RN / Web 渲染器负责。
  *
@@ -57,7 +57,7 @@ export const emojiFeature: SupramarkFeature<SupramarkTextNode> = {
           value: {
             type: 'string',
             description:
-              '文本内容，其中的 Emoji 已经由 markdown-it-emoji 从短代码转换为 Unicode 字符。',
+              '文本内容，其中的 Emoji 已经由 AST v2 parser 从短代码转换为 Unicode 字符。',
           },
         },
       },
@@ -74,15 +74,6 @@ export const emojiFeature: SupramarkFeature<SupramarkTextNode> = {
         } as SupramarkTextNode,
       ],
     },
-
-    // 可选：如果需要自定义解析器
-    // parser: {
-    //   engine: 'markdown-it',
-    //   markdownIt: {
-    //     plugin: yourPlugin,
-    //     tokenMapper: (token, context) => { /* ... */ }
-    //   }
-    // },
 
     // 可选：验证规则
     // validator: {
@@ -295,7 +286,7 @@ export const emojiFeature: SupramarkFeature<SupramarkTextNode> = {
               name: 'value',
               type: 'string',
               description:
-                '文本内容，其中的 Emoji 已经由 markdown-it-emoji 从短代码（:smile:）转换为 Unicode 字符（😄）',
+                '文本内容，其中的 Emoji 已经由 AST v2 parser 从短代码（:smile:）转换为 Unicode 字符（😄）',
               required: true,
             },
           ],
@@ -373,7 +364,7 @@ const options = getEmojiFeatureOptions(config);`,
       {
         question: 'Emoji Feature 支持哪些短代码？',
         answer:
-          '支持 GitHub 风格的 emoji 短代码，完整列表可参考 GitHub Emoji API 或 markdown-it-emoji 文档。',
+          '支持 GitHub 风格的 emoji 短代码，完整列表可参考 GitHub Emoji API。',
       },
       {
         question: 'Emoji 在 AST 中如何表示？',

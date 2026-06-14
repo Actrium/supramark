@@ -1731,6 +1731,7 @@ fn hexagon_polygon_local(w: f64, h: f64) -> Vec<(f64, f64)> {
     ]
 }
 
+#[allow(dead_code)]
 fn stadium_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {
     let radius = h / 2.0;
     let mut pts: Vec<(f32, f32)> = Vec::with_capacity(102);
@@ -1773,6 +1774,7 @@ fn diamond_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {
     vec![(cx, cy - hh), (cx + hw, cy), (cx, cy + hh), (cx - hw, cy)]
 }
 
+#[allow(dead_code)]
 fn hexagon_polygon(cx: f64, cy: f64, w: f64, h: f64) -> Vec<(f32, f32)> {
     // Mermaid's hexagon — vertical edges on the left/right, slanted
     // top/bottom corners. Matches upstream `hexagon` shape polygon.

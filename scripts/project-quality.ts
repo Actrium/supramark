@@ -159,7 +159,7 @@ async function main(): Promise<void> {
 
   section('1. TypeScript 编译检查');
 
-  const packages = ['packages/core', 'packages/rn', 'packages/rn-diagram-worker', 'packages/web'];
+  const packages = ['packages/core', 'packages/engines', 'packages/renderers/rn', 'packages/renderers/web'];
 
   const compileResults: Record<string, 'success' | 'failed'> = {};
 

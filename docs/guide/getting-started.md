@@ -46,7 +46,7 @@ import { View } from 'react-native'
 const markdown = `
 # Hello Supramark
 
-原生渲染，无需 WebView！
+原生 SVG 渲染！
 `
 
 function App() {

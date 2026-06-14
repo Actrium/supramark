@@ -52,29 +52,25 @@ bun run quality                   # 运行所有质量检查，CI 也会调用
 
 ### 1. `packages/core` — `@supramark/core`
 
-- **AST**：与 mdast 尽量兼容的 `SupramarkNode`（见 `src/ast.ts`、`docs/architecture/ast-spec.md`）。
-- **双解析器**：
-  - `parseMarkdown` — 基于 `markdown-it`，**跨平台**，RN / Web / Node 均可用（推荐）。
-  - `parseMarkdownWithRemark` — 基于 `unified + remark`，**仅 Node/Web**，体积较大但可接入 remark 生态。
+- **AST v2**：与 mdast 尽量兼容、但以 source map / 协作批注为一等目标的 `SupramarkNode`（见 `src/ast.ts`、`docs/architecture/ast-spec.md`）。
+- **单一解析入口**：`parse(source)` 调用 Rust `supramark-markdown` canonical parser，公开合同固定为 `source -> AST v2`。旧 TS 解析线路已移除；TS 插件只做 AST 后处理。
 - **Feature Interface**：`SupramarkFeature` 把 metadata / syntax / renderers / examples / testing / documentation / prompt 封装为一个**完整产品单元**。参见 `docs/architecture/PLUGIN_SYSTEM.md` 的「7 个核心 Trait」。
 - **语法家族运行时**：`src/syntax/{main,container,fence,input}.ts` 给 feature 提供 `registerContainerHook` / `registerInputHook` 等可扩展点。
 - **Container 扩展**：`container-feature.ts` 是新的精简版统一接口，用于实现 `:::` 型 container。
 
 ### 2. `packages/renderers/` — 渲染层
 
-- `diagram-engine` (`@supramark/diagram-engine`) — **所有图表 / 公式渲染的唯一出口**。统一接口 `render({ engine, code }) => Promise<{ format: 'svg' | 'error', payload }>`。支持 mermaid / dot / vega / vega-lite / echarts / plantuml / mathjax（LaTeX 也走相同路径）。目录 `src/{web,rn}.ts` 是平台入口。
+- `engines` (`@supramark/engines`) — **所有图表 / 公式渲染的唯一出口**。统一接口 `render({ engine, code }) => Promise<{ format: 'svg' | 'error', payload }>`。支持 mermaid / dot / vega / vega-lite / echarts / plantuml / mathjax（LaTeX 也走相同路径）。目录 `src/{web,rn}.ts` 是平台入口。
 - `rn` (`@supramark/rn`) — React Native 渲染层。组件结构：`Supramark.tsx`（入口）、`DiagramNode.tsx`、`MathBlock/Inline.tsx`、`ErrorBoundary.tsx`、`styles.ts`、`svgUtils.ts`。
 - `web` (`@supramark/web`) — React Web 渲染层，多入口（`.`、`./server`、`./client`）。
-- `rn-diagram-worker` — 隐藏 WebView 后台渲染服务（**过渡态**，目标是让 `diagram-engine` 完全替代，见 `docs/architecture/DIAGRAM_ENGINE_TARGET.md`）。
-- `web-diagram` — 仅有 `index.d.ts/index.js`，辅助模块。
 
-**关键架构约束**：renderer 自身**不直接**调用 Mermaid / Vega / ECharts 等图表库；它们只消费 `diagram-engine` 返回的 SVG。修改/新增 diagram 能力时优先在 `diagram-engine` 内完成。
+**关键架构约束**：renderer 自身**不直接**调用 Mermaid / Vega / ECharts 等图表库；它们只消费 `@supramark/engines` 返回的 SVG。修改/新增 diagram 能力时优先在 `packages/engines` 内完成。
 
 ### 3. `packages/features/` — Feature 扩展
 
 扁平布局（除 `container/` 子目录外，feature 都直接在 `features/` 下）。每个 feature 包都实现 `SupramarkFeature`，并自带：
 - `metadata` — id / version / tags / `syntaxFamily`（`main` | `container` | `fence`）
-- `syntax.ast` — 通过 `type` 或 `selector` 匹配 AST 节点；可选 `parser`（含 `markdownIt.tokenMapper`）
+- `syntax.ast` — 通过 `type` 或 `selector` 匹配 AST 节点；parser rule 属于 `supramark-markdown` 内部实现，不作为 public API 暴露。
 - `renderers.{web,rn}` — 声明 `infrastructure`（`needsWorker` / `needsCache` / `needsClientScript`）与 `dependencies`
 - `examples` / `testing` / `documentation` — 被脚本 `doc-gen-*.ts` 与 CI 消费
 

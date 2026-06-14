@@ -42,8 +42,8 @@ pub struct FlowchartLayout {
 }
 
 /// Font sizing defaults (upstream `flowchart.nodePadding=8, ranksep=50, nodesep=50`).
-const NODE_PADDING_X: f64 = 8.0;
-const NODE_PADDING_Y: f64 = 8.0;
+const _NODE_PADDING_X: f64 = 8.0;
+const _NODE_PADDING_Y: f64 = 8.0;
 const DEFAULT_FONT_FAMILY: &str = "trebuchet ms,verdana,arial,sans-serif";
 /// Upstream's `labelHelper` uses `div.getBoundingClientRect()` on the
 /// foreignObject HTML label, which inherits 14 px sans-serif from the
@@ -1408,7 +1408,11 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
             };
             let icon_size = 48.0;
             let gap = if has_label { 8.0 } else { 0.0 };
-            let total_w = if tw_icon > icon_size { tw_icon } else { icon_size };
+            let total_w = if tw_icon > icon_size {
+                tw_icon
+            } else {
+                icon_size
+            };
             let total_h = icon_size + gap + th_icon;
             return (total_w, total_h);
         }
@@ -1602,8 +1606,7 @@ fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64,
     // post-render bbox, not the raw `$$..$$` source width.
     if html_labels && crate::render::foreign_object::contains_katex_marker(text) {
         let font = crate::render::foreign_object::HtmlLabelFont::default();
-        if let Some((_, w, h)) =
-            crate::render::foreign_object::try_render_katex_label(text, &font)
+        if let Some((_, w, h)) = crate::render::foreign_object::try_render_katex_label(text, &font)
         {
             return (w, h);
         }

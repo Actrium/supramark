@@ -1,8 +1,7 @@
 /**
  * @supramark/core - React Native 专用入口
  *
- * 此入口只包含跨平台兼容的功能,不包含 unified/remark 相关代码
- * 避免在 React Native 环境中引入 Node.js 专用依赖
+ * 此入口只暴露 AST v2 parser facade 与跨平台类型。
  */
 
 // AST 类型定义
@@ -35,17 +34,16 @@ export {
 } from './syntax/container.js';
 
 /**
- * 默认解析器(使用 markdown-it)
+ * AST v2 parser facade.
  *
- * - 跨平台兼容:支持 React Native、Web、Node.js
- * - 推荐用于生产环境
- * - 性能较好,体积较小
+ * 内部使用 Rust `supramark-markdown` parser。RN 生产入口后续可接 native/TurboModule
+ * binding，公开合同保持 `source -> SupramarkRootNode`。
  *
- * @param markdown - Markdown 源文本
- * @param options - 解析选项(可选插件)
- * @returns Supramark AST
+ * @param source - Markdown 源文本
+ * @param options - 解析选项(可选 AST 后处理插件)
+ * @returns Supramark AST v2
  */
-export { parseMarkdown } from './plugin.js';
+export { parse } from './plugin.js';
 
 /**
  * 预设(Presets)

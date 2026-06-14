@@ -48,7 +48,7 @@ export const diagramDotFeature = defineDiagramFeature({
 # Diagram (DOT / Graphviz) Feature
 
 AST modelling + RN / Web rendering for DOT / Graphviz diagrams via the
-unified diagram-engine pipeline.
+@supramark/engines pipeline.
 
 - Syntax: \`\\\`\\\`dot\` or \`\\\`\\\`graphviz\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with \`engine = "dot"\` or

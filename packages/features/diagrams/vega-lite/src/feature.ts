@@ -12,11 +12,9 @@ import { diagramVegaLiteExamples } from './examples.js';
  * - Reuses the generic `diagram` AST node.
  * - Matches diagrams whose engine is one of:
  *   `'vega-lite' | 'vega' | 'chart' | 'chartjs'`.
- * - Web rendering goes through `@supramark/engines/vega-lite` against
- *   the upstream `vega` + `vega-lite` JS packages. RN is unsupported
- *   today; the planned RN path uses
- *   `vega.View(spec, { renderer: 'none' }).toSVG()` (pure JS, no DOM)
- *   piped into react-native-svg.
+ * - Rendering goes through `@supramark/engines/vega-lite` against the
+ *   upstream `vega` + `vega-lite` JS packages. Web and RN share the
+ *   same headless `vega.View(...).toSVG()` output path.
  *
  * @example
  * ```markdown
@@ -35,8 +33,8 @@ export const diagramVegaLiteFeature = defineDiagramFeature({
   engineAliases: ['vega', 'chart', 'chartjs'],
   name: 'Diagram (Vega-Lite)',
   description:
-    'Vega / Vega-Lite diagrams rendered through @supramark/engines + the JS vega/vega-lite libraries (Web only).',
-  tags: ['diagram', 'vega-lite', 'chart', 'web-only'],
+    'Vega / Vega-Lite diagrams rendered through @supramark/engines + the JS vega/vega-lite libraries.',
+  tags: ['diagram', 'vega-lite', 'chart', 'svg'],
   web: {
     dependencies: [
       {
@@ -54,17 +52,25 @@ export const diagramVegaLiteFeature = defineDiagramFeature({
     ],
   },
   rn: {
-    // Web-only feature today. RN path is unsupported in this build:
-    // the WebView worker has been retired; the planned RN path is a
-    // pure-JS pipeline (vega.View(spec, {renderer: 'none'}).toSVG())
-    // that produces an SVG string for react-native-svg to display.
     infrastructure: { needsCache: true },
     dependencies: [
+      {
+        name: 'vega',
+        version: '^5.0.0',
+        type: 'npm',
+        optional: false,
+      },
+      {
+        name: 'vega-lite',
+        version: '^5.0.0',
+        type: 'npm',
+        optional: false,
+      },
       {
         name: 'react-native-svg',
         version: '^13.0.0',
         type: 'npm',
-        optional: true,
+        optional: false,
       },
     ],
   },
@@ -74,19 +80,16 @@ export const diagramVegaLiteFeature = defineDiagramFeature({
   readme: `
 # Diagram (Vega-Lite) Feature
 
-Vega / Vega-Lite / ChartJS diagrams as fenced code blocks (Web only in
-this build).
+Vega / Vega-Lite / ChartJS diagrams as fenced code blocks.
 
 - Syntax: \`\\\`\\\`vega-lite\`, \`\\\`\\\`vega\`, \`\\\`\\\`chart\`, or
   \`\\\`\\\`chartjs\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with the matching \`engine\`
   identifier; \`code\` is the JSON spec.
-- Rendering: on Web, \`@supramark/engines/vega-lite\` consumes the
-  upstream JS \`vega\` + \`vega-lite\` packages and produces SVG. On RN,
-  this feature is currently **unsupported** — the WebView worker was
-  retired in 2026-05; the planned native path runs
-  \`vega.View(spec, { renderer: 'none' }).toSVG()\` in pure JS and
-  hands the SVG string to react-native-svg.
+- Rendering: on Web and RN, \`@supramark/engines/vega-lite\` consumes the
+  upstream JS \`vega\` + \`vega-lite\` packages, runs
+  \`vega.View(..., { renderer: "none" }).toSVG()\`, and hands the SVG
+  string to the platform renderer.
   `.trim(),
   bestPractices: [
     'Keep the Vega-Lite spec valid JSON for round-trip debugging and reuse.',
@@ -94,9 +97,9 @@ this build).
   ],
   faq: [
     {
-      question: 'Why is Vega-Lite Web-only in supramark?',
+      question: 'How does Vega-Lite render on RN?',
       answer:
-        'Vega and Vega-Lite are JS libraries; the SVG-producing engine runs in a JS host. The hidden-WebView worker that used to bridge this on RN was retired in 2026-05. The replacement plan is a pure-JS path (vega.View(spec, { renderer: "none" }).toSVG()) wired to react-native-svg in a follow-up.',
+        'Supramark runs Vega in headless SVG export mode and hands the SVG string to react-native-svg.',
     },
   ],
 });

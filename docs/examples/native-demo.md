@@ -17,7 +17,7 @@
   - 代码块（多行代码）；
   - 数学公式（Math / LaTeX）；
   - 脚注、定义列表、Admonition、Emoji 等；
-  - 图表示例：使用 ` ```mermaid` / ` ```plantuml` / ` ```vega-lite` / ` ```echarts` 等代码块生成 `diagram` 节点，在 RN 中通过 `@supramark/rn-diagram-worker` 触发对应引擎渲染为 SVG，再由 `<Supramark />` 展示最终图像。
+  - 图表示例：使用 ` ```mermaid` / ` ```plantuml` / ` ```vega-lite` / ` ```echarts` 等代码块生成 `diagram` 节点，在 RN 中通过 `@supramark/engines` 输出 SVG，再由 `<Supramark />` 展示最终图像。
 - 所有示例数据来自 `examples/demos.js（从各 Feature 包聚合）`，与 Web 示例共享。
 
 ## 运行方式
@@ -29,13 +29,13 @@ cd examples/react-native
 npm run start      # 如有需要会自动执行根目录 npm install
 ```
 
-脚本会在缺少根目录依赖时自动执行一次 `npm install`，随后启动 Expo DevTools。根据 Expo 提示，在 iOS / Android 模拟器或真机上运行。推荐保持网络可用，以便 headless WebView 中通过 CDN 加载 Mermaid。
+脚本会在缺少根目录依赖时自动执行一次依赖安装，随后启动 Expo DevTools。根据 Expo 提示，在 iOS / Android 模拟器或真机上运行。
 
 ## 与核心库的关系
 
 - 示例程序依赖：
-  - `@supramark/core`：提供 AST 与解析（当前 RN 中默认为 markdown-it 实现）；
+  - `@supramark/core`：提供 AST v2 类型与 `parse(source)` 解析 facade；
   - `@supramark/rn`：将 supramark AST 渲染为 React Native 组件；
-  - `@supramark/rn-diagram-worker`：在后台使用隐藏 WebView 渲染 Mermaid 图表（输出 SVG），并在示例中的 `diagram` 节点上展示。
+  - `@supramark/engines`：为示例中的 `diagram` 节点输出 SVG，RN 端通过 native FFI adapter 或 JS SVG-string engine 渲染。
 
 随着 supramark 支持的语法和插件增多，可以持续往示例目录中添加新的条目，用于验证和演示新的能力。

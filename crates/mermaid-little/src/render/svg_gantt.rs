@@ -126,7 +126,13 @@ pub fn render(
 
 // ── Exclude rect ─────────────────────────────────────────────────────
 
-fn emit_exclude_rect(out: &mut String, ex: &ExcludeRange, layout: &GanttLayout, id: &str, index: usize) {
+fn emit_exclude_rect(
+    out: &mut String,
+    ex: &ExcludeRange,
+    layout: &GanttLayout,
+    id: &str,
+    index: usize,
+) {
     let w = layout.width;
     let h = layout.height;
     let theta = layout.min_time_ms;
@@ -135,13 +141,16 @@ fn emit_exclude_rect(out: &mut String, ex: &ExcludeRange, layout: &GanttLayout, 
     // x = timeScale(start.startOf('day')) + leftPadding
     let x = l::time_scale(ex.start_of_day_ms, theta, max, w) + l::LEFT_PADDING;
     // width = timeScale(end.endOf('day')) - timeScale(start.startOf('day'))
-    let width = l::time_scale(ex.end_eod_ms, theta, max, w) - l::time_scale(ex.start_of_day_ms, theta, max, w);
+    let width = l::time_scale(ex.end_eod_ms, theta, max, w)
+        - l::time_scale(ex.start_of_day_ms, theta, max, w);
     let y = l::GRID_LINE_START_PADDING;
     let height = h - l::TOP_PADDING - l::GRID_LINE_START_PADDING;
     // transform-origin uses raw start/end (NOT startOf'd / endOf'd).
     let cx = (l::time_scale(ex.raw_start_ms, theta, max, w) as f64)
         + l::LEFT_PADDING as f64
-        + 0.5 * ((l::time_scale(ex.raw_end_ms, theta, max, w) - l::time_scale(ex.raw_start_ms, theta, max, w)) as f64);
+        + 0.5
+            * ((l::time_scale(ex.raw_end_ms, theta, max, w)
+                - l::time_scale(ex.raw_start_ms, theta, max, w)) as f64);
     let cy = (index as f64) * gap + 0.5 * h as f64;
     out.push_str(&format!(
         r#"<rect id="{id}-exclude-{iso}" x="{x}" y="{y}" width="{width}" height="{height}" transform-origin="{cx}px {cy}px" class="exclude-range"></rect>"#,
@@ -260,7 +269,8 @@ fn emit_task_rect(out: &mut String, t: &ResolvedTask, layout: &GanttLayout, id: 
 
     let i = t.order;
     let x: f64 = if t.milestone {
-        ts_start as f64 + side_pad as f64 + 0.5 * (ts_end - ts_start) as f64 - 0.5 * bar_height as f64
+        ts_start as f64 + side_pad as f64 + 0.5 * (ts_end - ts_start) as f64
+            - 0.5 * bar_height as f64
     } else {
         (ts_start + side_pad) as f64
     };
@@ -384,7 +394,8 @@ fn emit_task_text(
     // `tests/support/font_metrics.mjs` glyph advance values used to
     // generate the references.
     let font_family = "trebuchet ms";
-    let text_width = crate::font_metrics::text_width(&t.name, font_family, font_size as f64, false, false);
+    let text_width =
+        crate::font_metrics::text_width(&t.name, font_family, font_size as f64, false, false);
     let outside = text_width > (end_x - start_x);
 
     let x: f64 = if t.vert {
@@ -405,7 +416,10 @@ fn emit_task_text(
             + 60.0
     } else {
         let i = t.order;
-        i as f64 * gap as f64 + bar_height as f64 / 2.0 + (font_size as f64 / 2.0 - 2.0) + top_pad as f64
+        i as f64 * gap as f64
+            + bar_height as f64 / 2.0
+            + (font_size as f64 / 2.0 - 2.0)
+            + top_pad as f64
     };
 
     // Class string.
@@ -520,7 +534,9 @@ fn emit_section_labels(out: &mut String, layout: &GanttLayout) {
             // The `return` inside the for loop fires on j=0 — so prevGap
             // accumulates only the (i-1)-th occurrence count once per i.
             prev_gap += layout.category_heights[i - 1].1;
-            (*height_count as f64) * gap as f64 / 2.0 + prev_gap as f64 * gap as f64 + top_pad as f64
+            (*height_count as f64) * gap as f64 / 2.0
+                + prev_gap as f64 * gap as f64
+                + top_pad as f64
         } else {
             (*height_count as f64) * gap as f64 / 2.0 + top_pad as f64
         };
@@ -789,25 +805,15 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         "#{id} .mermaid-main-font{{font-family:{ff};}}",
         ff = font_family_compact,
     ));
-    css.push_str(&format!(
-        "#{id} .exclude-range{{fill:{exclude_bkg};}}",
-    ));
-    css.push_str(&format!(
-        "#{id} .section{{stroke:none;opacity:0.2;}}",
-    ));
-    css.push_str(&format!(
-        "#{id} .section0{{fill:{section_bkg};}}",
-    ));
-    css.push_str(&format!(
-        "#{id} .section2{{fill:{section_bkg2};}}",
-    ));
+    css.push_str(&format!("#{id} .exclude-range{{fill:{exclude_bkg};}}",));
+    css.push_str(&format!("#{id} .section{{stroke:none;opacity:0.2;}}",));
+    css.push_str(&format!("#{id} .section0{{fill:{section_bkg};}}",));
+    css.push_str(&format!("#{id} .section2{{fill:{section_bkg2};}}",));
     css.push_str(&format!(
         "#{id} .section1,#{id} .section3{{fill:{alt_section_bkg};opacity:0.2;}}",
     ));
     for n in 0..4 {
-        css.push_str(&format!(
-            "#{id} .sectionTitle{n}{{fill:{title_color};}}"
-        ));
+        css.push_str(&format!("#{id} .sectionTitle{n}{{fill:{title_color};}}"));
     }
     css.push_str(&format!(
         "#{id} .sectionTitle{{text-anchor:start;font-family:{ff};}}",
@@ -821,15 +827,11 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
         ff = font_family_compact,
         tc = primary_text_color,
     ));
-    css.push_str(&format!(
-        "#{id} .grid path{{stroke-width:0;}}",
-    ));
+    css.push_str(&format!("#{id} .grid path{{stroke-width:0;}}",));
     css.push_str(&format!(
         "#{id} .today{{fill:none;stroke:{today_line_color};stroke-width:2px;}}",
     ));
-    css.push_str(&format!(
-        "#{id} .task{{stroke-width:2;}}",
-    ));
+    css.push_str(&format!("#{id} .task{{stroke-width:2;}}",));
     css.push_str(&format!(
         "#{id} .taskText{{text-anchor:middle;font-family:{ff};}}",
         ff = font_family_compact,
@@ -841,9 +843,7 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     css.push_str(&format!(
         "#{id} .taskTextOutsideLeft{{fill:{task_text_dark_color};text-anchor:end;}}",
     ));
-    css.push_str(&format!(
-        "#{id} .task.clickable{{cursor:pointer;}}",
-    ));
+    css.push_str(&format!("#{id} .task.clickable{{cursor:pointer;}}",));
     css.push_str(&format!(
         "#{id} .taskText.clickable{{cursor:pointer;fill:{task_text_clickable_color}!important;font-weight:bold;}}",
     ));
@@ -893,18 +893,14 @@ fn build_style_block(id: &str, theme: &ThemeVariables) -> String {
     css.push_str(&format!(
         "#{id} .milestone{{transform:rotate(45deg) scale(0.8,0.8);}}",
     ));
-    css.push_str(&format!(
-        "#{id} .milestoneText{{font-style:italic;}}",
-    ));
+    css.push_str(&format!("#{id} .milestoneText{{font-style:italic;}}",));
     css.push_str(&format!(
         "#{id} .doneCritText0,#{id} .doneCritText1,#{id} .doneCritText2,#{id} .doneCritText3{{fill:{task_text_dark_color}!important;}}",
     ));
     css.push_str(&format!(
         "#{id} .doneCritText0.taskTextOutsideLeft,#{id} .doneCritText0.taskTextOutsideRight,#{id} .doneCritText1.taskTextOutsideLeft,#{id} .doneCritText1.taskTextOutsideRight,#{id} .doneCritText2.taskTextOutsideLeft,#{id} .doneCritText2.taskTextOutsideRight,#{id} .doneCritText3.taskTextOutsideLeft,#{id} .doneCritText3.taskTextOutsideRight{{fill:{task_text_outside_color}!important;}}",
     ));
-    css.push_str(&format!(
-        "#{id} .vert{{stroke:{vert_line_color};}}",
-    ));
+    css.push_str(&format!("#{id} .vert{{stroke:{vert_line_color};}}",));
     css.push_str(&format!(
         "#{id} .vertText{{font-size:15px;text-anchor:middle;fill:{vert_line_color}!important;}}",
     ));

@@ -2,8 +2,9 @@ export declare const DEFAULT_ENGINE = "dot";
 export declare const DEFAULT_FORMAT = "svg";
 export declare const KNOWN_ENGINES: readonly ["dot", "neato", "fdp", "sfdp", "circo", "twopi", "osage", "patchwork"];
 export declare const KNOWN_TEXT_FORMATS: readonly ["svg", "json", "dot", "xdot", "plain"];
-export type GraphvizEngine = (typeof KNOWN_ENGINES)[number] | (string & {});
-export type GraphvizFormat = (typeof KNOWN_TEXT_FORMATS)[number] | (string & {});
+type CustomStringLiteral = string & Record<never, never>;
+export type GraphvizEngine = (typeof KNOWN_ENGINES)[number] | CustomStringLiteral;
+export type GraphvizFormat = (typeof KNOWN_TEXT_FORMATS)[number] | CustomStringLiteral;
 export type GraphvizErrorLevel = 'error' | 'warning';
 export type GraphvizAttributeValue = string | number | boolean | {
     html: string;
@@ -101,3 +102,4 @@ export declare function assertEngineSupported(viz: VizWasmInstance, engine: stri
 export declare function assertFormatSupported(viz: VizWasmInstance, format: string | undefined): void;
 export declare function assertFormatsSupported(viz: VizWasmInstance, formats: string[]): void;
 export declare function assertActive(disposed: boolean, surface: string): void;
+export {};

@@ -490,7 +490,6 @@ fn escape_text(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::layout::xychart as layout_mod;
     use crate::parser::xychart as parser_mod;
     use crate::theme::get_theme;

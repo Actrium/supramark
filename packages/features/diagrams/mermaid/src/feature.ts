@@ -41,16 +41,15 @@ export const mermaidFeature = defineDiagramFeature({
   readme: `
 # Mermaid Feature
 
-AST modelling + Web rendering for Mermaid diagrams.
+AST modelling + Web / RN rendering for Mermaid diagrams.
 
 - Syntax: \`\\\`\\\`mermaid\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with \`engine = "mermaid"\`.
 - Rendering: on Web, \`@supramark/engines\` calls
   \`@kookyleo/mermaid-little-web\` (Rust → wasm; no DOM, no headless
   browser, no upstream JS Mermaid bundle) and inlines the SVG. On RN,
-  mermaid is currently **unsupported** — the legacy WebView worker was
-  retired in 2026-05; replacement is a mermaid-little native FFI
-  binding tracked in \`crates/mermaid-little/UPSTREAM.md\`.
+  hosts import \`@kookyleo/supramark-mermaid-native-rn\`, which registers
+  the mermaid-little native FFI adapter and returns the same SVG contract.
   `.trim(),
   bestPractices: [
     'Keep Mermaid source small and reusable so the same fence can be shared across Web hosts.',
@@ -63,9 +62,9 @@ AST modelling + Web rendering for Mermaid diagrams.
         'Parser, renderer wiring, and feature gating all need to be aligned per engine. A standalone feature lets Mermaid participate in the same capability-discovery, config, and documentation flow as every other diagram.',
     },
     {
-      question: 'Does React Native still need a headless WebView?',
+      question: 'How does Mermaid render on React Native?',
       answer:
-        'No — and Mermaid is also not yet usable on RN. The hidden-WebView worker (@supramark/rn-diagram-worker) was retired in the 2026-05 cleanup. Mermaid on RN will return when the mermaid-little native FFI binding lands; tracked in crates/mermaid-little/UPSTREAM.md.',
+        'Hosts import @kookyleo/supramark-mermaid-native-rn at startup. The side-effect import registers a native FFI adapter with @supramark/engines/rn, and the renderer receives SVG through the same diagram contract as Web.',
     },
   ],
 });

@@ -163,7 +163,7 @@ export const htmlPageFeature: SupramarkFeature<SupramarkHtmlPageContainerNode> =
 
 使用 \`:::html\` 容器定义独立 HTML 页面节点。
 
-在宿主应用中，该节点通常被渲染为一个卡片预览。当用户交互时，可以通过宿主提供的回调打开一个全屏的 WebView 或新窗口来加载该 HTML。
+在宿主应用中，该节点通常被渲染为一个卡片预览。当用户交互时，可以通过宿主提供的回调打开一个独立页面、Modal 或外部浏览器来加载该 HTML。
     `.trim(),
     api: {
       interfaces: [

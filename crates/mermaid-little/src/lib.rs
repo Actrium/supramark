@@ -28,11 +28,11 @@ pub mod error;
 // font_data;` re-export under `crate::font_data` were removed at the
 // same time. Callers should use `crate::font_metrics` (which routes
 // through the `Metrics` trait) for all measurement.
+#[cfg(feature = "cose_bilkent")]
+pub mod cose_bilkent_js;
 pub mod font_metrics;
 #[cfg(feature = "katex")]
 pub mod katex;
-#[cfg(feature = "cose_bilkent")]
-pub mod cose_bilkent_js;
 pub mod layout;
 pub mod math;
 pub mod model;

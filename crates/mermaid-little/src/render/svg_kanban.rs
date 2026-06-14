@@ -672,7 +672,6 @@ fn html_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::layout::kanban as layout_mod;
     use crate::parser::kanban as parser_mod;
     use crate::theme::get_theme;

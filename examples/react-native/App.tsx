@@ -263,7 +263,7 @@ export default function App() {
             onOpenHtmlPage={(node) => {
               Alert.alert(
                 node.params || 'HTML Page',
-                '这里应该在宿主中打开独立 WebView。当前只是示意回调已触发。',
+                '这里应该在宿主中打开独立页面或 Modal。当前只是示意回调已触发。',
               );
             }}
           />

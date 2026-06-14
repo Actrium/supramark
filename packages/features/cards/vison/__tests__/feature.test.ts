@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseMarkdown, validateFeature } from '@supramark/core';
+import { parse, validateFeature } from '@supramark/core';
 import {
   createVisonFeatureConfig,
   visonExamples,
@@ -23,7 +23,7 @@ describe('Vison Feature', () => {
   });
 
   it('parses a valid Vison container into an opaque container node', async () => {
-    const ast = await parseMarkdown(
+    const ast = await parse(
       [':::vison', '{ "version": "1", "type": "text", "props": { "text": "hi" } }', ':::'].join(
         '\n'
       ),
@@ -45,7 +45,7 @@ describe('Vison Feature', () => {
   });
 
   it('keeps parse errors on invalid JSON bodies', async () => {
-    const ast = await parseMarkdown([':::vison', '{ invalid json', ':::'].join('\n'), {
+    const ast = await parse([':::vison', '{ invalid json', ':::'].join('\n'), {
       config: {
         features: [createVisonFeatureConfig()],
       },
