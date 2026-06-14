@@ -110,7 +110,13 @@ impl BlockParser {
 
     /// Process input string and push block tokens into `out_tokens`
     ///
-    pub fn parse(&self, src: &str, node: Node, md: &MarkdownParser, root_ext: &mut RootExtSet) -> Node {
+    pub fn parse(
+        &self,
+        src: &str,
+        node: Node,
+        md: &MarkdownParser,
+        root_ext: &mut RootExtSet,
+    ) -> Node {
         let mut state = BlockState::new(src, md, root_ext, node);
         self.tokenize(&mut state);
         state.node

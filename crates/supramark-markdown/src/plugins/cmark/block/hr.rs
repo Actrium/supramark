@@ -13,8 +13,14 @@ pub struct ThematicBreak {
 }
 
 impl NodeValue for ThematicBreak {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
-        Some(vec![crate::supramark::SupramarkNode::ThematicBreak { position: ctx.position(node) }])
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
+        Some(vec![crate::supramark::SupramarkNode::ThematicBreak {
+            position: ctx.position(node),
+        }])
     }
 
     fn render(&self, node: &Node, fmt: &mut dyn Renderer) {

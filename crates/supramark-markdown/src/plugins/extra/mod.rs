@@ -6,11 +6,11 @@
 //! - Supramark-specific syntax: the `:::` container and `%%%` input blocks,
 //!   plus single-line raw HTML, in `ext`.
 
-#[cfg(feature = "linkify")]
-pub mod linkify;
 pub mod deflist;
 pub mod ext;
 pub mod footnote;
+#[cfg(feature = "linkify")]
+pub mod linkify;
 pub mod math;
 pub mod strikethrough;
 pub mod tables;

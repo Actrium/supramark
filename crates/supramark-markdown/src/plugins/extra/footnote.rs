@@ -82,8 +82,10 @@ impl BlockRule for FootnoteDefScanner {
         let mut def = Node::new(FootnoteDef { label });
         if !content.is_empty() {
             let mut para = Node::new(Paragraph);
-            para.children
-                .push(Node::new(InlineRoot::new(content, vec![(0, content_offset)])));
+            para.children.push(Node::new(InlineRoot::new(
+                content,
+                vec![(0, content_offset)],
+            )));
             def.children.push(para);
         }
         Some((def, 1))

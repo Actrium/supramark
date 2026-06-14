@@ -59,7 +59,8 @@ impl BlockRule for ExtensionScanner {
 
         match close {
             Some(close_line) => {
-                let (value, _) = state.get_lines(state.line + 1, close_line, state.blk_indent, false);
+                let (value, _) =
+                    state.get_lines(state.line + 1, close_line, state.blk_indent, false);
                 let node = Node::new(ExtBlock {
                     open,
                     value,

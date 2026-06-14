@@ -13,7 +13,11 @@ pub struct ATXHeading {
 }
 
 impl NodeValue for ATXHeading {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
         Some(vec![crate::supramark::SupramarkNode::Heading {
             depth: self.level,
             children: ctx.map_children(&node.children),

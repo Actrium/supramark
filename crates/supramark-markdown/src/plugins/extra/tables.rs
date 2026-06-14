@@ -15,9 +15,17 @@ pub struct Table {
 }
 
 impl NodeValue for Table {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
         Some(vec![crate::supramark::SupramarkNode::Table {
-            align: self.alignments.iter().map(crate::supramark::map_alignment).collect(),
+            align: self
+                .alignments
+                .iter()
+                .map(crate::supramark::map_alignment)
+                .collect(),
             children: ctx.map_table_sections(&node.children, &self.alignments),
             position: ctx.position(node),
         }])

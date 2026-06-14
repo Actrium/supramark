@@ -102,7 +102,12 @@ pub struct LineOffset {
 }
 
 impl<'a, 'b> BlockState<'a, 'b> {
-    pub fn new(src: &'b str, md: &'a MarkdownParser, root_ext: &'b mut RootExtSet, node: Node) -> Self {
+    pub fn new(
+        src: &'b str,
+        md: &'a MarkdownParser,
+        root_ext: &'b mut RootExtSet,
+        node: Node,
+    ) -> Self {
         let mut result = Self {
             src,
             md,

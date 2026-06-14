@@ -73,10 +73,12 @@ fn public_api_parses_diagram_meta_into_object() {
 
 #[test]
 fn public_api_omits_empty_diagram_meta() {
-    let ast = parse("```mermaid
+    let ast = parse(
+        "```mermaid
 graph TD; A-->B;
 ```
-");
+",
+    );
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
     };
@@ -354,7 +356,10 @@ fn public_api_preserves_inline_raw_html() {
                 if format == "html" && value == "<span>" && !block
         )
     });
-    assert!(has_inline_raw, "expected inline raw html, got {paragraph:?}");
+    assert!(
+        has_inline_raw,
+        "expected inline raw html, got {paragraph:?}"
+    );
 }
 
 #[test]
@@ -587,7 +592,10 @@ fn nests_math_block_inside_list_item() {
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
     };
-    let SupramarkNode::List { children: items, .. } = &children[0] else {
+    let SupramarkNode::List {
+        children: items, ..
+    } = &children[0]
+    else {
         panic!("expected list");
     };
     let SupramarkNode::ListItem { children: item, .. } = &items[0] else {
@@ -605,7 +613,10 @@ fn nests_container_inside_list_item() {
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
     };
-    let SupramarkNode::List { children: items, .. } = &children[0] else {
+    let SupramarkNode::List {
+        children: items, ..
+    } = &children[0]
+    else {
         panic!("expected list");
     };
     let SupramarkNode::ListItem { children: item, .. } = &items[0] else {

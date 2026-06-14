@@ -19,7 +19,11 @@ pub struct OrderedList {
 }
 
 impl NodeValue for OrderedList {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
         Some(vec![crate::supramark::SupramarkNode::List {
             ordered: true,
             start: Some(self.start),
@@ -51,7 +55,11 @@ pub struct BulletList {
 }
 
 impl NodeValue for BulletList {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
         Some(vec![crate::supramark::SupramarkNode::List {
             ordered: false,
             start: None,
@@ -75,7 +83,11 @@ impl NodeValue for BulletList {
 pub struct ListItem;
 
 impl NodeValue for ListItem {
-    fn to_ast_v2(&self, node: &Node, ctx: &crate::supramark::AstV2Ctx<'_>) -> Option<Vec<crate::supramark::SupramarkNode>> {
+    fn to_ast_v2(
+        &self,
+        node: &Node,
+        ctx: &crate::supramark::AstV2Ctx<'_>,
+    ) -> Option<Vec<crate::supramark::SupramarkNode>> {
         let (checked, children) = ctx.map_list_item_children(&node.children);
         Some(vec![crate::supramark::SupramarkNode::ListItem {
             checked,
