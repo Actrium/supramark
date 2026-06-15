@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig } from 'vitepress';
 
 // Supramark documentation site.
 // base MUST be /supramark/ (GitHub Pages project-site path).
@@ -17,8 +17,8 @@ export default defineConfig({
     html: false,
     config(md) {
       md.renderer.rules.code_inline = (tokens, idx) => {
-        return '<code v-pre>' + md.utils.escapeHtml(tokens[idx].content) + '</code>'
-      }
+        return '<code v-pre>' + md.utils.escapeHtml(tokens[idx].content) + '</code>';
+      };
     },
   },
   themeConfig: {
@@ -37,6 +37,7 @@ export default defineConfig({
             { text: '快速开始', link: '/guide/getting-started' },
             { text: '核心概念', link: '/guide/concepts' },
             { text: '架构', link: '/guide/architecture' },
+            { text: '设计系统', link: '/guide/design-system' },
             { text: '自定义 Feature', link: '/guide/custom-features' },
             { text: '创建 Feature 指南', link: '/guide/CREATE_FEATURE_GUIDE' },
             { text: 'Feature 质量保障', link: '/guide/FEATURE_QUALITY_ASSURANCE' },
@@ -96,4 +97,4 @@ export default defineConfig({
     outline: { label: '本页目录', level: [2, 3] },
     docFooter: { prev: '上一页', next: '下一页' },
   },
-})
+});

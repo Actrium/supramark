@@ -140,6 +140,7 @@ docs/
 │   ├── config.mts          # VitePress 配置 [手动]
 │   └── theme/              # 主题配置 [手动]
 │       ├── index.ts
+│       ├── tokens.css
 │       └── custom.css
 ├── public/
 │   └── typedoc/            # TypeDoc HTML [自动生成]
@@ -232,7 +233,7 @@ docs/
 
 ### 自定义主题
 
-编辑 `docs/.vitepress/theme/custom.css` 修改样式。
+编辑 `docs/.vitepress/theme/tokens.css` 维护设计 token，编辑 `docs/.vitepress/theme/custom.css` 修改消费 token 的样式。
 
 ### 添加导航项
 

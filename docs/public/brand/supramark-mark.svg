@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Supramark brand mark</title>
+  <desc id="desc">A violet document mark with structured diagram nodes.</desc>
+  <defs>
+    <linearGradient id="surface" x1="48" y1="24" x2="210" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8B5CF6" />
+      <stop offset="0.55" stop-color="#7C3AED" />
+      <stop offset="1" stop-color="#2E1065" />
+    </linearGradient>
+    <linearGradient id="accent" x1="68" y1="70" x2="186" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#CFFAFE" />
+    </linearGradient>
+    <filter id="shadow" x="18" y="18" width="220" height="220" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#2E1065" flood-opacity="0.22" />
+    </filter>
+  </defs>
+  <rect x="34" y="28" width="188" height="200" rx="32" fill="url(#surface)" filter="url(#shadow)" />
+  <path d="M78 70h74l32 32v84H78V70Z" fill="#FFFFFF" opacity="0.14" />
+  <path d="M152 70v32h32" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.72" />
+  <path d="M95 118h66M95 145h42M95 172h66" stroke="url(#accent)" stroke-width="12" stroke-linecap="round" />
+  <circle cx="174" cy="145" r="10" fill="#CFFAFE" />
+  <circle cx="174" cy="172" r="10" fill="#A78BFA" />
+  <path d="M174 155v7" stroke="#DDD6FE" stroke-width="6" stroke-linecap="round" />
+  <path d="M128 53l7 15 16 7-16 7-7 15-7-15-16-7 16-7 7-15Z" fill="#F5F3FF" />
+</svg>
