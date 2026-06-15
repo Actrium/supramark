@@ -1,6 +1,7 @@
 /// ERD (Chen notation) diagram IR
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdAttribute {
     pub name: String,
     pub display_name: Option<String>,
@@ -15,6 +16,7 @@ pub struct ErdAttribute {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdEntity {
     /// Internal identifier (alias if present, otherwise display name)
     pub id: String,
@@ -28,6 +30,7 @@ pub struct ErdEntity {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdRelationship {
     /// Internal identifier (alias if present, otherwise display name)
     pub id: String,
@@ -41,6 +44,7 @@ pub struct ErdRelationship {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdLink {
     pub from: String,
     pub to: String,
@@ -58,6 +62,7 @@ pub struct ErdLink {
 
 /// ISA (specialization/generalization) relationship
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdIsa {
     /// Parent entity id
     pub parent: String,
@@ -72,12 +77,14 @@ pub struct ErdIsa {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum IsaKind {
     Disjoint,
     Union,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ErdDirection {
     #[default]
     TopToBottom,
@@ -85,6 +92,7 @@ pub enum ErdDirection {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdNote {
     pub text: String,
     pub position: String,
@@ -92,6 +100,7 @@ pub struct ErdNote {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErdDiagram {
     pub entities: Vec<ErdEntity>,
     pub relationships: Vec<ErdRelationship>,

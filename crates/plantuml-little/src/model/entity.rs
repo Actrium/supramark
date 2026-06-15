@@ -1,5 +1,6 @@
 /// Entity kind
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum EntityKind {
     #[default]
     Class,
@@ -18,6 +19,7 @@ pub enum EntityKind {
 /// all map to `EntityKind::Rectangle` but need distinct rendered shapes.
 /// See Java `USymbols`/`USymbolFile`/`USymbolFolder` etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum RectSymbol {
     #[default]
     Rectangle,
@@ -36,6 +38,7 @@ pub enum RectSymbol {
 
 /// Member visibility
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Visibility {
     Public,    // +
     Private,   // -
@@ -45,6 +48,7 @@ pub enum Visibility {
 
 /// Member modifiers
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct MemberModifiers {
     pub is_static: bool,
     pub is_abstract: bool,
@@ -52,6 +56,7 @@ pub struct MemberModifiers {
 
 /// Class member (field or method)
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Member {
     pub visibility: Option<Visibility>,
     pub name: String,
@@ -65,10 +70,12 @@ pub struct Member {
 
 /// Stereotype (e.g. `<<Entity>>`)
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Stereotype(pub String);
 
 /// Spot extracted from a stereotype, e.g. `(E,White)` in `<< (E,White) Extension >>`.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct StereotypeSpot {
     pub character: char,
     pub color: Option<String>,
@@ -116,6 +123,7 @@ impl Stereotype {
 
 /// Entity (class, interface, enum, etc.)
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Entity {
     pub uid: Option<String>,
     pub name: String,

@@ -29,6 +29,7 @@ use crate::model::DiagramMeta;
 /// A parsed class diagram. One of these becomes a `Diagram::Class` via
 /// the (currently unit-variant) placeholder in `model/mod.rs`.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassDiagram {
     pub meta: DiagramMeta,
     /// `"TB" | "BT" | "LR" | "RL"` — top-level direction. Upstream
@@ -94,6 +95,7 @@ impl ClassDiagram {
 
 /// Visibility marker for a member. Upstream union `'#' | '+' | '~' | '-' | ''`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Visibility {
     #[default]
     None,
@@ -132,6 +134,7 @@ impl Visibility {
 
 /// Trailing classifier on a member — `*` abstract / `$` static.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Classifier {
     #[default]
     None,
@@ -162,6 +165,7 @@ impl Classifier {
 
 /// `'method' | 'attribute'` — what kind of slot a [`ClassMember`] fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum MemberKind {
     Attribute,
     Method,
@@ -170,6 +174,7 @@ pub enum MemberKind {
 /// One attribute or method inside a class body. Fields mirror upstream
 /// `ClassMember`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassMember {
     pub kind: MemberKind,
     /// Raw identifier — the name minus visibility prefix and classifier
@@ -205,6 +210,7 @@ impl ClassMember {
 
 /// Parsed class declaration. Mirrors `ClassNode` upstream.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassNode {
     pub id: String,
     /// Human-readable label. For most classes this equals `id`; set
@@ -315,6 +321,7 @@ fn split_generic(name: &str) -> (&str, Option<&str>) {
 /// `namespace Foo { class Bar {} }` — flat list + classes reference via
 /// `ClassNode::parent`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Namespace {
     pub id: String,
     pub dom_id: String,
@@ -326,6 +333,7 @@ pub struct Namespace {
 
 /// Relation type from upstream `relationType` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum RelationEnd {
     /// None — plain line end.
     None,
@@ -359,6 +367,7 @@ impl RelationEnd {
 
 /// Line type — solid (`--`) vs dotted (`..`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum LineType {
     Solid,
     Dotted,
@@ -376,6 +385,7 @@ impl LineType {
 
 /// Parsed relation. Mirrors upstream `ClassRelation`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassRelation {
     pub id1: String,
     pub id2: String,
@@ -398,6 +408,7 @@ pub struct ClassRelation {
 /// endpoint is rewritten to a fresh `interface{N}` id. The renderer
 /// emits a transparent `rect` node so dagre can route the edge.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassInterface {
     /// Synthetic id (`interface0`, `interface1`, …).
     pub id: String,
@@ -409,6 +420,7 @@ pub struct ClassInterface {
 
 /// Note attached via `note "..."` or `note for Foo "..."`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassNote {
     pub id: String,
     /// The class this note is attached to (`for Foo`), or empty.
@@ -422,6 +434,7 @@ pub struct ClassNote {
 
 /// `classDef foo fill:#f9f` — a named reusable style set.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct StyleClass {
     pub id: String,
     pub styles: Vec<String>,
@@ -432,6 +445,7 @@ pub struct StyleClass {
 /// order rather than attaching to the class so the layout adapter can
 /// replay them after every class is known.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassInteractivity {
     pub class_id: String,
     pub kind: InteractivityKind,
@@ -441,6 +455,7 @@ pub struct ClassInteractivity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum InteractivityKind {
     Callback,
     Link,

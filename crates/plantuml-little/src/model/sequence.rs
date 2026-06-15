@@ -1,5 +1,6 @@
 /// Participant kind
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ParticipantKind {
     #[default]
     Default,
@@ -14,6 +15,7 @@ pub enum ParticipantKind {
 
 /// Participant
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Participant {
     pub name: String,
     pub display_name: Option<String>,
@@ -28,6 +30,7 @@ pub struct Participant {
 
 /// Message arrow style
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum SeqArrowStyle {
     #[default]
     Solid, // ->
@@ -37,6 +40,7 @@ pub enum SeqArrowStyle {
 
 /// Message arrow head
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum SeqArrowHead {
     #[default]
     Filled, // > — filled diamond arrowhead (4 points)
@@ -49,6 +53,7 @@ pub enum SeqArrowHead {
 
 /// Message direction
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum SeqDirection {
     LeftToRight, // ->
     RightToLeft, // <-
@@ -56,6 +61,7 @@ pub enum SeqDirection {
 
 /// A single message
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Message {
     pub from: String,
     pub to: String,
@@ -90,6 +96,7 @@ pub struct Message {
 
 /// Combined fragment kind
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum FragmentKind {
     Alt,
     Loop,
@@ -117,6 +124,7 @@ impl FragmentKind {
 
 /// Events in a sequence diagram (in chronological order)
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum SeqEvent {
     Message(Message),
     Activate(String, Option<String>),
@@ -188,6 +196,7 @@ pub enum SeqEvent {
 
 /// Sequence diagram IR
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SequenceDiagram {
     pub participants: Vec<Participant>,
     pub events: Vec<SeqEvent>,

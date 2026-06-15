@@ -1,9 +1,11 @@
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct RegexDiagram {
     pub node: RegexNode,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum RegexNode {
     Literal(String),
     CharClass(Vec<String>),

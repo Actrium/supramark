@@ -1,5 +1,6 @@
 /// Line style
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum LineStyle {
     Solid,  // --
     Dashed, // ..
@@ -7,6 +8,7 @@ pub enum LineStyle {
 
 /// Arrow head type
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ArrowHead {
     None,          // no arrow
     Arrow,         // >  normal arrow
@@ -18,6 +20,7 @@ pub enum ArrowHead {
 
 /// Relationship between entities
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Link {
     pub uid: Option<String>,
     pub from: String,

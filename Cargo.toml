@@ -31,6 +31,8 @@ members = [
     "crates/mermaid-little/packages/native",
     "crates/vison/vison-core",
     "crates/code-highlight",
+    "crates/supramark-diagram-core",
+    "crates/supramark-diagram",
 ]
 
 # Crates we deliberately keep outside the unified workspace:

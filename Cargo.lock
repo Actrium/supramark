@@ -302,6 +302,7 @@ dependencies = [
  "rquickjs 0.11.0",
  "serde",
  "serde_json",
+ "supramark-diagram-core",
  "ttf-parser",
  "unicode-segmentation",
  "unicode-width",
@@ -531,6 +532,7 @@ dependencies = [
 name = "graphviz-anywhere"
 version = "0.2.1"
 dependencies = [
+ "supramark-diagram-core",
  "thiserror 1.0.69",
  "wasm-bindgen",
 ]
@@ -879,6 +881,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yml",
+ "supramark-diagram-core",
  "thiserror 1.0.69",
 ]
 
@@ -1023,7 +1026,9 @@ dependencies = [
  "log",
  "plantuml-little",
  "regex",
+ "serde",
  "serde_json",
+ "supramark-diagram-core",
  "thiserror 1.0.69",
  "ureq",
  "url",
@@ -1466,6 +1471,27 @@ version = "0.7.2"
 dependencies = [
  "d2-little",
  "font-metrics",
+]
+
+[[package]]
+name = "supramark-diagram"
+version = "0.1.0"
+dependencies = [
+ "d2-little",
+ "graphviz-anywhere",
+ "mermaid-little",
+ "plantuml-little",
+ "serde_json",
+ "supramark-diagram-core",
+]
+
+[[package]]
+name = "supramark-diagram-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

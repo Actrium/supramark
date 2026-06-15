@@ -1,5 +1,6 @@
 /// A parsed JSON value (recursive tree structure).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum JsonValue {
     Null,
     Bool(bool),
@@ -11,6 +12,7 @@ pub enum JsonValue {
 
 /// Top-level JSON diagram: the entire parsed JSON document.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct JsonDiagram {
     pub root: JsonValue,
 }

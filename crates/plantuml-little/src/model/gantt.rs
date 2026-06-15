@@ -1,6 +1,7 @@
 /// Gantt chart diagram IR
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GanttTask {
     pub name: String,
     pub alias: Option<String>,
@@ -10,12 +11,14 @@ pub struct GanttTask {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GanttDependency {
     pub from: String,
     pub to: String,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GanttColoredRange {
     pub start: String,
     pub end: String,
@@ -23,6 +26,7 @@ pub struct GanttColoredRange {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GanttNote {
     pub text: String,
     pub position: String,
@@ -30,6 +34,7 @@ pub struct GanttNote {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GanttDiagram {
     pub tasks: Vec<GanttTask>,
     pub dependencies: Vec<GanttDependency>,

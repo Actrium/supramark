@@ -57,6 +57,8 @@ log = "0.4"
 # the `font_metrics` namespace free for any future d2-little wrapper
 # module without crate-root shadowing.
 font_metrics_core = { package = "font-metrics", path = "../font-metrics", version = "0.1" }
+# Unified diagram engine abstraction (DiagramEngine / EngineAst etc.).
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
 
 [dev-dependencies]
 # tests/flate_round_trip.rs validates our deflate against miniz_oxide.

@@ -91,8 +91,14 @@ cose_bilkent = ["dep:rquickjs"]
 metrics-ttf-parser = []
 metrics-host-callback = []
 metrics-ffi-callback = []
+# Semantic AST: gates the `derive(serde::Serialize)` on `src/model/*`. serde itself
+# is an unconditional dependency (already used by the config/preprocess pipeline),
+# so this feature is an empty set and only controls whether the model is serializable.
+semantic-serde = []
 
 [dependencies]
+# Unified trait/AST envelope shared by the four engines (DiagramEngine / EngineAst / RenderOutput / DiagramError).
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
 # Shared font metrics. The `metrics-*` Cargo features above pick
 # which `Metrics` impl `crate::font_metrics` routes through; the
 # dev-dep self-cycle below selects `metrics-ttf-parser`, which

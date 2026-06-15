@@ -1,5 +1,6 @@
 /// BPM element type — matches Java BpmElementType.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum BpmElementType {
     Start,
     End,
@@ -9,6 +10,7 @@ pub enum BpmElementType {
 
 /// A single element in the BPM grid.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct BpmElement {
     pub id: Option<String>,
     pub element_type: BpmElementType,
@@ -19,6 +21,7 @@ pub struct BpmElement {
 
 /// Direction for connector lines on BPM elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Where {
     North,
     South,
@@ -28,6 +31,7 @@ pub enum Where {
 
 /// BPM event — matches Java BpmEvent hierarchy.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum BpmEvent {
     Add(BpmElement),
     Resume(String),
@@ -36,6 +40,7 @@ pub enum BpmEvent {
 
 /// BPM diagram model.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct BpmDiagram {
     pub events: Vec<BpmEvent>,
 }

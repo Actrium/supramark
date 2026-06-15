@@ -1,4 +1,5 @@
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct EbnfDiagram {
     pub title: Option<String>,
     pub comment: Option<String>,
@@ -6,12 +7,14 @@ pub struct EbnfDiagram {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct EbnfRule {
     pub name: String,
     pub expr: EbnfExpr,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum EbnfExpr {
     Terminal(String),
     NonTerminal(String),

@@ -2,6 +2,7 @@
 
 /// A single node in the mindmap tree.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct MindmapNode {
     /// Display text (may contain `\n` for line breaks).
     pub text: String,
@@ -13,6 +14,7 @@ pub struct MindmapNode {
 
 /// A note annotation on the mindmap diagram.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct MindmapNote {
     pub text: String,
     pub position: String,
@@ -20,6 +22,7 @@ pub struct MindmapNote {
 
 /// Top-level mindmap diagram.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct MindmapDiagram {
     /// The root node of the mindmap tree.
     pub root: MindmapNode,

@@ -50,6 +50,8 @@ required-features = ["cli", "metrics-ttf-parser"]
 
 [features]
 default = ["cli", "remote"]
+# Semantic AST: when on, derives serde::Serialize for model types and enables PlantumlEngine::semantic.
+semantic-serde = ["dep:serde"]
 # CLI front-end (env_logger + main.rs). Disabled automatically on wasm32.
 cli = ["dep:env_logger"]
 # Remote-resource fetching via ureq (themes, images).
@@ -135,6 +137,10 @@ url = "2"
 # on wasm32-unknown-unknown). Native builds get identical byte output.
 flate2 = { version = "1", features = ["rust_backend"], default-features = false }
 serde_json = "1"
+# Enabled only under semantic-serde: derives Serialize for model types for semantic AST serialization.
+serde = { version = "1", features = ["derive"], optional = true }
+# Unified diagram engine trait / AST envelope; reverse dependency avoids cycles.
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
 base64 = "0.22"
 
 [dev-dependencies]

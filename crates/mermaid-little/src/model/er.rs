@@ -27,6 +27,7 @@ use crate::model::DiagramMeta;
 /// Cardinality of one endpoint of an ER relationship. Matches the
 /// JS `Cardinality` enum strings verbatim for faithful error messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Cardinality {
     ZeroOrOne,
     ZeroOrMore,
@@ -58,6 +59,7 @@ impl Cardinality {
 /// Relationship identification kind. Solid vs dashed in the rendered
 /// edge — `IDENTIFYING` is the solid line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Identification {
     NonIdentifying,
     Identifying,
@@ -82,6 +84,7 @@ impl Identification {
 
 /// An entity attribute row — `type name [keys] [comment]`.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Attribute {
     pub attr_type: String,
     pub name: String,
@@ -93,6 +96,7 @@ pub struct Attribute {
 /// A parsed ER entity. Order within `ErDiagram::entity_keys` matches
 /// insertion order (upstream's `Map` iteration).
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Entity {
     /// The stable id generated from the entity name + insertion index,
     /// e.g. `entity-CUSTOMER-0`.
@@ -113,6 +117,7 @@ pub struct Entity {
 /// One relationship edge. `entity_a`/`entity_b` are the *entity ids*
 /// (not names — upstream maps names to ids during `addRelationship`).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Relationship {
     pub entity_a: String,
     pub role_a: String,
@@ -124,6 +129,7 @@ pub struct Relationship {
 
 /// classDef / class payload — style lists keyed by class id.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct EntityClass {
     pub id: String,
     pub styles: Vec<String>,
@@ -132,6 +138,7 @@ pub struct EntityClass {
 
 /// Parsed ER diagram.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ErDiagram {
     pub meta: DiagramMeta,
     /// Insertion order of entity names.

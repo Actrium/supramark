@@ -141,6 +141,11 @@ pub enum SupramarkNode {
         code: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         meta: Option<serde_json::Value>,
+        /// Semantic AST envelope { engine, kind, data }. None = not parsed or unsupported
+        /// (lazy by default; not inlined in the parser main path, filled in on demand by
+        /// downstream). See docs/architecture/diagram-semantic-ast.md.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        semantic: Option<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         position: Option<SourcePosition>,
     },
@@ -909,6 +914,7 @@ fn map_fence(fence: &CodeFence, position: Option<SourcePosition>) -> SupramarkNo
             engine: engine.to_owned(),
             code: fence.content.clone(),
             meta: meta_raw.as_deref().and_then(parse_diagram_meta),
+            semantic: None,
             position,
         }
     } else {

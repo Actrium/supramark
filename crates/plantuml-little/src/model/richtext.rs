@@ -1,6 +1,7 @@
 /// Rich text model for Creole markup used in PlantUML labels, notes, and descriptions.
 /// A span of inline text with optional formatting.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum TextSpan {
     /// Plain unformatted text.
     Plain(String),
@@ -66,6 +67,7 @@ pub enum TextSpan {
 
 /// A block-level rich text element.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum RichText {
     /// A single line consisting of inline spans.
     Line(Vec<TextSpan>),

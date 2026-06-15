@@ -8,6 +8,7 @@
 /// A parsed salt diagram. The root element is always a pyramid (grid) since
 /// Java requires salt content to be wrapped in `{ ... }`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SaltDiagram {
     pub root: SaltElement,
     /// True when salt is embedded inside `@startuml` (inline), false for
@@ -18,6 +19,7 @@ pub struct SaltDiagram {
 
 /// A single UI element inside the salt grid.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum SaltElement {
     /// Plain text label. Java: `ElementText`.
     Text(String),
@@ -35,6 +37,7 @@ pub enum SaltElement {
 
 /// A pyramid (grid) of salt cells. Java: `ElementPyramid`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SaltPyramid {
     /// Cells in the order they were added by the positioner. Each cell has its
     /// own row/col coordinates, and may span multiple rows/columns via `mergeLeft`.
@@ -49,6 +52,7 @@ pub struct SaltPyramid {
 
 /// A single cell in a salt pyramid. Holds its element plus its row/col span.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SaltCell {
     pub min_row: usize,
     pub max_row: usize,
@@ -71,6 +75,7 @@ impl SaltCell {
 
 /// Table grid line drawing strategy. Mirrors Java `TableStrategy`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum TableStrategy {
     /// No grid lines. Used for plain `{`.
     DrawNone,

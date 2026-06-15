@@ -31,6 +31,12 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod ffi;
 
+/// Graphviz adapter for supramark's unified diagram abstraction (render-only); native targets only.
+#[cfg(not(target_arch = "wasm32"))]
+mod diagram_engine;
+#[cfg(not(target_arch = "wasm32"))]
+pub use diagram_engine::GraphvizEngine;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 

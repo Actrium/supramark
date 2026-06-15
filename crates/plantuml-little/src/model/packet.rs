@@ -9,6 +9,7 @@
 
 /// A single field in the packet diagram.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct PacketField {
     /// Start bit (inclusive).
     pub start: u32,
@@ -20,6 +21,7 @@ pub struct PacketField {
 
 /// The packet diagram model.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct PacketDiagram {
     /// Ordered list of fields.
     pub fields: Vec<PacketField>,

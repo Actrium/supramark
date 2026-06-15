@@ -1,6 +1,7 @@
 /// Component/Deployment diagram IR
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ComponentKind {
     Component,
     Interface,
@@ -28,6 +29,7 @@ pub enum ComponentKind {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ComponentEntity {
     pub name: String,
     pub id: String,
@@ -51,6 +53,7 @@ pub struct ComponentEntity {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ComponentLink {
     pub from: String,
     pub to: String,
@@ -77,6 +80,7 @@ pub struct ComponentLink {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ComponentGroup {
     pub name: String,
     pub id: String,
@@ -94,6 +98,7 @@ pub struct ComponentGroup {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ComponentDiagram {
     pub entities: Vec<ComponentEntity>,
     pub links: Vec<ComponentLink>,
@@ -103,6 +108,7 @@ pub struct ComponentDiagram {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ComponentNote {
     pub text: String,
     pub position: String,

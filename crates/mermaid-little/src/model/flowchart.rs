@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 /// ASCII-arrow aliases `> < ^ v`. We normalise to the four canonical
 /// forms — `TD` is an alias for `TB`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Direction {
     #[default]
     TB,
@@ -49,12 +50,14 @@ impl Direction {
 /// Label text — carried with its parsing mode so renderers know
 /// whether the content is plain text, a quoted string, or markdown.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Label {
     pub text: String,
     pub kind: LabelKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum LabelKind {
     #[default]
     Text,
@@ -85,6 +88,7 @@ impl Label {
 
 /// A single vertex (a.k.a. node) declared in the source.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Vertex {
     pub id: String,
     /// Empty label means "use the id as label" — upstream behaviour.
@@ -115,6 +119,7 @@ pub struct Vertex {
 
 /// Edge stroke style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum EdgeStroke {
     #[default]
     Normal,
@@ -125,6 +130,7 @@ pub enum EdgeStroke {
 
 /// Edge arrow-head type (both ends).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ArrowType {
     #[default]
     None,
@@ -138,6 +144,7 @@ pub enum ArrowType {
 /// which produces `[A-C, B-C]`; the parser expands such groups to
 /// individual `Edge` entries.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Edge {
     pub id: Option<String>,
     pub start: String,
@@ -167,6 +174,7 @@ pub struct Edge {
 
 /// A subgraph (cluster) declaration.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Subgraph {
     pub id: String,
     pub title: Option<Label>,
@@ -187,6 +195,7 @@ pub struct Subgraph {
 
 /// `classDef name fill:#red,stroke:#000` — set of style props for a class.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassDef {
     pub name: String,
     pub styles: Vec<String>,
@@ -195,6 +204,7 @@ pub struct ClassDef {
 
 /// `linkStyle N stroke:#red,...`, or `linkStyle default ...`.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct LinkStyle {
     /// Which edge indices this rule applies to. Empty = default.
     pub indices: Vec<usize>,
@@ -205,6 +215,7 @@ pub struct LinkStyle {
 
 /// Top-level flowchart AST.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct FlowchartDiagram {
     pub meta: DiagramMeta,
     /// Direction declared on the header line (`flowchart TD`).

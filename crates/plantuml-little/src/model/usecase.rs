@@ -2,6 +2,7 @@ use super::diagram::Direction;
 
 /// Use Case diagram intermediate representation.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCaseDiagram {
     pub actors: Vec<UseCaseActor>,
     pub usecases: Vec<UseCase>,
@@ -13,6 +14,7 @@ pub struct UseCaseDiagram {
 
 /// An actor in the use case diagram.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCaseActor {
     pub id: String,
     pub name: String,
@@ -26,6 +28,7 @@ pub struct UseCaseActor {
 
 /// A use case (oval) in the diagram.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCase {
     pub id: String,
     pub name: String,
@@ -41,6 +44,7 @@ pub struct UseCase {
 
 /// A boundary (package/rectangle) grouping use cases.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCaseBoundary {
     pub id: String,
     pub name: String,
@@ -49,6 +53,7 @@ pub struct UseCaseBoundary {
 
 /// Relationship between actors and use cases.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCaseLink {
     pub from: String,
     pub to: String,
@@ -61,6 +66,7 @@ pub struct UseCaseLink {
 
 /// Link style.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum UseCaseLinkStyle {
     /// Solid line with arrow (association)
     Association,
@@ -74,6 +80,7 @@ pub enum UseCaseLinkStyle {
 
 /// A note annotation.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct UseCaseNote {
     pub text: String,
     pub position: String,

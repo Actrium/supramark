@@ -26,12 +26,14 @@ pub mod openiconic;
 pub mod parser;
 pub mod preproc;
 pub mod render;
+pub mod semantic;
 pub mod skin;
 pub mod style;
 pub mod svek;
 pub mod tim;
 
 pub use error::{Error, Result};
+pub use semantic::PlantumlEngine;
 
 /// Private-use Unicode character for `%newline()` / `%n()` expansion.
 ///

@@ -1,0 +1,21 @@
+[package]
+name = "supramark-diagram"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+publish = false
+description = "Facade assembling the four engines: default_registry() yields a unified DiagramRegistry for CLI / FFI / downstream consumers."
+
+[dependencies]
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
+d2-little = { path = "../d2-little" }
+mermaid-little = { path = "../mermaid-little", features = ["metrics-ttf-parser", "semantic-serde"] }
+plantuml-little = { path = "../plantuml-little", default-features = false, features = ["metrics-ttf-parser", "semantic-serde"] }
+
+# The graphviz Rust adapter is exported only on native targets (wasm goes through the JS bridge, not wired up at this stage).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+graphviz-anywhere = { path = "../graphviz-anywhere/packages/rust" }
+
+[dev-dependencies]
+serde_json = "1"

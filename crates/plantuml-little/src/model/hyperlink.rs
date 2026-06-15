@@ -7,6 +7,7 @@
 /// - `[[url{tooltip} label]]` — link with tooltip and label
 /// - `[[{tooltip} label]]` — tooltip-only annotation
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Hyperlink {
     pub url: String,
     pub tooltip: Option<String>,

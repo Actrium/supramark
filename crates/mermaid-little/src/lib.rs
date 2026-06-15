@@ -39,11 +39,15 @@ pub mod model;
 pub mod parser;
 pub mod preprocess;
 pub mod render;
+pub mod semantic;
+pub mod engine;
 pub mod svg_match;
 pub mod text;
 pub mod theme;
 
 pub use error::MermaidError;
+pub use engine::MermaidEngine;
+pub use semantic::{parse_semantic, MermaidAst};
 
 /// Mirror `tests/support/generate_ref.mjs#renumberCounterIds` —
 /// renumber matched `(prefix, counter)` pairs by first-appearance

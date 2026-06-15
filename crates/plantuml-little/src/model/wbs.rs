@@ -1,6 +1,7 @@
 /// WBS (Work Breakdown Structure) diagram IR
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum WbsDirection {
     #[default]
     Default,
@@ -9,6 +10,7 @@ pub enum WbsDirection {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct WbsNode {
     pub text: String,
     pub children: Vec<WbsNode>,
@@ -18,18 +20,21 @@ pub struct WbsNode {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct WbsLink {
     pub from: String,
     pub to: String,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct WbsNote {
     pub text: String,
     pub position: String,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct WbsDiagram {
     pub root: WbsNode,
     pub links: Vec<WbsLink>,

@@ -19,6 +19,7 @@ pub mod venn;
 /// (`---\ntitle: ...\n---`) or directives (`%%{init:...}%%`) by the
 /// preprocessor, plus accessibility fields from the diagram body.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct DiagramMeta {
     pub title: Option<String>,
     pub acc_title: Option<String>,

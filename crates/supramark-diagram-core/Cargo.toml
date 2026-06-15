@@ -1,0 +1,12 @@
+[package]
+name = "supramark-diagram-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+description = "Unified DiagramEngine trait and public EngineAst envelope that converge supramark's four diagram engines."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

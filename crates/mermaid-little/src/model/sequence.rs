@@ -19,6 +19,7 @@ use crate::model::DiagramMeta;
 /// Visual archetype for an actor box. Mirrors upstream's
 /// `actor.type` field — see `svgDraw.drawActor` switch.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ActorType {
     /// Default rectangle with text. `participant` keyword.
     #[default]
@@ -43,6 +44,7 @@ pub enum ActorType {
 /// declaration order — upstream uses the same ordering for the
 /// initial X-coordinate sweep.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Actor {
     /// Identifier used in messages (e.g. `Alice` in `Alice->>Bob`).
     pub id: String,
@@ -77,6 +79,7 @@ pub struct Actor {
 /// Arrow-token classification — matches upstream's `LINETYPE`
 /// constants in `messageHelper.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ArrowType {
     /// `->` solid line, no arrow.
     SolidLine,
@@ -133,6 +136,7 @@ pub enum ArrowType {
 /// `LINETYPE.CENTRAL_CONNECTION{,_REVERSE,_DUAL}`. Set by the
 /// `()` token next to one or both actors in a message line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum CentralConnection {
     /// `actor signal '()' actor` — circle drawn at destination.
     AtTo,
@@ -144,6 +148,7 @@ pub enum CentralConnection {
 
 /// One message between two actors.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Message {
     pub from: String,
     pub to: String,
@@ -162,6 +167,7 @@ pub struct Message {
 
 /// Note placement relative to its anchor actor(s).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum NotePlacement {
     LeftOf,
     RightOf,
@@ -169,6 +175,7 @@ pub enum NotePlacement {
 }
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Note {
     pub placement_actors: Vec<String>,
     pub placement: Option<NotePlacement>,
@@ -180,12 +187,14 @@ pub struct Note {
 /// holds the `alt` text; subsequent arms hold the `else <text>` or
 /// no-text.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct AltBranch {
     pub label: String,
     pub items: Vec<DiagramItem>,
 }
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ParBranch {
     pub label: String,
     pub items: Vec<DiagramItem>,
@@ -193,6 +202,7 @@ pub struct ParBranch {
 
 /// Optional grouping container for actors — `box <colour> <label> ... end`.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ActorBox {
     pub fill: Option<String>,
     pub label: String,
@@ -202,6 +212,7 @@ pub struct ActorBox {
 /// One element in the linear stream of "things that happen". The
 /// renderer walks this Vec to emit message lines, notes, loops, etc.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum DiagramItem {
     Message(Message),
     Note(Note),
@@ -258,6 +269,7 @@ pub enum DiagramItem {
 
 /// Per-diagram config consumed from `%%{init}%%` / frontmatter.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SequenceConfig {
     pub diagram_margin_x: f64,
     pub diagram_margin_y: f64,
@@ -332,6 +344,7 @@ impl Default for SequenceConfig {
 /// Parsed sequence diagram — a flat actor list plus the linear stream
 /// of items in declaration order.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct SequenceDiagram {
     pub meta: DiagramMeta,
     pub title: Option<String>,

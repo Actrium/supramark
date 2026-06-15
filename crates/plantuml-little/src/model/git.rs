@@ -9,6 +9,7 @@
 
 /// A single node in the git commit graph.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GitNode {
     /// Depth level (number of asterisks, 1-based).
     pub depth: usize,
@@ -20,6 +21,7 @@ pub struct GitNode {
 
 /// The git log diagram model.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct GitDiagram {
     /// Ordered list of commit nodes.
     pub nodes: Vec<GitNode>,

@@ -1,5 +1,6 @@
 /// Pseudo-state kind for special state nodes.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum StateKind {
     /// Regular state (default).
     #[default]
@@ -24,6 +25,7 @@ pub enum StateKind {
 
 /// State in a state diagram
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct State {
     /// State name (display name)
     pub name: String,
@@ -52,6 +54,7 @@ pub struct State {
 
 /// State transition
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Transition {
     /// Source state ID
     pub from: String,
@@ -71,6 +74,7 @@ pub struct Transition {
 
 /// Note
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct StateNote {
     /// Note alias
     pub alias: Option<String>,
@@ -88,6 +92,7 @@ pub struct StateNote {
 
 /// State diagram IR
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct StateDiagram {
     /// All top-level states
     pub states: Vec<State>,

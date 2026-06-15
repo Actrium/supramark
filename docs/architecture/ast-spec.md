@@ -291,6 +291,7 @@ interface DiagramNode extends SupramarkBaseNode {
   engine: string;
   code: string;
   meta?: Record<string, unknown>;
+  semantic?: { engine: string; kind: string; data: Record<string, unknown> };
 }
 ```
 
@@ -301,6 +302,7 @@ interface DiagramNode extends SupramarkBaseNode {
 - `code` 不包含 opening/closing fence。
 - `meta` 由 info string 中 engine 之后剩余部分解析为结构化对象：按空白拆项，每项以第一个 `=` 切 key/value（value 可用双引号包裹，去引号后保存）；无 `=` 的裸 token 记为 `key=true`。剩余部分为空时省略 `meta`（不输出空对象）。
 - renderer 根据 `engine` 分发；parser 不调用 Mermaid、PlantUML、Vega、D2 等渲染引擎。
+- `semantic` 是可选的语义 AST 信封，形状为 `{ "engine": "...", "kind": "...", "data": {...} }`：`engine` 为引擎 id，`kind` 标识图形语义类别，`data` 为该类别的结构化语义数据。默认懒解析——parser 主流程不填充，缺省为 `None` 且不序列化（无该字段即等同未解析）；由下游按需解析后填充。详见 `docs/architecture/diagram-semantic-ast.md`。
 
 内置 engine id：
 

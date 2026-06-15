@@ -1,5 +1,6 @@
 /// Activity diagram node kind
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ActivityNodeKind {
     /// Start node
     Start,
@@ -23,6 +24,7 @@ pub enum ActivityNodeKind {
 
 /// Note position in activity diagram
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum NotePosition {
     Left,
     Right,
@@ -30,6 +32,7 @@ pub enum NotePosition {
 
 /// Activity diagram event
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ActivityEvent {
     /// start
     Start,
@@ -98,6 +101,7 @@ pub enum ActivityEvent {
 
 /// Old-style activity node kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum OldActivityNodeKind {
     Start,
     End,
@@ -108,6 +112,7 @@ pub enum OldActivityNodeKind {
 
 /// Old-style activity node metadata mirroring Java `activitydiagram.ActivityDiagram`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct OldActivityNode {
     pub id: String,
     pub uid: String,
@@ -118,6 +123,7 @@ pub struct OldActivityNode {
 
 /// Old-style activity edge metadata mirroring Java `Link` creation order.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct OldActivityLink {
     pub uid: String,
     pub from_id: String,
@@ -130,6 +136,7 @@ pub struct OldActivityLink {
 
 /// Old-style activity graph reconstructed during parsing.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct OldActivityGraph {
     pub nodes: Vec<OldActivityNode>,
     pub links: Vec<OldActivityLink>,
@@ -137,6 +144,7 @@ pub struct OldActivityGraph {
 
 /// Activity diagram IR
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ActivityDiagram {
     pub events: Vec<ActivityEvent>,
     pub swimlanes: Vec<String>,

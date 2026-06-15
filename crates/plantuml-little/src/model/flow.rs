@@ -1,4 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum FlowDirection {
     North,
     South,
@@ -28,6 +29,7 @@ impl FlowDirection {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct FlowNode {
     pub id: String,
     pub label: String,
@@ -35,6 +37,7 @@ pub struct FlowNode {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct FlowLink {
     pub from: String,
     pub to: String,
@@ -42,6 +45,7 @@ pub struct FlowLink {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct FlowDiagram {
     pub nodes: Vec<FlowNode>,
     pub links: Vec<FlowLink>,

@@ -5,6 +5,7 @@ use super::link::Link;
 
 /// Diagram metadata (title / header / footer / legend / caption / pragmas)
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct DiagramMeta {
     pub title: Option<String>,
     pub header: Option<String>,
@@ -32,6 +33,7 @@ impl DiagramMeta {
 
 /// Layout direction
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Direction {
     #[default]
     TopToBottom,
@@ -42,6 +44,7 @@ pub enum Direction {
 
 /// Grouping container (package / namespace / rectangle)
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct Group {
     pub uid: Option<String>,
     pub kind: GroupKind,
@@ -54,6 +57,7 @@ pub struct Group {
 
 /// Group kind
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum GroupKind {
     Package,
     Namespace,
@@ -62,6 +66,7 @@ pub enum GroupKind {
 
 /// A note annotation on the class diagram.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassNote {
     pub text: String,
     pub position: String,
@@ -69,6 +74,7 @@ pub struct ClassNote {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ClassPortion {
     Field,
     Method,
@@ -76,6 +82,7 @@ pub enum ClassPortion {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum ClassRuleTarget {
     Any,
     Entity(String),
@@ -83,6 +90,7 @@ pub enum ClassRuleTarget {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassHideShowRule {
     pub target: ClassRuleTarget,
     pub portion: ClassPortion,
@@ -93,6 +101,7 @@ pub struct ClassHideShowRule {
 
 /// Class diagram IR
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct ClassDiagram {
     pub entities: Vec<Entity>,
     pub links: Vec<Link>,
@@ -108,6 +117,7 @@ pub struct ClassDiagram {
 
 /// Diagram type enum
 #[derive(Debug)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum Diagram {
     Bpm(super::bpm::BpmDiagram),
     Class(ClassDiagram),

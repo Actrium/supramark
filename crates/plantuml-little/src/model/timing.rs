@@ -1,6 +1,7 @@
 /// Timing diagram IR
 /// Participant type: robust (thick state band) or concise (thin state line)
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub enum TimingParticipantKind {
     Robust,
     Concise,
@@ -8,6 +9,7 @@ pub enum TimingParticipantKind {
 
 /// A participant (signal/entity) in the timing diagram
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingParticipant {
     /// Display name (from quoted string)
     pub name: String,
@@ -26,6 +28,7 @@ impl TimingParticipant {
 
 /// State change: participant enters a new state at a given (absolute) time
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingStateChange {
     /// Participant alias/name
     pub participant: String,
@@ -37,6 +40,7 @@ pub struct TimingStateChange {
 
 /// Message arrow between participants
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingMessage {
     /// Source participant
     pub from: String,
@@ -52,6 +56,7 @@ pub struct TimingMessage {
 
 /// Constraint / measurement annotation between two time points on a participant
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingConstraint {
     /// Participant this constraint belongs to
     pub participant: String,
@@ -65,6 +70,7 @@ pub struct TimingConstraint {
 
 /// A note annotation on the timing diagram.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingNote {
     pub text: String,
     pub position: String,
@@ -77,6 +83,7 @@ pub struct TimingNote {
 /// relative offsets (`@+100`) during parsing so downstream consumers
 /// (layout, render) only deal with absolute timestamps.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "semantic-serde", derive(serde::Serialize))]
 pub struct TimingDiagram {
     pub participants: Vec<TimingParticipant>,
     pub state_changes: Vec<TimingStateChange>,
