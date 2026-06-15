@@ -27,6 +27,17 @@ Primitive token 是原始尺度，不直接表达组件含义。
 --sm-duration-normal: 180ms;
 ```
 
+### Logo typography
+
+文字 logo 使用 WongSans，并通过独立 token 控制，后续替换正式 logo 时可以只调整 logo token 或组件样式。
+字体文件自托管在 `docs/public/fonts/wongsans/`，随附 OFL 1.1 许可文本。
+
+```css
+--sm-font-logo: 'WongSans', var(--sm-font-sans);
+--sm-logo-font-size: 28px;
+--sm-logo-letter-spacing: 0.012em;
+```
+
 ### Semantic tokens
 
 Semantic token 表达产品语义，新增页面应优先使用这一层。
@@ -78,6 +89,7 @@ docs/.vitepress/theme/index.ts
 docs/.vitepress/theme/tokens.css
 docs/.vitepress/theme/custom.css
 docs/public/brand/supramark-mark.svg
+docs/public/fonts/wongsans/
 ```
 
 `tokens.css` 只负责 token 定义和 VitePress 映射；`custom.css` 只负责消费 token 的视觉规则。后续如果新增 Feature gallery、API overview 或交互式示例，应先在 token 层补齐语义变量，再写组件样式。

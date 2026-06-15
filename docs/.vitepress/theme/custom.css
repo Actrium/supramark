@@ -37,7 +37,11 @@ body {
 
 .VPNavBarTitle .title {
   color: var(--sm-color-text);
-  font-weight: 760;
+  font-family: var(--sm-font-logo);
+  font-size: var(--sm-logo-font-size);
+  font-weight: 400;
+  letter-spacing: var(--sm-logo-letter-spacing);
+  line-height: 1;
 }
 
 .VPNavBarMenuLink,
@@ -276,6 +280,10 @@ body {
 }
 
 @media (max-width: 640px) {
+  .VPNavBarTitle .title {
+    font-size: 26px;
+  }
+
   .VPHero .actions {
     align-items: stretch;
   }
