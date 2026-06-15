@@ -40,7 +40,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Actrium/supermark.git",
-    "directory": "packages/features/feature-mermaid"
+    "url": "https://github.com/kookyleo/supramark.git",
+    "directory": "packages/features/diagrams/mermaid"
   }
 }

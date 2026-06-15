@@ -41,7 +41,10 @@
     "license:check": "bun scripts/license-check.ts",
     "build:wasm": "bun scripts/build-wasm.ts",
     "build:profile": "bun scripts/build-profile.ts",
-    "feature:preview:web": "bun scripts/feature-preview-web.ts"
+    "feature:preview:web": "bun scripts/feature-preview-web.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "bun run docs:typedoc && vitepress build docs",
+    "docs:typedoc": "cd packages/core && bun run docs && cd ../.. && rm -rf docs/public/typedoc && mkdir -p docs/public && cp -r packages/core/docs/api docs/public/typedoc"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -54,7 +57,8 @@
     "eslint-plugin-react": "^7.33.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "prettier": "^3.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitepress": "^1.6.4"
   },
   "dependencies": {
     "react": "19.1.0",
