@@ -82,33 +82,3 @@ declare module '@kookyleo/d2-little-web' {
   export function render(d2: string): Promise<string> | string;
   export function renderSvg(d2: string): Promise<string> | string;
 }
-
-declare module '@kookyleo/graphviz-anywhere-rn' {
-  export type GraphvizEngine =
-    | 'dot'
-    | 'neato'
-    | 'fdp'
-    | 'sfdp'
-    | 'circo'
-    | 'twopi'
-    | 'osage'
-    | 'patchwork';
-
-  export type GraphvizFormat =
-    | 'svg'
-    | 'png'
-    | 'pdf'
-    | 'ps'
-    | 'json'
-    | 'dot'
-    | 'xdot'
-    | 'plain';
-
-  export function renderDot(
-    dot: string,
-    engine?: GraphvizEngine,
-    format?: GraphvizFormat
-  ): Promise<string>;
-
-  export function getVersion(): Promise<string>;
-}

@@ -99,4 +99,22 @@ ignore = [
     # Tracking: open issue at kookyleo/mermaid-little to migrate.
     # Remove this entry after mermaid-little drops the dep.
     "RUSTSEC-2025-0068",
+
+    # bincode is unmaintained (RUSTSEC-2025-0141); pulled in
+    # transitively. No maintained drop-in replacement yet; revisit
+    # when the upstream consumer migrates off bincode.
+    "RUSTSEC-2025-0141",
+
+    # derivative is unmaintained (RUSTSEC-2024-0388); pulled by
+    # supramark-markdown. No drop-in; revisit on migration.
+    "RUSTSEC-2024-0388",
+
+    # yaml-rust is unmaintained (RUSTSEC-2024-0320); transitive via
+    # syntect -> two-face -> supramark-code-highlight. No safe upgrade.
+    "RUSTSEC-2024-0320",
+
+    # idna punycode advisory (RUSTSEC-2024-0421); transitive via
+    # url -> plantuml-little (duplicate idna in tree). Low real risk for a
+    # markdown/diagram toolchain; revisit when url/plantuml dedupe idna.
+    "RUSTSEC-2024-0421",
 ]

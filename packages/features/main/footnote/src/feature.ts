@@ -83,11 +83,13 @@ export const footnoteFeature: SupramarkFeature<
           type: 'footnote_reference',
           index: 1,
           label: '1',
+          identifier: '1',
         } as SupramarkFootnoteReferenceNode,
         {
           type: 'footnote_definition',
           index: 1,
           label: '1',
+          identifier: '1',
           children: [],
         } as SupramarkFootnoteDefinitionNode,
       ],

@@ -33,6 +33,10 @@
       "@supramark/engines/host-bridge": ["packages/engines/src/host-bridge.ts"],
       "@supramark/engines/code-highlight": ["packages/engines/src/code-highlight.ts"],
 
+      "@kookyleo/graphviz-anywhere-rn": [
+        "packages/engines/src/shims/graphviz-anywhere-rn.d.ts"
+      ],
+
       "@supramark/web": ["packages/renderers/web/src/index.ts"],
       "@supramark/web/createSupramark": ["packages/renderers/web/src/createSupramark.tsx"],
       "@supramark/rn": ["packages/renderers/rn/src/index.ts"],
