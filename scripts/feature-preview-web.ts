@@ -39,6 +39,8 @@ ${colors.blue}Examples:${colors.reset}
   ${colors.gray}# Specific feature${colors.reset}
   bun run feature:preview:web math
   bun run feature:preview:web gfm
+  bun run feature:preview:web mermaid
+  bun run feature:preview:web diagram-echarts
 `);
     process.exit(0);
   }
@@ -65,9 +67,9 @@ ${colors.blue}Examples:${colors.reset}
   log(`\nStarting preview for: ${selected.shortName}\n`, 'green');
 
   const child = spawn(
-    'pnpm',
-    ['exec', 'vite', '--host', '--open', `/?feature=${selected.shortName}`],
-    { cwd: CSR_DIR, stdio: 'inherit' },
+    process.execPath,
+    ['x', 'vite', '--host', '--open', `/?feature=${selected.shortName}`],
+    { cwd: CSR_DIR, stdio: 'inherit' }
   );
 
   child.on('exit', code => process.exit(code ?? 0));

@@ -62,3 +62,4 @@ crates/supramark-markdown/src/generated/
 docs/.vitepress/dist
 docs/.vitepress/cache
 docs/public/typedoc
+docs/public/preview

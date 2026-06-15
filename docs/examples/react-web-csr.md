@@ -111,7 +111,6 @@ react-web-csr/
 - [Vite 文档](https://vitejs.dev/)
 - [React 文档](https://react.dev/)
 
-
 ## 快速开始
 
 ```bash
@@ -120,11 +119,40 @@ bun install
 bun run dev
 ```
 
+## 实时 Feature Preview
+
+这是当前站点首页挂载的效果预览页面。直接运行下面的命令可以交互式选择 Feature；传入 Feature 名称时会打开指定类型，浏览器里仍然可以通过下拉菜单切换其它图表或示例。
+
+```bash
+bun run feature:preview:web
+bun run feature:preview:web mermaid
+bun run feature:preview:web d2
+bun run feature:preview:web plantuml
+bun run feature:preview:web diagram-dot
+bun run feature:preview:web diagram-echarts
+bun run feature:preview:web diagram-vega-lite
+```
+
 ## Supramark 依赖
 
-- `@supramark/web` - file:../../packages/renderers/web
-- `@supramark/core` - file:../../packages/core
-- `@supramark/feature-weather` - file:../../packages/features/feature-weather
+- `@supramark/core` - workspace:\*
+- `@supramark/feature-admonition` - workspace:\*
+- `@supramark/feature-core-markdown` - workspace:\*
+- `@supramark/feature-d2` - workspace:\*
+- `@supramark/feature-definition-list` - workspace:\*
+- `@supramark/feature-diagram-dot` - workspace:\*
+- `@supramark/feature-diagram-echarts` - workspace:\*
+- `@supramark/feature-diagram-vega-lite` - workspace:\*
+- `@supramark/feature-emoji` - workspace:\*
+- `@supramark/feature-footnote` - workspace:\*
+- `@supramark/feature-gfm` - workspace:\*
+- `@supramark/feature-html-page` - workspace:\*
+- `@supramark/feature-map` - workspace:\*
+- `@supramark/feature-math` - workspace:\*
+- `@supramark/feature-mermaid` - workspace:\*
+- `@supramark/feature-plantuml` - workspace:\*
+- `@supramark/feature-weather` - workspace:\*
+- `@supramark/web` - workspace:\*
 
 ## 源代码
 
@@ -189,21 +217,11 @@ tempC: 22
 const params = new URLSearchParams(window.location.search);
 const featureParam = params.get('feature');
 
-if (featureParam) {
-  const featureModule = () => import(`@supramark/feature-${featureParam}`);
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <FeaturePreview featureName={featureParam} featureImport={featureModule} />
-    </StrictMode>
-  );
-} else {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>
-  );
-}
-
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    {featureParam ? <FeaturePreview initialFeature={featureParam} /> : <App />}
+  </StrictMode>
+);
 ```
 
 ## 项目结构
@@ -223,4 +241,5 @@ examples/react-web-csr/
 - [其他示例](/examples/)
 
 ---
-*此文档由 scripts/doc-gen-example.ts 自动生成*
+
+_此文档由 scripts/doc-gen-example.ts 自动生成_

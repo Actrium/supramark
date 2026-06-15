@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,12 +13,38 @@ interface ExampleInfo {
   name: string;
   title: string;
   path: string;
+  description: string;
 }
 
 const EXAMPLES: ExampleInfo[] = [
-  { name: 'react-web', title: 'React Web 示例', path: 'examples/react-web' },
-  { name: 'react-web-csr', title: 'React Web CSR 示例', path: 'examples/react-web-csr' },
-  { name: 'react-native', title: 'React Native 示例', path: 'examples/react-native' },
+  {
+    name: 'react-web-csr',
+    title: 'React Web CSR 示例',
+    path: 'examples/react-web-csr',
+    description: 'Vite + React 的浏览器端实时 Markdown 编辑器示例。',
+  },
+  {
+    name: 'react-native',
+    title: 'React Native 示例',
+    path: 'examples/react-native',
+    description: 'Expo / React Native 环境下的 Markdown 与图表渲染示例。',
+  },
+  {
+    name: 'config-examples',
+    title: '构建配置示例',
+    path: 'examples/config-examples',
+    description: '在 Vite / Webpack 等构建工具中集成 Supramark 的配置参考。',
+  },
+];
+
+const FEATURE_PREVIEW_COMMANDS = [
+  'bun run feature:preview:web',
+  'bun run feature:preview:web mermaid',
+  'bun run feature:preview:web d2',
+  'bun run feature:preview:web plantuml',
+  'bun run feature:preview:web diagram-dot',
+  'bun run feature:preview:web diagram-echarts',
+  'bun run feature:preview:web diagram-vega-lite',
 ];
 
 const docsDir = path.join(projectRoot, 'docs/examples');
@@ -27,21 +54,30 @@ console.log('🚀 开始生成示例文档...\n');
 
 function generateExampleIndex(): string {
   let doc = `# 示例项目\n\n`;
-  doc += `Supramark 提供完整的示例项目，展示在不同平台上的实际使用方法。\n\n`;
-  doc += `## 示例列表\n\n`;
+  doc += `Supramark 的 examples 分成两类：一类是可以直接在文档站浏览的 Feature 示例库，另一类是需要在本地运行的完整宿主项目。\n\n`;
+  doc += `## 站内示例\n\n`;
+  doc += `### [实时 Feature Preview](/preview/?feature=mermaid)\n\n`;
+  doc += `首页挂载的是同一套可交互预览页面：左侧编辑 Markdown，右侧查看实际渲染效果，页面内可以继续切换 Feature 和示例。\n\n`;
+  doc += `本地调试时可以用命令直接打开：\n\n`;
+  doc += codeFence('bash', FEATURE_PREVIEW_COMMANDS.join('\n'));
+  doc += `\n\n`;
+
+  doc += `### [Feature 示例库](./gallery)\n\n`;
+  doc += `从各个 Feature 包的 \`src/examples.ts\` 自动聚合，展示当前内置语法、容器和图表能力的 Markdown 输入。\n\n`;
+  doc += `## 可运行项目\n\n`;
 
   for (const example of EXAMPLES) {
     doc += `### [${example.title}](./${example.name})\n\n`;
-    doc += `完整的可运行项目，展示 Supramark 在该平台的使用方法。\n\n`;
+    doc += `${example.description}\n\n`;
   }
 
   doc += `## 运行示例\n\n`;
   doc += `所有示例项目都可以直接克隆并运行：\n\n`;
   doc += `\`\`\`bash\n`;
-  doc += `git clone https://github.com/supramark/supramark.git\n`;
+  doc += `git clone https://github.com/kookyleo/supramark.git\n`;
   doc += `cd supramark\n`;
   doc += `bun install\n`;
-  doc += `cd examples/react-web\n`;
+  doc += `cd examples/react-web-csr\n`;
   doc += `bun run dev\n`;
   doc += `\`\`\`\n\n`;
 
@@ -125,6 +161,13 @@ function generateExampleDoc(data: ExampleData, example: ExampleInfo): string {
   }
   doc += `\`\`\`\n\n`;
 
+  if (example.name === 'react-web-csr') {
+    doc += `## 实时 Feature Preview\n\n`;
+    doc += `这是当前站点首页挂载的效果预览页面。直接运行下面的命令可以交互式选择 Feature；传入 Feature 名称时会打开指定类型，浏览器里仍然可以通过下拉菜单切换其它图表或示例。\n\n`;
+    doc += codeFence('bash', FEATURE_PREVIEW_COMMANDS.join('\n'));
+    doc += `\n\n`;
+  }
+
   const deps = data.packageJson.dependencies as Record<string, string> | undefined;
   if (deps) {
     const supramarkDeps = Object.keys(deps).filter(dep => dep.startsWith('@supramark/'));
@@ -173,6 +216,121 @@ function generateExampleDoc(data: ExampleData, example: ExampleInfo): string {
   return doc;
 }
 
+interface FeatureGalleryGroup {
+  packageName: string;
+  title: string;
+  path: string;
+  examples: Array<{
+    name: string;
+    description?: string;
+    markdown: string;
+  }>;
+}
+
+async function collectFeatureExamples(): Promise<FeatureGalleryGroup[]> {
+  const files = findFiles(path.join(projectRoot, 'packages/features'), 'src/examples.ts')
+    .filter(file => !file.includes(`${path.sep}dist${path.sep}`))
+    .sort();
+
+  const groups: FeatureGalleryGroup[] = [];
+
+  for (const file of files) {
+    const module = await import(pathToFileURL(file).href);
+    const examples = Object.values(module).find(value => Array.isArray(value)) as
+      | FeatureGalleryGroup['examples']
+      | undefined;
+
+    if (!examples || examples.length === 0) continue;
+
+    const packageRoot = path.dirname(path.dirname(file));
+    const packageJsonPath = path.join(packageRoot, 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as {
+      name?: string;
+    };
+    const packageName = packageJson.name ?? path.basename(packageRoot);
+
+    groups.push({
+      packageName,
+      title: titleFromPackageName(packageName),
+      path: path.relative(projectRoot, packageRoot),
+      examples: examples.filter(example => typeof example.markdown === 'string'),
+    });
+  }
+
+  return groups.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function findFiles(root: string, suffix: string): string[] {
+  const results: string[] = [];
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      results.push(...findFiles(fullPath, suffix));
+      continue;
+    }
+    if (fullPath.endsWith(suffix)) {
+      results.push(fullPath);
+    }
+  }
+
+  return results;
+}
+
+function titleFromPackageName(packageName: string): string {
+  return packageName
+    .replace(/^@supramark\/feature-/, '')
+    .split('-')
+    .map(part => (part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)))
+    .join(' ');
+}
+
+function generateFeatureGallery(groups: FeatureGalleryGroup[]): string {
+  const totalExamples = groups.reduce((sum, group) => sum + group.examples.length, 0);
+  let doc = `# Feature 示例库\n\n`;
+  doc += `本页从各个 Feature 包的 \`src/examples.ts\` 自动聚合，当前包含 **${groups.length} 个 Feature**、**${totalExamples} 个示例**。\n\n`;
+  doc += `这些示例展示的是 Markdown 输入本身；完整实时预览请打开 [首页预览](/preview/?feature=mermaid)，或运行 \`bun run feature:preview:web\`。\n\n`;
+
+  doc += `## 目录\n\n`;
+  for (const group of groups) {
+    doc += `- [${group.title}](#${slugify(group.title)}) (${group.examples.length})\n`;
+  }
+  doc += `\n`;
+
+  for (const group of groups) {
+    doc += `## ${group.title}\n\n`;
+    doc += `包：\`${group.packageName}\`  \n`;
+    doc += `路径：\`${group.path}\`\n\n`;
+
+    for (const example of group.examples) {
+      doc += `### ${example.name}\n\n`;
+      if (example.description) {
+        doc += `${example.description}\n\n`;
+      }
+      doc += codeFence('markdown', example.markdown);
+      doc += `\n\n`;
+    }
+  }
+
+  doc += `---\n*此文档由 scripts/doc-gen-example.ts 自动生成*\n`;
+  return doc;
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function codeFence(language: string, content: string): string {
+  const fence = content.includes('```') ? '````' : '```';
+  return `${fence}${language}\n${content.trimEnd()}\n${fence}`;
+}
+
 function extractCodeSnippet(content: string): string {
   const lines = content.split('\n');
   const codeLines: string[] = [];
@@ -194,7 +352,6 @@ function extractCodeSnippet(content: string): string {
   return codeLines.slice(0, 50).join('\n');
 }
 
-generateExampleIndex();
 fs.writeFileSync(path.join(docsDir, 'index.md'), generateExampleIndex());
 console.log('✅ 生成 examples/index.md');
 
@@ -211,5 +368,9 @@ for (const example of EXAMPLES) {
     console.error(`  ❌ 失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
+
+const featureGallery = await collectFeatureExamples();
+fs.writeFileSync(path.join(docsDir, 'gallery.md'), generateFeatureGallery(featureGallery));
+console.log('✅ 生成 examples/gallery.md');
 
 console.log('\n✅ 示例文档生成完成！');

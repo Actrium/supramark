@@ -564,7 +564,6 @@ import { Supramark } from '@/generated/supramark';
 | 旧 Web diagram helper 包 | **删除**。空壳包 |
 | `@supramark/cli` | **新增** |
 | `examples/react-web-csr` | 迁到 config + generated 流程 |
-| `examples/react-web` | 同上 |
 | `examples/react-native` | 同上 |
 
 ## 8 · 实施阶段（Phase 1–8）

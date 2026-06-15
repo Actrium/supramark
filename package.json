@@ -43,7 +43,8 @@
     "build:profile": "bun scripts/build-profile.ts",
     "feature:preview:web": "bun scripts/feature-preview-web.ts",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "bun run docs:typedoc && vitepress build docs",
+    "docs:preview:build": "bun run build:wasm && bun run --cwd examples/react-web-csr build -- --base /supramark/preview/ --outDir ../../docs/public/preview --emptyOutDir",
+    "docs:build": "bun run docs:preview:build && bun run docs:typedoc && vitepress build docs",
     "docs:typedoc": "cd packages/core && bun run docs && cd ../.. && rm -rf docs/public/typedoc && mkdir -p docs/public && cp -r packages/core/docs/api docs/public/typedoc"
   },
   "devDependencies": {

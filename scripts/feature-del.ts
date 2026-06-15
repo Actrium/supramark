@@ -41,7 +41,6 @@ interface BundleResult {
 function removeFromBundles(featureShortName: string): BundleResult[] {
   const bundleFiles = [
     'examples/react-web-csr/src/all-features.ts',
-    'examples/react-web/src/all-features.ts',
     'examples/react-native/src/all-features.ts',
   ];
 

@@ -5,7 +5,7 @@ import { discoverFeaturePackages } from './lib-feature-layout';
 const repoRoot = process.cwd();
 
 const targets = {
-  web: ['examples/react-web-csr/src/all-features.ts', 'examples/react-web/src/all-features.ts'],
+  web: ['examples/react-web-csr/src/all-features.ts'],
   rn: ['examples/react-native/src/all-features.ts'],
 };
 

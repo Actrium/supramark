@@ -118,6 +118,12 @@
   --sm-nav-height: 64px;
   --sm-logo-font-size: 28px;
   --sm-logo-letter-spacing: 0.012em;
+  --sm-logo-gradient: linear-gradient(
+    120deg,
+    var(--sm-brand-700) 8%,
+    var(--sm-brand-500) 52%,
+    var(--sm-cyan-600) 96%
+  );
   --sm-card-radius: var(--sm-radius-lg);
   --sm-card-border: 1px solid var(--sm-color-border);
   --sm-card-bg: var(--sm-color-surface);
@@ -167,6 +173,12 @@
   --sm-shadow-md: 0 14px 32px rgba(0, 0, 0, 0.34);
   --sm-shadow-lg: 0 26px 70px rgba(0, 0, 0, 0.42);
   --sm-focus-ring: 0 0 0 3px rgba(167, 139, 250, 0.32);
+  --sm-logo-gradient: linear-gradient(
+    120deg,
+    var(--sm-brand-200) 8%,
+    var(--sm-brand-400) 52%,
+    var(--sm-cyan-500) 96%
+  );
   --sm-hero-title-gradient: linear-gradient(
     120deg,
     var(--sm-brand-200) 6%,

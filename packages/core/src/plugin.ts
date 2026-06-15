@@ -89,6 +89,14 @@ async function parseWithRustMarkdown(source: string): Promise<SupramarkRootNode>
 async function loadRustMarkdownModule(): Promise<RustMarkdownModule> {
   const errors: unknown[] = [];
 
+  if (!isServerRuntime()) {
+    try {
+      return (await import('@supramark/markdown-web')) as RustMarkdownModule;
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
   for (const specifier of rustModuleCandidates()) {
     try {
       return (await import(/* @vite-ignore */ specifier)) as RustMarkdownModule;

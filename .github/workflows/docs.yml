@@ -5,6 +5,16 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'examples/react-web-csr/**'
+      - 'packages/features/**'
+      - 'packages/renderers/**'
+      - 'packages/engines/**'
+      - 'crates/**'
+      - 'scripts/build-wasm.ts'
+      - 'scripts/doc-gen-example.ts'
+      - 'scripts/wasm-pack.ts'
+      - 'package.json'
+      - 'bun.lock'
       - 'packages/core/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
@@ -34,6 +44,14 @@ jobs:
           node-version: '20'
       - name: Install dependencies
         run: bun install --no-progress
+      - name: Setup Rust toolchain (for wasm builds)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Build docs (typedoc + vitepress)

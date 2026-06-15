@@ -52,7 +52,7 @@ interface SupramarkHtmlPageNode {
 
 ## 示例
 
-更多 Markdown 示例见 `src/examples.ts`，并可在 `examples/react-native`、`examples/react-web` 中体验。
+更多 Markdown 示例见 `src/examples.ts`，并可在 `examples/react-native`、`examples/react-web-csr` 中体验。
 
 ## 相关文档
 

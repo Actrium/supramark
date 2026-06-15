@@ -36,7 +36,7 @@
 ## 示例与演示
 
 - React Native 示例：`examples/react-native` 使用 “目录 + 示例详情” 布局展示所有能力。
-- React Web 示例：`examples/react-web`（SSR）与 `examples/react-web-csr`（Vite CSR）展示 `<Supramark />` 在浏览器端的渲染。
+- React Web 示例：`examples/react-web-csr`（Vite CSR）展示 `<Supramark />` 在浏览器端的渲染。
 - 示例数据聚合：`examples/demos.ts` 从各 Feature 包导入示例并生成统一 `DEMOS` 数据，供多端示例共享。
 - 配置示例：`examples/config-examples` 提供 bundler 配置模板，`examples/demos.(ts|mjs)` 提供脚本化数据聚合。
 
