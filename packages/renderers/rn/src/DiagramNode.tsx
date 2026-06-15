@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Dimensions,
+  type LayoutChangeEvent,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/core';
 import { type DiagramRenderResult } from '@supramark/engines';
@@ -24,6 +31,14 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  // 容器实际宽度：图表应跟随父容器（如聊天气泡等窄容器）渲染，而非直接
+  // 按屏宽，否则会右偏 / 溢出。0 表示尚未测量，渲染时回退屏宽。
+  const [measuredWidth, setMeasuredWidth] = useState<number>(0);
+
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const next = Math.max(0, Math.floor(event.nativeEvent.layout.width));
+    setMeasuredWidth((prev) => (prev === next ? prev : next));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -76,7 +91,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
 
   if (loading && !svg && !error) {
     return (
-      <View style={styles.placeholder}>
+      <View style={styles.placeholder} onLayout={handleLayout}>
         <ActivityIndicator size="small" />
         <Text style={styles.placeholderText}>Rendering diagram ({node.engine})…</Text>
       </View>
@@ -85,7 +100,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
 
   if (error) {
     return (
-      <View style={styles.placeholder}>
+      <View style={styles.placeholder} onLayout={handleLayout}>
         <Text style={styles.errorText}>Diagram error: {error}</Text>
       </View>
     );
@@ -97,7 +112,8 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
     const heightAttrMatch = svg.match(/<svg[^>]*\bheight="([^"]+)"/);
 
     const { width: screenWidth } = Dimensions.get('window');
-    const containerWidth = screenWidth - 32;
+    // 优先用 onLayout 测得的容器宽度；未测到时回退屏宽（减常见内边距）。
+    const containerWidth = measuredWidth > 0 ? measuredWidth : screenWidth - 32;
     let svgWidth = 0;
     let svgHeight = 0;
 
@@ -131,14 +147,14 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
       .replace(/(<svg[^>]*)\bheight="[^"]*"/, '$1');
 
     return (
-      <View style={[styles.diagram, { width: containerWidth, height }]}>
+      <View style={[styles.diagram, { width: containerWidth, height }]} onLayout={handleLayout}>
         <SvgXml xml={scalableSvg} width={containerWidth} height={height} />
       </View>
     );
   }
 
   return (
-    <View style={styles.placeholder}>
+    <View style={styles.placeholder} onLayout={handleLayout}>
       <Text style={styles.placeholderText}>[diagram: {node.engine}]</Text>
     </View>
   );
