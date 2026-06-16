@@ -384,6 +384,7 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
     >
       <div
         className="feature-preview-render"
+        data-preview-theme={bgMode}
         style={{
           width: compact ? maxPreviewWidth : previewWidth,
           maxWidth: '100%',

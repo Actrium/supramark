@@ -59,26 +59,24 @@ export const containerRenderers: Record<string, any> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderHtmlContainerWeb({ node, key }: any) {
   const html = (node.data?.html as string | undefined) ?? '';
+  const title = extractHtmlTitle(html) ?? 'HTML Page';
   return (
-    <div
-      key={key}
-      className="supramark-html-page"
-      style={{
-        margin: '1em 0',
-        padding: 12,
-        border: '1px solid #e0e0e0',
-        borderRadius: 6,
-        background: '#fafafa',
-        fontFamily: 'ui-monospace, Menlo, monospace',
-        fontSize: 12,
-        color: '#555',
-        whiteSpace: 'pre-wrap',
-        overflowX: 'auto',
-      }}
-    >
-      {html || '(empty :::html container)'}
-    </div>
+    <article key={key} className="supramark-html-page">
+      <div className="supramark-html-page__header">
+        <div>
+          <span className="supramark-html-page__eyebrow">HTML Page</span>
+          <strong className="supramark-html-page__title">{title}</strong>
+        </div>
+      </div>
+      <iframe className="supramark-html-page__frame" title={title} srcDoc={html} sandbox="" />
+    </article>
   );
+}
+
+function extractHtmlTitle(html: string): string | undefined {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  const title = match?.[1]?.replace(/\s+/g, ' ').trim();
+  return title || undefined;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

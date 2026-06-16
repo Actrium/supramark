@@ -2,8 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
-import { resolve } from 'path';
-import { existsSync } from 'fs';
+import { dirname, resolve } from 'path';
+import { copyFileSync, existsSync, mkdirSync } from 'fs';
 
 // TS NodeNext source style: `import from './foo.js'` actually points to `foo.ts`.
 // Vite's default resolver doesn't fall back from .js → .ts, so we do it here.
@@ -22,11 +22,23 @@ const jsToTsResolver = {
   },
 };
 
+const graphvizWasmSibling = {
+  name: 'graphviz-wasm-sibling',
+  apply: 'build' as const,
+  writeBundle(options: { dir?: string }) {
+    if (!options.dir) return;
+    const source = resolve(__dirname, '../../crates/graphviz-anywhere/packages/web/dist/viz.wasm');
+    const target = resolve(options.dir, 'assets/viz.wasm');
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(source, target);
+  },
+};
+
 export default defineConfig({
   // `vite-plugin-wasm` + `vite-plugin-top-level-await` let us consume
   // plantuml-little-web's default wasm-bindgen shape (`import * as wasm from
   // "./plantuml_little_web_bg.wasm"`) without a custom loader.
-  plugins: [jsToTsResolver, react(), wasm(), topLevelAwait()],
+  plugins: [jsToTsResolver, react(), wasm(), topLevelAwait(), graphvizWasmSibling],
   worker: {
     format: 'es',
   },
