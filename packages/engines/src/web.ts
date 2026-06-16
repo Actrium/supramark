@@ -66,70 +66,111 @@ export function createWebDiagramEngine(
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
-  // 1. Preload graphviz-anywhere-web so its sync `.layout()` is ready before
-  //    plantuml-little-web ever triggers a layout pass.
-  //    eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { Graphviz } = await import('@kookyleo/graphviz-anywhere-web' as string);
-  const graphviz = await Graphviz.load();
-
-  // 2. Install the global bridge the wasm module expects. Use a guard so we
-  //    only install once per realm even if the loader fires concurrently.
-  //    eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const g = globalThis as any;
-  if (typeof g.__graphviz_anywhere_render !== 'function') {
-    g.__graphviz_anywhere_render = (
-      dot: string,
-      engine?: string,
-      format?: string
-    ): string => {
-      return graphviz.layout(dot, (format ?? 'svg') as string, (engine ?? 'dot') as string);
-    };
-  }
-
-  // 3. Install the host text-metrics bridge before loading the wasm so the
-  //    wasm's metrics-host-callback impl can resolve `supramark.measureText`
-  //    on first render. Idempotent.
+  // Install the host text-metrics bridge before loading the wasm so the
+  // wasm's metrics-host-callback impl can resolve `supramark.measureText`
+  // on first render. Idempotent.
   installHostMetricsBridge();
 
-  // 4. Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
-  //    the `import * from '*.wasm'` side effect, so no separate init call is
-  //    needed. Some builds still ship a default `init()` — probe defensively.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const puml: any = await import('@kookyleo/plantuml-little-web' as string);
+  let plantumlPromise: Promise<DiagramRenderFn> | null = null;
+  let graphvizBridgePromise: Promise<void> | null = null;
 
-  const init =
-    (typeof puml.default === 'function' && puml.default) ||
-    (typeof puml.init === 'function' && puml.init) ||
-    null;
-  if (init) {
-    try {
-      await init();
-    } catch {
-      // Already initialised via the module-import side effect — ignore.
+  const ensureGraphvizBridge = async () => {
+    if (!graphvizBridgePromise) {
+      graphvizBridgePromise = (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { Graphviz } = await import('@kookyleo/graphviz-anywhere-web' as string);
+        const graphviz = await Graphviz.load();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const g = globalThis as any;
+        if (typeof g.__graphviz_anywhere_render !== 'function') {
+          g.__graphviz_anywhere_render = (
+            dot: string,
+            engine?: string,
+            format?: string
+          ): string => {
+            return graphviz.layout(dot, (format ?? 'svg') as string, (engine ?? 'dot') as string);
+          };
+        }
+      })();
     }
-  }
 
-  const convert =
-    (typeof puml.convert === 'function' && puml.convert) ||
-    (typeof puml.render === 'function' && puml.render) ||
-    (typeof puml.renderSvg === 'function' && puml.renderSvg) ||
-    null;
-  if (!convert) {
-    throw new Error(
-      '`@kookyleo/plantuml-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
-    );
-  }
+    return graphvizBridgePromise;
+  };
+
+  const loadPlantuml = async (): Promise<DiagramRenderFn> => {
+    if (!plantumlPromise) {
+      plantumlPromise = (async () => {
+        // Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
+        // the `import * from '*.wasm'` side effect, so no separate init call is
+        // needed. Some builds still ship a default `init()` — probe defensively.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const puml: any = await import('@kookyleo/plantuml-little-web' as string);
+
+        const init =
+          (typeof puml.default === 'function' && puml.default) ||
+          (typeof puml.init === 'function' && puml.init) ||
+          null;
+        if (init) {
+          try {
+            await init();
+          } catch {
+            // Already initialised via the module-import side effect — ignore.
+          }
+        }
+
+        const convert =
+          (typeof puml.convert === 'function' && puml.convert) ||
+          (typeof puml.render === 'function' && puml.render) ||
+          (typeof puml.renderSvg === 'function' && puml.renderSvg) ||
+          null;
+        if (!convert) {
+          throw new Error(
+            '`@kookyleo/plantuml-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
+          );
+        }
+
+        return async (code: string): Promise<string> => {
+          // `convert` is synchronous (wasm-bindgen-generated) but `await` handles
+          // both sync and async return shapes uniformly.
+          const svg = await convert(code);
+          const normalized = String(svg ?? '');
+          if (!normalized.includes('<svg')) {
+            throw new Error('PlantUML renderer did not return SVG output.');
+          }
+          return normalized;
+        };
+      })();
+    }
+    return plantumlPromise;
+  };
 
   return async (code: string): Promise<string> => {
-    // `convert` is synchronous (wasm-bindgen-generated) but `await` handles
-    // both sync and async return shapes uniformly.
-    const svg = await convert(code);
-    const normalized = String(svg ?? '');
-    if (!normalized.includes('<svg')) {
-      throw new Error('PlantUML renderer did not return SVG output.');
+    if (plantumlNeedsGraphviz(code)) {
+      await ensureGraphvizBridge();
     }
-    return normalized;
+    const render = await loadPlantuml();
+    return render(code);
   };
+}
+
+function plantumlNeedsGraphviz(code: string): boolean {
+  const normalized = code.toLowerCase();
+  const hasSequenceArrow = /(^|\n)\s*[\w.$"'[\] -]+\s*(?:--?|==?|\.\.)[>x]/.test(normalized);
+  const hasSequenceKeyword =
+    /(^|\n)\s*(actor|participant|boundary|control|entity|queue|collections?)\b/.test(normalized);
+  const hasGraphLayoutKeyword =
+    /(^|\n)\s*(abstract\s+class|class|interface|enum|annotation|component|state|usecase|object|package|node|artifact|folder|frame|cloud|database|rectangle|storage|agent|card)\b/.test(
+      normalized
+    );
+  const hasActivityKeyword =
+    /(^|\n)\s*(start|stop|if\s*\(|while\s*\(|repeat\b|fork\b|partition\b|:[^;\n]+;)/.test(
+      normalized
+    );
+
+  if (hasGraphLayoutKeyword || hasActivityKeyword) return true;
+  if (hasSequenceArrow || hasSequenceKeyword) return false;
+  return true;
 }
 
 /**
@@ -199,7 +240,7 @@ function injectD2Dimensions(svg: string): string {
   const vb = tag.match(/viewBox="([^"]+)"/);
   if (!vb) return svg;
   const parts = vb[1].trim().split(/\s+/).map(Number);
-  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return svg;
+  if (parts.length !== 4 || parts.some(n => !Number.isFinite(n))) return svg;
   const [, , w, h] = parts;
   if (w <= 0 || h <= 0) return svg;
   const replaced = tag.replace('<svg', `<svg width="${w}" height="${h}"`);

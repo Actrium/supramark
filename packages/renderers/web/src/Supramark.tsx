@@ -76,6 +76,14 @@ export interface SupramarkWebProps {
   containerRenderers?: Record<string, ContainerRendererWeb>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  onRenderStateChange?: (state: SupramarkRenderState) => void;
+}
+
+export interface SupramarkRenderState {
+  pending: boolean;
+  renderTasks: number;
+  highlightTasks: number;
+  engines: string[];
 }
 
 type RenderTask = {
@@ -103,8 +111,7 @@ function getDefinitionDescriptions(
   item: SupramarkDefinitionItemNode
 ): SupramarkDefinitionDescriptionNode[] {
   return item.children.filter(
-    (child): child is SupramarkDefinitionDescriptionNode =>
-      child.type === 'definition_description'
+    (child): child is SupramarkDefinitionDescriptionNode => child.type === 'definition_description'
   );
 }
 
@@ -132,6 +139,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
+  onRenderStateChange,
 }) => {
   const diagramEngine = useContext(DiagramEngineContext) ?? defaultDiagramEngine;
   const [root, setRoot] = useState<SupramarkRootNode | null>(ast ?? null);
@@ -161,21 +169,45 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
 
     (async () => {
       try {
+        onRenderStateChange?.({
+          pending: true,
+          renderTasks: 0,
+          highlightTasks: 0,
+          engines: [],
+        });
+
         const parsed = ast ?? (await parse(markdown, { config }));
-        const renderedMap = await preRenderAll(
-          collectRenderTasks(parsed.children, config),
-          diagramEngine
+        const renderTasks = collectRenderTasks(parsed.children, config);
+        const highlightTasks = collectCodeHighlightTasks(
+          parsed.children,
+          config,
+          codeHighlightTheme
         );
-        const highlightedMap = await preHighlightAll(
-          collectCodeHighlightTasks(parsed.children, config, codeHighlightTheme),
-          codeHighlighter
-        );
+        const engines = [...new Set(renderTasks.map(task => task.engine))];
+
+        if (!cancelled) {
+          onRenderStateChange?.({
+            pending: true,
+            renderTasks: renderTasks.length,
+            highlightTasks: highlightTasks.length,
+            engines,
+          });
+        }
+
+        const renderedMap = await preRenderAll(renderTasks, diagramEngine);
+        const highlightedMap = await preHighlightAll(highlightTasks, codeHighlighter);
 
         if (!cancelled) {
           setRoot(parsed);
           setRendered(renderedMap);
           setHighlighted(highlightedMap);
           setParseError(null);
+          onRenderStateChange?.({
+            pending: false,
+            renderTasks: renderTasks.length,
+            highlightTasks: highlightTasks.length,
+            engines,
+          });
         }
       } catch (error) {
         if (!cancelled) {
@@ -189,6 +221,12 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
           setRendered(new Map());
           setHighlighted(new Map());
           setRoot(null);
+          onRenderStateChange?.({
+            pending: false,
+            renderTasks: 0,
+            highlightTasks: 0,
+            engines: [],
+          });
           if (onError) {
             onError(err);
           }
@@ -199,7 +237,16 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [markdown, ast, config, diagramEngine, onError, codeHighlighter, codeHighlightTheme]);
+  }, [
+    markdown,
+    ast,
+    config,
+    diagramEngine,
+    onError,
+    codeHighlighter,
+    codeHighlightTheme,
+    onRenderStateChange,
+  ]);
 
   const mergedContainerRenderers = useMemo(() => {
     return containerRenderers ?? {};
@@ -620,7 +667,13 @@ function renderNode(
                   {terms.map((term, termIndex) => (
                     <p key={`term-${termIndex}`} className={classNames.paragraph}>
                       <strong>
-                        {renderInlineNodes(term.children, classNames, rendered, highlighted, config)}
+                        {renderInlineNodes(
+                          term.children,
+                          classNames,
+                          rendered,
+                          highlighted,
+                          config
+                        )}
                       </strong>
                     </p>
                   ))}

@@ -10,6 +10,9 @@ on:
       - 'packages/renderers/**'
       - 'packages/engines/**'
       - 'crates/**'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'scripts/build-wasm.ts'
       - 'scripts/doc-gen-example.ts'
       - 'scripts/wasm-pack.ts'
@@ -17,6 +20,7 @@ on:
       - 'bun.lock'
       - 'packages/core/**'
       - '.github/workflows/docs.yml'
+      - 'wrangler.toml'
   workflow_dispatch:
 
 permissions:

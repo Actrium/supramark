@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Supramark } from '@supramark/web/client';
+import { Supramark, type SupramarkRenderState } from '@supramark/web/client';
 import {
   featureRegistry,
   findFeature,
@@ -19,6 +19,33 @@ type MobilePane = 'preview' | 'editor';
 
 const MOBILE_QUERY = '(max-width: 767px)';
 const LINE_HEIGHT = 19.5; // 13px * 1.5
+const IDLE_RENDER_STATE: SupramarkRenderState = {
+  pending: false,
+  renderTasks: 0,
+  highlightTasks: 0,
+  engines: [],
+};
+
+function previewEnginesForFeature(shortName: string): string[] {
+  switch (shortName) {
+    case 'mermaid':
+      return ['mermaid'];
+    case 'd2':
+      return ['d2'];
+    case 'diagram-dot':
+      return ['dot'];
+    case 'plantuml':
+      return ['plantuml'];
+    case 'diagram-echarts':
+      return ['echarts'];
+    case 'diagram-vega-lite':
+      return ['vega-lite'];
+    case 'math':
+      return ['math'];
+    default:
+      return [];
+  }
+}
 
 export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   const initial = findFeature(initialFeature) ?? featureRegistry[0];
@@ -32,6 +59,7 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   const [copied, setCopied] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobilePane, setMobilePane] = useState<MobilePane>('preview');
+  const [renderState, setRenderState] = useState<SupramarkRenderState>(IDLE_RENDER_STATE);
 
   // Splitter drag
   const [leftPct, setLeftPct] = useState(50);
@@ -148,6 +176,12 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   const switchFeature = (shortName: string) => {
     const f = findFeature(shortName);
     if (!f) return;
+    setRenderState({
+      pending: true,
+      renderTasks: 0,
+      highlightTasks: 0,
+      engines: previewEnginesForFeature(f.shortName),
+    });
     setFeature(f);
     setSelectedExample(0);
     setMarkdown(f.examples[0]?.markdown ?? '');
@@ -158,6 +192,12 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   };
 
   const switchExample = (idx: number) => {
+    setRenderState({
+      pending: true,
+      renderTasks: 0,
+      highlightTasks: 0,
+      engines: previewEnginesForFeature(feature.shortName),
+    });
     setSelectedExample(idx);
     setMarkdown(feature.examples[idx]?.markdown ?? '');
     setDirty(false);
@@ -167,6 +207,10 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
     setMarkdown(value);
     setDirty(value !== (feature.examples[selectedExample]?.markdown ?? ''));
   };
+
+  const onRenderStateChange = useCallback((state: SupramarkRenderState) => {
+    setRenderState(state);
+  }, []);
 
   const copyVersion = () => {
     navigator.clipboard.writeText(feature.version);
@@ -316,6 +360,25 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
     </>
   );
 
+  const renderPreviewLoading = () => {
+    if (!renderState.pending) return null;
+
+    const engines =
+      renderState.engines.length > 0 ? renderState.engines.join(' / ') : feature.displayName;
+    const detail =
+      renderState.renderTasks > 0 ? `Rendering ${engines}` : `Preparing ${feature.displayName}`;
+
+    return (
+      <div className="feature-preview-loading" role="status" aria-live="polite">
+        <div className="feature-preview-loading__spinner" />
+        <div className="feature-preview-loading__body">
+          <strong>{detail}</strong>
+          <span>Loading parser and renderer modules</span>
+        </div>
+      </div>
+    );
+  };
+
   const renderEditor = (compact = false) => (
     <div
       style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', minHeight: 0 }}
@@ -383,21 +446,34 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
       }}
     >
       <div
-        className="feature-preview-render"
+        className={`feature-preview-render-shell${renderState.pending ? ' is-loading' : ''}`}
         data-preview-theme={bgMode}
         style={{
           width: compact ? maxPreviewWidth : previewWidth,
           maxWidth: '100%',
-          boxSizing: 'border-box',
-          background: bgMode === 'dark' ? '#2d2d2d' : '#fff',
-          color: bgMode === 'dark' ? '#e0e0e0' : '#1a1a1a',
-          borderRadius: 6,
-          boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-          padding: compact ? 16 : 20,
-          alignSelf: 'flex-start',
         }}
       >
-        <Supramark markdown={markdown} containerRenderers={containerRenderers} />
+        {renderPreviewLoading()}
+        <div
+          className="feature-preview-render"
+          data-preview-theme={bgMode}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            background: bgMode === 'dark' ? '#2d2d2d' : '#fff',
+            color: bgMode === 'dark' ? '#e0e0e0' : '#1a1a1a',
+            borderRadius: 6,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+            padding: compact ? 16 : 20,
+            alignSelf: 'flex-start',
+          }}
+        >
+          <Supramark
+            markdown={markdown}
+            containerRenderers={containerRenderers}
+            onRenderStateChange={onRenderStateChange}
+          />
+        </div>
       </div>
     </div>
   );

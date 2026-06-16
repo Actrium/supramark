@@ -72,6 +72,8 @@ module.exports = {
     'crates/mermaid-little/src/cose_bilkent_js/**',
 
     // docs build outputs / caches
+    'docs/public/preview/',
+    'docs/public/preview/**',
     'docs/public/typedoc/',
     'docs/public/typedoc/**',
     'docs/.vitepress/cache/',

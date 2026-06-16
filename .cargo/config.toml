@@ -22,10 +22,10 @@
 # Belt-and-suspenders: also set target.cfg rustflags in case the
 # per-triple value alone is overridden by a more specific source.
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "opt-level=3"]
+rustflags = []
 
 [target.'cfg(target_arch = "wasm32")']
-rustflags = ["-C", "opt-level=3"]
+rustflags = []
 
 # graphviz-anywhere statically pulls in graphviz C++ object files (block.cpp,
 # csolve_VPSC.cpp, …) that need libc++ at link time. Its build.rs does not
