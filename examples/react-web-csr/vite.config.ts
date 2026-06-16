@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { dirname, resolve } from 'path';
-import { copyFileSync, existsSync, mkdirSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 
 // TS NodeNext source style: `import from './foo.js'` actually points to `foo.ts`.
 // Vite's default resolver doesn't fall back from .js → .ts, so we do it here.
@@ -25,14 +25,53 @@ const jsToTsResolver = {
 const graphvizWasmSibling = {
   name: 'graphviz-wasm-sibling',
   apply: 'build' as const,
-  writeBundle(options: { dir?: string }) {
+  async writeBundle(options: { dir?: string }) {
     if (!options.dir) return;
-    const source = resolve(__dirname, '../../crates/graphviz-anywhere/packages/web/dist/viz.wasm');
     const target = resolve(options.dir, 'assets/viz.wasm');
     mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(source, target);
+
+    const source = findGraphvizWasmSource(options.dir);
+    if (source) {
+      if (source !== target) copyFileSync(source, target);
+      return;
+    }
+
+    await downloadGraphvizWasm(target);
   },
 };
+
+function findGraphvizWasmSource(outDir: string) {
+  const workspaceDist = resolve(
+    __dirname,
+    '../../crates/graphviz-anywhere/packages/web/dist/viz.wasm'
+  );
+  if (existsSync(workspaceDist)) return workspaceDist;
+
+  const assetsDir = resolve(outDir, 'assets');
+  if (!existsSync(assetsDir)) return undefined;
+
+  const emitted = readdirSync(assetsDir).find(name => /^viz-[\w-]+\.wasm$/.test(name));
+  return emitted ? resolve(assetsDir, emitted) : undefined;
+}
+
+async function downloadGraphvizWasm(target: string) {
+  const response = await fetch(graphvizWasmCdnUrl());
+  if (!response.ok) {
+    throw new Error(
+      `Unable to download Graphviz wasm asset: ${response.status} ${response.statusText}`
+    );
+  }
+  writeFileSync(target, new Uint8Array(await response.arrayBuffer()));
+}
+
+function graphvizWasmCdnUrl() {
+  const packageJsonPath = resolve(
+    __dirname,
+    '../../crates/graphviz-anywhere/packages/web/package.json'
+  );
+  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: string };
+  return `https://unpkg.com/@kookyleo/graphviz-anywhere-web@${version ?? '0.2.1'}/dist/viz.wasm`;
+}
 
 export default defineConfig({
   // `vite-plugin-wasm` + `vite-plugin-top-level-await` let us consume
