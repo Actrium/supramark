@@ -58,6 +58,8 @@ jobs:
           tool: wasm-pack
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Build docs (typedoc + vitepress)
         run: bun run docs:build
       - name: Upload artifact
