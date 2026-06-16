@@ -1,7 +1,8 @@
 import { installHostMetricsBridge } from '../host-bridge.js';
 
-let renderFn: ((code: string, options?: Record<string, unknown>) => Promise<string> | string) | null =
-  null;
+let renderFn:
+  | ((code: string, options?: Record<string, unknown>) => Promise<string> | string)
+  | null = null;
 
 type MermaidThemeVars = Record<string, string>;
 
@@ -188,7 +189,11 @@ function rewriteStyleValue(value: string, vars: MermaidThemeVars): string {
   );
 }
 
-function applyFontFamilies(svg: string, textFontFamily: string | null, monoFontFamily: string | null): string {
+function applyFontFamilies(
+  svg: string,
+  textFontFamily: string | null,
+  monoFontFamily: string | null
+): string {
   let next = svg;
 
   if (monoFontFamily) {
@@ -217,6 +222,29 @@ function applyFontFamilies(svg: string, textFontFamily: string | null, monoFontF
   return next;
 }
 
+function normalizeMermaidHtmlLabels(svg: string): string {
+  const withVisibleLabels = svg.replace(/<foreignObject\b([^>]*)>/gi, (match, attrs: string) => {
+    if (/\soverflow=/.test(match)) {
+      return match;
+    }
+    return `<foreignObject overflow="visible"${attrs}>`;
+  });
+
+  return withVisibleLabels.replace(/<p\b([^>]*)>/gi, (match, attrs: string) => {
+    const styleMatch = attrs.match(/\sstyle="([^"]*)"/i);
+    if (!styleMatch) {
+      return `<p${attrs} style="margin:0">`;
+    }
+
+    const styleValue = styleMatch[1];
+    if (/(^|;)\s*margin\s*:/.test(styleValue)) {
+      return match;
+    }
+
+    return `<p${attrs.replace(styleMatch[0], ` style="margin:0; ${styleValue}"`)}>`;
+  });
+}
+
 function inlineMermaidSvg(svg: string, options?: Record<string, unknown>): string {
   const styleMatch = svg.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
   const cssText = styleMatch?.[1] ?? '';
@@ -227,7 +255,10 @@ function inlineMermaidSvg(svg: string, options?: Record<string, unknown>): strin
   const rootStyle = rootStyleMatch ? parseStyleAttribute(rootStyleMatch[1]) : {};
   const vars = buildThemeVars(rootStyle, options);
 
-  let next = svg.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  let next = svg.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (_match, styleBody: string) => {
+    const rewritten = rewriteStyleValue(styleBody, vars).trim();
+    return rewritten ? `<style>${rewritten}</style>` : '';
+  });
   next = next.replace(/\sstyle="([^"]*)"/gi, (_match, styleValue: string) => {
     const rewritten = rewriteStyleValue(styleValue, vars)
       .split(';')
@@ -246,11 +277,12 @@ function inlineMermaidSvg(svg: string, options?: Record<string, unknown>): strin
   );
 
   next = next.replace(/<svg\b([^>]*)>/i, (_match, attrs: string) => {
-    const cleaned = attrs.replace(/\sclass="[^"]*"/gi, '').replace(/\sstyle="[^"]*"/gi, '');
+    const cleaned = attrs.replace(/\sclass="[^"]*"/gi, '');
     return `<svg${cleaned}>`;
   });
 
   next = applyFontFamilies(next, textFontFamily, monoFontFamily);
+  next = normalizeMermaidHtmlLabels(next);
   return next;
 }
 

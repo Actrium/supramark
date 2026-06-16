@@ -1,0 +1,58 @@
+.feature-preview-render {
+  overflow-wrap: anywhere;
+}
+
+.feature-preview-render [data-supramark-diagram],
+.feature-preview-render .sm-diagram {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.feature-preview-render [data-supramark-diagram='mermaid'],
+.feature-preview-render .sm-diagram[data-supramark-diagram='mermaid'] {
+  overflow: visible;
+  padding-bottom: 32px;
+}
+
+.feature-preview-render [data-supramark-diagram] svg,
+.feature-preview-render .sm-diagram svg,
+.feature-preview-render svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.feature-preview-render [data-supramark-diagram='mermaid'] svg,
+.feature-preview-render .sm-diagram[data-supramark-diagram='mermaid'] svg {
+  overflow: visible;
+}
+
+.feature-preview-render .sm-diagram-pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.feature-preview-render table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0;
+  }
+
+  body {
+    display: block;
+  }
+
+  .feature-preview-render [data-supramark-diagram],
+  .feature-preview-render .sm-diagram {
+    margin-inline: auto;
+  }
+}
