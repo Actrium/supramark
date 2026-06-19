@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0 AND MIT"
 description = "wasm-bindgen wrapper for supramark-markdown AST v2 parsing"
-repository = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/Actrium/supramark"
 publish = false
 
 [lib]

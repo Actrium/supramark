@@ -351,7 +351,7 @@ function generatePackageJson(config: CreateConfig): string {
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/supramark/supramark.git",
+    "url": "https://github.com/Actrium/supramark.git",
     "directory": "${repositoryDirectory}"
   }
 }

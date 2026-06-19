@@ -74,7 +74,7 @@ function generateExampleIndex(): string {
   doc += `## 运行示例\n\n`;
   doc += `所有示例项目都可以直接克隆并运行：\n\n`;
   doc += `\`\`\`bash\n`;
-  doc += `git clone https://github.com/kookyleo/supramark.git\n`;
+  doc += `git clone https://github.com/Actrium/supramark.git\n`;
   doc += `cd supramark\n`;
   doc += `bun install\n`;
   doc += `cd examples/react-web-csr\n`;

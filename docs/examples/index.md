@@ -43,7 +43,7 @@ Expo / React Native 环境下的 Markdown 与图表渲染示例。
 所有示例项目都可以直接克隆并运行：
 
 ```bash
-git clone https://github.com/kookyleo/supramark.git
+git clone https://github.com/Actrium/supramark.git
 cd supramark
 bun install
 cd examples/react-web-csr

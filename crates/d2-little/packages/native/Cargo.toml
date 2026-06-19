@@ -5,8 +5,8 @@ edition = "2024"
 license = "MPL-2.0"
 authors = ["kookyleo <kookyleo@gmail.com>"]
 description = "Native FFI wrapper around d2-little for React Native / iOS / Android consumers"
-homepage = "https://github.com/kookyleo/supramark"
-repository = "https://github.com/kookyleo/supramark"
+homepage = "https://github.com/Actrium/supramark"
+repository = "https://github.com/Actrium/supramark"
 publish = false
 
 [lib]

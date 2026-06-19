@@ -30,8 +30,8 @@
 项目 README 中的徽章：
 
 ```markdown
-[![CI](https://github.com/supramark/supramark/actions/workflows/ci.yml/badge.svg)](https://github.com/supramark/supramark/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/supramark/supramark/branch/main/graph/badge.svg)](https://codecov.io/gh/supramark/supramark)
+[![CI](https://github.com/Actrium/supramark/actions/workflows/ci.yml/badge.svg)](https://github.com/Actrium/supramark/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Actrium/supramark/branch/main/graph/badge.svg)](https://codecov.io/gh/Actrium/supramark)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ```
 
@@ -69,7 +69,7 @@ node scripts/quality-check.js
 
 测试覆盖率会自动上传到 Codecov：
 
-- 报告地址：`https://codecov.io/gh/supramark/supramark`
+- 报告地址：`https://codecov.io/gh/Actrium/supramark`
 - 覆盖率徽章已添加到 README
 
 当前覆盖率要求（`packages/core/jest.config.cjs`）：

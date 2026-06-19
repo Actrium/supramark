@@ -41,7 +41,7 @@ render errors. `convertWithId(source, id)` mirrors upstream Mermaid's
 ## Provenance
 
 This package is part of the
-[supramark](https://github.com/kookyleo/supramark) super-monorepo (path:
+[supramark](https://github.com/Actrium/supramark) super-monorepo (path:
 `crates/mermaid-little/packages/web/`). It originated **inside the
 super-monorepo as a downstream patch** to the
 [`mermaid-little`](https://github.com/kookyleo/mermaid-little) sub-tree;

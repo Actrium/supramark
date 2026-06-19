@@ -1,7 +1,7 @@
 # Supramark
 
-[![CI](https://github.com/supramark/supramark/actions/workflows/ci.yml/badge.svg)](https://github.com/supramark/supramark/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/supramark/supramark/branch/main/graph/badge.svg)](https://codecov.io/gh/supramark/supramark)
+[![CI](https://github.com/Actrium/supramark/actions/workflows/ci.yml/badge.svg)](https://github.com/Actrium/supramark/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Actrium/supramark/branch/main/graph/badge.svg)](https://codecov.io/gh/Actrium/supramark)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 一个面向 React Native / 小程序宿主的 Markdown 扩展与图表渲染**集成 / 封装库**。

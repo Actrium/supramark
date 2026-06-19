@@ -11,7 +11,7 @@
   "plugin": [],
   "name": "@supramark/core API Documentation",
   "navigationLinks": {
-    "GitHub": "https://github.com/supramark/supramark"
+    "GitHub": "https://github.com/Actrium/supramark"
   },
   "categorizeByGroup": true,
   "categoryOrder": ["Core", "AST", "Parser", "Plugin", "Feature Interface", "Cache", "*"],
