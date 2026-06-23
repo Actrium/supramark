@@ -41,16 +41,38 @@ interface NativeSupramarkMarkdownModule {
   getVersion(): Promise<string>;
 }
 
-function resolveNative(): NativeSupramarkMarkdownModule {
-  // TurboModule (new arch) first.
+/**
+ * Load the codegen'd TurboModule (new arch), or `null` when codegen
+ * didn't run / new-arch is disabled. Kept separate from {@link
+ * resolveNative} so the selection logic stays a pure, testable function.
+ */
+function loadTurboModule(): NativeSupramarkMarkdownModule | null {
   try {
     const turbo = require('./NativeSupramarkMarkdown').default;
-    if (turbo) return turbo as NativeSupramarkMarkdownModule;
+    return (turbo as NativeSupramarkMarkdownModule) ?? null;
   } catch {
     // not codegen'd or new-arch disabled — fall through
+    return null;
   }
+}
+
+/**
+ * Pick the native module implementation, preferring the New Architecture
+ * TurboModule over the legacy bridge. When neither is available the
+ * package wasn't linked, so return a Proxy that throws an actionable
+ * error on first use (rather than crashing at import time).
+ *
+ * Exported for unit tests — pass the candidates explicitly so the
+ * fallback order can be exercised without relying on import-time module
+ * resolution.
+ */
+export function resolveNative(
+  turbo: NativeSupramarkMarkdownModule | null | undefined,
+  bridged: NativeSupramarkMarkdownModule | null | undefined
+): NativeSupramarkMarkdownModule {
+  // TurboModule (new arch) first.
+  if (turbo) return turbo;
   // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkMarkdownNative;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkMarkdownModule, {
       get() {
@@ -58,10 +80,10 @@ function resolveNative(): NativeSupramarkMarkdownModule {
       },
     });
   }
-  return bridged as NativeSupramarkMarkdownModule;
+  return bridged;
 }
 
-const native = resolveNative();
+const native = resolveNative(loadTurboModule(), NativeModules.SupramarkMarkdownNative);
 
 registerNativeParserAdapter({
   parseJson: async (source: string) => native.parseJson(source),

@@ -22,7 +22,7 @@
 //! produced it; calling `free(3)` from C is undefined behaviour because
 //! the Rust allocator may be jemalloc/mimalloc in a host build.
 
-use std::ffi::{CStr, c_char};
+use std::ffi::{c_char, CStr};
 use std::os::raw::c_int;
 use std::ptr;
 use std::slice;
@@ -288,12 +288,34 @@ mod tests {
     fn parse_empty_input_null_ptr() {
         let mut out_buf: *mut c_char = ptr::null_mut();
         let mut out_len: usize = 0;
-        let rc = unsafe {
-            supramark_markdown_parse_json(ptr::null(), 0, &mut out_buf, &mut out_len)
-        };
+        let rc =
+            unsafe { supramark_markdown_parse_json(ptr::null(), 0, &mut out_buf, &mut out_len) };
         assert_eq!(rc, SUPRAMARK_MARKDOWN_OK);
         assert!(!out_buf.is_null());
         unsafe { supramark_markdown_free(out_buf, out_len) };
+    }
+
+    /// Invalid UTF-8 bytes (explicit length) -> ERR_NULL_INPUT, out-params
+    /// left untouched. Covers the `str::from_utf8` failure branch: a caller
+    /// passing a non-UTF-8 source (e.g. binary data mistaken for text) must
+    /// not crash and returns the documented error code.
+    #[test]
+    fn parse_invalid_utf8() {
+        // 0xFF / 0xFE are not valid UTF-8 lead bytes.
+        let src: [u8; 3] = [b'#', 0xFF, 0xFE];
+        let mut out_buf: *mut c_char = ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            supramark_markdown_parse_json(
+                src.as_ptr() as *const c_char,
+                src.len(),
+                &mut out_buf,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, SUPRAMARK_MARKDOWN_ERR_NULL_INPUT);
+        assert!(out_buf.is_null());
+        assert_eq!(out_len, 0);
     }
 
     /// NULL out-params → ERR_NULL_INPUT（不崩溃）。
