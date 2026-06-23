@@ -53,14 +53,16 @@ public final class SupramarkMarkdownModule {
         check(json.contains("\"type\"") && json.contains("root"), "simple: JSON has root node");
 
         // 2. Empty byte[] (length 0) is a valid empty document, not an error.
-        //    Scope note: this guards the bridge-level behaviour. It does not,
-        //    on this host JVM, reproduce the failure the input_len == 0 fix
-        //    targets: HotSpot's GetByteArrayElements over an empty array
-        //    happens to hand back a pointer that the pre-fix strlen path reads
-        //    as empty, so the test passes either way here. The fix matters on
-        //    real Android ART (non-NUL-terminated buffer); the NULL/empty FFI
-        //    contract itself is teeth-tested in the Rust suite
-        //    (parse_empty_input_null_ptr / parse_empty_input_explicit_len).
+        //    Scope note: this guards bridge-level behaviour. It does not, by
+        //    itself, demonstrate a pre-fix failure: empirically the pre-fix
+        //    strlen path reads GetByteArrayElements' empty-array pointer as an
+        //    empty string and resolves the same way — on a host JVM AND on a
+        //    real Android 15 arm64 ART emulator (the UB is benign on both).
+        //    The input_len == 0 fix is therefore a UB-hygiene + NULL-handling
+        //    correctness change; its teeth live in the Rust suite, where
+        //    parse_empty_input_null_ptr passes an explicit NULL pointer that
+        //    the pre-fix code rejected with ERR_NULL_INPUT and the fix accepts
+        //    as an empty document.
         st[0] = -1;
         byte[] outEmpty = nativeParseJson(new byte[0], st);
         check(st[0] == OK, "empty: status OK (input_len==0 is empty document)");
