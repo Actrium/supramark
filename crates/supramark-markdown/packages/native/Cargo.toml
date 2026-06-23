@@ -1,0 +1,20 @@
+[package]
+name = "supramark-markdown-native"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 AND MIT"
+authors = ["Supramark contributors"]
+description = "Native FFI wrapper around supramark-markdown for React Native / iOS / Android consumers"
+homepage = "https://github.com/kookyleo/supramark"
+repository = "https://github.com/kookyleo/supramark"
+publish = false
+
+[lib]
+# staticlib  → libsupramark_markdown_native.a   (iOS .xcframework, Android NDK static link)
+# cdylib     → libsupramark_markdown_native.so / .dylib / .dll (Android jniLibs, desktop hosts)
+# rlib       → keep so other in-workspace Rust crates can depend on this wrapper if useful.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+supramark-markdown = { path = "../.." }
+serde_json = "1"

@@ -12,6 +12,10 @@
       "react-native": "./src/index.rn.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./rn": {
+      "types": "./src/index.rn.ts",
+      "default": "./src/index.rn.ts"
     }
   },
   "license": "Apache-2.0",

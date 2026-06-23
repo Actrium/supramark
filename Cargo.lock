@@ -1518,6 +1518,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "supramark-markdown-native"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "supramark-markdown",
+]
+
+[[package]]
 name = "supramark-markdown-web"
 version = "0.1.0"
 dependencies = [

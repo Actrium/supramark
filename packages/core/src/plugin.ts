@@ -1,5 +1,6 @@
 import type { SupramarkRootNode } from './ast.js';
 import { type SupramarkConfig } from './feature.js';
+import { loadRustMarkdownModule } from './plugin-loader.js';
 
 /**
  * 插件解析上下文，提供给插件访问原始数据和共享状态。
@@ -50,16 +51,9 @@ export interface SupramarkParseOptions {
 
 type RustMarkdownModule = {
   parse?: (source: string) => unknown;
-  parseJson?: (source: string) => string;
-};
-
-type RuntimeGlobal = typeof globalThis & {
-  Bun?: unknown;
-  process?: {
-    versions?: { node?: string };
-    env?: Record<string, string | undefined>;
-    cwd?: () => string;
-  };
+  // wasm 版同步返回 string；native TurboModule 跨 bridge 异步返回 Promise。
+  // 两种都支持，调用处统一 await。
+  parseJson?: (source: string) => string | Promise<string>;
 };
 
 /**
@@ -80,57 +74,10 @@ async function parseWithRustMarkdown(source: string): Promise<SupramarkRootNode>
     return mod.parse(source) as SupramarkRootNode;
   }
   if (typeof mod.parseJson === 'function') {
-    return JSON.parse(mod.parseJson(source)) as SupramarkRootNode;
+    return JSON.parse(await mod.parseJson(source)) as SupramarkRootNode;
   }
 
   throw new Error('supramark-markdown module does not expose parse(source) or parseJson(source).');
-}
-
-async function loadRustMarkdownModule(): Promise<RustMarkdownModule> {
-  const errors: unknown[] = [];
-
-  if (!isServerRuntime()) {
-    try {
-      return (await import('@supramark/markdown-web')) as RustMarkdownModule;
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-
-  for (const specifier of rustModuleCandidates()) {
-    try {
-      return (await import(/* @vite-ignore */ specifier)) as RustMarkdownModule;
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-
-  const cli = await parseWithRustCliModule();
-  if (cli) {
-    return cli;
-  }
-
-  throw new Error(
-    `Unable to load supramark-markdown parser. Build @supramark/markdown-web first. Tried ${errors.length} module candidates.`
-  );
-}
-
-function rustModuleCandidates(): string[] {
-  const candidates: string[] = [];
-
-  if (isServerRuntime()) {
-    candidates.push(
-      '@supramark/markdown-web/node',
-      '../../../crates/supramark-markdown/packages/web/dist/node.js'
-    );
-  }
-
-  candidates.push(
-    '@supramark/markdown-web',
-    '../../../crates/supramark-markdown/packages/web/dist/index.js'
-  );
-
-  return candidates;
 }
 
 async function applyPlugins(
@@ -196,30 +143,6 @@ function sortPluginsByDependencies(plugins: SupramarkPlugin[]): SupramarkPlugin[
   }
 
   return sorted;
-}
-
-function isServerRuntime(): boolean {
-  const runtime = globalThis as RuntimeGlobal;
-  return runtime.Bun !== undefined || Boolean(runtime.process?.versions?.node);
-}
-
-async function parseWithRustCliModule(): Promise<RustMarkdownModule | null> {
-  if (!isServerRuntime()) {
-    return null;
-  }
-
-  return {
-    parse: (source: string) => parseWithRustCli(source),
-  };
-}
-
-function parseWithRustCli(source: string): SupramarkRootNode {
-  const runtime = globalThis as RuntimeGlobal;
-  const cwd = runtime.process?.cwd?.() ?? '.';
-
-  throw new Error(
-    `supramark-markdown wasm wrapper is not built for this runtime. Run "bun --filter @supramark/markdown-web build" before parsing. Current cwd: ${cwd}. Source length: ${source.length}.`
-  );
 }
 
 /**

@@ -1,0 +1,15 @@
+# Staged native artefacts — produced by `node scripts/prepare-native.js`
+# from cargo-built target/. NEVER commit these binaries to git.
+ios/Frameworks/
+android/src/main/jniLibs/
+
+# react-native-builder-bob build output
+lib/
+
+# Node / build noise
+node_modules/
+*.log
+
+# Android CMake external native build state
+android/.cxx/
+android/build/

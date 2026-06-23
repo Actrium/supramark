@@ -16,6 +16,7 @@ resolver = "2"
 members = [
     "crates/supramark-markdown",
     "crates/supramark-markdown/packages/web",
+    "crates/supramark-markdown/packages/native",
     "crates/dagre",
     "crates/graphviz-anywhere/packages/rust",
     "crates/graphviz-anywhere/examples/rust",

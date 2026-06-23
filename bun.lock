@@ -114,6 +114,15 @@
         "@kookyleo/graphviz-anywhere-web",
       ],
     },
+    "crates/supramark-markdown/packages/react-native": {
+      "name": "@supramark/markdown-native-rn",
+      "version": "0.1.0",
+      "peerDependencies": {
+        "@supramark/core": "workspace:*",
+        "react": "*",
+        "react-native": "*",
+      },
+    },
     "crates/supramark-markdown/packages/web": {
       "name": "@supramark/markdown-web",
       "version": "0.1.0",
@@ -1385,6 +1394,8 @@
     "@supramark/feature-plantuml": ["@supramark/feature-plantuml@workspace:packages/features/diagrams/plantuml"],
 
     "@supramark/feature-weather": ["@supramark/feature-weather@workspace:packages/features/containers/weather"],
+
+    "@supramark/markdown-native-rn": ["@supramark/markdown-native-rn@workspace:crates/supramark-markdown/packages/react-native"],
 
     "@supramark/markdown-web": ["@supramark/markdown-web@workspace:crates/supramark-markdown/packages/web"],
 

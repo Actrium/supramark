@@ -16,6 +16,8 @@
     "paths": {
       "@supramark/core": ["packages/core/src/index.ts"],
       "@supramark/cli": ["packages/cli/src/index.ts"],
+      "@supramark/markdown-web": ["crates/supramark-markdown/packages/web/src/index.ts"],
+      "@supramark/markdown-web/node": ["crates/supramark-markdown/packages/web/src/node.ts"],
 
       "@supramark/engines": ["packages/engines/src/index.ts"],
       "@supramark/engines/types": ["packages/engines/src/types.ts"],

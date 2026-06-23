@@ -1,0 +1,57 @@
+{
+  "name": "@supramark/markdown-native-rn",
+  "version": "0.1.0",
+  "description": "React Native native FFI wrapper for supramark-markdown — Markdown source to AST v2 JSON via the supramark-markdown-native Rust staticlib on iOS / Android.",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/index.d.ts",
+  "source": "src/index.ts",
+  "react-native": "src/index.ts",
+  "license": "Apache-2.0 AND MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kookyleo/supramark.git",
+    "directory": "crates/supramark-markdown/packages/react-native"
+  },
+  "authors": ["Supramark contributors"],
+  "files": [
+    "src",
+    "lib",
+    "ios",
+    "android",
+    "scripts",
+    "!**/__tests__",
+    "!**/.gitkeep"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typescript": "tsc --noEmit",
+    "build": "if command -v bob >/dev/null 2>&1; then BROWSERSLIST_IGNORE_OLD_DATA=1 bob build; else echo 'react-native-builder-bob not installed; skipping build'; fi",
+    "prepack": "if command -v bob >/dev/null 2>&1; then BROWSERSLIST_IGNORE_OLD_DATA=1 bob build; fi",
+    "prepare-native": "node scripts/prepare-native.js"
+  },
+  "keywords": [
+    "react-native",
+    "markdown",
+    "parser",
+    "ast",
+    "supramark"
+  ],
+  "peerDependencies": {
+    "@supramark/core": "workspace:*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {},
+  "codegenConfig": {
+    "name": "SupramarkMarkdownNativeSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.supramark.markdownnative"
+    }
+  }
+}

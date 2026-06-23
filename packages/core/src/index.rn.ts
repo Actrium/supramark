@@ -33,6 +33,19 @@ export {
   registerContainerHook,
 } from './syntax/container.js';
 
+// Native parser adapter registry —— 供 RN native wrapper 包
+// (如 `@supramark/markdown-native-rn`) side-effect 注册。
+// Web / Node 不会注册，plugin.ts 自动回退到 wasm。
+// 仅从 RN 入口导出（不污染 web 入口），模式对齐 `@supramark/engines/rn`。
+export {
+  type NativeParseJsonFn,
+  type NativeParserAdapter,
+  registerNativeParserAdapter,
+  getNativeParserAdapter,
+  listNativeParserAdapters,
+  parseViaNative,
+} from './parser-native-adapter.js';
+
 /**
  * AST v2 parser facade.
  *
