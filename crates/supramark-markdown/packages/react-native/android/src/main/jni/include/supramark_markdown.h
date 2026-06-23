@@ -28,13 +28,22 @@ extern "C" {
 #define SUPRAMARK_MARKDOWN_ERR_NULL_INPUT   2
 
 /*
+ * Sentinel input_len that opts into the NUL-terminated C-string path
+ * (length computed via strlen). Every other value — including 0 — is an
+ * explicit byte length, so input_len == 0 is a valid empty document.
+ */
+#define SUPRAMARK_MARKDOWN_LEN_CSTRING      ((size_t)-1)
+
+/*
  * Parse a Markdown source string into AST v2 JSON.
  *
- * input      : pointer to the Markdown source bytes. May be either a
- *              NUL-terminated C string (pass input_len = 0) or an
- *              explicit-length byte buffer (pass input_len > 0). The
- *              explicit-length form is preferred for large inputs.
- * input_len  : number of bytes at `input`, or 0 to use strlen-style.
+ * input      : pointer to the Markdown source bytes. Pass the exact byte
+ *              length in input_len (the buffer need NOT be
+ *              NUL-terminated). For an empty document pass input_len = 0;
+ *              `input` is then not dereferenced and may be NULL.
+ * input_len  : number of bytes at `input`. 0 means an empty document.
+ *              Pass SUPRAMARK_MARKDOWN_LEN_CSTRING to treat `input` as a
+ *              NUL-terminated C string (length via strlen).
  * out_buf    : on success, *out_buf is set to a heap-allocated UTF-8
  *              JSON byte buffer. NOT NUL-terminated. Caller MUST
  *              release with supramark_markdown_free.

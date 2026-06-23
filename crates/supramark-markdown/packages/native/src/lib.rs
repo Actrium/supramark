@@ -42,6 +42,13 @@ pub const SUPRAMARK_MARKDOWN_ERR_SERIALIZE: c_int = 1;
 /// was not valid UTF-8 / not NUL-terminated within `input_len` bytes.
 pub const SUPRAMARK_MARKDOWN_ERR_NULL_INPUT: c_int = 2;
 
+/// Sentinel `input_len` value that opts into the NUL-terminated
+/// C-string convenience: the wrapper computes the byte length itself
+/// via `strlen` (`CStr`). Every other `input_len` — including `0` — is
+/// an explicit byte length, so an empty document (`input_len == 0`)
+/// parses as an empty root instead of being misread as the strlen path.
+pub const SUPRAMARK_MARKDOWN_LEN_CSTRING: usize = usize::MAX;
+
 // ---------------------------------------------------------------------------
 // Public C ABI
 // ---------------------------------------------------------------------------
@@ -53,12 +60,12 @@ pub const SUPRAMARK_MARKDOWN_ERR_NULL_INPUT: c_int = 2;
 /// `*out_buf` together with its length (in bytes) in `*out_len`. The
 /// caller MUST release the buffer with [`supramark_markdown_free`].
 ///
-/// `input` may be either a NUL-terminated C string (pass
-/// `input_len = 0`, in which case the wrapper computes the length with
-/// `strlen`) or an explicit-length byte buffer (pass `input_len > 0`,
-/// in which case the buffer does NOT need to be NUL-terminated). The
-/// latter is preferred because it avoids a redundant scan on large
-/// inputs.
+/// `input` is interpreted by `input_len`: pass the exact byte length of
+/// the buffer (it does NOT need to be NUL-terminated). `input_len == 0`
+/// is a valid, empty document — `input` is never dereferenced in that
+/// case, so callers may pass `NULL` for an empty buffer. Pass the
+/// sentinel [`SUPRAMARK_MARKDOWN_LEN_CSTRING`] to opt into the
+/// NUL-terminated C-string convenience (length computed via `strlen`).
 ///
 /// The returned JSON matches the schema produced by
 /// `@supramark/markdown-web`'s `parse_json` (the wasm-bindgen wrapper),
@@ -67,9 +74,12 @@ pub const SUPRAMARK_MARKDOWN_ERR_NULL_INPUT: c_int = 2;
 ///
 /// # Safety
 ///
-/// All pointer arguments are dereferenced. The caller must ensure:
-///   * `input` points to at least `input_len` readable bytes (or, when
-///     `input_len == 0`, to a NUL-terminated C string).
+/// The out-parameters are always dereferenced. The caller must ensure:
+///   * `input` points to at least `input_len` readable bytes when
+///     `0 < input_len < SUPRAMARK_MARKDOWN_LEN_CSTRING`, or to a
+///     NUL-terminated C string when `input_len ==
+///     SUPRAMARK_MARKDOWN_LEN_CSTRING`. When `input_len == 0` `input`
+///     is not read and may be `NULL`.
 ///   * `out_buf` and `out_len` are valid, writable, non-aliasing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn supramark_markdown_parse_json(
@@ -88,19 +98,28 @@ pub unsafe extern "C" fn supramark_markdown_parse_json(
         *out_len = 0;
     }
 
-    if input.is_null() {
-        return SUPRAMARK_MARKDOWN_ERR_NULL_INPUT;
-    }
-
+    // Resolve `input` to a byte slice.
+    //
+    // `input_len == 0` is an empty document: callers (iOS/Android
+    // bridges) hand us the real byte length, which is 0 for an empty
+    // string, and may pass a NULL/dangling pointer for it — so we must
+    // not dereference `input` here. `SUPRAMARK_MARKDOWN_LEN_CSTRING`
+    // opts into the strlen path; any other value is an explicit length.
     let input_bytes: &[u8] = if input_len == 0 {
-        // SAFETY: caller guaranteed NUL-terminated valid C string.
-        let cstr = unsafe { CStr::from_ptr(input) };
-        match cstr.to_bytes_with_nul().split_last() {
-            Some((_nul, body)) => body,
-            None => return SUPRAMARK_MARKDOWN_ERR_NULL_INPUT,
+        &[]
+    } else if input_len == SUPRAMARK_MARKDOWN_LEN_CSTRING {
+        if input.is_null() {
+            return SUPRAMARK_MARKDOWN_ERR_NULL_INPUT;
         }
+        // SAFETY: input null-checked above; caller guaranteed a
+        // NUL-terminated valid C string.
+        unsafe { CStr::from_ptr(input) }.to_bytes()
     } else {
-        // SAFETY: caller guaranteed `input_len` readable bytes at `input`.
+        if input.is_null() {
+            return SUPRAMARK_MARKDOWN_ERR_NULL_INPUT;
+        }
+        // SAFETY: input null-checked above; caller guaranteed
+        // `input_len` readable bytes at `input`.
         unsafe { slice::from_raw_parts(input as *const u8, input_len) }
     };
 
@@ -182,7 +201,7 @@ mod tests {
         let rc = unsafe {
             supramark_markdown_parse_json(
                 src.as_ptr(),
-                0,
+                SUPRAMARK_MARKDOWN_LEN_CSTRING,
                 &mut out_buf as *mut *mut c_char,
                 &mut out_len as *mut usize,
             )
@@ -218,17 +237,63 @@ mod tests {
         unsafe { supramark_markdown_free(out_buf, out_len) };
     }
 
-    /// NULL input → ERR_NULL_INPUT，out-params 保持原状。
+    /// NULL input（strlen 路径）→ ERR_NULL_INPUT，out-params 保持原状。
     #[test]
     fn parse_null_input() {
         let mut out_buf: *mut c_char = ptr::null_mut();
         let mut out_len: usize = 0;
         let rc = unsafe {
-            supramark_markdown_parse_json(ptr::null(), 0, &mut out_buf, &mut out_len)
+            supramark_markdown_parse_json(
+                ptr::null(),
+                SUPRAMARK_MARKDOWN_LEN_CSTRING,
+                &mut out_buf,
+                &mut out_len,
+            )
         };
         assert_eq!(rc, SUPRAMARK_MARKDOWN_ERR_NULL_INPUT);
         assert!(out_buf.is_null());
         assert_eq!(out_len, 0);
+    }
+
+    /// 空文档（显式长度 0）→ OK，返回合法 root JSON，且不解引用 input。
+    /// 这是 iOS / Android bridge 对空字符串源的真实调用形态
+    /// （`[sourceData length]` / `GetArrayLength` 都为 0）。
+    #[test]
+    fn parse_empty_input_explicit_len() {
+        let src = b"";
+        let mut out_buf: *mut c_char = ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            supramark_markdown_parse_json(
+                src.as_ptr() as *const c_char,
+                0,
+                &mut out_buf,
+                &mut out_len,
+            )
+        };
+        assert_eq!(rc, SUPRAMARK_MARKDOWN_OK);
+        assert!(!out_buf.is_null());
+        assert!(out_len > 0);
+
+        let json = unsafe { slice::from_raw_parts(out_buf as *const u8, out_len) };
+        let value: serde_json::Value = serde_json::from_slice(json).expect("must be valid JSON");
+        assert_eq!(value["type"], "root");
+
+        unsafe { supramark_markdown_free(out_buf, out_len) };
+    }
+
+    /// 空文档 + NULL 指针（len 0）→ OK：len 0 时不解引用 input，
+    /// 覆盖 iOS `[emptyData bytes]` 可能返回 NULL 的情况。
+    #[test]
+    fn parse_empty_input_null_ptr() {
+        let mut out_buf: *mut c_char = ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = unsafe {
+            supramark_markdown_parse_json(ptr::null(), 0, &mut out_buf, &mut out_len)
+        };
+        assert_eq!(rc, SUPRAMARK_MARKDOWN_OK);
+        assert!(!out_buf.is_null());
+        unsafe { supramark_markdown_free(out_buf, out_len) };
     }
 
     /// NULL out-params → ERR_NULL_INPUT（不崩溃）。
@@ -263,7 +328,12 @@ mod tests {
         let mut out_buf: *mut c_char = ptr::null_mut();
         let mut out_len: usize = 0;
         let rc = unsafe {
-            supramark_markdown_parse_json(src.as_ptr(), 0, &mut out_buf, &mut out_len)
+            supramark_markdown_parse_json(
+                src.as_ptr(),
+                SUPRAMARK_MARKDOWN_LEN_CSTRING,
+                &mut out_buf,
+                &mut out_len,
+            )
         };
         assert_eq!(rc, SUPRAMARK_MARKDOWN_OK);
 
