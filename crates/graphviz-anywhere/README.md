@@ -67,7 +67,7 @@ divergence, see **[docs/cross-compile.md](docs/cross-compile.md)**.
 ### Native build
 
 ```bash
-git clone --recursive https://github.com/kookyleo/graphviz-anywhere.git
+git clone --recursive https://github.com/Actrium/graphviz-anywhere.git
 cd graphviz-anywhere
 
 ./scripts/build-linux.sh
@@ -80,7 +80,7 @@ cd graphviz-anywhere
 Build outputs land in `output/<platform>/`.
 
 Prebuilt native binaries are published from the current repository namespace:
-[GitHub Releases](https://github.com/kookyleo/graphviz-anywhere/releases).
+[GitHub Releases](https://github.com/Actrium/graphviz-anywhere/releases).
 
 ## C API
 

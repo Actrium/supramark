@@ -1,7 +1,7 @@
 # Upstream Tracking — d2-little
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/d2-little
+- **Upstream:** https://github.com/Actrium/d2-little
 - **Pinned commit (at merge time):** `a8db3b23f3ba2f89e031e70525ace34b1d3f0226`
 - **Pinned tag:** `v0.7.2`
 - **Merged into supramark on:** 2026-05-09 (step 3 of the super-monorepo plan)

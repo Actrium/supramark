@@ -5,7 +5,7 @@ edition = "2024"
 license = "Apache-2.0"
 authors = ["kookyleo <kookyleo@gmail.com>"]
 description = "A Rust port of dagre - directed graph layout using the Sugiyama method"
-repository = "https://github.com/kookyleo/dagre-rs"
+repository = "https://github.com/Actrium/dagre-rs"
 keywords = ["graph", "layout", "dagre", "sugiyama", "diagram"]
 categories = ["algorithms", "visualization"]
 

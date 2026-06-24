@@ -15,7 +15,7 @@
 | 已 byte-exact（≥99% pass） | 22 / 25 |
 | Reference 测试 | 1328 条（cypress 1126 + demos 202），known_ignored 已清空 |
 | Lib unit tests | 666 / 0 / 0 |
-| Layout 后端 | [`dagre-rs`](https://github.com/kookyleo/dagre-rs)（pinned，完整 dagre.js port） |
+| Layout 后端 | [`dagre-rs`](https://github.com/Actrium/dagre-rs)（pinned，完整 dagre.js port） |
 | 详细进展 | 见 [PROGRESS.zh.md](PROGRESS.zh.md) |
 
 ## 上游依赖勘察
@@ -24,7 +24,7 @@
 
 | 上游 JS 依赖 | 用途 | mermaid-little 策略 |
 |---|---|---|
-| `dagre-d3-es` | flowchart / class / state / er 默认 layout | **使用 [`dagre-rs`](https://github.com/kookyleo/dagre-rs)** —— 完整 Rust port，已对 dagre.js byte-exact 交叉验证通过。外加两个小几何辅助函数（`intersectPolygon`、`intersectRect`）需要补齐。 |
+| `dagre-d3-es` | flowchart / class / state / er 默认 layout | **使用 [`dagre-rs`](https://github.com/Actrium/dagre-rs)** —— 完整 Rust port，已对 dagre.js byte-exact 交叉验证通过。外加两个小几何辅助函数（`intersectPolygon`、`intersectRect`）需要补齐。 |
 | `@mermaid-js/parser` | 7 种较新 diagram 的 langium grammar | 每个 grammar 重写成手写 Rust parser（nom / chumsky 风格）。 |
 | `packages/mermaid/src/diagrams/*/parser/*.jison` | 18 种老 diagram 的 jison grammar | 同上，每个 jison 规则都手动 port。 |
 | `d3` 及子模块 | 通用 SVG 原语、拖拽、缩放 | **不需要** —— 我们直接拼 SVG 字符串，零运行时 DOM。 |

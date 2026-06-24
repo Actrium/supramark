@@ -1,7 +1,7 @@
 # Upstream Tracking — graphviz-anywhere
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/graphviz-anywhere
+- **Upstream:** https://github.com/Actrium/graphviz-anywhere
 - **Pinned commit (last subtree pull):** `c6dc26569f87632fcd2c7d66493acb6d56d83996`
 - **Pinned tag:** `v0.2.1` (released on crates.io / npm / GitHub Release)
 - **First subtree merge into supramark:** 2026-05-09 at `436fe2f` / `v0.1.7`

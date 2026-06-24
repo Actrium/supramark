@@ -1,7 +1,7 @@
 # Upstream Tracking — plantuml-little
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/plantuml-little
+- **Upstream:** https://github.com/Actrium/plantuml-little
 - **Pinned commit (at merge time):** `c6d01ba4a7c30cd8c4289f5e1d772e2e18fb1d3b`
 - **Pinned tag:** `v1.2026.2-3`
 - **Merged into supramark on:** 2026-05-09 (step 3 of the super-monorepo plan)

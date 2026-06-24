@@ -1,7 +1,7 @@
 # Upstream Tracking — vison
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/vison
+- **Upstream:** https://github.com/Actrium/vison
 - **Pinned commit (at merge time):** `7fb2a910e22e6c4a3eb5cb34158b8d0c77e2dbf9`
 - **Pinned tag:** (HEAD of `main`; no tag at merge time)
 - **Merged into supramark on:** 2026-05-09 (step 5 of the super-monorepo plan)

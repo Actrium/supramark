@@ -2,7 +2,7 @@
 
 > 基于 mermaid-little 项目测试结果，截至 Wave 6 初期。
 > 上游参照：mermaid@11.14.0 使用 dagre-d3-es@7.0.14（dagre.js 的特定封装版本）。
-> 本项目使用：[dagre-rs](https://github.com/kookyleo/dagre-rs)（dagre.js 的 Rust port）。
+> 本项目使用：[dagre-rs](https://github.com/Actrium/dagre-rs)（dagre.js 的 Rust port）。
 
 ---
 

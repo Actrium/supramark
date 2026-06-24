@@ -260,7 +260,7 @@ fn try_github_release() -> bool {
     }
 
     let url = format!(
-        "https://github.com/kookyleo/graphviz-anywhere/releases/download/v{release_version}/{asset}"
+        "https://github.com/Actrium/graphviz-anywhere/releases/download/v{release_version}/{asset}"
     );
 
     let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from) else {

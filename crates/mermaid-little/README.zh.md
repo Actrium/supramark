@@ -6,7 +6,7 @@
 
 ## 这是什么
 
-mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能相同，但以原生 Rust 库 + CLI 形态运行，**运行时零 JS / DOM 依赖**。姊妹项目是 [plantuml-little](https://github.com/kookyleo/plantuml-little)，布局后端构建在完整的 dagre.js port [dagre-rs](https://github.com/kookyleo/dagre-rs) 之上。
+mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能相同，但以原生 Rust 库 + CLI 形态运行，**运行时零 JS / DOM 依赖**。姊妹项目是 [plantuml-little](https://github.com/Actrium/plantuml-little)，布局后端构建在完整的 dagre.js port [dagre-rs](https://github.com/Actrium/dagre-rs) 之上。
 
 ## 当前状态
 
@@ -18,7 +18,7 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 | `convert_with_id` 已接线 | **25 / 25** diagram |
 | 已 byte-exact (≥99%) | 22 / 25（pie / packet / radar / ishikawa / journey / timeline / quadrant / xychart / wardley / sankey / treemap / kanban / c4 / er / block / requirement / class / state / gitGraph / gantt / venn / flowchart） |
 | 主要剩余阻塞 | sequence (51/150)、mindmap multi-node (7/25)、KaTeX × 6、icon shapes × 1、handDrawn venn × 3 |
-| Layout 后端 | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) |
+| Layout 后端 | [`dagre-rs`](https://github.com/Actrium/dagre-rs) |
 | Reference 测试 | `cargo run --bin sweep_all` 单文件全量 sweep；known_ignored 列表已清空，所有失败均暴露 |
 | 跟踪文档 | [PROGRESS.zh.md](PROGRESS.zh.md)、[docs/stratum3_execution_guide.zh.md](docs/stratum3_execution_guide.zh.md) |
 
@@ -33,7 +33,7 @@ mermaid-little 读取 `.mmd` 源文本，输出 `.svg` —— 与 Mermaid 功能
 
 本项目是 [Mermaid](https://mermaid.js.org/) 的独立 Rust 重新实现，原作者为 Knut Sveidqvist。我们对 Mermaid 团队在 diagram-as-code 领域的贡献深表敬意。所有规范性内容以上游为标准。
 
-布局后端使用 [`dagre-rs`](https://github.com/kookyleo/dagre-rs)——dagre.js 的完整 Rust port。字体度量管线（`src/font_data.rs`、`src/font_metrics.rs`）vendor 自姊妹项目 [plantuml-little](https://github.com/kookyleo/plantuml-little)——两个项目共用同一张 DejaVu Sans glyph advance 表，保证两处输出的 byte-exact 一致。
+布局后端使用 [`dagre-rs`](https://github.com/Actrium/dagre-rs)——dagre.js 的完整 Rust port。字体度量管线（`src/font_data.rs`、`src/font_metrics.rs`）vendor 自姊妹项目 [plantuml-little](https://github.com/Actrium/plantuml-little)——两个项目共用同一张 DejaVu Sans glyph advance 表，保证两处输出的 byte-exact 一致。
 
 同时感谢社区已有的 Rust mermaid port 作为 prior art：[mermaid-rs-renderer (mmdr)](https://github.com/1jehuang/mermaid-rs-renderer)、[selkie](https://github.com/btucker/selkie)、[mmdflux](https://github.com/kevinswiber/mmdflux)。mermaid-little 选的 trade-off 点不同（先追求与上游 byte-exact 一致，再谈性能），但具体 diagram 卡壳时我们会参考他们的源码实现，参考时会在相关 commit message 里明确声明。
 

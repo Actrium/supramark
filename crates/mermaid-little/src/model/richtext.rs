@@ -1,7 +1,7 @@
 //! Rich-text span types used by label parsers.
 //!
 //! `TextSpan` enum adapted from plantuml-little
-//! (https://github.com/kookyleo/plantuml-little) at commit b32d6aa,
+//! (https://github.com/Actrium/plantuml-little) at commit b32d6aa,
 //! MIT-compatible multi-license. Trimmed to the subset mermaid's
 //! label markup exercises.
 

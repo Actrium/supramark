@@ -13,7 +13,7 @@ import { visonExamples } from './examples.js';
  *
  * Adds support for `:::vison` container blocks. The body of the
  * container is parsed as a Vison JSON spec
- * (see https://github.com/kookyleo/vison) and exposed on the AST node
+ * (see https://github.com/Actrium/vison) and exposed on the AST node
  * as `data.spec`. Hosts pair this feature with the `vison`
  * containerRenderer entry from `runtime.web` / `runtime.rn` to render
  * the spec as a card.
@@ -181,7 +181,7 @@ export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {
 
 Renders \`:::vison\` container blocks as Vison cards. The body of the
 container is parsed as Vison JSON (see
-[vison spec](https://github.com/kookyleo/vison)) and exposed on the
+[vison spec](https://github.com/Actrium/vison)) and exposed on the
 AST node as \`data.spec\`.
 
 ## Wiring

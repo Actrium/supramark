@@ -165,7 +165,7 @@ Captured here so they don't get forgotten:
 After 0.2.0 ships on `kookyleo/graphviz-anywhere`:
 
 1. Pull updated subtree into supramark: `git subtree pull --prefix
-   crates/graphviz-anywhere https://github.com/kookyleo/graphviz-anywhere
+   crates/graphviz-anywhere https://github.com/Actrium/graphviz-anywhere
    main`
 2. Update `crates/graphviz-anywhere/UPSTREAM.md` pin (currently
    `436fe2f00bf099416a3e6eea6d1012911d4f7435` / `v0.1.7` — bump to

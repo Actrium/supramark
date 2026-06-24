@@ -6,12 +6,12 @@
   "license": "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kookyleo/plantuml-little.git",
+    "url": "https://github.com/Actrium/plantuml-little.git",
     "directory": "packages/web"
   },
-  "homepage": "https://github.com/kookyleo/plantuml-little",
+  "homepage": "https://github.com/Actrium/plantuml-little",
   "bugs": {
-    "url": "https://github.com/kookyleo/plantuml-little/issues"
+    "url": "https://github.com/Actrium/plantuml-little/issues"
   },
   "author": "kookyleo <kookyleo@gmail.com>",
   "main": "dist/index.js",

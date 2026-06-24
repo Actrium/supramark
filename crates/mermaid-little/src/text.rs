@@ -1,6 +1,6 @@
 //! Text helpers — CJK double-width classification etc.
 //!
-//! Vendored from plantuml-little (https://github.com/kookyleo/plantuml-little)
+//! Vendored from plantuml-little (https://github.com/Actrium/plantuml-little)
 //! at commit b32d6aa, MIT-compatible multi-license.
 
 /// Extract the plain-text content that `markdownToHTML` would produce from a

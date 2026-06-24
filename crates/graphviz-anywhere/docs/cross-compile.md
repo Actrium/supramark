@@ -160,7 +160,7 @@ GRAPHVIZ_ANYWHERE_DIR=/path/to/lib-dir cargo build --target <triple>
 
 ## Sandboxed / airgapped builds
 
-1. Download the required asset from the [GitHub Release](https://github.com/kookyleo/graphviz-anywhere/releases) on a connected machine.
+1. Download the required asset from the [GitHub Release](https://github.com/Actrium/graphviz-anywhere/releases) on a connected machine.
 2. Extract and place the library where `build.rs` can find it — either:
    - Set `GRAPHVIZ_ANYWHERE_DIR=/path/to/extracted/dir`, or
    - Place `libgraphviz_api.a` (or `.lib` on Windows) under `packages/rust/prebuilt/<os>/`.

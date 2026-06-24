@@ -1,7 +1,7 @@
 # Upstream Tracking — mermaid-little
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/mermaid-little
+- **Upstream:** https://github.com/Actrium/mermaid-little
 - **Pinned commit (at merge time):** `7beb9ab1f737833bb4798eafe6a59da97dab1401`
 - **Pinned tag:** (HEAD of `main`; no tag yet at merge time)
 - **Merged into supramark on:** 2026-05-09 (step 4 of the super-monorepo plan)
@@ -59,10 +59,10 @@ sub-tree to bring it into structural parity with `plantuml-little` and
 | `packages/web/package.json` | added | npm publish config for `@actrium/mermaid-little-web` |
 | `packages/web/tsconfig.json` | added | matches plantuml-little-web tsconfig |
 | `packages/web/README.md` | added | usage docs + provenance note |
-| `Cargo.toml` (root crate) | edited | added `version = "0.1"` constraint to the `dagre` git dep so cargo-deny accepts it as a non-wildcard. Net behaviour identical because the supramark workspace root `[patch."https://github.com/kookyleo/dagre-rs.git"]` redirects to in-tree `crates/dagre`. |
+| `Cargo.toml` (root crate) | edited | added `version = "0.1"` constraint to the `dagre` git dep so cargo-deny accepts it as a non-wildcard. Net behaviour identical because the supramark workspace root `[patch."https://github.com/Actrium/dagre-rs.git"]` redirects to in-tree `crates/dagre`. |
 
 **Upstream PR plan:** open a PR against
-`https://github.com/kookyleo/mermaid-little` proposing this directory
+`https://github.com/Actrium/mermaid-little` proposing this directory
 verbatim. When upstream merges, we resolve any `subtree pull` conflict
 by accepting upstream's version. If upstream takes a different shape
 (e.g. different package name), align supramark to match.

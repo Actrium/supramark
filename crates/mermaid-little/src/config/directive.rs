@@ -23,7 +23,7 @@
 //! quote- and brace-depth aware so a directive body containing an
 //! embedded `}%%` inside a string literal isn't severed mid-block.
 //!
-//! Portions adapted from mmdflux (<https://github.com/kookyleo/mmdflux>,
+//! Portions adapted from mmdflux (<https://github.com/Actrium/mmdflux>,
 //! MIT license). Specifically: the realisation that handling quoted
 //! strings vs. brace-depth by hand — instead of via regex backrefs — is
 //! the only way to stay sane when a directive body contains nested

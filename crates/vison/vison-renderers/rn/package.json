@@ -6,10 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kookyleo/vison.git",
+    "url": "https://github.com/Actrium/vison.git",
     "directory": "vison-renderers/rn"
   },
-  "homepage": "https://github.com/kookyleo/vison",
+  "homepage": "https://github.com/Actrium/vison",
   "author": "kookyleo <kookyleo@gmail.com>",
   "main": "src/index.ts",
   "types": "src/index.ts",
