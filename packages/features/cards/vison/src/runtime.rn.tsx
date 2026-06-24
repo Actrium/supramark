@@ -2,7 +2,7 @@
  * Vison React Native container renderer.
  *
  * Designed to be passed to `<Supramark containerRenderers={{ vison }} />`
- * on the RN side. Lazy-imports `@kookyleo/vison-rn` so consumers who
+ * on the RN side. Lazy-imports `@actrium/vison-rn` so consumers who
  * never include a `:::vison` block don't pay for the renderer bundle.
  */
 
@@ -27,10 +27,10 @@ async function loadRenderer(): Promise<VisonRNRendererComponent> {
   if (cachedRenderer) return cachedRenderer;
   if (!rendererPromise) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rendererPromise = import('@kookyleo/vison-rn' as string).then((mod: any) => {
+    rendererPromise = import('@actrium/vison-rn' as string).then((mod: any) => {
       const Component = mod.VisonRNRenderer ?? mod.default;
       if (!Component) {
-        throw new Error('@kookyleo/vison-rn did not export VisonRNRenderer');
+        throw new Error('@actrium/vison-rn did not export VisonRNRenderer');
       }
       cachedRenderer = Component as VisonRNRendererComponent;
       return cachedRenderer;

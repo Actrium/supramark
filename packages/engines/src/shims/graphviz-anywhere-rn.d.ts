@@ -1,7 +1,7 @@
 /**
  * Type shim for the React Native graphviz binding.
  *
- * The real package (`@kookyleo/graphviz-anywhere-rn`) only ships its
+ * The real package (`@actrium/graphviz-anywhere-rn`) only ships its
  * declarations as a build artifact (`lib/typescript/index.d.ts`) and its
  * runtime entry imports `react-native`, so it cannot be resolved by `tsc`
  * in this node-targeted workspace — especially before the artifact is

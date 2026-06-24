@@ -11,7 +11,7 @@ a -> b
 ````
 
 - AST：统一解析为 `diagram` 节点，`engine` 为 `d2`。
-- 渲染：由 `@supramark/engines` 调用 `@kookyleo/d2-little-web`（Rust wasm，纯 Rust
+- 渲染：由 `@supramark/engines` 调用 `@actrium/d2-little-web`（Rust wasm，纯 Rust
   布局引擎）在 Web 端生成 SVG，无需外部 Graphviz 桥。
 
 ## 快速示例

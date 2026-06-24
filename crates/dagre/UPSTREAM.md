@@ -1,7 +1,7 @@
 # Upstream Tracking — dagre
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/dagre-rs
+- **Upstream:** https://github.com/Actrium/dagre-rs
 - **Pinned commit (at merge time):** `ad891113d80f5d0305962a0e45e88715e15873f4`
 - **Pinned tag:** `v0.1.1`
 - **Merged into supramark on:** 2026-05-09 (step 2 of the super-monorepo plan)

@@ -49,11 +49,11 @@ const ALLOWED_EXPRESSIONS = new Set<string>([
 // monorepo default. Listed for traceability — actual enforcement happens
 // when these are introduced (steps 2-4).
 const KNOWN_NON_DEFAULT: Record<string, string> = {
-  '@kookyleo/plantuml-little-web':
+  '@actrium/plantuml-little-web':
     'GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT',
-  '@kookyleo/graphviz-anywhere-web': 'EPL-1.0',
-  '@kookyleo/graphviz-anywhere-rn': 'EPL-1.0',
-  '@kookyleo/d2-little-web': 'MPL-2.0',
+  '@actrium/graphviz-anywhere-web': 'EPL-1.0',
+  '@actrium/graphviz-anywhere-rn': 'EPL-1.0',
+  '@actrium/d2-little-web': 'MPL-2.0',
 };
 
 // ── Skip patterns ──────────────────────────────────────────────────────

@@ -1,17 +1,17 @@
 {
-  "name": "@kookyleo/mermaid-little-web",
+  "name": "@actrium/mermaid-little-web",
   "version": "11.14.0-1",
   "description": "wasm-bindgen wrapper for mermaid-little — run Mermaid → SVG in the browser",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kookyleo/mermaid-little.git",
+    "url": "https://github.com/Actrium/mermaid-little.git",
     "directory": "packages/web"
   },
-  "homepage": "https://github.com/kookyleo/mermaid-little",
+  "homepage": "https://github.com/Actrium/mermaid-little",
   "bugs": {
-    "url": "https://github.com/kookyleo/mermaid-little/issues"
+    "url": "https://github.com/Actrium/mermaid-little/issues"
   },
   "author": "kookyleo <kookyleo@gmail.com>",
   "main": "dist/index.js",

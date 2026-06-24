@@ -35,15 +35,15 @@
   "peerDependencies": {
     "@supramark/core": "*",
     "react": ">=18.0.0",
-    "@kookyleo/vison-web": "workspace:*",
-    "@kookyleo/vison-rn": "workspace:*",
+    "@actrium/vison-web": "workspace:*",
+    "@actrium/vison-rn": "workspace:*",
     "react-native": ">=0.72.0"
   },
   "peerDependenciesMeta": {
     "react": { "optional": true },
     "react-native": { "optional": true },
-    "@kookyleo/vison-web": { "optional": true },
-    "@kookyleo/vison-rn": { "optional": true }
+    "@actrium/vison-web": { "optional": true },
+    "@actrium/vison-rn": { "optional": true }
   },
   "devDependencies": {
     "typescript": "^5.5.0"

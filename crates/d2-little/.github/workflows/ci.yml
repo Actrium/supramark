@@ -59,7 +59,7 @@ jobs:
       - run: cargo build -r -p d2-little
 
   build-wasm:
-    name: Build @kookyleo/d2-little-web
+    name: Build @actrium/d2-little-web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

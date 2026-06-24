@@ -11,7 +11,7 @@
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-native": ">=0.72.0",
-    "@kookyleo/graphviz-anywhere-rn": ">=0.1.0",
+    "@actrium/graphviz-anywhere-rn": "workspace:*",
     "react-native-svg": ">=13.0.0"
   },
   "peerDependenciesMeta": {
@@ -21,7 +21,7 @@
     "react-native": {
       "optional": true
     },
-    "@kookyleo/graphviz-anywhere-rn": {
+    "@actrium/graphviz-anywhere-rn": {
       "optional": true
     },
     "react-native-svg": {
@@ -33,7 +33,7 @@
     "@supramark/engines": "workspace:*"
   },
   "devDependencies": {
-    "@kookyleo/graphviz-anywhere-rn": "^0.1.3",
+    "@actrium/graphviz-anywhere-rn": "workspace:*",
     "typescript": "^5.5.0"
   }
 }

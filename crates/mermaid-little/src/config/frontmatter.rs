@@ -12,7 +12,7 @@
 //! matching upstream's behaviour of only lifting `parsed.title` /
 //! `parsed.displayMode` / `parsed.config` into the metadata struct.
 //!
-//! Portions adapted from mmdflux (<https://github.com/kookyleo/mmdflux>,
+//! Portions adapted from mmdflux (<https://github.com/Actrium/mmdflux>,
 //! MIT license). Specifically: the intuition around hand-scanning
 //! `---\n...\n---` blocks when the wrapping regex misbehaves on CRLF /
 //! indented-`---` edge cases — though this file uses a regex that

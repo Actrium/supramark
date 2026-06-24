@@ -51,7 +51,7 @@ export function createWebDiagramEngine(
 /**
  * Default web-side lazy loader for PlantUML.
  *
- * Loads `@kookyleo/plantuml-little-web` (Rust → wasm) on first use and
+ * Loads `@actrium/plantuml-little-web` (Rust → wasm) on first use and
  * returns a `RenderFn`. The wasm binary initialises as a side effect of the
  * ES-module import (`import * as wasm from "./plantuml_little_web_bg.wasm"`).
  *
@@ -61,7 +61,7 @@ export function createWebDiagramEngine(
  *
  * `plantuml-little-web` delegates layout for component / activity / state /
  * use-case diagrams to Graphviz via this global. We install a synchronous
- * wrapper backed by `@kookyleo/graphviz-anywhere-web` (pre-loaded) so the
+ * wrapper backed by `@actrium/graphviz-anywhere-web` (pre-loaded) so the
  * wasm call site can invoke it without returning to the JS event loop.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,7 +78,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
     if (!graphvizBridgePromise) {
       graphvizBridgePromise = (async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { Graphviz } = await import('@kookyleo/graphviz-anywhere-web' as string);
+        const { Graphviz } = await import('@actrium/graphviz-anywhere-web' as string);
         const graphviz = await Graphviz.load();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +105,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
         // the `import * from '*.wasm'` side effect, so no separate init call is
         // needed. Some builds still ship a default `init()` — probe defensively.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const puml: any = await import('@kookyleo/plantuml-little-web' as string);
+        const puml: any = await import('@actrium/plantuml-little-web' as string);
 
         const init =
           (typeof puml.default === 'function' && puml.default) ||
@@ -126,7 +126,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
           null;
         if (!convert) {
           throw new Error(
-            '`@kookyleo/plantuml-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
+            '`@actrium/plantuml-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
           );
         }
 
@@ -176,7 +176,7 @@ function plantumlNeedsGraphviz(code: string): boolean {
 /**
  * Default web-side lazy loader for D2.
  *
- * Loads `@kookyleo/d2-little-web` (Rust → wasm) on first use and returns a
+ * Loads `@actrium/d2-little-web` (Rust → wasm) on first use and returns a
  * `RenderFn`. Unlike plantuml-little-web, d2-little ships a pure-Rust layout
  * engine so there is no Graphviz bridge to wire — this loader is a thin
  * adapter over the wasm module's `convert(code) -> svg` entry.
@@ -189,7 +189,7 @@ function plantumlNeedsGraphviz(code: string): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadWebD2Render(): Promise<DiagramRenderFn> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const d2: any = await import('@kookyleo/d2-little-web' as string);
+  const d2: any = await import('@actrium/d2-little-web' as string);
 
   const init =
     (typeof d2.default === 'function' && d2.default) ||
@@ -210,7 +210,7 @@ async function loadWebD2Render(): Promise<DiagramRenderFn> {
     null;
   if (!convert) {
     throw new Error(
-      '`@kookyleo/d2-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
+      '`@actrium/d2-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
     );
   }
 
@@ -259,7 +259,7 @@ function createWebGraphvizAdapterLoader(): () => Promise<GraphvizRenderAdapter> 
 }
 
 async function loadWebGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
-  const { Graphviz } = await import('@kookyleo/graphviz-anywhere-web');
+  const { Graphviz } = await import('@actrium/graphviz-anywhere-web');
   const graphviz = await Graphviz.load();
 
   return {

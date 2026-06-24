@@ -1,7 +1,7 @@
 //! Deterministic Graphviz backend for plantuml-little's reference tests.
 //!
 //! Spawns a long-lived Node.js child process that loads
-//! `@kookyleo/graphviz-anywhere-web` (a wasm-compiled Graphviz) and
+//! `@actrium/graphviz-anywhere-web` (a wasm-compiled Graphviz) and
 //! streams DOT → SVG requests over stdin/stdout.
 
 use plantuml_little::error::Error;

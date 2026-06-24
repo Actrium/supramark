@@ -1,14 +1,14 @@
 # `@supramark/feature-card-vison`
 
 Renders `:::vison` container blocks in Markdown as
-[Vison](https://github.com/kookyleo/vison) cards — a JSON visual
+[Vison](https://github.com/Actrium/vison) cards — a JSON visual
 description spec for AI chat UIs.
 
 ## Install
 
 ```bash
-bun add @supramark/feature-card-vison @kookyleo/vison-web
-# RN side also needs @kookyleo/vison-rn
+bun add @supramark/feature-card-vison @actrium/vison-web
+# RN side also needs @actrium/vison-rn
 ```
 
 ## Usage

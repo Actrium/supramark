@@ -110,7 +110,7 @@ export interface DefineDiagramFeatureSpec {
  *     engineId: 'd2',
  *     name: 'Diagram (D2)',
  *     description: 'D2 diagrams rendered to SVG ...',
- *     web: { dependencies: [{ name: '@kookyleo/d2-little-web', version: 'workspace:*', type: 'npm', optional: false }] },
+ *     web: { dependencies: [{ name: '@actrium/d2-little-web', version: 'workspace:*', type: 'npm', optional: false }] },
  *     rn:  { dependencies: [{ name: 'react-native-svg', version: '^13.0.0', type: 'npm', optional: true }] },
  *     examples: d2Examples,
  *     exampleCode: 'a -> b',

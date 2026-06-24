@@ -1,5 +1,5 @@
 /**
- * `@kookyleo/mermaid-little-web` — wasm-bindgen wrapper around the
+ * `@actrium/mermaid-little-web` — wasm-bindgen wrapper around the
  * `mermaid-little` Rust crate.
  *
  * Unlike the plantuml-little wasm wrapper, mermaid-little-web has no
@@ -8,7 +8,7 @@
  * {@link convert}.
  *
  * ```ts
- * import { convert } from '@kookyleo/mermaid-little-web';
+ * import { convert } from '@actrium/mermaid-little-web';
  *
  * const svg = convert('graph TD; A-->B;');
  * ```

@@ -1,5 +1,5 @@
 // Re-export the upstream renderer + shared types so consumers `import
-// { VisonWebRenderer } from '@kookyleo/vison-web'` instead of pointing
+// { VisonWebRenderer } from '@actrium/vison-web'` instead of pointing
 // at the .tsx file directly.
 //
 // The actual implementation lives one level up at

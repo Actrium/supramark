@@ -46,9 +46,9 @@ import { diagramDotFeature } from '@supramark/feature-diagram-dot';
 // Side-effect: each registers a native adapter against @supramark/engines/rn
 // so the diagram engine routes d2 / mermaid / plantuml blocks to the linked
 // libsupramark_*_native.so / .a.
-import '@kookyleo/supramark-d2-native-rn';
-import '@kookyleo/supramark-mermaid-native-rn';
-import '@kookyleo/supramark-plantuml-native-rn';
+import '@actrium/supramark-d2-native-rn';
+import '@actrium/supramark-mermaid-native-rn';
+import '@actrium/supramark-plantuml-native-rn';
 
 import { DEMOS } from '../demos';
 

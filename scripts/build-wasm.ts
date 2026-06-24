@@ -3,7 +3,7 @@
  * Build all in-tree wasm-bindgen wrapper crates with `wasm-pack`.
  *
  * After step 4 of the super-monorepo merge, supramark's
- * `packages/engines` consumes the four `@kookyleo/*-web` packages
+ * `packages/engines` consumes the four `@actrium/*-web` packages
  * directly from the workspace (no npm registry lookup). For those
  * dynamic imports to resolve, the wrapper crates must have been built
  * locally first — that's what this script does.
@@ -33,17 +33,17 @@ const TARGETS: WasmTarget[] = [
   {
     id: 'plantuml',
     cwd: 'crates/plantuml-little/packages/web',
-    label: '@kookyleo/plantuml-little-web',
+    label: '@actrium/plantuml-little-web',
   },
   {
     id: 'd2',
     cwd: 'crates/d2-little/packages/web',
-    label: '@kookyleo/d2-little-web',
+    label: '@actrium/d2-little-web',
   },
   {
     id: 'mermaid',
     cwd: 'crates/mermaid-little/packages/web',
-    label: '@kookyleo/mermaid-little-web',
+    label: '@actrium/mermaid-little-web',
   },
   {
     id: 'markdown',

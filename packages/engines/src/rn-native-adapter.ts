@@ -5,7 +5,7 @@
  * (`crates/<engine>-little/packages/native/`) become available on
  * RN through a thin TurboModule / NativeModule binding. The actual
  * binding code lives in consumer-side npm packages (e.g.
- * `@kookyleo/supramark-d2-native-rn`), one per engine, because the
+ * `@actrium/supramark-d2-native-rn`), one per engine, because the
  * native module shape is platform / linker specific.
  *
  * This file is the **routing layer**: consumers register an adapter

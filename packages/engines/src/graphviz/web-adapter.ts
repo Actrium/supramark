@@ -4,7 +4,7 @@ import { pickGraphvizDiagramOptions } from './index.js';
 let cached: Promise<GraphvizRenderAdapter> | null = null;
 
 async function loadAdapter(): Promise<GraphvizRenderAdapter> {
-  const { Graphviz } = await import('@kookyleo/graphviz-anywhere-web');
+  const { Graphviz } = await import('@actrium/graphviz-anywhere-web');
   const graphviz = await Graphviz.load();
 
   return {

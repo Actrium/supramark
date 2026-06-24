@@ -16,7 +16,7 @@ const config = {
   watchFolders: [libraryRoot],
   resolver: {
     extraNodeModules: {
-      '@kookyleo/graphviz-anywhere-rn': libraryRoot,
+      '@actrium/graphviz-anywhere-rn': libraryRoot,
     },
     // Ensure the example app's node_modules take priority
     nodeModulesPaths: [

@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/supramark-d2-native-rn",
+  "name": "@actrium/supramark-d2-native-rn",
   "version": "0.1.0",
   "description": "React Native native FFI wrapper for d2-little — D2 diagrams to SVG via the supramark-d2-native Rust staticlib on iOS / Android.",
   "main": "lib/commonjs/index.js",

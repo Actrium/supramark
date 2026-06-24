@@ -94,7 +94,7 @@ jobs:
           exit "$rc"
 
   publish-npm-web:
-    name: Publish @kookyleo/d2-little-web to npm
+    name: Publish @actrium/d2-little-web to npm
     runs-on: ubuntu-latest
     needs: gate
     steps:

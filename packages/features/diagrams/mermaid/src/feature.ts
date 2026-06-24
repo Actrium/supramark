@@ -15,7 +15,7 @@ export const mermaidFeature = defineDiagramFeature({
   web: {
     dependencies: [
       {
-        name: '@kookyleo/mermaid-little-web',
+        name: '@actrium/mermaid-little-web',
         version: 'workspace:*',
         type: 'npm',
         optional: false,
@@ -46,9 +46,9 @@ AST modelling + Web / RN rendering for Mermaid diagrams.
 - Syntax: \`\\\`\\\`mermaid\` fenced code blocks.
 - AST: parsed into a \`diagram\` node with \`engine = "mermaid"\`.
 - Rendering: on Web, \`@supramark/engines\` calls
-  \`@kookyleo/mermaid-little-web\` (Rust → wasm; no DOM, no headless
+  \`@actrium/mermaid-little-web\` (Rust → wasm; no DOM, no headless
   browser, no upstream JS Mermaid bundle) and inlines the SVG. On RN,
-  hosts import \`@kookyleo/supramark-mermaid-native-rn\`, which registers
+  hosts import \`@actrium/supramark-mermaid-native-rn\`, which registers
   the mermaid-little native FFI adapter and returns the same SVG contract.
   `.trim(),
   bestPractices: [
@@ -64,7 +64,7 @@ AST modelling + Web / RN rendering for Mermaid diagrams.
     {
       question: 'How does Mermaid render on React Native?',
       answer:
-        'Hosts import @kookyleo/supramark-mermaid-native-rn at startup. The side-effect import registers a native FFI adapter with @supramark/engines/rn, and the renderer receives SVG through the same diagram contract as Web.',
+        'Hosts import @actrium/supramark-mermaid-native-rn at startup. The side-effect import registers a native FFI adapter with @supramark/engines/rn, and the renderer receives SVG through the same diagram contract as Web.',
     },
   ],
 });

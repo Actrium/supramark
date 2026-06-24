@@ -10,9 +10,9 @@ targeting byte-exact SVG output parity with upstream `mermaid@11.14.0`.
 mermaid-little takes `.mmd` source text and produces `.svg` output —
 the same as Mermaid, but as a native Rust library + CLI with **zero
 JS / DOM dependency at runtime**. Sibling project to
-[plantuml-little](https://github.com/kookyleo/plantuml-little) and built
+[plantuml-little](https://github.com/Actrium/plantuml-little) and built
 on top of the complete dagre.js port at
-[dagre-rs](https://github.com/kookyleo/dagre-rs).
+[dagre-rs](https://github.com/Actrium/dagre-rs).
 
 ## Status
 
@@ -45,10 +45,10 @@ deeply appreciate the Mermaid team's work in making diagram-as-code
 accessible to everyone. All specification-level behavior follows the
 upstream standard.
 
-The layout backend is [`dagre-rs`](https://github.com/kookyleo/dagre-rs),
+The layout backend is [`dagre-rs`](https://github.com/Actrium/dagre-rs),
 a complete Rust port of dagre.js. The font metric pipeline
 (`src/font_data.rs`, `src/font_metrics.rs`) is vendored from the sister
-project [plantuml-little](https://github.com/kookyleo/plantuml-little) —
+project [plantuml-little](https://github.com/Actrium/plantuml-little) —
 the same DejaVu Sans glyph advance tables anchor both projects, which
 keeps byte-exact output consistent across the two codebases.
 

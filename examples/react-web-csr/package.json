@@ -13,9 +13,9 @@
     "supramark:check": "bun x supramark-gen --check"
   },
   "dependencies": {
-    "@kookyleo/d2-little-web": "^0.7.2",
-    "@kookyleo/mermaid-little-web": "workspace:*",
-    "@kookyleo/plantuml-little-web": "^1.2026.2-3",
+    "@actrium/d2-little-web": "workspace:*",
+    "@actrium/mermaid-little-web": "workspace:*",
+    "@actrium/plantuml-little-web": "workspace:*",
     "@supramark/core": "workspace:*",
     "@supramark/feature-admonition": "workspace:*",
     "@supramark/feature-core-markdown": "workspace:*",

@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/graphviz-anywhere-rn",
+  "name": "@actrium/graphviz-anywhere-rn",
   "version": "0.2.1",
   "description": "React Native package for graphviz-anywhere with native binary support",
   "main": "lib/commonjs/index.js",

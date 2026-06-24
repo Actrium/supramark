@@ -11,7 +11,7 @@ import {
 let cached: Promise<GraphvizRenderAdapter> | null = null;
 
 async function loadAdapter(): Promise<GraphvizRenderAdapter> {
-  const mod = await import('@kookyleo/graphviz-anywhere-rn');
+  const mod = await import('@actrium/graphviz-anywhere-rn');
   // Tolerate the CJS/ESM interop shapes Metro produces for this package's
   // CommonJS main; see resolveGraphvizAnywhereRnExports.
   const { renderDot, getVersion } = resolveGraphvizAnywhereRnExports(mod);
@@ -32,7 +32,7 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
 }
 
 /**
- * Graphviz RN adapter — thin wrapper over `@kookyleo/graphviz-anywhere-rn`'s
+ * Graphviz RN adapter — thin wrapper over `@actrium/graphviz-anywhere-rn`'s
  * native module (JSI TurboModule on new arch, NativeModule bridge on old arch).
  * First call triggers native initialization.
  */

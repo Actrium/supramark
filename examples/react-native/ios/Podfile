@@ -38,10 +38,10 @@ target 'supramarkexamplereactnative' do
 
   config = use_native_modules!(config_command)
 
-  # @kookyleo/graphviz-anywhere-rn@0.1.3 ships an empty Frameworks/ and a broken
+  # @actrium/graphviz-anywhere-rn@0.1.3 ships an empty Frameworks/ and a broken
   # postinstall (wrong GH repo + asset names). Re-enable after bumping to a fixed
   # release or pinning to the in-tree subtree wrapper.
-  # @kookyleo/supramark-d2-native-rn is now auto-discovered (podspec at pkg root).
+  # @actrium/supramark-d2-native-rn is now auto-discovered (podspec at pkg root).
 
   use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
   use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']

@@ -1,7 +1,7 @@
-# `@kookyleo/mermaid-little-web`
+# `@actrium/mermaid-little-web`
 
 wasm-bindgen wrapper around the
-[`mermaid-little`](https://github.com/kookyleo/mermaid-little) Rust crate.
+[`mermaid-little`](https://github.com/Actrium/mermaid-little) Rust crate.
 Run [Mermaid](https://mermaid.js.org/) diagrams to SVG in the browser,
 Web Workers, or any wasm-capable runtime — no DOM, no headless browser,
 no JS-side Mermaid bundle.
@@ -9,14 +9,14 @@ no JS-side Mermaid bundle.
 ## Install
 
 ```bash
-npm install @kookyleo/mermaid-little-web
+npm install @actrium/mermaid-little-web
 # or: bun add / pnpm add / yarn add
 ```
 
 ## Usage
 
 ```ts
-import { convert } from '@kookyleo/mermaid-little-web';
+import { convert } from '@actrium/mermaid-little-web';
 
 const svg = convert(`
 graph TD
@@ -44,6 +44,6 @@ This package is part of the
 [supramark](https://github.com/Actrium/supramark) super-monorepo (path:
 `crates/mermaid-little/packages/web/`). It originated **inside the
 super-monorepo as a downstream patch** to the
-[`mermaid-little`](https://github.com/kookyleo/mermaid-little) sub-tree;
+[`mermaid-little`](https://github.com/Actrium/mermaid-little) sub-tree;
 see `crates/mermaid-little/UPSTREAM.md` for the contribution path back
 to the standalone repo.

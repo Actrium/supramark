@@ -11,7 +11,7 @@
 //! `globalThis.__graphviz_anywhere_render(dot, engine, format) -> string`
 //! that performs the Graphviz layout step. The TypeScript wrapper
 //! (`index.ts` / `index.js`) installs that bridge against a
-//! `@kookyleo/graphviz-anywhere-web` Graphviz instance.
+//! `@actrium/graphviz-anywhere-web` Graphviz instance.
 //!
 //! `version()` returns the crate version embedded at compile time so
 //! hosts can assert the wasm bytes match what they bundled.

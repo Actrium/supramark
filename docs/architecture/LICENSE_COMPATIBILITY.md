@@ -23,18 +23,18 @@
 | `@supramark/feature-*` | `Apache-2.0` | 自有 | |
 | `crates/dagre` → crate `dagre` | `Apache-2.0` | dagre.js (Chris Pettitt, MIT) | 完整端口；reimplementation, not fork → 维护者选了 Apache-2.0 |
 | `crates/d2-little` → crate `d2-little` | `MPL-2.0` | terrastruct/d2 (MPL-2.0) | 纯 Rust 端口；MPL 是文件级 copyleft，可 link |
-| `crates/d2-little/web-wasm` → npm `@kookyleo/d2-little-web` | `MPL-2.0` | 同上 | |
+| `crates/d2-little/web-wasm` → npm `@actrium/d2-little-web` | `MPL-2.0` | 同上 | |
 | `crates/mermaid-little` → crate `mermaid-little` | `MIT` | mermaid-js (MIT) | 纯 Rust 重写 |
-| `crates/mermaid-little/web-wasm` → npm `@kookyleo/mermaid-little-web` | `MIT` | 同上 | step 4 新发 |
+| `crates/mermaid-little/web-wasm` → npm `@actrium/mermaid-little-web` | `MIT` | 同上 | step 4 新发 |
 | `crates/supramark-markdown` → crate `supramark-markdown` | **`Apache-2.0 AND MIT`** | markdown-it-rust/markdown-it (MIT) | 自有 AST v2 + parse 编排（Apache-2.0）叠加改编自 markdown-it-rust 的 parser core（MIT）；AND 表示两协议同时约束，二者均在白名单 |
 | `crates/supramark-markdown/packages/web` → npm `@supramark/markdown-web` | 同上（`Apache-2.0 AND MIT`） | 同上 | wasm 封装，协议随 crate 一致 |
 | `crates/plantuml-little` → crate `plantuml-little` | **`GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT`** | PlantUML (GPL-3 / LGPL-3) | 上游主动选择 5-way OR 多协议；reimplementation，目标 byte-exact parity；supramark 以 Apache-2.0 分支消费 |
-| `crates/plantuml-little/packages/web` → npm `@kookyleo/plantuml-little-web` | 同上（5-way OR） | 同上 | npm 发布时仍保留 OR 表达式；下游可选择最宽松分支 |
+| `crates/plantuml-little/packages/web` → npm `@actrium/plantuml-little-web` | 同上（5-way OR） | 同上 | npm 发布时仍保留 OR 表达式；下游可选择最宽松分支 |
 | `crates/graphviz-anywhere/graphviz/` (submodule) | **`EPL-1.0`** | Graphviz (EPL-1.0 / CPL-1.0) | 不发布；只作为 link 目标；与 Apache 文件目录隔离；目前是空目录占位（待 step 4 装回 submodule） |
 | `crates/graphviz-anywhere/packages/rust` (Rust wrapper) | `Apache-2.0` | 自有 | 包名 `graphviz-anywhere`，独立发 crate |
 | `crates/graphviz-anywhere/packages/rust/prebuilt/` | `EPL-1.0` | Graphviz 编译产物 | 仅在 release build 时填充；运行时 link 边界 |
-| `crates/graphviz-anywhere/packages/web` → npm `@kookyleo/graphviz-anywhere-web` | `Apache-2.0`（JS 源码）；wasm 产物 `EPL-1.0` 衍生 | 含 wasm 形式的 Graphviz | |
-| `crates/graphviz-anywhere/packages/react-native` → npm `@kookyleo/graphviz-anywhere-rn` | `Apache-2.0` | RN bridge | |
+| `crates/graphviz-anywhere/packages/web` → npm `@actrium/graphviz-anywhere-web` | `Apache-2.0`（JS 源码）；wasm 产物 `EPL-1.0` 衍生 | 含 wasm 形式的 Graphviz | |
+| `crates/graphviz-anywhere/packages/react-native` → npm `@actrium/graphviz-anywhere-rn` | `Apache-2.0` | RN bridge | |
 | `crates/vison-core` | `Apache-2.0` | 自有 | |
 | `packages/vison-{web,rn}` | `Apache-2.0` | 自有 | |
 
@@ -49,7 +49,7 @@
 ### 3.3 Apache-2.0 ⇆ plantuml-little（5-way OR 多协议）✅
 **完全兼容（升级）**。upstream 维护者主动选择了 `GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT` 五选一。supramark 以 **Apache-2.0** 分支消费，**完全无传染**：
 
-- `@supramark/feature-plantuml` 在 Apache-2.0 路径下使用 `@kookyleo/plantuml-little-web`，与 supramark 主体协议一致。
+- `@supramark/feature-plantuml` 在 Apache-2.0 路径下使用 `@actrium/plantuml-little-web`，与 supramark 主体协议一致。
 - 终端用户也可自由选择任一选项（包括最严格的 GPL 或最宽松的 MIT）。
 - 这条路线比 ADR-001 当初设想的 LGPL-only 更宽松，对商业用户友好。
 
@@ -97,10 +97,10 @@
 (原 ADR-002 内容；编号未变，下移因 ADR-001 增加 revision 段落)
 
 **Date:** 2026-05-09
-**Context:** `dagre` 与 `graphviz-anywhere` 对 supramark 之外的用户也有价值。是全部 internalize 为 `@supramark/*` 还是保持原 `@kookyleo/*` 名独立发布？
+**Context:** `dagre` 与 `graphviz-anywhere` 对 supramark 之外的用户也有价值。是全部 internalize 为 `@supramark/*` 还是保持原 `@actrium/*` 名独立发布？
 **Decision:** 独立发布。
 **Why:** internalize 会断掉它们的生态杠杆——`graphviz-anywhere` 是"万能 graphviz"通用基础设施，`dagre-rs` 是 dagre.js 的纯 Rust port，两者都有比 supramark 更广的潜在受众。物理上住在一个仓库，不影响逻辑独立性。
-**Consequences:** 仓库必须用 monorepo / multi-publish 工作流；`@kookyleo/*` 的 npm scope 与 `@supramark/*` 并存；CI 需支持按 sub-crate 独立 release。
+**Consequences:** 仓库必须用 monorepo / multi-publish 工作流；`@actrium/*` 的 npm scope 与 `@supramark/*` 并存；CI 需支持按 sub-crate 独立 release。
 
 ### ADR-003 · git subtree 真合并保留上游历史
 **Date:** 2026-05-09

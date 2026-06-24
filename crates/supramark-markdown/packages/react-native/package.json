@@ -10,7 +10,7 @@
   "license": "Apache-2.0 AND MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kookyleo/supramark.git",
+    "url": "https://github.com/Actrium/supramark.git",
     "directory": "crates/supramark-markdown/packages/react-native"
   },
   "authors": ["Supramark contributors"],

@@ -92,7 +92,7 @@ export default defineConfig({
         },
       ],
     },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/kookyleo/supramark' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/Actrium/supramark' }],
     outline: { label: '本页目录', level: [2, 3] },
     docFooter: { prev: '上一页', next: '下一页' },
   },

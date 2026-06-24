@@ -35,7 +35,7 @@
       "@supramark/engines/host-bridge": ["packages/engines/src/host-bridge.ts"],
       "@supramark/engines/code-highlight": ["packages/engines/src/code-highlight.ts"],
 
-      "@kookyleo/graphviz-anywhere-rn": [
+      "@actrium/graphviz-anywhere-rn": [
         "packages/engines/src/shims/graphviz-anywhere-rn.d.ts"
       ],
 

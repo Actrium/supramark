@@ -4,7 +4,7 @@
 // This script is spawned once by the Rust test harness (see
 // `src/layout/wasm_backend.rs`) and services many `render_dot_to_svg`
 // calls over stdin/stdout. The goal is byte-identical SVG output on
-// every developer machine and every CI runner — @kookyleo/graphviz-
+// every developer machine and every CI runner — @actrium/graphviz-
 // anywhere-web ships a single viz.wasm binary that produces the same
 // SVG bytes under Node's V8 wasm runtime regardless of host OS.
 // (Version is pinned in `tests/support/package.json`.)
@@ -32,10 +32,10 @@ import process from "node:process";
 async function main() {
   let Graphviz;
   try {
-    ({ Graphviz } = await import("@kookyleo/graphviz-anywhere-web"));
+    ({ Graphviz } = await import("@actrium/graphviz-anywhere-web"));
   } catch (err) {
     process.stderr.write(
-      `viz_wasm_runner: failed to import @kookyleo/graphviz-anywhere-web: ${err.stack ?? err}\n` +
+      `viz_wasm_runner: failed to import @actrium/graphviz-anywhere-web: ${err.stack ?? err}\n` +
         `Make sure 'npm install' has been run in tests/support/.\n`,
     );
     process.exit(1);

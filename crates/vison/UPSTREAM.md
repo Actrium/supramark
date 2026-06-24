@@ -1,7 +1,7 @@
 # Upstream Tracking — vison
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/vison
+- **Upstream:** https://github.com/Actrium/vison
 - **Pinned commit (at merge time):** `7fb2a910e22e6c4a3eb5cb34158b8d0c77e2dbf9`
 - **Pinned tag:** (HEAD of `main`; no tag at merge time)
 - **Merged into supramark on:** 2026-05-09 (step 5 of the super-monorepo plan)
@@ -39,8 +39,8 @@ intend to upstream them.
 |---|---|---|
 | `LICENSE` | added | upstream README declares MIT but ships no LICENSE file. Added the canonical SPDX MIT text. |
 | `vison-core/Cargo.toml` | edited | added `license = "MIT"`, `description`, `authors`, `repository` so cargo metadata is complete (cargo-deny would otherwise reject) |
-| `vison-renderers/web/package.json` | added | makes the renderer a proper `@kookyleo/vison-web` npm workspace package |
-| `vison-renderers/rn/package.json` | added | same as above for `@kookyleo/vison-rn` |
+| `vison-renderers/web/package.json` | added | makes the renderer a proper `@actrium/vison-web` npm workspace package |
+| `vison-renderers/rn/package.json` | added | same as above for `@actrium/vison-rn` |
 | `vison-renderers/{web,rn}/index.ts` | added | barrel exports so consumers `import { VisonWebRenderer }` instead of pointing at the `.tsx` directly |
 | `vison-renderers/{web,rn}/tsconfig.json` | added | per-package tsconfig so `tsc -p` works in workspace context |
 

@@ -303,7 +303,7 @@ async function ensureLoaded(): Promise<
   // Some wasm-bindgen builds still ship a default `init()` — probe
   // defensively so a re-init does not throw.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod: any = await import('@kookyleo/mermaid-little-web' as string);
+  const mod: any = await import('@actrium/mermaid-little-web' as string);
 
   const init =
     (typeof mod.default === 'function' && mod.default) ||
@@ -323,7 +323,7 @@ async function ensureLoaded(): Promise<
     null;
   if (!convert) {
     throw new Error(
-      '`@kookyleo/mermaid-little-web` is missing a convert / render entry. ' +
+      '`@actrium/mermaid-little-web` is missing a convert / render entry. ' +
         'Did `bun run build:wasm` complete?'
     );
   }

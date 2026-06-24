@@ -18,7 +18,7 @@ reports **1200 / 1328 byte-exact ≈ 90.4%**.
 | Byte-exact (≥99% pass) | 22 / 25 |
 | Reference tests | 1328 (cypress 1126 + demos 202); `known_ignored.txt` is now empty |
 | Lib unit tests | 666 / 0 / 0 |
-| Layout backend | [`dagre-rs`](https://github.com/kookyleo/dagre-rs) (pinned, complete dagre.js port) |
+| Layout backend | [`dagre-rs`](https://github.com/Actrium/dagre-rs) (pinned, complete dagre.js port) |
 | Tracking doc | [PROGRESS.zh.md](PROGRESS.zh.md) (Chinese only, by project rule) |
 
 ## Upstream Dependency Survey
@@ -28,7 +28,7 @@ Rust side:
 
 | Upstream JS dep | Used for | mermaid-little strategy |
 |---|---|---|
-| `dagre-d3-es` | default flowchart / class / state / er layout | **Use [`dagre-rs`](https://github.com/kookyleo/dagre-rs)** — complete Rust port, cross-validated byte-exact against dagre.js. Plus 2 small geometric helpers (`intersectPolygon`, `intersectRect`) to port. |
+| `dagre-d3-es` | default flowchart / class / state / er layout | **Use [`dagre-rs`](https://github.com/Actrium/dagre-rs)** — complete Rust port, cross-validated byte-exact against dagre.js. Plus 2 small geometric helpers (`intersectPolygon`, `intersectRect`) to port. |
 | `@mermaid-js/parser` | langium grammars for 7 newer diagrams | Rewrite each grammar as a hand-written Rust parser (nom / chumsky style). |
 | Jison files under `packages/mermaid/src/diagrams/*/parser/` | jison grammars for 18 legacy diagrams | Same — port each jison grammar to a hand-written Rust parser. |
 | `d3` + submodules | generic SVG primitives, drag / zoom | **Not needed** — we emit SVG strings directly, no runtime DOM. |
@@ -122,7 +122,7 @@ Open execution items:
 - **Icon shapes phase** — register ~500 AWS / iconify SVG paths to
   unlock 3 cypress/flowchart fixtures (independent decision).
 - **`packages/web/` wasm build** — mirror plantuml-little's
-  `@kookyleo/plantuml-little-web` once the parity work converges.
+  `@actrium/plantuml-little-web` once the parity work converges.
 
 ## Out of Scope (v1)
 

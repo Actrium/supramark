@@ -86,7 +86,7 @@ export interface GraphvizAnywhereRnExports {
 
 /**
  * Resolve `renderDot` / `getVersion` from the dynamically-imported
- * `@kookyleo/graphviz-anywhere-rn` module across CJS/ESM interop shapes.
+ * `@actrium/graphviz-anywhere-rn` module across CJS/ESM interop shapes.
  *
  * The package `main` points at a CommonJS build that exposes both named
  * exports (`renderDot`, `getVersion`) and a default export bundling the same
@@ -112,7 +112,7 @@ export function resolveGraphvizAnywhereRnExports(
   const renderDot = ns?.renderDot ?? fallback?.renderDot;
   if (typeof renderDot !== 'function') {
     throw new DiagramRenderError(
-      '@kookyleo/graphviz-anywhere-rn did not export a renderDot function ' +
+      '@actrium/graphviz-anywhere-rn did not export a renderDot function ' +
         '(checked both named and default exports)',
       { engine: 'graphviz', code: 'render_error' }
     );

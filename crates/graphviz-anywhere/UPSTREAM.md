@@ -1,7 +1,7 @@
 # Upstream Tracking — graphviz-anywhere
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/graphviz-anywhere
+- **Upstream:** https://github.com/Actrium/graphviz-anywhere
 - **Pinned commit (last subtree pull):** `c6dc26569f87632fcd2c7d66493acb6d56d83996`
 - **Pinned tag:** `v0.2.1` (released on crates.io / npm / GitHub Release)
 - **First subtree merge into supramark:** 2026-05-09 at `436fe2f` / `v0.1.7`
@@ -26,8 +26,8 @@
 |---|---|---|
 | `crates/graphviz-anywhere/Cargo.toml` | Inner workspace root (now shadowed by supramark root; see below) | Apache-2.0 |
 | `crates/graphviz-anywhere/packages/rust/` | Crate `graphviz-anywhere` — safe Rust wrapper + wasm32 bridge | Apache-2.0 |
-| `crates/graphviz-anywhere/packages/web/` | npm `@kookyleo/graphviz-anywhere-web` — wasm + JS bindings | Apache-2.0 (built artifacts inherit EPL-1.0 from bundled Graphviz) |
-| `crates/graphviz-anywhere/packages/react-native/` | npm `@kookyleo/graphviz-anywhere-rn` — RN bridge | Apache-2.0 |
+| `crates/graphviz-anywhere/packages/web/` | npm `@actrium/graphviz-anywhere-web` — wasm + JS bindings | Apache-2.0 (built artifacts inherit EPL-1.0 from bundled Graphviz) |
+| `crates/graphviz-anywhere/packages/react-native/` | npm `@actrium/graphviz-anywhere-rn` — RN bridge | Apache-2.0 |
 | `crates/graphviz-anywhere/capi/` | C API wrapper around Graphviz | Apache-2.0 |
 | `crates/graphviz-anywhere/examples/` | Rust + Web + RN demos | Apache-2.0 |
 | `crates/graphviz-anywhere/graphviz/` | (empty) submodule placeholder for upstream Graphviz | EPL-1.0 (when populated) |

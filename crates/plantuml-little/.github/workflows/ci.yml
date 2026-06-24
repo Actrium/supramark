@@ -93,7 +93,7 @@ jobs:
         run: ls -lh target/release/plantuml-little
 
   build-wasm:
-    name: Build @kookyleo/plantuml-little-web
+    name: Build @actrium/plantuml-little-web
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

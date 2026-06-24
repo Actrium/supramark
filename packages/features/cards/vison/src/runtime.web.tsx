@@ -2,7 +2,7 @@
  * Vison Web container renderer.
  *
  * Designed to be passed to `<Supramark containerRenderers={{ vison }} />`.
- * Lazy-imports `@kookyleo/vison-web` so consumers who never include a
+ * Lazy-imports `@actrium/vison-web` so consumers who never include a
  * `:::vison` block don't pay for the renderer bundle.
  */
 
@@ -19,10 +19,10 @@ async function loadRenderer(): Promise<VisonWebRendererComponent> {
   if (cachedRenderer) return cachedRenderer;
   if (!rendererPromise) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rendererPromise = import('@kookyleo/vison-web' as string).then((mod: any) => {
+    rendererPromise = import('@actrium/vison-web' as string).then((mod: any) => {
       const Component = mod.VisonWebRenderer ?? mod.default;
       if (!Component) {
-        throw new Error('@kookyleo/vison-web did not export VisonWebRenderer');
+        throw new Error('@actrium/vison-web did not export VisonWebRenderer');
       }
       cachedRenderer = Component as VisonWebRendererComponent;
       return cachedRenderer;

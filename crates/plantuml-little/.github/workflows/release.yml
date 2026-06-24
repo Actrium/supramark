@@ -110,7 +110,7 @@ jobs:
           exit "$rc"
 
   publish-npm-web:
-    name: Publish @kookyleo/plantuml-little-web to npm
+    name: Publish @actrium/plantuml-little-web to npm
     runs-on: ubuntu-24.04
     needs: gate
     steps:

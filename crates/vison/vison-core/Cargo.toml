@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 description = "Vison — JSON visual description spec for AI chat UIs (validator + parser + CLI)"
 authors = ["kookyleo <kookyleo@gmail.com>"]
-repository = "https://github.com/kookyleo/vison"
+repository = "https://github.com/Actrium/vison"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

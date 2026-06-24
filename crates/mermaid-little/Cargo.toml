@@ -6,8 +6,8 @@ rust-version = "1.82"
 license = "MIT"
 authors = ["kookyleo <kookyleo@gmail.com>"]
 description = "Lightweight .mmd to .svg converter — byte-exact SVG parity with upstream Mermaid"
-homepage = "https://github.com/kookyleo/mermaid-little"
-repository = "https://github.com/kookyleo/mermaid-little"
+homepage = "https://github.com/Actrium/mermaid-little"
+repository = "https://github.com/Actrium/mermaid-little"
 keywords = ["mermaid", "mmd", "svg", "diagram"]
 categories = ["graphics", "command-line-utilities"]
 exclude = [
@@ -137,7 +137,7 @@ regex = "1"
 # constraint is added so cargo-deny does not flag a wildcard public
 # dependency. Tracked for upstream contribution in
 # crates/mermaid-little/UPSTREAM.md.
-dagre = { version = "0.1", git = "https://github.com/kookyleo/dagre-rs.git", branch = "main" }
+dagre = { version = "0.1", git = "https://github.com/Actrium/dagre-rs.git", branch = "main" }
 # Pure-Rust port of fdlibm. Used by the venn layout to match V8's
 # Math.* (acos/atan2/sqrt/sin/cos) byte-for-byte — V8 ships fdlibm too,
 # so routing all venn FP through libm eliminates ULP-level drift in the

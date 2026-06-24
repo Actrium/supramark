@@ -1,5 +1,5 @@
 /**
- * `@kookyleo/d2-little-web` — wasm-bindgen wrapper around the `d2-little`
+ * `@actrium/d2-little-web` — wasm-bindgen wrapper around the `d2-little`
  * Rust crate.
  *
  * Unlike the plantuml-little wasm wrapper, d2-little-web has no external
@@ -8,7 +8,7 @@
  * {@link convert}.
  *
  * ```ts
- * import { convert } from '@kookyleo/d2-little-web';
+ * import { convert } from '@actrium/d2-little-web';
  *
  * const svg = convert('a -> b');
  * ```

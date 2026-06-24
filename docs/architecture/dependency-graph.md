@@ -26,7 +26,7 @@ flowchart TB
     HostBridge["@supramark/engines/host-bridge\ninstallHostMetricsBridge()"]
   end
 
-  subgraph wasm["📦 Wasm Wrappers (npm @kookyleo/*)"]
+  subgraph wasm["📦 Wasm Wrappers (npm @actrium/*)"]
     PUWeb["plantuml-little-web"]
     MWeb["mermaid-little-web"]
     DWeb["d2-little-web (3.63 MB)"]
@@ -132,7 +132,7 @@ flowchart TB
 
 ### 📦 Wasm Wrappers (npm)
 
-`crates/<engine>-little/packages/web/` 用 `wasm-bindgen` 包装出来的 npm 包。各自 publish 到 `@kookyleo/<engine>-little-web`。
+`crates/<engine>-little/packages/web/` 用 `wasm-bindgen` 包装出来的 npm 包。各自 publish 到 `@actrium/<engine>-little-web`。
 
 ### 🦀 Rust Port Crates
 

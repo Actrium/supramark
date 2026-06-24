@@ -1,7 +1,7 @@
 # Upstream Tracking — plantuml-little
 
 ## Source repo
-- **Upstream:** https://github.com/kookyleo/plantuml-little
+- **Upstream:** https://github.com/Actrium/plantuml-little
 - **Pinned commit (at merge time):** `c6d01ba4a7c30cd8c4289f5e1d772e2e18fb1d3b`
 - **Pinned tag:** `v1.2026.2-3`
 - **Merged into supramark on:** 2026-05-09 (step 3 of the super-monorepo plan)
@@ -29,7 +29,7 @@
 |---|---|---|
 | `crates/plantuml-little/Cargo.toml` | Root crate manifest (was a workspace + package; inner `[workspace]` removed during merge — see below) | multi (5-way OR) |
 | `crates/plantuml-little/src/` | Rust library + CLI binary | multi (5-way OR) |
-| `crates/plantuml-little/packages/web/` | crate `plantuml-little-web` — wasm-bindgen wrapper, published as npm `@kookyleo/plantuml-little-web` | multi (5-way OR) |
+| `crates/plantuml-little/packages/web/` | crate `plantuml-little-web` — wasm-bindgen wrapper, published as npm `@actrium/plantuml-little-web` | multi (5-way OR) |
 | `crates/plantuml-little/stdlib/` | PlantUML stdlib (sprites, includes) — vendored | multi (5-way OR), or upstream-PlantUML licence for original sprites |
 | `crates/plantuml-little/tests/` | Test fixtures (PUML inputs + expected SVG references) | multi (5-way OR) |
 | `crates/plantuml-little/examples/` | dump_parse / dump_preproc / dump_svg debug binaries | multi (5-way OR) |
@@ -101,7 +101,7 @@ already matched Java byte-for-byte — both the wrapper and the
 - Decide whether to publish `plantuml-little-web` from this monorepo or
   keep cutting npm releases from the upstream repo.
 - **Engine switchover deferred to step 4.** supramark's
-  `packages/engines/src/web.ts` still loads `@kookyleo/plantuml-little-web`
+  `packages/engines/src/web.ts` still loads `@actrium/plantuml-little-web`
   from npm. The vendored switchover (workspace-resolve to
   `crates/plantuml-little/packages/web` after a `wasm-pack` build) lands
   together with mermaid-little + a CI wasm-build job, so we don't ship

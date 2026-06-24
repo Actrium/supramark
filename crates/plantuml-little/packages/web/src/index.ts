@@ -1,16 +1,16 @@
 /**
- * `@kookyleo/plantuml-little-web` — wasm-bindgen wrapper around the
+ * `@actrium/plantuml-little-web` — wasm-bindgen wrapper around the
  * `plantuml-little` Rust crate.
  *
  * The underlying wasm calls out to Graphviz via a host-installed global
  * function `globalThis.__graphviz_anywhere_render(dot, engine, format)`.
  * Use {@link installGraphvizBridge} (or {@link setup}) with a
- * `@kookyleo/graphviz-anywhere-web` Graphviz instance to wire that up
+ * `@actrium/graphviz-anywhere-web` Graphviz instance to wire that up
  * before calling {@link convert}.
  *
  * ```ts
- * import { Graphviz } from '@kookyleo/graphviz-anywhere-web';
- * import { setup, convert } from '@kookyleo/plantuml-little-web';
+ * import { Graphviz } from '@actrium/graphviz-anywhere-web';
+ * import { setup, convert } from '@actrium/plantuml-little-web';
  *
  * const graphviz = await Graphviz.load();
  * setup({ graphviz });
@@ -26,7 +26,7 @@ export { convert, version } from './wasm/plantuml_little_web.js';
 
 /**
  * Minimal shape of the object a host must pass so the wasm can render
- * Graphviz. Any `@kookyleo/graphviz-anywhere-web` `Graphviz` instance
+ * Graphviz. Any `@actrium/graphviz-anywhere-web` `Graphviz` instance
  * already satisfies this (it exposes `.layout(dot, format, engine)`).
  */
 export interface GraphvizLike {
@@ -64,7 +64,7 @@ export function installGraphvizBridge(bridge: GraphvizBridge): () => void {
 }
 
 /**
- * Install a `@kookyleo/graphviz-anywhere-web` Graphviz instance as the
+ * Install a `@actrium/graphviz-anywhere-web` Graphviz instance as the
  * backing Graphviz engine for plantuml-little-web. Returns a disposer
  * that restores the previous binding (if any).
  */

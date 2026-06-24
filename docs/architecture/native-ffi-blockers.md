@@ -260,7 +260,7 @@ cmake --build build-iossim-x64
 
 ## 阻塞 #3 — RN turbomodule wrapper npm 包不存在
 
-每个 engine 还需要一个 RN native 包，例如 `@kookyleo/supramark-d2-native-rn`，承担：
+每个 engine 还需要一个 RN native 包，例如 `@actrium/supramark-d2-native-rn`，承担：
 
 1. 把 `libsupramark_d2_native.a` / `.so` 打进 iOS .xcframework + Android jniLibs 各 ABI
 2. RN TurboModule / Old NativeModule wrapper：
@@ -268,7 +268,7 @@ cmake --build build-iossim-x64
    - Android：JNI 调同上 → 转 Promise
 3. JS entry 调 `@supramark/engines/rn` 的 `registerNativeEngineAdapter({ engine: 'd2', render })` 在 module 加载时自动注册
 
-参考已有的 `@kookyleo/graphviz-anywhere-rn`（`crates/graphviz-anywhere/packages/react-native/`）作模板。每个 engine 大概 200-400 LOC 包装 + per-platform 二进制。
+参考已有的 `@actrium/graphviz-anywhere-rn`（`crates/graphviz-anywhere/packages/react-native/`）作模板。每个 engine 大概 200-400 LOC 包装 + per-platform 二进制。
 
 ## 待办优先级（2026-05-11 当前 Mac 上更新后）
 

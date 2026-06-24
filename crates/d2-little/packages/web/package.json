@@ -1,17 +1,17 @@
 {
-  "name": "@kookyleo/d2-little-web",
+  "name": "@actrium/d2-little-web",
   "version": "0.7.2",
   "description": "wasm-bindgen wrapper for d2-little — run D2 diagrams → SVG in the browser",
   "type": "module",
   "license": "MPL-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kookyleo/d2-little.git",
+    "url": "https://github.com/Actrium/d2-little.git",
     "directory": "packages/web"
   },
-  "homepage": "https://github.com/kookyleo/d2-little",
+  "homepage": "https://github.com/Actrium/d2-little",
   "bugs": {
-    "url": "https://github.com/kookyleo/d2-little/issues"
+    "url": "https://github.com/Actrium/d2-little/issues"
   },
   "author": "kookyleo <kookyleo@gmail.com>",
   "main": "dist/index.js",

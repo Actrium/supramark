@@ -1,4 +1,4 @@
-# @kookyleo/supramark-mermaid-native-rn
+# @actrium/supramark-mermaid-native-rn
 
 React Native FFI wrapper around `supramark-mermaid-native` — a Rust staticlib
 that turns Mermaid source into SVG. iOS via xcframework + ObjC bridge,
@@ -10,7 +10,7 @@ on import.
 ## Usage
 
 ```ts
-import '@kookyleo/supramark-mermaid-native-rn';
+import '@actrium/supramark-mermaid-native-rn';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
 
 const engine = createReactNativeDiagramEngine();
