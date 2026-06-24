@@ -3,7 +3,7 @@ export type ComponentType = 'container' | 'text' | 'image' | 'markdown' | 'divid
 export interface VisonComponent {
   version?: string;
   type: ComponentType;
-  props?: Record<string, any>;
-  style?: Record<string, any>;
+  props?: Record<string, unknown>;
+  style?: Record<string, unknown>;
   children?: VisonComponent[];
 }

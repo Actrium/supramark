@@ -55,13 +55,13 @@ export function pickGraphvizDiagramOptions(
     picked.reduce = options.reduce;
   }
   if (isRecord(options?.graphAttributes)) {
-    picked.graphAttributes = options.graphAttributes;
+    picked.graphAttributes = options.graphAttributes as GraphvizDiagramOptions['graphAttributes'];
   }
   if (isRecord(options?.nodeAttributes)) {
-    picked.nodeAttributes = options.nodeAttributes;
+    picked.nodeAttributes = options.nodeAttributes as GraphvizDiagramOptions['nodeAttributes'];
   }
   if (isRecord(options?.edgeAttributes)) {
-    picked.edgeAttributes = options.edgeAttributes;
+    picked.edgeAttributes = options.edgeAttributes as GraphvizDiagramOptions['edgeAttributes'];
   }
   if (Array.isArray(options?.images)) {
     picked.images = options.images.filter(isGraphvizImageSize);
@@ -128,7 +128,7 @@ export function resolveGraphvizAnywhereRnExports(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

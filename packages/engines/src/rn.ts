@@ -120,7 +120,7 @@ async function loadReactNativeGraphvizAdapter(): Promise<GraphvizRenderAdapter> 
   return {
     async renderToSvg(code, rawOptions) {
       const graphvizOptions = pickGraphvizDiagramOptions(rawOptions);
-      return renderDot(code, (graphvizOptions.layoutEngine ?? 'dot') as any, 'svg');
+      return renderDot(code, graphvizOptions.layoutEngine ?? 'dot', 'svg');
     },
     async getCapabilities(): Promise<GraphvizCapabilities> {
       return {

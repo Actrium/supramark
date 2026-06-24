@@ -12,7 +12,8 @@
  * @packageDocumentation
  */
 
-import type { ExampleDefinition } from './feature.js';
+import type { ExampleDefinition, SupramarkConfig } from './feature.js';
+import type { SupramarkContainerNode, SupramarkNode } from './ast.js';
 
 // ============================================================================
 // ContainerFeature 接口
@@ -140,15 +141,15 @@ export interface ContainerFeature {
  */
 export interface ContainerWebRenderArgs {
   /** AST 节点 */
-  node: any;
+  node: SupramarkContainerNode;
   /** React key */
   key: number;
   /** CSS 类名映射 */
   classNames: Record<string, string>;
   /** Supramark 配置 */
-  config?: any;
+  config?: SupramarkConfig;
   /** 渲染子节点的函数 */
-  renderChildren: (children: any[]) => any;
+  renderChildren: (children: SupramarkNode[]) => unknown;
 }
 
 /**
@@ -156,22 +157,22 @@ export interface ContainerWebRenderArgs {
  *
  * 每个 runtime.web.tsx 的渲染函数必须符合此签名。
  */
-export type ContainerWebRenderer = (args: ContainerWebRenderArgs) => any;
+export type ContainerWebRenderer = (args: ContainerWebRenderArgs) => unknown;
 
 /**
  * Container RN 渲染函数的参数
  */
 export interface ContainerRNRenderArgs {
   /** AST 节点 */
-  node: any;
+  node: SupramarkContainerNode;
   /** React key */
   key: number;
   /** RN 样式映射 */
-  styles: Record<string, any>;
+  styles: Record<string, unknown>;
   /** Supramark 配置 */
-  config?: any;
+  config?: SupramarkConfig;
   /** 渲染子节点的函数 */
-  renderChildren: (children: any[]) => any;
+  renderChildren: (children: SupramarkNode[]) => unknown;
 }
 
 /**
@@ -179,7 +180,7 @@ export interface ContainerRNRenderArgs {
  *
  * 每个 runtime.rn.tsx 的渲染函数必须符合此签名。
  */
-export type ContainerRNRenderer = (args: ContainerRNRenderArgs) => any;
+export type ContainerRNRenderer = (args: ContainerRNRenderArgs) => unknown;
 
 // ============================================================================
 // Examples 接口（重导出）

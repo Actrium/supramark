@@ -53,7 +53,7 @@ import {
 } from './styles';
 import { ErrorBoundary, ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 
-type RenderedNode = any;
+type RenderedNode = React.ComponentProps<typeof Text>['children'];
 
 function getDefinitionTerms(item: SupramarkDefinitionItemNode): SupramarkDefinitionTermNode[] {
   return item.children.filter(
@@ -72,7 +72,7 @@ function getDefinitionDescriptions(
 
 export interface ContainerRendererRN {
   (args: {
-    node: any;
+    node: SupramarkContainerNode;
     key: number;
     styles: ReturnType<typeof mergeStyles>;
     config?: SupramarkConfig;
@@ -373,7 +373,11 @@ function renderNode(
       // opaque container 的 children 已在主组件 useEffect 里通过 expandOpaqueContainers
       // 预解析填充（parse(value) → children）。这里直接渲染 children。
       // Column 布局：title 一行，正文一行。
-      if (SUPRAMARK_ADMONITION_KINDS.includes(containerName as any)) {
+      if (
+        SUPRAMARK_ADMONITION_KINDS.includes(
+          containerName as (typeof SUPRAMARK_ADMONITION_KINDS)[number]
+        )
+      ) {
         const title = container.params || (container.data?.title as string | undefined);
         const kind = containerName;
         const admonitionContainerStyle = { flexDirection: 'column' as const, marginBottom: 4 };

@@ -1,6 +1,9 @@
 import type {
   SupramarkFeature,
+  SupramarkNode,
+  SupramarkRootNode,
   SupramarkDefinitionListNode,
+  SupramarkDefinitionItemNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
 } from '@supramark/core';
@@ -233,8 +236,8 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
           input: 'Markdown\n:   轻量级标记语言',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            return nodes.some((n: any) => n.type === 'definition_list');
+            const nodes = (result as SupramarkRootNode).children || [];
+            return nodes.some((n: SupramarkNode) => n.type === 'definition_list');
           },
           platforms: ['web', 'rn'],
         },
@@ -243,15 +246,15 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
           input: 'TypeScript\n:   强类型 JavaScript\n:   微软开发',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            const defList = nodes.find((n: any) => n.type === 'definition_list');
+            const nodes = (result as SupramarkRootNode).children || [];
+            const defList = nodes.find((n: SupramarkNode) => n.type === 'definition_list');
             if (!defList) return false;
-            const items = defList.children || [];
+            const items = (defList as SupramarkDefinitionListNode).children || [];
             return items.some(
-              (item: any) =>
+              (item: SupramarkDefinitionItemNode) =>
                 item.type === 'definition_item' &&
                 Array.isArray(item.children) &&
-                item.children.some((child: any) => child.type === 'definition_description')
+                item.children.some((child: SupramarkNode) => child.type === 'definition_description')
             );
           },
           platforms: ['web', 'rn'],

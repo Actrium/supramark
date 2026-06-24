@@ -1,6 +1,7 @@
 import type {
   SupramarkContainerNode,
   SupramarkNode,
+  SupramarkRootNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
   SupramarkFeature,
@@ -161,8 +162,10 @@ export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {
         {
           name: 'Vison container produces a vison-named container node',
           input: ':::vison\n{ "version": "1", "type": "text" }\n:::',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          validate: (result: any) => result?.children?.[0]?.name === 'vison',
+          validate: (result: unknown) =>
+            ((result as SupramarkRootNode | undefined)?.children?.[0] as
+              | SupramarkContainerNode
+              | undefined)?.name === 'vison',
           platforms: ['web', 'rn'],
         },
       ],

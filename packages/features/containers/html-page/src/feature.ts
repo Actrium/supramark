@@ -1,6 +1,7 @@
 import type {
   SupramarkContainerNode,
   SupramarkNode,
+  SupramarkRootNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
   SupramarkFeature,
@@ -144,7 +145,9 @@ export const htmlPageFeature: SupramarkFeature<SupramarkHtmlPageContainerNode> =
         {
           name: 'HTML Page 集成测试',
           input: ':::html\ncontent\n:::',
-          validate: (result: any) => result.children?.[0]?.name === 'html',
+          validate: (result: unknown) =>
+            ((result as SupramarkRootNode).children?.[0] as SupramarkContainerNode | undefined)
+              ?.name === 'html',
           platforms: ['web', 'rn'],
         },
       ],

@@ -32,6 +32,7 @@ import {
   type ContainerFeature,
   type ContainerHook,
   type ContainerHookContext,
+  type SupramarkContainerNode,
 } from '@supramark/core';
 
 // ============================================================================
@@ -289,20 +290,20 @@ function createWeatherContainerHook(name: string): ContainerHook {
         rawConfig: parsed.parseError ? innerText : undefined,
       };
 
-      const node = {
+      const node: SupramarkContainerNode = {
         type: 'container' as const,
         name: 'weather',
         params: token.info ? String(token.info) : undefined,
-        data,
+        data: { ...data },
         children: [],
       };
 
       const parent = stack[stack.length - 1];
-      parent.children.push(node as any);
-      stack.push(node as any);
+      parent.children.push(node);
+      stack.push(node);
     },
     onClose(ctx: ContainerHookContext) {
-      const top = ctx.stack[ctx.stack.length - 1] as any;
+      const top = ctx.stack[ctx.stack.length - 1] as SupramarkContainerNode;
       if (top && top.type === 'container' && top.name === 'weather') {
         ctx.stack.pop();
       }

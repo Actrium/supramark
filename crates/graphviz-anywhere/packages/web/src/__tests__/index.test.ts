@@ -4,6 +4,7 @@ import {
   createServerWasmRenderer,
   createWorkerWasmRenderer,
   GraphvizWebError,
+  type GraphvizWorkerRequest,
 } from '../index';
 import { createMockVizWasmModule } from './mocks/viz-wasm';
 
@@ -274,7 +275,7 @@ describe('createWorkerWasmRenderer', () => {
     const mockWorker = {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
-      postMessage: vi.fn((msg: any) => {
+      postMessage: vi.fn((msg: GraphvizWorkerRequest) => {
         // Simulate worker response
         const response = {
           id: msg.id,

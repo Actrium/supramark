@@ -22,6 +22,7 @@ import {
   type ContainerFeature,
   type ContainerHook,
   type ContainerHookContext,
+  type SupramarkContainerNode,
 } from '@supramark/core';
 
 type ContainerTokenLike = {
@@ -65,7 +66,7 @@ function createAdmonitionContainerHook(kind: string): ContainerHook {
     opaque: false,
     onOpen(ctx: ContainerHookContext) {
       const title = parseTitle(ctx.token, kind);
-      const node = {
+      const node: SupramarkContainerNode = {
         type: 'container' as const,
         name: 'admonition',
         params: ctx.token.info ? String(ctx.token.info) : undefined,
@@ -76,11 +77,11 @@ function createAdmonitionContainerHook(kind: string): ContainerHook {
         children: [],
       };
       const parent = ctx.stack[ctx.stack.length - 1];
-      parent.children.push(node as any);
-      ctx.stack.push(node as any);
+      parent.children.push(node);
+      ctx.stack.push(node);
     },
     onClose(ctx: ContainerHookContext) {
-      const top = ctx.stack[ctx.stack.length - 1] as any;
+      const top = ctx.stack[ctx.stack.length - 1] as SupramarkContainerNode;
       if (top && top.type === 'container' && top.name === 'admonition') {
         ctx.stack.pop();
       }

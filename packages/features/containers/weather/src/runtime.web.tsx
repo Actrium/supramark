@@ -145,7 +145,7 @@ export function renderWeatherContainerWeb({
   node,
   key,
 }: ContainerWebRenderArgs): React.ReactNode {
-  const data = (node?.data ?? {}) as WeatherData;
+  const data = (node?.data ?? {}) as unknown as WeatherData;
   const { format, location, units = 'metric', parseError, rawConfig } = data;
 
   // 解析错误时显示错误信息

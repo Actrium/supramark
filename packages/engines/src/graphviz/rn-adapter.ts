@@ -19,7 +19,7 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
   return {
     async renderToSvg(code, rawOptions) {
       const opt = pickGraphvizDiagramOptions(rawOptions);
-      return renderDot(code, (opt.layoutEngine ?? 'dot') as any, 'svg');
+      return renderDot(code, opt.layoutEngine ?? 'dot', 'svg');
     },
     async getCapabilities(): Promise<GraphvizCapabilities> {
       return {

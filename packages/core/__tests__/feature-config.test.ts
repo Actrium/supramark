@@ -18,6 +18,7 @@ import {
   type SupramarkNode,
   type SupramarkFeature,
 } from '../src/feature';
+import type { SupramarkDiagramNode } from '../src/ast';
 
 function createTestFeature(id: string, type: string): SupramarkFeature<SupramarkNode> {
   return {
@@ -263,7 +264,7 @@ describe('Feature 配置系统', () => {
           ast: {
             type: 'diagram',
             selector: (node: SupramarkNode) =>
-              node.type === 'diagram' && (node as any).engine === 'mermaid',
+              node.type === 'diagram' && (node as SupramarkDiagramNode).engine === 'mermaid',
           },
         },
       });
@@ -274,7 +275,7 @@ describe('Feature 配置系统', () => {
           ast: {
             type: 'diagram',
             selector: (node: SupramarkNode) =>
-              node.type === 'diagram' && (node as any).engine === 'vega-lite',
+              node.type === 'diagram' && (node as SupramarkDiagramNode).engine === 'vega-lite',
           },
         },
       });

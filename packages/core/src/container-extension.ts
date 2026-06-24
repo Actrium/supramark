@@ -35,7 +35,7 @@ export function parseContainerParams(raw: string | undefined | null): ContainerP
     }
 
     if (ch === '"' || ch === "'") {
-      quote = ch as any;
+      quote = ch as '"' | "'";
       continue;
     }
 

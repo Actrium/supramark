@@ -319,7 +319,7 @@ export function mergeStyles(customStyles?: SupramarkStyles): typeof defaultStyle
   }
 
   // 创建一个新对象,避免修改defaultStyles
-  const merged: Record<string, any> = {};
+  const merged: Record<string, TextStyle | ViewStyle> = {};
 
   // 先复制所有默认样式
   Object.keys(defaultStyles).forEach(key => {

@@ -61,8 +61,9 @@ function fallbackBox(text: string, size: number): MeasureResult {
 export function installHostMetricsBridge(): void {
   if (installed) return;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const g = globalThis as any;
+  const g = globalThis as unknown as {
+    supramark?: { measureText?: MeasureFn } & Record<string, unknown>;
+  };
   const existing = g.supramark;
   if (existing && typeof existing.measureText === 'function') {
     installed = true;

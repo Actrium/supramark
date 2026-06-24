@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import type { ContainerWebRenderArgs } from '@supramark/core';
+import type { ContainerWebRenderArgs, FeatureConfig } from '@supramark/core';
 
 /**
  * Web 渲染器 for :::note, :::tip, :::warning 等
@@ -19,14 +19,14 @@ export function renderAdmonitionContainerWeb({
   config,
   renderChildren,
 }: ContainerWebRenderArgs): React.ReactNode {
-  const kind = node?.data?.kind ?? 'note';
-  const title = node?.data?.title;
+  const kind = (node?.data?.kind as string | undefined) ?? 'note';
+  const title = node?.data?.title as React.ReactNode;
 
   // Feature enable 检查：如果禁用，退化为普通段落
   const isEnabled =
     !config || !config.features || config.features.length === 0
       ? true
-      : (config.features.find((f: any) => f.id === '@supramark/feature-admonition')?.enabled ??
+      : (config.features.find((f: FeatureConfig) => f.id === '@supramark/feature-admonition')?.enabled ??
         true);
 
   if (!isEnabled) {
@@ -34,7 +34,7 @@ export function renderAdmonitionContainerWeb({
       <p key={key} className={classNames.paragraph}>
         {title ? <strong>{title}</strong> : null}
         {title ? ' ' : null}
-        {renderChildren(node.children ?? [])}
+        {renderChildren(node.children ?? []) as React.ReactNode}
       </p>
     );
   }
@@ -46,7 +46,7 @@ export function renderAdmonitionContainerWeb({
           <strong>{title}</strong>
         </p>
       ) : null}
-      <div>{renderChildren(node.children ?? [])}</div>
+      <div>{renderChildren(node.children ?? []) as React.ReactNode}</div>
     </div>
   );
 }

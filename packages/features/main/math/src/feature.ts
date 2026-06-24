@@ -1,6 +1,7 @@
 import type {
   SupramarkFeature,
   SupramarkNode,
+  SupramarkRootNode,
   SupramarkMathInlineNode,
   SupramarkMathBlockNode,
   FeatureConfigWithOptions,
@@ -262,12 +263,13 @@ export const mathFeature: SupramarkFeature<SupramarkMathInlineNode | SupramarkMa
           input: '测试 $x^2$ 和\n\n$$\\int_0^1$$',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             const hasMathInline = nodes.some(
-              (n: any) =>
-                n.type === 'paragraph' && n.children?.some((c: any) => c.type === 'math_inline')
+              (n: SupramarkNode) =>
+                n.type === 'paragraph' &&
+                n.children?.some((c: SupramarkNode) => c.type === 'math_inline')
             );
-            const hasMathBlock = nodes.some((n: any) => n.type === 'math_block');
+            const hasMathBlock = nodes.some((n: SupramarkNode) => n.type === 'math_block');
             return hasMathInline && hasMathBlock;
           },
           platforms: ['web', 'rn'],
@@ -277,12 +279,12 @@ export const mathFeature: SupramarkFeature<SupramarkMathInlineNode | SupramarkMa
           input: '公式 $a^2$ 和 $b^2$ 以及 $c^2$',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             return nodes.some(
-              (n: any) =>
+              (n: SupramarkNode) =>
                 n.type === 'paragraph' &&
                 Array.isArray(n.children) &&
-                n.children.filter((c: any) => c.type === 'math_inline').length >= 3
+                n.children.filter((c: SupramarkNode) => c.type === 'math_inline').length >= 3
             );
           },
           platforms: ['web', 'rn'],

@@ -302,8 +302,12 @@ async function ensureLoaded(): Promise<
   // as a side effect of the ESM import (`import * as wasm from "./*.wasm"`).
   // Some wasm-bindgen builds still ship a default `init()` — probe
   // defensively so a re-init does not throw.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod: any = await import('@actrium/mermaid-little-web' as string);
+  const mod = (await import('@actrium/mermaid-little-web' as string)) as {
+    default?: unknown;
+    init?: unknown;
+    convert?: unknown;
+    render?: unknown;
+  };
 
   const init =
     (typeof mod.default === 'function' && mod.default) ||

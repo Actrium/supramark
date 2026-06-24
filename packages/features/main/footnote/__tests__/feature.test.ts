@@ -1,5 +1,6 @@
 import { footnoteFeature } from '../src/feature';
 import { validateFeature } from '@supramark/core';
+import type { SupramarkNode } from '@supramark/core';
 
 describe('Footnote Feature', () => {
   describe('Metadata', () => {
@@ -31,13 +32,13 @@ describe('Footnote Feature', () => {
       const refMatch = selector!({
         type: 'footnote_reference',
         index: 1,
-      } as any);
+      } as unknown as SupramarkNode);
 
       const defMatch = selector!({
         type: 'footnote_definition',
         index: 1,
         children: [],
-      } as any);
+      } as unknown as SupramarkNode);
 
       expect(refMatch).toBe(true);
       expect(defMatch).toBe(true);

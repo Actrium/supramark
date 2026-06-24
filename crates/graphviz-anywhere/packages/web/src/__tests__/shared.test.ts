@@ -31,7 +31,7 @@ describe('GraphvizWebError', () => {
   it('creates error with cause', () => {
     const cause = new Error('Original error');
     const error = new GraphvizWebError('RENDER_FAILED', 'Wrapped error', { cause });
-    expect((error as any).cause).toBe(cause);
+    expect((error as { cause?: unknown }).cause).toBe(cause);
   });
 
   it('has correct error codes', () => {

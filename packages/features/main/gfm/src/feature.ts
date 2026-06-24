@@ -1,6 +1,8 @@
 import type {
   SupramarkFeature,
   SupramarkNode,
+  SupramarkRootNode,
+  SupramarkListItemNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
 } from '@supramark/core';
@@ -262,14 +264,19 @@ export const gfmFeature: SupramarkFeature<SupramarkNode> = {
           input: '~~删除~~ 文本\n\n- [x] 任务1\n- [ ] 任务2',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             const hasDelete = nodes.some(
-              (n: any) =>
-                n.type === 'paragraph' && n.children?.some((c: any) => c.type === 'delete')
+              (n: SupramarkNode) =>
+                n.type === 'paragraph' &&
+                n.children?.some((c: SupramarkNode) => c.type === 'delete')
             );
             const hasTaskList = nodes.some(
-              (n: any) =>
-                n.type === 'list' && n.children?.some((item: any) => item.checked !== undefined)
+              (n: SupramarkNode) =>
+                n.type === 'list' &&
+                n.children?.some(
+                  (item: SupramarkNode) =>
+                    (item as SupramarkListItemNode).checked !== undefined
+                )
             );
             return hasDelete && hasTaskList;
           },
@@ -280,8 +287,8 @@ export const gfmFeature: SupramarkFeature<SupramarkNode> = {
           input: '| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            const hasTable = nodes.some((n: any) => n.type === 'table');
+            const nodes = (result as SupramarkRootNode).children || [];
+            const hasTable = nodes.some((n: SupramarkNode) => n.type === 'table');
             return hasTable;
           },
           platforms: ['web', 'rn'],

@@ -1,6 +1,7 @@
 import type {
   SupramarkFeature,
   SupramarkNode,
+  SupramarkRootNode,
   SupramarkFootnoteReferenceNode,
   SupramarkFootnoteDefinitionNode,
   FeatureConfigWithOptions,
@@ -243,13 +244,15 @@ export const footnoteFeature: SupramarkFeature<
           input: '正文[^1]\n\n[^1]: 脚注内容',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             const hasReference = nodes.some(
-              (n: any) =>
+              (n: SupramarkNode) =>
                 n.type === 'paragraph' &&
-                n.children?.some((c: any) => c.type === 'footnote_reference')
+                n.children?.some((c: SupramarkNode) => c.type === 'footnote_reference')
             );
-            const hasDefinition = nodes.some((n: any) => n.type === 'footnote_definition');
+            const hasDefinition = nodes.some(
+              (n: SupramarkNode) => n.type === 'footnote_definition'
+            );
             return hasReference && hasDefinition;
           },
           platforms: ['web', 'rn'],
@@ -259,16 +262,19 @@ export const footnoteFeature: SupramarkFeature<
           input: '文本[^1]和[^2]\n\n[^1]: 第一个\n[^2]: 第二个',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            const references = nodes.reduce((count: number, n: any) => {
+            const nodes = (result as SupramarkRootNode).children || [];
+            const references = nodes.reduce((count: number, n: SupramarkNode) => {
               if (n.type === 'paragraph' && Array.isArray(n.children)) {
                 return (
-                  count + n.children.filter((c: any) => c.type === 'footnote_reference').length
+                  count +
+                  n.children.filter((c: SupramarkNode) => c.type === 'footnote_reference').length
                 );
               }
               return count;
             }, 0);
-            const definitions = nodes.filter((n: any) => n.type === 'footnote_definition').length;
+            const definitions = nodes.filter(
+              (n: SupramarkNode) => n.type === 'footnote_definition'
+            ).length;
             return references >= 2 && definitions >= 2;
           },
           platforms: ['web', 'rn'],

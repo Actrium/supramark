@@ -9,6 +9,18 @@ import type {
   GraphvizRenderAdapter,
 } from './types';
 
+/**
+ * Minimal shape of a wasm-bindgen ESM module probed defensively for an
+ * init entry and a sync convert/render entry.
+ */
+interface WasmRenderModule {
+  default?: unknown;
+  init?: unknown;
+  convert?: unknown;
+  render?: unknown;
+  renderSvg?: unknown;
+}
+
 export interface WebGraphvizAdapterOptions {
   adapter?: GraphvizRenderAdapter;
   loadAdapter?: () => Promise<GraphvizRenderAdapter>;
@@ -64,7 +76,6 @@ export function createWebDiagramEngine(
  * wrapper backed by `@actrium/graphviz-anywhere-web` (pre-loaded) so the
  * wasm call site can invoke it without returning to the JS event loop.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
   // Install the host text-metrics bridge before loading the wasm so the
   // wasm's metrics-host-callback impl can resolve `supramark.measureText`
@@ -77,12 +88,12 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
   const ensureGraphvizBridge = async () => {
     if (!graphvizBridgePromise) {
       graphvizBridgePromise = (async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { Graphviz } = await import('@actrium/graphviz-anywhere-web' as string);
         const graphviz = await Graphviz.load();
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const g = globalThis as any;
+        const g = globalThis as unknown as {
+          __graphviz_anywhere_render?: (dot: string, engine?: string, format?: string) => string;
+        };
         if (typeof g.__graphviz_anywhere_render !== 'function') {
           g.__graphviz_anywhere_render = (
             dot: string,
@@ -104,8 +115,9 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
         // Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
         // the `import * from '*.wasm'` side effect, so no separate init call is
         // needed. Some builds still ship a default `init()` — probe defensively.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const puml: any = await import('@actrium/plantuml-little-web' as string);
+        const puml = (await import(
+          '@actrium/plantuml-little-web' as string
+        )) as WasmRenderModule;
 
         const init =
           (typeof puml.default === 'function' && puml.default) ||
@@ -186,10 +198,8 @@ function plantumlNeedsGraphviz(code: string): boolean {
  * still ship a default `init()` — we probe defensively and `await` it if
  * present, swallowing errors caused by re-init.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadWebD2Render(): Promise<DiagramRenderFn> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const d2: any = await import('@actrium/d2-little-web' as string);
+  const d2 = (await import('@actrium/d2-little-web' as string)) as WasmRenderModule;
 
   const init =
     (typeof d2.default === 'function' && d2.default) ||

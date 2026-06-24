@@ -14,8 +14,14 @@ declare module '@actrium/mermaid-little-web' {
 }
 
 declare module 'mathjax-full/js/mathjax.js' {
+  /** Opaque DOM-like node handle produced and consumed by the lite adaptor. */
+  type MathJaxNode = unknown;
+  /** Minimal shape of the document returned by `mathjax.document`. */
+  interface MathJaxDocument {
+    convert(input: string, options?: Record<string, unknown>): MathJaxNode;
+  }
   export const mathjax: {
-    document(input?: string, options?: Record<string, unknown>): any;
+    document(input?: string, options?: Record<string, unknown>): MathJaxDocument;
   };
 }
 
@@ -32,11 +38,19 @@ declare module 'mathjax-full/js/output/svg.js' {
 }
 
 declare module 'mathjax-full/js/adaptors/liteAdaptor.js' {
-  export function liteAdaptor(): any;
+  /** Opaque DOM-like node handle used by the lite adaptor. */
+  type LiteAdaptorNode = unknown;
+  /** Minimal shape of the lite adaptor used by the math engine. */
+  export interface LiteAdaptor {
+    firstChild(node: LiteAdaptorNode): LiteAdaptorNode;
+    outerHTML(node: LiteAdaptorNode): string;
+  }
+  export function liteAdaptor(): LiteAdaptor;
 }
 
 declare module 'mathjax-full/js/handlers/html.js' {
-  export function RegisterHTMLHandler(adaptor: any): void;
+  import type { LiteAdaptor } from 'mathjax-full/js/adaptors/liteAdaptor.js';
+  export function RegisterHTMLHandler(adaptor: LiteAdaptor): void;
 }
 
 declare module 'mathjax-full/js/input/tex/AllPackages.js' {
