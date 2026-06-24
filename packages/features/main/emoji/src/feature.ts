@@ -1,5 +1,7 @@
 import type {
   SupramarkFeature,
+  SupramarkNode,
+  SupramarkRootNode,
   SupramarkTextNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
@@ -210,12 +212,12 @@ export const emojiFeature: SupramarkFeature<SupramarkTextNode> = {
           input: '测试 :smile: 和 :rocket:',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             return nodes.some(
-              (n: any) =>
+              (n: SupramarkNode) =>
                 n.type === 'paragraph' &&
                 n.children?.some(
-                  (c: any) =>
+                  (c: SupramarkNode) =>
                     c.type === 'text' && (c.value.includes('😄') || c.value.includes('🚀'))
                 )
             );
@@ -227,11 +229,11 @@ export const emojiFeature: SupramarkFeature<SupramarkTextNode> = {
           input: '直接使用 😄🚀',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             return nodes.some(
-              (n: any) =>
+              (n: SupramarkNode) =>
                 n.type === 'paragraph' &&
-                n.children?.some((c: any) => c.type === 'text' && c.value.includes('😄'))
+                n.children?.some((c: SupramarkNode) => c.type === 'text' && c.value.includes('😄'))
             );
           },
           platforms: ['web', 'rn'],

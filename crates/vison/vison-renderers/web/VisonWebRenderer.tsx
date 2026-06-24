@@ -8,7 +8,7 @@ import { VisonComponent } from '../shared/types';
  */
 
 // 图片组件：处理加载中与加载失败状态
-const VisonImage: React.FC<{ props: any; style: any }> = ({ props, style }) => {
+const VisonImage: React.FC<{ props: Record<string, unknown>; style: React.CSSProperties }> = ({ props, style }) => {
   const [status, setStatus] = useState<'loading' | 'error' | 'loaded'>('loading');
 
   const containerStyle: React.CSSProperties = {
@@ -30,7 +30,7 @@ const VisonImage: React.FC<{ props: any; style: any }> = ({ props, style }) => {
         <div style={{ position: 'absolute', color: '#FF4D4F', fontSize: '12px' }}>Image Error</div>
       )}
       <img
-        src={props.src}
+        src={props.src as string | undefined}
         alt=""
         style={{
           width: '100%',
@@ -66,9 +66,9 @@ export const VisonWebRenderer: React.FC<{ data: VisonComponent }> = React.memo((
     // 转换 Vison 样式到 CSS
     Object.entries(style).forEach(([key, value]) => {
       if (typeof value === 'number' && !['opacity', 'fontWeight', 'lineHeight'].includes(key)) {
-        (s as any)[key] = `${value}px`;
+        (s as Record<string, unknown>)[key] = `${value}px`;
       } else {
-        (s as any)[key] = value;
+        (s as Record<string, unknown>)[key] = value;
       }
     });
 
@@ -87,7 +87,7 @@ export const VisonWebRenderer: React.FC<{ data: VisonComponent }> = React.memo((
         );
 
       case 'text':
-        return <span style={baseStyle}>{props.text}</span>;
+        return <span style={baseStyle}>{props.text as React.ReactNode}</span>;
 
       case 'image':
         return <VisonImage props={props} style={baseStyle} />;
@@ -95,7 +95,7 @@ export const VisonWebRenderer: React.FC<{ data: VisonComponent }> = React.memo((
       case 'markdown':
         return (
           <div style={{ ...baseStyle, display: 'block' }} className="vison-markdown">
-            <ReactMarkdown skipHtml={true}>{props.content}</ReactMarkdown>
+            <ReactMarkdown skipHtml={true}>{props.content as string}</ReactMarkdown>
           </div>
         );
 
@@ -103,9 +103,9 @@ export const VisonWebRenderer: React.FC<{ data: VisonComponent }> = React.memo((
         return (
           <div
             style={{
-              height: style.borderWidth || 1,
-              backgroundColor: style.borderColor || '#EEE',
-              margin: `${style.margin || 8}px 0`,
+              height: (style.borderWidth as React.CSSProperties['height']) || 1,
+              backgroundColor: (style.borderColor as string) || '#EEE',
+              margin: `${(style.margin as number) || 8}px 0`,
               width: '100%',
             }}
           />

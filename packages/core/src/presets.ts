@@ -1,4 +1,5 @@
 import type { SupramarkFeature } from './feature.js';
+import type { SupramarkNode } from './ast.js';
 
 /**
  * 预设配置类型
@@ -6,7 +7,7 @@ import type { SupramarkFeature } from './feature.js';
 export interface SupramarkPreset {
   name: string;
   description: string;
-  features: SupramarkFeature<any>[];
+  features: SupramarkFeature<SupramarkNode>[];
 }
 
 /**
@@ -15,7 +16,7 @@ export interface SupramarkPreset {
 export function createPreset(
   name: string,
   description: string,
-  features: SupramarkFeature<any>[]
+  features: SupramarkFeature<SupramarkNode>[]
 ): SupramarkPreset {
   return { name, description, features };
 }

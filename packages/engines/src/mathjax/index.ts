@@ -37,10 +37,12 @@ async function ensureRenderer(): Promise<MathJaxRenderer> {
 }
 
 function extractSvg(adaptor: MathJaxRenderer['adaptor'], node: unknown): string {
-  const asAny = node as any;
-  const svgNode = asAny && typeof adaptor.firstChild === 'function' ? adaptor.firstChild(asAny) : null;
+  type AdaptorNode = Parameters<MathJaxRenderer['adaptor']['outerHTML']>[0];
+  const adaptorNode = node as AdaptorNode;
+  const svgNode =
+    adaptorNode && typeof adaptor.firstChild === 'function' ? adaptor.firstChild(adaptorNode) : null;
 
-  const target = svgNode ?? asAny;
+  const target = (svgNode ?? adaptorNode) as AdaptorNode;
   const svg = adaptor.outerHTML(target);
   if (!svg || !svg.includes('<svg')) {
     throw new Error('MathJax did not produce SVG output');

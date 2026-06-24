@@ -1,5 +1,15 @@
 import { parse } from '../src/plugin';
-import type { SupramarkRootNode } from '../src/ast';
+import type {
+  SupramarkRootNode,
+  SupramarkNode,
+  SupramarkTextNode,
+  SupramarkParentNode,
+  SupramarkHeadingNode,
+  SupramarkCodeNode,
+  SupramarkListNode,
+  SupramarkListItemNode,
+  SupramarkDiagramNode,
+} from '../src/ast';
 
 describe('parse', () => {
   describe('AST v2 合同', () => {
@@ -17,8 +27,8 @@ describe('parse', () => {
 
     it('应该省略普通列表项的 v2 可选字段', async () => {
       const ast = await parse('- plain item');
-      const list = ast.children[0] as any;
-      const item = list.children[0] as any;
+      const list = ast.children[0] as SupramarkListNode;
+      const item = list.children[0] as SupramarkListItemNode;
 
       expect(list.type).toBe('list');
       expect(Object.prototype.hasOwnProperty.call(list, 'start')).toBe(false);
@@ -27,17 +37,17 @@ describe('parse', () => {
 
     it('应该输出 definition list v2 children 结构', async () => {
       const ast = await parse('Term\n:   Definition');
-      const list = ast.children[0] as any;
-      const item = list.children[0] as any;
+      const list = ast.children[0] as SupramarkParentNode;
+      const item = list.children[0] as SupramarkParentNode;
 
       expect(list.type).toBe('definition_list');
       expect(item.type).toBe('definition_item');
       expect(Object.prototype.hasOwnProperty.call(item, 'term')).toBe(false);
       expect(Object.prototype.hasOwnProperty.call(item, 'descriptions')).toBe(false);
       expect(item.children[0].type).toBe('definition_term');
-      expect(item.children[0].children[0].value).toBe('Term');
+      expect(((item.children[0] as SupramarkParentNode).children[0] as SupramarkTextNode).value).toBe('Term');
       expect(item.children[1].type).toBe('definition_description');
-      expect(item.children[1].children[0].type).toBe('paragraph');
+      expect((item.children[1] as SupramarkParentNode).children[0].type).toBe('paragraph');
     });
   });
 
@@ -57,9 +67,9 @@ describe('parse', () => {
 
       expect(ast.children).toHaveLength(2);
       expect(ast.children[0].type).toBe('heading');
-      expect((ast.children[0] as any).depth).toBe(1);
+      expect((ast.children[0] as SupramarkHeadingNode).depth).toBe(1);
       expect(ast.children[1].type).toBe('heading');
-      expect((ast.children[1] as any).depth).toBe(2);
+      expect((ast.children[1] as SupramarkHeadingNode).depth).toBe(2);
     });
 
     it('应该解析列表', async () => {
@@ -68,7 +78,7 @@ describe('parse', () => {
 
       expect(ast.children).toHaveLength(1);
       expect(ast.children[0].type).toBe('list');
-      expect((ast.children[0] as any).children).toHaveLength(3);
+      expect((ast.children[0] as SupramarkListNode).children).toHaveLength(3);
     });
 
     it('应该解析代码块', async () => {
@@ -77,7 +87,7 @@ describe('parse', () => {
 
       expect(ast.children).toHaveLength(1);
       expect(ast.children[0].type).toBe('code');
-      expect((ast.children[0] as any).lang).toBe('javascript');
+      expect((ast.children[0] as SupramarkCodeNode).lang).toBe('javascript');
     });
   });
 
@@ -86,32 +96,32 @@ describe('parse', () => {
       const markdown = 'This is **bold** text.';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'strong')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'strong')).toBe(true);
     });
 
     it('应该解析斜体文本', async () => {
       const markdown = 'This is *italic* text.';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'emphasis')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'emphasis')).toBe(true);
     });
 
     it('应该解析链接', async () => {
       const markdown = '[Link](https://example.com)';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'link')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'link')).toBe(true);
     });
 
     it('应该解析行内代码', async () => {
       const markdown = 'This is `code` inline.';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'inline_code')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'inline_code')).toBe(true);
     });
   });
 
@@ -120,18 +130,18 @@ describe('parse', () => {
       const markdown = 'This is ~~deleted~~ text.';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'delete')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'delete')).toBe(true);
     });
 
     it('应该解析任务列表', async () => {
       const markdown = '- [x] Task 1\n- [ ] Task 2';
       const ast = await parse(markdown);
 
-      const list = ast.children[0] as any;
+      const list = ast.children[0] as SupramarkListNode;
       expect(list.type).toBe('list');
-      expect(list.children[0].checked).toBe(true);
-      expect(list.children[1].checked).toBe(false);
+      expect((list.children[0] as SupramarkListItemNode).checked).toBe(true);
+      expect((list.children[1] as SupramarkListItemNode).checked).toBe(false);
     });
 
     it('应该解析表格', async () => {
@@ -150,7 +160,7 @@ describe('parse', () => {
 
       expect(ast.children).toHaveLength(1);
       expect(ast.children[0].type).toBe('diagram');
-      expect((ast.children[0] as any).engine).toBe('mermaid');
+      expect((ast.children[0] as SupramarkDiagramNode).engine).toBe('mermaid');
     });
 
     it('应该解析 plantuml 代码块为 diagram 节点', async () => {
@@ -159,7 +169,7 @@ describe('parse', () => {
 
       expect(ast.children).toHaveLength(1);
       expect(ast.children[0].type).toBe('diagram');
-      expect((ast.children[0] as any).engine).toBe('plantuml');
+      expect((ast.children[0] as SupramarkDiagramNode).engine).toBe('plantuml');
     });
   });
 
@@ -168,15 +178,15 @@ describe('parse', () => {
       const markdown = 'Inline math: $E = mc^2$';
       const ast = await parse(markdown);
 
-      const paragraph = ast.children[0] as any;
-      expect(paragraph.children.some((node: any) => node.type === 'math_inline')).toBe(true);
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'math_inline')).toBe(true);
     });
 
     it('应该解析块级公式', async () => {
       const markdown = '$$\n\\int_0^1 x^2 dx\n$$';
       const ast = await parse(markdown);
 
-      expect(ast.children.some((node: any) => node.type === 'math_block')).toBe(true);
+      expect(ast.children.some((node: SupramarkNode) => node.type === 'math_block')).toBe(true);
     });
   });
 

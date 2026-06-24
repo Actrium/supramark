@@ -718,7 +718,7 @@ export interface RenderContext<TPlatform> {
  * Core 包保持框架无关性，不直接依赖 React 类型。
  * 上层应用会将此类型实例化为 React.ReactNode。
  */
-export type RenderOutput<TPlatform> = TPlatform extends 'cli' ? string : any;
+export type RenderOutput<TPlatform> = TPlatform extends 'cli' ? string : unknown;
 
 /**
  * React Native 样式类型（简化）
@@ -1193,7 +1193,7 @@ export class FeatureRegistry {
   // 注册表内部使用 any，避免对节点类型做过度约束。
   // 这样既可以注册针对特定节点子集的 Feature（如 SupramarkDiagramNode），
   // 也不会影响外部通过 SupramarkNode 做统一查询。
-  private static features = new Map<string, SupramarkFeature<any>>();
+  private static features = new Map<string, SupramarkFeature<SupramarkNode>>();
 
   /**
    * 注册一个 Feature
@@ -1201,14 +1201,17 @@ export class FeatureRegistry {
    * @param feature - Feature 定义
    * @throws 如果 Feature ID 已存在
    */
-  static register(feature: SupramarkFeature<any>): void {
+  static register<TNode extends SupramarkNode>(feature: SupramarkFeature<TNode>): void {
     const id = feature.metadata.id;
 
     if (this.features.has(id)) {
       throw new Error(`Feature "${id}" is already registered`);
     }
 
-    this.features.set(id, feature);
+    // A feature is registered for a specific node subtype (e.g. SupramarkDiagramNode),
+    // but the registry stores them under the common SupramarkNode contract. The widening
+    // is sound because the registry never calls node-specific functions with a wider node.
+    this.features.set(id, feature as unknown as SupramarkFeature<SupramarkNode>);
   }
 
   /**
@@ -1217,7 +1220,7 @@ export class FeatureRegistry {
    * @param id - Feature ID
    * @returns Feature 定义，如果不存在则返回 undefined
    */
-  static get(id: string): SupramarkFeature<any> | undefined {
+  static get(id: string): SupramarkFeature<SupramarkNode> | undefined {
     return this.features.get(id);
   }
 
@@ -1226,7 +1229,7 @@ export class FeatureRegistry {
    *
    * @returns Feature 列表
    */
-  static list(): Array<SupramarkFeature<any>> {
+  static list(): Array<SupramarkFeature<SupramarkNode>> {
     return Array.from(this.features.values());
   }
 
@@ -1248,7 +1251,7 @@ export class FeatureRegistry {
    * @param node - AST 节点
    * @returns 匹配的 Feature 列表
    */
-  static findByNode(node: SupramarkNode): Array<SupramarkFeature<any>> {
+  static findByNode(node: SupramarkNode): Array<SupramarkFeature<SupramarkNode>> {
     return this.list().filter(feature => {
       const ast = feature.syntax.ast;
 

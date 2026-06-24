@@ -12,14 +12,18 @@ import type { VisonContainerData, VisonSpec } from './feature.js';
 
 type VisonWebRendererComponent = React.ComponentType<{ data: VisonSpec }>;
 
+interface VisonWebModule {
+  VisonWebRenderer?: VisonWebRendererComponent;
+  default?: VisonWebRendererComponent;
+}
+
 let cachedRenderer: VisonWebRendererComponent | null = null;
 let rendererPromise: Promise<VisonWebRendererComponent> | null = null;
 
 async function loadRenderer(): Promise<VisonWebRendererComponent> {
   if (cachedRenderer) return cachedRenderer;
   if (!rendererPromise) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rendererPromise = import('@actrium/vison-web' as string).then((mod: any) => {
+    rendererPromise = import('@actrium/vison-web' as string).then((mod: VisonWebModule) => {
       const Component = mod.VisonWebRenderer ?? mod.default;
       if (!Component) {
         throw new Error('@actrium/vison-web did not export VisonWebRenderer');

@@ -28,9 +28,9 @@ module.exports = {
   },
   rules: {
     // TypeScript 相关
-    // This repo integrates with many untyped JS ecosystems (markdown-it plugins, renderer bridges).
-    // Keep visibility on `any`, but don't block CI on it.
-    '@typescript-eslint/no-explicit-any': 'warn',
+    // Explicit `any` is forbidden. Use precise types, generics, or `unknown` with a
+    // narrowing guard. Untyped third-party boundaries should be wrapped in minimal interfaces.
+    '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-unused-vars': [
       'warn',

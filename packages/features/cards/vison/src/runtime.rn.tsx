@@ -8,17 +8,22 @@
 
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import type { SupramarkContainerNode } from '@supramark/core';
 import type { VisonContainerData, VisonSpec } from './feature.js';
 
 // Loose typing for the RN renderer args — the core ContainerRendererRN
 // signature lives in @supramark/rn but we don't want a hard dep here.
 interface RNContainerArgs {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  node: any;
+  node: SupramarkContainerNode;
   key: string | number;
 }
 
 type VisonRNRendererComponent = React.ComponentType<{ data: VisonSpec }>;
+
+interface VisonRNModule {
+  VisonRNRenderer?: VisonRNRendererComponent;
+  default?: VisonRNRendererComponent;
+}
 
 let cachedRenderer: VisonRNRendererComponent | null = null;
 let rendererPromise: Promise<VisonRNRendererComponent> | null = null;
@@ -26,8 +31,7 @@ let rendererPromise: Promise<VisonRNRendererComponent> | null = null;
 async function loadRenderer(): Promise<VisonRNRendererComponent> {
   if (cachedRenderer) return cachedRenderer;
   if (!rendererPromise) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rendererPromise = import('@actrium/vison-rn' as string).then((mod: any) => {
+    rendererPromise = import('@actrium/vison-rn' as string).then((mod: VisonRNModule) => {
       const Component = mod.VisonRNRenderer ?? mod.default;
       if (!Component) {
         throw new Error('@actrium/vison-rn did not export VisonRNRenderer');

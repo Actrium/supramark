@@ -91,7 +91,7 @@ function parseMapConfig(raw: string): ParsedMapConfig {
 
       if (!result.marker) result.marker = {};
       if (key === 'lat' || key === 'lng') {
-        (result.marker as any)[key] = num;
+        result.marker[key] = num;
       } else {
         if (!result.meta) result.meta = {};
         result.meta[`marker.${key}`] = num;

@@ -1,6 +1,7 @@
 import type {
   SupramarkContainerNode,
   SupramarkNode,
+  SupramarkRootNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
   SupramarkFeature,
@@ -152,7 +153,9 @@ export const mapFeature: SupramarkFeature<SupramarkMapContainerNode> = {
         {
           name: 'Map 集成测试',
           input: ':::map\ncenter: [0, 0]\n:::',
-          validate: (result: any) => result.children?.[0]?.name === 'map',
+          validate: (result: unknown) =>
+            ((result as SupramarkRootNode).children?.[0] as SupramarkContainerNode | undefined)
+              ?.name === 'map',
           platforms: ['web', 'rn'],
         },
       ],

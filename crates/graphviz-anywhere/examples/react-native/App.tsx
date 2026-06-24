@@ -64,9 +64,10 @@ export default function App() {
     try {
       const svg = await renderDot(dotSource, engine, 'svg');
       setSvgOutput(svg);
-    } catch (e: any) {
-      const code = e?.code || GraphvizErrorCode.UNKNOWN;
-      const message = e?.message || 'Unknown rendering error';
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string } | null | undefined;
+      const code = err?.code || GraphvizErrorCode.UNKNOWN;
+      const message = err?.message || 'Unknown rendering error';
       setError(`[${code}] ${message}`);
     } finally {
       setLoading(false);

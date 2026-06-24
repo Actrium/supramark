@@ -56,7 +56,7 @@ import { MathBlockWeb, MathInlineWeb } from './MathBlockWeb.js';
 
 export interface ContainerRendererWeb {
   (args: {
-    node: any;
+    node: SupramarkContainerNode;
     key: number;
     classNames: SupramarkClassNames;
     config?: SupramarkConfig;
@@ -510,10 +510,14 @@ function renderNode(
       //   2. 来自 @supramark/feature-admonition（feature 注册的 hook）→ name='admonition', data.kind=实际种类
       const kindFromData = container.data?.kind as string | undefined;
       const isAdmonition =
-        SUPRAMARK_ADMONITION_KINDS.includes(containerName as any) ||
+        SUPRAMARK_ADMONITION_KINDS.includes(
+          containerName as (typeof SUPRAMARK_ADMONITION_KINDS)[number]
+        ) ||
         (containerName === 'admonition' &&
           kindFromData !== undefined &&
-          SUPRAMARK_ADMONITION_KINDS.includes(kindFromData as any));
+          SUPRAMARK_ADMONITION_KINDS.includes(
+            kindFromData as (typeof SUPRAMARK_ADMONITION_KINDS)[number]
+          ));
       if (isAdmonition) {
         const kind = (kindFromData as string) || containerName;
         // title 优先使用 data.title（已剥离 kind 名），否则退回 params（可能含 kind 前缀）

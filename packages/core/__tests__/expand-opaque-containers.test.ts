@@ -1,19 +1,31 @@
 import { parse, expandOpaqueContainers } from '../src/plugin';
-import type { SupramarkNode, SupramarkRootNode } from '../src/ast';
+import type {
+  SupramarkNode,
+  SupramarkRootNode,
+  SupramarkParentNode,
+  SupramarkContainerNode,
+} from '../src/ast';
 
-function findContainers(node: SupramarkNode, out: any[] = []): any[] {
-  const n = node as any;
+// Test-local view of a node that may carry children, used to walk an arbitrary tree.
+type NodeWithChildren = SupramarkNode & { children?: SupramarkNode[] };
+
+function findContainers(
+  node: SupramarkNode,
+  out: SupramarkContainerNode[] = []
+): SupramarkContainerNode[] {
+  const n = node as NodeWithChildren;
   if (n && typeof n === 'object') {
-    if (n.type === 'container') out.push(n);
+    if (n.type === 'container') out.push(n as SupramarkContainerNode);
     for (const child of n.children ?? []) findContainers(child, out);
   }
   return out;
 }
 
-function hasNodeOfType(node: any, type: string): boolean {
+function hasNodeOfType(node: SupramarkNode, type: string): boolean {
   if (!node || typeof node !== 'object') return false;
   if (node.type === type) return true;
-  return (node.children ?? []).some((c: any) => hasNodeOfType(c, type));
+  const children = (node as NodeWithChildren).children ?? [];
+  return children.some((c: SupramarkNode) => hasNodeOfType(c, type));
 }
 
 describe('expandOpaqueContainers', () => {
@@ -50,7 +62,7 @@ describe('expandOpaqueContainers', () => {
   });
 
   describe('discriminator and idempotency (unit)', () => {
-    function makeRoot(children: any[]): SupramarkRootNode {
+    function makeRoot(children: SupramarkNode[]): SupramarkRootNode {
       return { type: 'root', children } as unknown as SupramarkRootNode;
     }
 
@@ -59,7 +71,7 @@ describe('expandOpaqueContainers', () => {
         { type: 'container', name: 'note', mode: 'opaque', value: '# Heading', children: [] },
       ]);
       await expandOpaqueContainers(root);
-      const note: any = root.children[0];
+      const note = root.children[0] as SupramarkContainerNode;
 
       expect(note.value).toBeUndefined();
       expect(hasNodeOfType(note, 'heading')).toBe(true);
@@ -77,7 +89,7 @@ describe('expandOpaqueContainers', () => {
         },
       ]);
       await expandOpaqueContainers(root);
-      const html: any = root.children[0];
+      const html = root.children[0] as SupramarkContainerNode;
 
       // data-bearing container is left byte-for-byte intact.
       expect(html.value).toBe('<b>raw</b>');
@@ -96,7 +108,7 @@ describe('expandOpaqueContainers', () => {
         },
       ]);
       await expandOpaqueContainers(root);
-      const note: any = (root.children[0] as any).children[0];
+      const note = (root.children[0] as SupramarkParentNode).children[0] as SupramarkContainerNode;
 
       expect(note.value).toBeUndefined();
       expect(hasNodeOfType(note, 'strong')).toBe(true);

@@ -1,6 +1,7 @@
 import type {
   SupramarkFeature,
   SupramarkNode,
+  SupramarkRootNode,
   FeatureConfigWithOptions,
   SupramarkConfig,
 } from '@supramark/core';
@@ -271,9 +272,9 @@ export const coreMarkdownFeature: SupramarkFeature<SupramarkNode> = {
           input: '# 标题\n\n这是段落',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            const hasHeading = nodes.some((n: any) => n.type === 'heading');
-            const hasParagraph = nodes.some((n: any) => n.type === 'paragraph');
+            const nodes = (result as SupramarkRootNode).children || [];
+            const hasHeading = nodes.some((n: SupramarkNode) => n.type === 'heading');
+            const hasParagraph = nodes.some((n: SupramarkNode) => n.type === 'paragraph');
             return hasHeading && hasParagraph;
           },
           platforms: ['web', 'rn'],
@@ -283,9 +284,9 @@ export const coreMarkdownFeature: SupramarkFeature<SupramarkNode> = {
           input: '- 列表\n\n```js\ncode\n```',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
-            const hasList = nodes.some((n: any) => n.type === 'list');
-            const hasCode = nodes.some((n: any) => n.type === 'code');
+            const nodes = (result as SupramarkRootNode).children || [];
+            const hasList = nodes.some((n: SupramarkNode) => n.type === 'list');
+            const hasCode = nodes.some((n: SupramarkNode) => n.type === 'code');
             return hasList && hasCode;
           },
           platforms: ['web', 'rn'],
@@ -295,14 +296,14 @@ export const coreMarkdownFeature: SupramarkFeature<SupramarkNode> = {
           input: '**粗体** 和 *斜体* 和 `代码`',
           validate: result => {
             if (!result || typeof result !== 'object') return false;
-            const nodes = (result as any).children || [];
+            const nodes = (result as SupramarkRootNode).children || [];
             return nodes.some(
-              (n: any) =>
+              (n: SupramarkNode) =>
                 n.type === 'paragraph' &&
                 Array.isArray(n.children) &&
-                n.children.some((c: any) => c.type === 'strong') &&
-                n.children.some((c: any) => c.type === 'emphasis') &&
-                n.children.some((c: any) => c.type === 'inline_code')
+                n.children.some((c: SupramarkNode) => c.type === 'strong') &&
+                n.children.some((c: SupramarkNode) => c.type === 'emphasis') &&
+                n.children.some((c: SupramarkNode) => c.type === 'inline_code')
             );
           },
           platforms: ['web', 'rn'],
