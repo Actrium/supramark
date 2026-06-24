@@ -54,6 +54,46 @@ import { ErrorBoundary, ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 
 type RenderedNode = any;
 
+/**
+ * 递归遍历 AST，对 `mode: 'opaque'` 且有 `value` 的 container，
+ * 用 parse(value) 解析 value 成 AST 子树，填回 container.children。
+ *
+ * 新 AST v2 的 opaque container children 为空，正文在 value（原始 markdown 字符串）。
+ * Rust parser 不认 feature 插件 JS 侧注册的 registerContainerHook，把所有 :::xxx
+ * 当 opaque 处理。这里在主组件异步上下文里预解析，renderNode 就能同步渲染 children。
+ *
+ * 递归处理已填充的 children（可能嵌套 opaque container）。
+ */
+async function expandOpaqueContainers(node: SupramarkNode): Promise<void> {
+  if (!node || typeof node !== 'object' || !('children' in node)) {
+    return;
+  }
+  const parent = node as { children: SupramarkNode[] };
+  for (let i = 0; i < parent.children.length; i++) {
+    const child = parent.children[i] as SupramarkNode & {
+      mode?: string;
+      value?: string;
+    };
+    if (
+      child &&
+      typeof child === 'object' &&
+      child.mode === 'opaque' &&
+      typeof child.value === 'string' &&
+      child.value.length > 0
+    ) {
+      try {
+        const sub = await parse(child.value);
+        (child as { children: SupramarkNode[] }).children = sub.children;
+        // 清空 value，避免 renderNode 误判再次解析
+        child.value = undefined;
+      } catch {
+        // 解析失败保留原 children（可能为空），renderNode 走 fallback
+      }
+    }
+    await expandOpaqueContainers(child);
+  }
+}
+
 function getDefinitionTerms(item: SupramarkDefinitionItemNode): SupramarkDefinitionTermNode[] {
   return item.children.filter(
     (child): child is SupramarkDefinitionTermNode => child.type === 'definition_term'
@@ -156,6 +196,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     (async () => {
       try {
         const parsed = ast ?? (await parse(markdown, { config }));
+        // Post-process：递归解析 opaque container 的 value。
+        // 新 AST v2 的 opaque container children 为空，正文在 value（原始 markdown）。
+        // Rust parser 不认 feature 插件 JS 侧注册的 registerContainerHook，
+        // 把所有 :::xxx 当 opaque 处理。这里在主组件异步上下文里把 value 解析成
+        // AST 子树填回 children，renderNode 就能正常渲染。
+        await expandOpaqueContainers(parsed);
         const highlightedMap = await preHighlightAll(
           collectCodeHighlightTasks(parsed.children, config, codeHighlightTheme),
           codeHighlighter
@@ -363,17 +409,24 @@ function renderNode(
       }
 
       // 内置处理：admonition 类型 (note, tip, warning, etc.)
+      // opaque container 的 children 已在主组件 useEffect 里通过 expandOpaqueContainers
+      // 预解析填充（parse(value) → children）。这里直接渲染 children。
+      // Column 布局：title 一行，正文一行。
       if (SUPRAMARK_ADMONITION_KINDS.includes(containerName as any)) {
         const title = container.params || (container.data?.title as string | undefined);
         const kind = containerName;
+        const admonitionContainerStyle = { flexDirection: 'column' as const, marginBottom: 4 };
+
+        const renderAdmonitionContent = () =>
+          container.children.map((child, index) =>
+            renderNode(child, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+          );
 
         if (!isFeatureGroupEnabled(config, ['@supramark/feature-admonition'])) {
           return (
-            <View key={key} style={styles.listItem}>
+            <View key={key} style={admonitionContainerStyle}>
               {title ? <Text style={styles.listItemText}>{title}</Text> : null}
-              <Text style={styles.listItemText}>
-                {renderInlineNodes(container.children, styles, highlighted, config)}
-              </Text>
+              {renderAdmonitionContent()}
             </View>
           );
         }
@@ -383,24 +436,20 @@ function renderNode(
         if (Array.isArray(adOptions.kinds) && adOptions.kinds.length > 0) {
           if (!adOptions.kinds.includes(kind)) {
             return (
-              <View key={key} style={styles.listItem}>
+              <View key={key} style={admonitionContainerStyle}>
                 {title ? <Text style={styles.listItemText}>{title}</Text> : null}
-                <Text style={styles.listItemText}>
-                  {renderInlineNodes(container.children, styles, highlighted, config)}
-                </Text>
+                {renderAdmonitionContent()}
               </View>
             );
           }
         }
 
         return (
-          <View key={key} style={styles.listItem}>
+          <View key={key} style={admonitionContainerStyle}>
             {title ? (
               <Text style={[styles.listItemText, { fontWeight: '600' }]}>{title}</Text>
             ) : null}
-            <Text style={styles.listItemText}>
-              {renderInlineNodes(container.children, styles, highlighted, config)}
-            </Text>
+            {renderAdmonitionContent()}
           </View>
         );
       }
@@ -433,6 +482,10 @@ function renderNode(
         getFeatureOptionsAs<{ compact?: boolean }>(config, '@supramark/feature-definition-list') ??
         {};
       const isCompact = defOptions.compact !== false; // 默认紧凑
+      // Column 布局：term 一行，description 缩进一行。
+      // 避免 row 布局下 description 被 term 挤压导致 Text 不换行。
+      const defItemStyle = { flexDirection: 'column' as const, marginBottom: 4 };
+      const defDescriptionStyle = { paddingLeft: 16 };
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-definition-list'])) {
         // 禁用时，将定义列表退化为普通列表样式
         return (
@@ -442,14 +495,14 @@ function renderNode(
               const terms = getDefinitionTerms(defItem);
               const descriptions = getDefinitionDescriptions(defItem);
               return (
-                <View key={index} style={styles.listItem}>
+                <View key={index} style={defItemStyle}>
                   {terms.map((term, termIndex) => (
                     <Text key={`term-${termIndex}`} style={[styles.listItemText, { fontWeight: '600' }]}>
                       {renderInlineNodes(term.children, styles, highlighted, config)}
                     </Text>
                   ))}
                   {descriptions.map((description, descriptionIndex) => (
-                    <View key={`description-${descriptionIndex}`}>
+                    <View key={`description-${descriptionIndex}`} style={defDescriptionStyle}>
                       {description.children.map((child, childIndex) =>
                         renderNode(
                           child,
@@ -476,14 +529,14 @@ function renderNode(
             const terms = getDefinitionTerms(defItem);
             const descriptions = getDefinitionDescriptions(defItem);
             return (
-              <View key={index} style={styles.listItem}>
+              <View key={index} style={defItemStyle}>
                 {terms.map((term, termIndex) => (
                   <Text key={`term-${termIndex}`} style={[styles.listItemText, { fontWeight: '600' }]}>
                     {renderInlineNodes(term.children, styles, highlighted, config)}
                   </Text>
                 ))}
                 {descriptions.map((description, idx) => (
-                  <View key={idx}>
+                  <View key={idx} style={defDescriptionStyle}>
                     {description.children.map((child, childIndex) =>
                       renderNode(
                         child,
@@ -506,23 +559,25 @@ function renderNode(
     }
     case 'footnote_definition': {
       const def = node as SupramarkFootnoteDefinitionNode;
+      // 新 AST v2 的 footnote_definition.children 是 block 节点（paragraph 等），
+      // 不是 inline 节点。用 renderNode 渲染 children，避免 renderInlineNodes 跳过 block 节点。
+      const renderFootnoteContent = () =>
+        def.children.map((child, childIndex) =>
+          renderNode(child, childIndex, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+        );
       // 第一阶段：简单以「[n] 内容」形式追加在文末
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-footnote'])) {
         // 禁用脚注 Feature 时，直接渲染为普通段落
         return (
           <View key={key} style={styles.listItem}>
-            <Text style={styles.listItemText}>
-              {renderInlineNodes(def.children, styles, highlighted, config)}
-            </Text>
+            <Text style={styles.listItemText}>{renderFootnoteContent()}</Text>
           </View>
         );
       }
       return (
         <View key={key} style={styles.listItem}>
           <Text style={styles.bullet}>[{def.index}]</Text>
-          <Text style={styles.listItemText}>
-            {renderInlineNodes(def.children, styles, highlighted, config)}
-          </Text>
+          <View style={styles.listItemText}>{renderFootnoteContent()}</View>
         </View>
       );
     }
