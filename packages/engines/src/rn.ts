@@ -2,6 +2,7 @@ import { createDiagramEngine } from './engine';
 import {
   GRAPHVIZ_LAYOUT_ENGINES,
   pickGraphvizDiagramOptions,
+  resolveGraphvizAnywhereRnExports,
 } from './graphviz';
 import { loadEchartsSvgRender, loadVegaLiteSvgRender } from './js-chart-loaders';
 import { getNativeEngineAdapter, renderViaNative } from './rn-native-adapter';
@@ -112,11 +113,9 @@ function createReactNativeGraphvizAdapterLoader(): () => Promise<GraphvizRenderA
 
 async function loadReactNativeGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
   const mod = await import('@kookyleo/graphviz-anywhere-rn');
-  // CJS/ESM 互操作：包的 main 指向 lib/commonjs/index.js（CJS），
-  // metro 的 await import() 可能返回 { default: { renderDot, ... } }
-  // 而不提升命名导出。兼容两种形式。
-  const renderDot = (mod.renderDot ?? mod.default?.renderDot).bind(mod.default ?? mod);
-  const getVersion = mod.getVersion ?? mod.default?.getVersion;
+  // Tolerate the CJS/ESM interop shapes Metro produces for this package's
+  // CommonJS main; see resolveGraphvizAnywhereRnExports.
+  const { renderDot, getVersion } = resolveGraphvizAnywhereRnExports(mod);
 
   return {
     async renderToSvg(code, rawOptions) {
@@ -125,8 +124,7 @@ async function loadReactNativeGraphvizAdapter(): Promise<GraphvizRenderAdapter> 
     },
     async getCapabilities(): Promise<GraphvizCapabilities> {
       return {
-        graphvizVersion:
-          typeof getVersion === 'function' ? await getVersion() : undefined,
+        graphvizVersion: getVersion ? await getVersion() : undefined,
         engines: [...GRAPHVIZ_LAYOUT_ENGINES],
         formats: ['svg'],
       };
