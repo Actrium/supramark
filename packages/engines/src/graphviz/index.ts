@@ -78,6 +78,56 @@ export async function renderGraphvizSvg(
   return adapter.renderToSvg(code, pickGraphvizDiagramOptions(options));
 }
 
+/** The functions the RN graphviz adapters need from the native package. */
+export interface GraphvizAnywhereRnExports {
+  renderDot: (dot: string, engine: string, format: string) => Promise<string>;
+  getVersion?: () => Promise<string>;
+}
+
+/**
+ * Resolve `renderDot` / `getVersion` from the dynamically-imported
+ * `@kookyleo/graphviz-anywhere-rn` module across CJS/ESM interop shapes.
+ *
+ * The package `main` points at a CommonJS build that exposes both named
+ * exports (`renderDot`, `getVersion`) and a default export bundling the same
+ * functions. Under Metro, `await import(...)` of that build does not always
+ * hoist the named exports — it can hand back `{ default: { renderDot, ... } }`,
+ * leaving `mod.renderDot` undefined. Reaching through `default` lets both the
+ * named-export and default-wrapped shapes resolve.
+ *
+ * These are standalone module functions (they close over the native module,
+ * not `this`), so no binding is needed.
+ */
+export function resolveGraphvizAnywhereRnExports(
+  mod: unknown
+): GraphvizAnywhereRnExports {
+  const ns = mod as
+    | { renderDot?: unknown; getVersion?: unknown; default?: unknown }
+    | null
+    | undefined;
+  const fallback = ns?.default as
+    | { renderDot?: unknown; getVersion?: unknown }
+    | undefined;
+
+  const renderDot = ns?.renderDot ?? fallback?.renderDot;
+  if (typeof renderDot !== 'function') {
+    throw new DiagramRenderError(
+      '@kookyleo/graphviz-anywhere-rn did not export a renderDot function ' +
+        '(checked both named and default exports)',
+      { engine: 'graphviz', code: 'render_error' }
+    );
+  }
+
+  const getVersion = ns?.getVersion ?? fallback?.getVersion;
+  return {
+    renderDot: renderDot as GraphvizAnywhereRnExports['renderDot'],
+    getVersion:
+      typeof getVersion === 'function'
+        ? (getVersion as GraphvizAnywhereRnExports['getVersion'])
+        : undefined,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

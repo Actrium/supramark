@@ -2,22 +2,28 @@ import type {
   GraphvizCapabilities,
   GraphvizRenderAdapter,
 } from '../types.js';
-import { GRAPHVIZ_LAYOUT_ENGINES, pickGraphvizDiagramOptions } from './index.js';
+import {
+  GRAPHVIZ_LAYOUT_ENGINES,
+  pickGraphvizDiagramOptions,
+  resolveGraphvizAnywhereRnExports,
+} from './index.js';
 
 let cached: Promise<GraphvizRenderAdapter> | null = null;
 
 async function loadAdapter(): Promise<GraphvizRenderAdapter> {
-  const module = await import('@kookyleo/graphviz-anywhere-rn');
+  const mod = await import('@kookyleo/graphviz-anywhere-rn');
+  // Tolerate the CJS/ESM interop shapes Metro produces for this package's
+  // CommonJS main; see resolveGraphvizAnywhereRnExports.
+  const { renderDot, getVersion } = resolveGraphvizAnywhereRnExports(mod);
 
   return {
     async renderToSvg(code, rawOptions) {
       const opt = pickGraphvizDiagramOptions(rawOptions);
-      return module.renderDot(code, (opt.layoutEngine ?? 'dot') as any, 'svg');
+      return renderDot(code, (opt.layoutEngine ?? 'dot') as any, 'svg');
     },
     async getCapabilities(): Promise<GraphvizCapabilities> {
       return {
-        graphvizVersion:
-          typeof module.getVersion === 'function' ? await module.getVersion() : undefined,
+        graphvizVersion: getVersion ? await getVersion() : undefined,
         engines: [...GRAPHVIZ_LAYOUT_ENGINES],
         formats: ['svg'],
       };

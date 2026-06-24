@@ -2,6 +2,7 @@ import { createDiagramEngine } from './engine';
 import {
   GRAPHVIZ_LAYOUT_ENGINES,
   pickGraphvizDiagramOptions,
+  resolveGraphvizAnywhereRnExports,
 } from './graphviz';
 import { loadEchartsSvgRender, loadVegaLiteSvgRender } from './js-chart-loaders';
 import { getNativeEngineAdapter, renderViaNative } from './rn-native-adapter';
@@ -111,17 +112,19 @@ function createReactNativeGraphvizAdapterLoader(): () => Promise<GraphvizRenderA
 }
 
 async function loadReactNativeGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
-  const module = await import('@kookyleo/graphviz-anywhere-rn');
+  const mod = await import('@kookyleo/graphviz-anywhere-rn');
+  // Tolerate the CJS/ESM interop shapes Metro produces for this package's
+  // CommonJS main; see resolveGraphvizAnywhereRnExports.
+  const { renderDot, getVersion } = resolveGraphvizAnywhereRnExports(mod);
 
   return {
     async renderToSvg(code, rawOptions) {
       const graphvizOptions = pickGraphvizDiagramOptions(rawOptions);
-      return module.renderDot(code, (graphvizOptions.layoutEngine ?? 'dot') as any, 'svg');
+      return renderDot(code, (graphvizOptions.layoutEngine ?? 'dot') as any, 'svg');
     },
     async getCapabilities(): Promise<GraphvizCapabilities> {
       return {
-        graphvizVersion:
-          typeof module.getVersion === 'function' ? await module.getVersion() : undefined,
+        graphvizVersion: getVersion ? await getVersion() : undefined,
         engines: [...GRAPHVIZ_LAYOUT_ENGINES],
         formats: ['svg'],
       };
