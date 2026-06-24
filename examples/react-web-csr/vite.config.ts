@@ -70,7 +70,14 @@ function graphvizWasmCdnUrl() {
     '../../crates/graphviz-anywhere/packages/web/package.json'
   );
   const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: string };
-  return `https://unpkg.com/@actrium/graphviz-anywhere-web@${version ?? '0.2.1'}/dist/viz.wasm`;
+  // Build-time fallback that fetches a real published tarball from unpkg when
+  // the workspace wasm hasn't been built locally (e.g. CI). This stays on the
+  // @kookyleo scope on purpose: the monorepo moved to @actrium, but
+  // @actrium/graphviz-anywhere-web@0.2.1 is not published yet, so an @actrium
+  // URL 404s. Same deliberate exception as
+  // crates/plantuml-little/tests/support/package.json. Switch to @actrium only
+  // once an identical build is published there.
+  return `https://unpkg.com/@kookyleo/graphviz-anywhere-web@${version ?? '0.2.1'}/dist/viz.wasm`;
 }
 
 export default defineConfig({
