@@ -1,4 +1,4 @@
-# @kookyleo/graphviz-anywhere-react-native
+# @actrium/graphviz-anywhere-react-native
 
 <!-- TODO (follow-up PR): migrate to the shared C++ CGraphviz wrapper
      introduced in `packages/web/src-cpp/main.cpp`. Plan: expose the same

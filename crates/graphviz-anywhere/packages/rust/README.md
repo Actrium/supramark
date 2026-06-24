@@ -54,10 +54,10 @@ returned string as raw bytes). On failure, **throw** a JavaScript `Error`;
 the thrown error is reported to Rust as
 [`GraphvizError::RenderFailed`](crate::GraphvizError::RenderFailed).
 
-### Example wire-up with `@kookyleo/graphviz-anywhere-web`
+### Example wire-up with `@actrium/graphviz-anywhere-web`
 
 ```js
-import { Graphviz } from "@kookyleo/graphviz-anywhere-web";
+import { Graphviz } from "@actrium/graphviz-anywhere-web";
 
 const graphviz = await Graphviz.load();
 globalThis.__graphviz_anywhere_render = (dot, engine, format) =>

@@ -22,7 +22,7 @@ plantuml-little takes `.puml` source text and produces `.svg` output — the sam
 
 Reference tests compare the SVG plantuml-little emits against an upstream-generated reference for every fixture under `tests/fixtures/`. To keep that comparison truly byte-exact across platforms we pin two shared axes:
 
-- **Shared-wasm Graphviz.** Both the Java reference pipeline and plantuml-little's Rust layout code route `dot` calls through [`@kookyleo/graphviz-anywhere-web`](https://www.npmjs.com/package/@kookyleo/graphviz-anywhere-web) (Graphviz 14.1.5 + libexpat, compiled to wasm). The Java side uses the `scripts/wasm-dot-wrapper.sh` shim as `GRAPHVIZ_DOT`; the Rust side opts in via `PLANTUML_LITTLE_TEST_BACKEND=wasm`. Graphviz output is therefore bit-identical on every machine.
+- **Shared-wasm Graphviz.** Both the Java reference pipeline and plantuml-little's Rust layout code route `dot` calls through [`@actrium/graphviz-anywhere-web`](https://www.npmjs.com/package/@actrium/graphviz-anywhere-web) (Graphviz 14.1.5 + libexpat, compiled to wasm). The Java side uses the `scripts/wasm-dot-wrapper.sh` shim as `GRAPHVIZ_DOT`; the Rust side opts in via `PLANTUML_LITTLE_TEST_BACKEND=wasm`. Graphviz output is therefore bit-identical on every machine.
 - **DejaVu Sans fonts.** plantuml-little bakes DejaVu Sans / DejaVu Sans Mono text-width metrics into `src/font_data.rs` — including the matching `*-Oblique` italic faces so `«stereotype»`-style strings measure exactly as Java does on a system with `fonts-dejavu-extra` installed. Reference SVGs are regenerated on Ubuntu (via the manual `regenerate-refs.yml` workflow) where Java's `sans-serif` resolves to DejaVu through fontconfig, so `textLength` values compare byte-exact.
 
 Two Graphviz execution modes are supported:

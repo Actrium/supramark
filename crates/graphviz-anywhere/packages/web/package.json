@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/graphviz-anywhere-web",
+  "name": "@actrium/graphviz-anywhere-web",
   "version": "0.2.1",
   "description": "Wasm-powered Graphviz renderer for browsers, Web Workers, and edge runtimes",
   "type": "module",

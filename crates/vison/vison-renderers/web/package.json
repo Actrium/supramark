@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/vison-web",
+  "name": "@actrium/vison-web",
   "version": "0.1.0",
   "description": "React Web renderer for Vison — JSON visual description spec for AI chat UIs",
   "type": "module",

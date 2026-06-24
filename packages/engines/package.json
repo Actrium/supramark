@@ -73,17 +73,17 @@
     "test": "bun test __tests__"
   },
   "dependencies": {
-    "@kookyleo/graphviz-anywhere-web": "workspace:*",
-    "@kookyleo/graphviz-anywhere-rn": "workspace:*",
+    "@actrium/graphviz-anywhere-web": "workspace:*",
+    "@actrium/graphviz-anywhere-rn": "workspace:*",
     "mathjax-full": "^3.2.2"
   },
   "peerDependencies": {
     "echarts": "^5",
     "vega": "^5",
     "vega-lite": "^5",
-    "@kookyleo/plantuml-little-web": "workspace:*",
-    "@kookyleo/d2-little-web": "workspace:*",
-    "@kookyleo/mermaid-little-web": "workspace:*"
+    "@actrium/plantuml-little-web": "workspace:*",
+    "@actrium/d2-little-web": "workspace:*",
+    "@actrium/mermaid-little-web": "workspace:*"
   },
   "peerDependenciesMeta": {
     "echarts": {
@@ -95,13 +95,13 @@
     "vega-lite": {
       "optional": true
     },
-    "@kookyleo/plantuml-little-web": {
+    "@actrium/plantuml-little-web": {
       "optional": true
     },
-    "@kookyleo/d2-little-web": {
+    "@actrium/d2-little-web": {
       "optional": true
     },
-    "@kookyleo/mermaid-little-web": {
+    "@actrium/mermaid-little-web": {
       "optional": true
     }
   },

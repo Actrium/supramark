@@ -70,7 +70,7 @@ function graphvizWasmCdnUrl() {
     '../../crates/graphviz-anywhere/packages/web/package.json'
   );
   const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: string };
-  return `https://unpkg.com/@kookyleo/graphviz-anywhere-web@${version ?? '0.2.1'}/dist/viz.wasm`;
+  return `https://unpkg.com/@actrium/graphviz-anywhere-web@${version ?? '0.2.1'}/dist/viz.wasm`;
 }
 
 export default defineConfig({
@@ -115,14 +115,14 @@ export default defineConfig({
       // Pre-bundling would strip viz.wasm away from viz.js's sibling
       // directory; emscripten's runtime resolves wasm relative to viz.js
       // via import.meta.url, so the file has to stay in node_modules.
-      '@kookyleo/graphviz-anywhere-web',
+      '@actrium/graphviz-anywhere-web',
       // plantuml-little-web ships a sibling .wasm blob resolved via
       // `import * as wasm from "./plantuml_little_web_bg.wasm"`. Prebundling
       // breaks that relative import.
-      '@kookyleo/plantuml-little-web',
+      '@actrium/plantuml-little-web',
       // d2-little-web is the same story — wasm-bindgen sibling .wasm blob
       // resolved as a relative module import. Prebundling would strip it.
-      '@kookyleo/d2-little-web',
+      '@actrium/d2-little-web',
     ],
   },
   build: {

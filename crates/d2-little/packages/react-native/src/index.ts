@@ -1,5 +1,5 @@
 /**
- * @kookyleo/supramark-d2-native-rn
+ * @actrium/supramark-d2-native-rn
  *
  * Importing this package side-registers a `d2` adapter with
  * `@supramark/engines`'s React Native native-engine registry. From
@@ -9,7 +9,7 @@
  * Host usage:
  *
  *   ```ts
- *   import '@kookyleo/supramark-d2-native-rn';     // side-effect register
+ *   import '@actrium/supramark-d2-native-rn';     // side-effect register
  *   import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
  *
  *   const engine = createReactNativeDiagramEngine();
@@ -20,7 +20,7 @@ import { NativeModules, Platform } from 'react-native';
 import { registerNativeEngineAdapter } from '@supramark/engines/rn';
 
 const LINKING_ERROR =
-  `The package '@kookyleo/supramark-d2-native-rn' doesn't seem to be linked. Make sure:\n\n` +
+  `The package '@actrium/supramark-d2-native-rn' doesn't seem to be linked. Make sure:\n\n` +
   Platform.select({
     ios: '- You have run `pod install`\n',
     android: '',

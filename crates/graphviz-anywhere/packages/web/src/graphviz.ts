@@ -57,7 +57,7 @@ export interface GraphvizLoadOptions {
 
 async function loadDefaultFactory(): Promise<VizModuleFactory> {
   try {
-    const mod = (await import('@kookyleo/graphviz-anywhere-web/wasm')) as unknown as {
+    const mod = (await import('@actrium/graphviz-anywhere-web/wasm')) as unknown as {
       default: VizModuleFactory;
     };
     return mod.default;
@@ -85,7 +85,7 @@ async function loadDefaultFactory(): Promise<VizModuleFactory> {
  *
  * @example
  * ```ts
- * import { Graphviz } from '@kookyleo/graphviz-anywhere-web';
+ * import { Graphviz } from '@actrium/graphviz-anywhere-web';
  *
  * const gv = await Graphviz.load();
  * const svg = gv.dot('digraph { a -> b; b -> c; }');

@@ -30,10 +30,10 @@ export interface ReactNativeDiagramEngineOptions extends DiagramEngineOptions {
  *   1. **Native engine adapter** (`registerNativeEngineAdapter(...)`) —
  *      installed by the host with the engine's native FFI module.
  *      This is the path for d2 / mermaid / plantuml on iOS / Android
- *      once their `@kookyleo/supramark-<engine>-native-rn` package
+ *      once their `@actrium/supramark-<engine>-native-rn` package
  *      installs an adapter.
  *   2. **Graphviz layout adapter** (`options.graphviz.{adapter,loadAdapter}`) —
- *      defaults to `@kookyleo/graphviz-anywhere-rn`.
+ *      defaults to `@actrium/graphviz-anywhere-rn`.
  *   3. **JS SVG engines** — ECharts and Vega/Vega-Lite use the same
  *      source -> SVG-string route as Web.
  *   4. **Inner engine** — for unrecognised engines, falls through to the
@@ -112,7 +112,7 @@ function createReactNativeGraphvizAdapterLoader(): () => Promise<GraphvizRenderA
 }
 
 async function loadReactNativeGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
-  const mod = await import('@kookyleo/graphviz-anywhere-rn');
+  const mod = await import('@actrium/graphviz-anywhere-rn');
   // Tolerate the CJS/ESM interop shapes Metro produces for this package's
   // CommonJS main; see resolveGraphvizAnywhereRnExports.
   const { renderDot, getVersion } = resolveGraphvizAnywhereRnExports(mod);

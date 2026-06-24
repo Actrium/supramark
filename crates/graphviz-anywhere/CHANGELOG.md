@@ -54,7 +54,7 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
 - **Per-slice iOS Release assets**: `graphviz-native-ios-{device-arm64,
   sim-arm64,sim-x86_64}.tar.gz` alongside the legacy bundled
   `graphviz-native-ios.tar.gz`. The per-slice form is what `build.rs`
-  auto-resolves; the bundled form remains for `@kookyleo/graphviz-anywhere-rn`'s
+  auto-resolves; the bundled form remains for `@actrium/graphviz-anywhere-rn`'s
   postinstall script.
 - **Windows ARM64**: skeleton (`scripts/build-windows.sh --arch arm64`, CI
   matrix entry with `continue-on-error: true`, asset name
@@ -62,7 +62,7 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
   real verification on a Windows ARM runner.
 - **RN postinstall paths in `try_repo_output`**: `build.rs` now scans
   `packages/react-native/{ios,android}/...` when the Rust crate is built
-  inside the same monorepo as `@kookyleo/graphviz-anywhere-rn`.
+  inside the same monorepo as `@actrium/graphviz-anywhere-rn`.
 - **Target-triple `prebuilt/` layout**: new entries use
   `prebuilt/<rust-target-triple>/libgraphviz_api.{a,lib}`. Legacy per-host-OS
   paths (`prebuilt/{macos,linux,windows}/`) are kept as read-only fallback.

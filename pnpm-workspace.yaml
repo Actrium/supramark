@@ -10,13 +10,13 @@ packages:
   - 'packages/features/cards/*'
   # examples/* — explicit per-example listing. react-native unblocked
   # in 2026-05 by the cross-target graphviz-anywhere 0.2.1 + the
-  # @kookyleo/supramark-<engine>-native-rn wrappers (this workspace
+  # @actrium/supramark-<engine>-native-rn wrappers (this workspace
   # tree picks them up via crates/*/packages/react-native below).
   - 'examples/react-native'
   - 'examples/react-web-csr'
   # Vendored wasm-bindgen wrapper packages from subtree-merged crates.
-  # Resolves @kookyleo/{plantuml,d2,mermaid}-little-web and
-  # @kookyleo/graphviz-anywhere-{web,rn} to in-tree paths instead of
+  # Resolves @actrium/{plantuml,d2,mermaid}-little-web and
+  # @actrium/graphviz-anywhere-{web,rn} to in-tree paths instead of
   # the npm registry — keeping supramark self-contained.
   # The wrappers ship source-only; run `bun run build:wasm` (which
   # invokes wasm-pack + tsc per package) before consuming them.

@@ -1,4 +1,4 @@
-# `@kookyleo/mermaid-little-web`
+# `@actrium/mermaid-little-web`
 
 wasm-bindgen wrapper around the
 [`mermaid-little`](https://github.com/kookyleo/mermaid-little) Rust crate.
@@ -9,14 +9,14 @@ no JS-side Mermaid bundle.
 ## Install
 
 ```bash
-npm install @kookyleo/mermaid-little-web
+npm install @actrium/mermaid-little-web
 # or: bun add / pnpm add / yarn add
 ```
 
 ## Usage
 
 ```ts
-import { convert } from '@kookyleo/mermaid-little-web';
+import { convert } from '@actrium/mermaid-little-web';
 
 const svg = convert(`
 graph TD

@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/d2-little-web",
+  "name": "@actrium/d2-little-web",
   "version": "0.7.2",
   "description": "wasm-bindgen wrapper for d2-little — run D2 diagrams → SVG in the browser",
   "type": "module",

@@ -39,8 +39,8 @@ intend to upstream them.
 |---|---|---|
 | `LICENSE` | added | upstream README declares MIT but ships no LICENSE file. Added the canonical SPDX MIT text. |
 | `vison-core/Cargo.toml` | edited | added `license = "MIT"`, `description`, `authors`, `repository` so cargo metadata is complete (cargo-deny would otherwise reject) |
-| `vison-renderers/web/package.json` | added | makes the renderer a proper `@kookyleo/vison-web` npm workspace package |
-| `vison-renderers/rn/package.json` | added | same as above for `@kookyleo/vison-rn` |
+| `vison-renderers/web/package.json` | added | makes the renderer a proper `@actrium/vison-web` npm workspace package |
+| `vison-renderers/rn/package.json` | added | same as above for `@actrium/vison-rn` |
 | `vison-renderers/{web,rn}/index.ts` | added | barrel exports so consumers `import { VisonWebRenderer }` instead of pointing at the `.tsx` directly |
 | `vison-renderers/{web,rn}/tsconfig.json` | added | per-package tsconfig so `tsc -p` works in workspace context |
 

@@ -11,7 +11,7 @@ import { d2Examples } from './examples.js';
  *
  * - Reuses the generic `diagram` AST node.
  * - Matches diagrams with `engine === 'd2'`.
- * - On Web, `@supramark/engines` calls `@kookyleo/d2-little-web`
+ * - On Web, `@supramark/engines` calls `@actrium/d2-little-web`
  *   (Rust → wasm). On RN, hosts import the d2-little native package,
  *   which registers the same SVG contract through `@supramark/engines/rn`.
  *
@@ -31,7 +31,7 @@ export const d2Feature = defineDiagramFeature({
   web: {
     dependencies: [
       {
-        name: '@kookyleo/d2-little-web',
+        name: '@actrium/d2-little-web',
         version: 'workspace:*',
         type: 'npm',
         optional: false,
@@ -63,9 +63,9 @@ AST modelling + SVG rendering for D2 diagrams.
 - AST: parsed into a \`diagram\` node with \`engine = "d2"\`,
   \`code\` carrying the raw D2 source.
 - Rendering: \`@supramark/engines\` returns SVG. Web uses
-  \`@kookyleo/d2-little-web\` (Rust → wasm; ships its own dagre-style
+  \`@actrium/d2-little-web\` (Rust → wasm; ships its own dagre-style
   layout, no Graphviz bridge required). RN hosts import
-  \`@kookyleo/supramark-d2-native-rn\` at startup, which registers the
+  \`@actrium/supramark-d2-native-rn\` at startup, which registers the
   d2-little native FFI adapter with \`@supramark/engines/rn\`.
   `.trim(),
   bestPractices: [
@@ -76,7 +76,7 @@ AST modelling + SVG rendering for D2 diagrams.
     {
       question: 'How is D2 rendered?',
       answer:
-        'D2 is rendered through @supramark/engines and always returns SVG. Web uses @kookyleo/d2-little-web; RN hosts import @kookyleo/supramark-d2-native-rn to register the native FFI adapter.',
+        'D2 is rendered through @supramark/engines and always returns SVG. Web uses @actrium/d2-little-web; RN hosts import @actrium/supramark-d2-native-rn to register the native FFI adapter.',
     },
     {
       question: 'How does D2 differ from mermaid / plantuml?',

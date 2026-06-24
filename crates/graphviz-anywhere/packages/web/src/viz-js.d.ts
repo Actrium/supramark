@@ -2,7 +2,7 @@
 // The canonical declaration is generated alongside the build artifact at
 // packages/web/dist/viz.d.ts by scripts/build-wasm.sh.
 
-declare module '@kookyleo/graphviz-anywhere-web/wasm' {
+declare module '@actrium/graphviz-anywhere-web/wasm' {
   export interface CGraphviz {
     layout(dot: string, format: string, engine: string): string;
     delete(): void;

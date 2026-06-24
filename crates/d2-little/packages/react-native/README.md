@@ -1,4 +1,4 @@
-# @kookyleo/supramark-d2-native-rn
+# @actrium/supramark-d2-native-rn
 
 React Native FFI wrapper around `supramark-d2-native` — a Rust staticlib
 that turns D2 source into SVG. iOS via xcframework + ObjC bridge,
@@ -10,7 +10,7 @@ on import.
 ## Usage
 
 ```ts
-import '@kookyleo/supramark-d2-native-rn';
+import '@actrium/supramark-d2-native-rn';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
 
 const engine = createReactNativeDiagramEngine();

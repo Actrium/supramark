@@ -23,8 +23,8 @@ import {
   renderDot,
   getVersion,
   GraphvizErrorCode,
-} from '@kookyleo/graphviz-anywhere-rn';
-import type { GraphvizEngine } from '@kookyleo/graphviz-anywhere-rn';
+} from '@actrium/graphviz-anywhere-rn';
+import type { GraphvizEngine } from '@actrium/graphviz-anywhere-rn';
 
 const DEFAULT_DOT = `digraph G {
   rankdir=LR;

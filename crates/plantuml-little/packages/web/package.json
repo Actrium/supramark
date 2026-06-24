@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/plantuml-little-web",
+  "name": "@actrium/plantuml-little-web",
   "version": "1.2026.2-3",
   "description": "wasm-bindgen wrapper for plantuml-little — run PlantUML → SVG in the browser",
   "type": "module",
@@ -41,10 +41,10 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@kookyleo/graphviz-anywhere-web": ">=0.1.7"
+    "@actrium/graphviz-anywhere-web": "workspace:*"
   },
   "peerDependenciesMeta": {
-    "@kookyleo/graphviz-anywhere-web": {
+    "@actrium/graphviz-anywhere-web": {
       "optional": true
     }
   },

@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/supramark-mermaid-native-rn",
+  "name": "@actrium/supramark-mermaid-native-rn",
   "version": "0.1.0",
   "description": "React Native native FFI wrapper for mermaid-little — Mermaid diagrams to SVG via the supramark-mermaid-native Rust staticlib on iOS / Android.",
   "main": "lib/commonjs/index.js",

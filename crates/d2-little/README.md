@@ -28,12 +28,12 @@ drive the pipeline phase-by-phase.
 ## Web / WebAssembly
 
 The sibling crate `packages/web` is published to npm as
-[`@kookyleo/d2-little-web`](https://www.npmjs.com/package/@kookyleo/d2-little-web).
+[`@actrium/d2-little-web`](https://www.npmjs.com/package/@actrium/d2-little-web).
 It exposes the same `d2_to_svg` entry point as a wasm-bindgen
 `convert(source: string) => string`:
 
 ```ts
-import { convert } from '@kookyleo/d2-little-web';
+import { convert } from '@actrium/d2-little-web';
 const svg = convert('a -> b');
 ```
 

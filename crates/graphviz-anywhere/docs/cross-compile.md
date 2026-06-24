@@ -133,14 +133,14 @@ CI or airgapped environments). Override the release tag with
 ## wasm32-unknown-unknown
 
 - **No native linking needed.** The Rust crate detects `target_arch == "wasm32"` in build.rs and exits early.
-- **Delivery**: bundled in the `@kookyleo/graphviz-anywhere-web` npm package
+- **Delivery**: bundled in the `@actrium/graphviz-anywhere-web` npm package
 - **Build**: `./scripts/build-wasm.sh` → `packages/web/dist/{viz.js,viz.wasm}`
 
 ---
 
 ## RN integration
 
-The `@kookyleo/graphviz-anywhere-rn` postinstall script downloads a prebuilt
+The `@actrium/graphviz-anywhere-rn` postinstall script downloads a prebuilt
 native library into `packages/react-native/ios/Frameworks/` and the Android
 JNI libs. This is **separate** from what `build.rs` does.
 

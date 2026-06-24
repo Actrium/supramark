@@ -28,7 +28,7 @@
 |---|---|---|
 | `crates/d2-little/Cargo.toml` | Root crate manifest (was a workspace + package; inner `[workspace]` removed during merge) | MPL-2.0 |
 | `crates/d2-little/src/` | Parser, IR, graph, dagre layout, SVG renderer | MPL-2.0 |
-| `crates/d2-little/packages/web/` | crate `d2-little-web` — wasm-bindgen wrapper, published as npm `@kookyleo/d2-little-web` | MPL-2.0 |
+| `crates/d2-little/packages/web/` | crate `d2-little-web` — wasm-bindgen wrapper, published as npm `@actrium/d2-little-web` | MPL-2.0 |
 | `crates/d2-little/tests/` | E2E + unit tests with reference data | MPL-2.0; reference data files inherit terrastruct/d2 attribution |
 | `crates/d2-little/examples/` | dump_basic / dump_ir / dump_layout / measure debug binaries | MPL-2.0 |
 | `crates/d2-little/ttf/` | Bundled font files (for byte-exact text-metric parity) | each font has its own license — see file headers |
@@ -67,6 +67,6 @@
 - Decide whether to publish `d2-little-web` from this monorepo or keep
   cutting npm releases from the upstream repo.
 - **Engine switchover deferred to step 4.** supramark's
-  `packages/engines/src/web.ts` still loads `@kookyleo/d2-little-web`
+  `packages/engines/src/web.ts` still loads `@actrium/d2-little-web`
   from npm; the vendored switchover lands in step 4 together with
   mermaid-little and a CI wasm-build job.

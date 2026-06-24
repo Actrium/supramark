@@ -34,7 +34,7 @@ import { visonExamples } from './examples.js';
  */
 
 /** Vison spec subset surfaced on the AST node. Mirrors `VisonComponent`
- *  from `@kookyleo/vison-web` so consumers don't have to import
+ *  from `@actrium/vison-web` so consumers don't have to import
  *  the renderer package just to read the spec. */
 export interface VisonSpec {
   version?: string;

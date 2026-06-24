@@ -122,7 +122,7 @@ Open execution items:
 - **Icon shapes phase** — register ~500 AWS / iconify SVG paths to
   unlock 3 cypress/flowchart fixtures (independent decision).
 - **`packages/web/` wasm build** — mirror plantuml-little's
-  `@kookyleo/plantuml-little-web` once the parity work converges.
+  `@actrium/plantuml-little-web` once the parity work converges.
 
 ## Out of Scope (v1)
 

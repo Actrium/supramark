@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { resolveGraphvizAnywhereRnExports } from '../src/graphviz';
 
-// `@kookyleo/graphviz-anywhere-rn` ships a CommonJS main carrying both named
+// `@actrium/graphviz-anywhere-rn` ships a CommonJS main carrying both named
 // exports and a default export. Metro's `await import(...)` may or may not
 // hoist the named exports, so the adapter has to tolerate both namespace
 // shapes. These tests pin that resolution down without a real RN runtime.

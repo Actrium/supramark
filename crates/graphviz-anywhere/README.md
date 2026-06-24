@@ -134,13 +134,13 @@ GRAPHVIZ_ANYWHERE_DIR=output/linux-x86_64 cargo build
 ## React Native
 
 ```bash
-npm install @kookyleo/graphviz-anywhere-rn
+npm install @actrium/graphviz-anywhere-rn
 # or
-yarn add @kookyleo/graphviz-anywhere-rn
+yarn add @actrium/graphviz-anywhere-rn
 ```
 
 ```ts
-import { renderDot, getVersion } from '@kookyleo/graphviz-anywhere-rn';
+import { renderDot, getVersion } from '@actrium/graphviz-anywhere-rn';
 
 const svg = await renderDot('digraph { mobile -> native }');
 const svg2 = await renderDot('graph { a -- b }', 'neato', 'svg');
@@ -167,7 +167,7 @@ npm install
 ```
 
 ```ts
-import { createLazyWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
+import { createLazyWasmRenderer } from '@actrium/graphviz-anywhere-web';
 
 const renderer = createLazyWasmRenderer();
 const svg = await renderer.render('digraph { web -> wasm }');
@@ -191,7 +191,7 @@ Use `createLazyWasmRenderer()` for docs sites, product pages, or pages where dia
 Use `createWorkerWasmRenderer()` for diagram editors, whiteboards, or large-graph exploration so layout work stays off the main thread.
 
 ```ts
-import { createWorkerWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
+import { createWorkerWasmRenderer } from '@actrium/graphviz-anywhere-web';
 
 const renderer = createWorkerWasmRenderer({ timeoutMs: 8000 });
 const svg = await renderer.render('digraph { editor -> worker -> svg }');
@@ -202,7 +202,7 @@ const svg = await renderer.render('digraph { editor -> worker -> svg }');
 Use `createServerWasmRenderer()` for SSR, preview APIs, or edge handlers that render repeatedly and want to amortize Wasm startup cost across requests.
 
 ```ts
-import { createServerWasmRenderer } from '@kookyleo/graphviz-anywhere-web';
+import { createServerWasmRenderer } from '@actrium/graphviz-anywhere-web';
 
 const renderer = createServerWasmRenderer();
 await renderer.preload();
@@ -236,8 +236,8 @@ Renaming the project to `graphviz-anywhere` is reasonable because the repository
 The migration strategy in this repository is:
 
 - the Rust crate is published as `graphviz-anywhere`
-- the React Native npm package is published as `@kookyleo/graphviz-anywhere-rn`
-- the Web npm package is published as `@kookyleo/graphviz-anywhere-web`
+- the React Native npm package is published as `@actrium/graphviz-anywhere-rn`
+- the Web npm package is published as `@actrium/graphviz-anywhere-web`
 
 ## Testing
 

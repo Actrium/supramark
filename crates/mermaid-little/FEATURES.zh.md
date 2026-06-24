@@ -130,7 +130,7 @@ Phase 0-4（骨架 → reference 管线 → 字体度量 → fixtures → 逐 di
 - **Mindmap 多节点收尾** —— cose-bilkent reduceTrees / FR-grid bucket / Coarsening / curveBasis edge / Base64 data-points 五大件接力（W11-D 后续）。
 - **KaTeX Phase** —— port KaTeX 渲染器子集，解锁 6 demos/flowchart fixtures（独立决策）。
 - **Icon shapes Phase** —— 注册 ~500 AWS / iconify SVG path，解锁 3 cypress/flowchart fixtures（独立决策）。
-- **`packages/web/` wasm 构建** —— parity 收敛后，对齐 plantuml-little 的 `@kookyleo/plantuml-little-web`。
+- **`packages/web/` wasm 构建** —— parity 收敛后，对齐 plantuml-little 的 `@actrium/plantuml-little-web`。
 
 ## 测试方法学
 

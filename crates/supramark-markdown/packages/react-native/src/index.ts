@@ -17,7 +17,7 @@
  * ```
  *
  * Metro config on the host side should stub `@supramark/markdown-web`
- * to an empty module (mirroring how `@kookyleo/*-web` wasm packages
+ * to an empty module (mirroring how `@actrium/*-web` wasm packages
  * are stubbed for the diagram engines) so the wasm bundle never loads.
  *
  * registry API 从 `@supramark/core/rn` 导入（不污染 web 入口，模式对齐

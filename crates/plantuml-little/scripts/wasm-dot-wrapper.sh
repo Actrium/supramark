@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dot-compatible wrapper that funnels Java PlantUML's Graphviz calls
-# through the same wasm Graphviz blob (@kookyleo/graphviz-anywhere-web,
+# through the same wasm Graphviz blob (@actrium/graphviz-anywhere-web,
 # viz.wasm from Graphviz 14.1.5) that plantuml-little's Rust tests use.
 #
 # Shared-wasm pipeline rationale
@@ -37,7 +37,7 @@ if [[ ! -f "${RUNNER}" ]]; then
     exit 127
 fi
 
-if [[ ! -d "${SUPPORT_DIR}/node_modules/@kookyleo/graphviz-anywhere-web" ]]; then
+if [[ ! -d "${SUPPORT_DIR}/node_modules/@actrium/graphviz-anywhere-web" ]]; then
     echo "wasm-dot-wrapper: dependencies not installed. Run:" >&2
     echo "    cd ${SUPPORT_DIR} && npm install" >&2
     exit 127

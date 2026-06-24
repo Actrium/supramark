@@ -210,7 +210,7 @@ export async function loadDefaultVizWasmModule(): Promise<VizWasmModule> {
   try {
     // Published-package case: resolved via the `./wasm` export.
     vizModuleFactory = (await import(
-      '@kookyleo/graphviz-anywhere-web/wasm'
+      '@actrium/graphviz-anywhere-web/wasm'
     )) as unknown as { default: VizModuleFactory };
   } catch {
     try {

@@ -15,11 +15,11 @@
 //!
 //! # Wiring
 //!
-//! The `@kookyleo/graphviz-anywhere-web` npm package provides
+//! The `@actrium/graphviz-anywhere-web` npm package provides
 //! `Graphviz.load()` and `.layout()`. A typical wire-up looks like:
 //!
 //! ```js
-//! import { Graphviz } from "@kookyleo/graphviz-anywhere-web";
+//! import { Graphviz } from "@actrium/graphviz-anywhere-web";
 //!
 //! const graphviz = await Graphviz.load();
 //! globalThis.__graphviz_anywhere_render = (dot, engine, format) => {

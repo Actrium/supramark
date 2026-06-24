@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-shot dot-compatible wrapper backed by @kookyleo/graphviz-anywhere-web.
+// One-shot dot-compatible wrapper backed by @actrium/graphviz-anywhere-web.
 //
 // Contrasts with `viz_wasm_runner.mjs`, which is a long-lived daemon spoken
 // by the Rust test harness over a length-prefixed framing protocol. This
@@ -59,10 +59,10 @@ async function main() {
 
   let Graphviz;
   try {
-    ({ Graphviz } = await import("@kookyleo/graphviz-anywhere-web"));
+    ({ Graphviz } = await import("@actrium/graphviz-anywhere-web"));
   } catch (err) {
     process.stderr.write(
-      `wasm-dot: failed to import @kookyleo/graphviz-anywhere-web: ${err.stack ?? err}\n` +
+      `wasm-dot: failed to import @actrium/graphviz-anywhere-web: ${err.stack ?? err}\n` +
         `Make sure 'npm install' has been run in tests/support/.\n`,
     );
     process.exit(1);
@@ -80,7 +80,7 @@ async function main() {
     // Real dot writes its version to stderr in this exact shape.
     // PlantUML scrapes it to decide whether dot is available.
     const ver = gv.version();
-    process.stderr.write(`dot - graphviz version ${ver} (wasm, @kookyleo/graphviz-anywhere-web)\n`);
+    process.stderr.write(`dot - graphviz version ${ver} (wasm, @actrium/graphviz-anywhere-web)\n`);
     process.exit(0);
   }
 

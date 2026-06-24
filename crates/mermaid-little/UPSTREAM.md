@@ -49,14 +49,14 @@
 does not yet ship a wasm wrapper. We added one inside the merged
 sub-tree to bring it into structural parity with `plantuml-little` and
 `d2-little`, so supramark's `packages/engines` can consume an in-tree
-`@kookyleo/mermaid-little-web`. Patch contents:
+`@actrium/mermaid-little-web`. Patch contents:
 
 | File | Status | Notes |
 |---|---|---|
 | `packages/web/Cargo.toml` | added | wasm-bindgen wrapper crate (mirrors d2-little-web shape) |
 | `packages/web/src/lib.rs` | added | re-exports `convert` / `convert_with_id` / `version` |
 | `packages/web/src/index.ts` | added | TS wrapper exporting from generated wasm bundle |
-| `packages/web/package.json` | added | npm publish config for `@kookyleo/mermaid-little-web` |
+| `packages/web/package.json` | added | npm publish config for `@actrium/mermaid-little-web` |
 | `packages/web/tsconfig.json` | added | matches plantuml-little-web tsconfig |
 | `packages/web/README.md` | added | usage docs + provenance note |
 | `Cargo.toml` (root crate) | edited | added `version = "0.1"` constraint to the `dagre` git dep so cargo-deny accepts it as a non-wildcard. Net behaviour identical because the supramark workspace root `[patch."https://github.com/kookyleo/dagre-rs.git"]` redirects to in-tree `crates/dagre`. |

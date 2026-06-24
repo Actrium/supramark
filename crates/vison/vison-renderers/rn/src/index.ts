@@ -1,5 +1,5 @@
 // Re-export the upstream renderer + shared types so consumers `import
-// { VisonRNRenderer } from '@kookyleo/vison-rn'` instead of pointing
+// { VisonRNRenderer } from '@actrium/vison-rn'` instead of pointing
 // at the .tsx file directly.
 //
 // The actual implementation lives one level up at

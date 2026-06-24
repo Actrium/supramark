@@ -6,7 +6,7 @@ name: Regenerate reference SVGs
 # Rust-side metrics in src/font_data.rs).
 #
 # The pipeline funnels Java PlantUML through the shared-wasm Graphviz
-# wrapper (scripts/wasm-dot-wrapper.sh → @kookyleo/graphviz-anywhere-web)
+# wrapper (scripts/wasm-dot-wrapper.sh → @actrium/graphviz-anywhere-web)
 # so Graphviz output is byte-identical to what the Rust suite sees.
 #
 # Runner is pinned to ubuntu-24.04 (noble) so the system fontconfig
@@ -121,7 +121,7 @@ jobs:
           cat > tests/reference/VERSION <<EOF
           plantuml_jar: plantuml-${{ inputs.plantuml_version }}.jar (from github.com/plantuml/plantuml releases)
           java_version: $(java -version 2>&1 | head -1)
-          graphviz_backend: @kookyleo/graphviz-anywhere-web (wasm, Graphviz 14.1.5 + libexpat)
+          graphviz_backend: @actrium/graphviz-anywhere-web (wasm, Graphviz 14.1.5 + libexpat)
           font_stack: DejaVu Sans via fontconfig (fonts-dejavu-core)
           regenerated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
           wrapper: scripts/wasm-dot-wrapper.sh

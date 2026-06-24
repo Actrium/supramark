@@ -1,4 +1,4 @@
-declare module '@kookyleo/mermaid-little-web' {
+declare module '@actrium/mermaid-little-web' {
   /** wasm-bindgen default async initialiser. */
   const init: (input?: unknown) => Promise<unknown>;
   export default init;
@@ -43,7 +43,7 @@ declare module 'mathjax-full/js/input/tex/AllPackages.js' {
   export const AllPackages: unknown;
 }
 
-declare module '@kookyleo/plantuml-little-web' {
+declare module '@actrium/plantuml-little-web' {
   /** wasm-bindgen default async initialiser. */
   const init: (input?: unknown) => Promise<unknown>;
   export default init;
@@ -70,7 +70,7 @@ declare module '@kookyleo/plantuml-little-web' {
   ): void;
 }
 
-declare module '@kookyleo/d2-little-web' {
+declare module '@actrium/d2-little-web' {
   /** wasm-bindgen default async initialiser. */
   const init: (input?: unknown) => Promise<unknown>;
   export default init;

@@ -74,7 +74,7 @@ if [[ "${PLANTUML_LITTLE_REF_BACKEND:-}" == "wasm" ]]; then
         echo "ERROR: PLANTUML_LITTLE_REF_BACKEND=wasm but $DOT_WRAPPER is missing or not executable." >&2
         exit 1
     fi
-    if [[ ! -d "${PROJECT_DIR}/tests/support/node_modules/@kookyleo/graphviz-anywhere-web" ]]; then
+    if [[ ! -d "${PROJECT_DIR}/tests/support/node_modules/@actrium/graphviz-anywhere-web" ]]; then
         echo "ERROR: tests/support/node_modules missing. Run:" >&2
         echo "  (cd ${PROJECT_DIR}/tests/support && npm install)" >&2
         exit 1

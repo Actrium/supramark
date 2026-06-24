@@ -1,5 +1,5 @@
 {
-  "name": "@kookyleo/mermaid-little-web",
+  "name": "@actrium/mermaid-little-web",
   "version": "11.14.0-1",
   "description": "wasm-bindgen wrapper for mermaid-little — run Mermaid → SVG in the browser",
   "type": "module",
