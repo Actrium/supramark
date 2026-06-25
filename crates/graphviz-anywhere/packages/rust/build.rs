@@ -194,12 +194,19 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
         candidates.push((repo_root.join(rel), prefer_static));
     }
 
-    // RN postinstall paths — React-Native's postinstall script copies the
-    // native libs under packages/react-native/{ios,android}/.
+    // RN staged paths — scripts/prepare-native.js copies the native libs under
+    // packages/react-native/. Android is single-sourced into src/main/jniLibs/
+    // (no separate libs/ copy); the .so carries no SONAME so a directory search
+    // path resolves the `-lgraphviz_api` link.
     let rn_root = repo_root.join("packages").join("react-native");
     if is_ios_target(&target) {
+        // iOS xcframework: device slice holds the static archive + header.
         candidates.push((
-            rn_root.join("ios").join("Frameworks").join("lib"),
+            rn_root
+                .join("ios")
+                .join("Frameworks")
+                .join("Graphviz.xcframework")
+                .join("ios-arm64"),
             true, // iOS always static
         ));
     } else if target_os == "android" {
@@ -213,16 +220,17 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
         };
         if !abi.is_empty() {
             candidates.push((
-                rn_root.join("android").join("libs").join(abi),
+                rn_root
+                    .join("android")
+                    .join("src")
+                    .join("main")
+                    .join("jniLibs")
+                    .join(abi),
                 false, // Android: .so preferred
-            ));
-            candidates.push((
-                rn_root.join("android").join("Frameworks").join("lib"),
-                false,
             ));
         }
     } else if target_os == "macos" {
-        candidates.push((rn_root.join("ios").join("Frameworks").join("lib"), true));
+        candidates.push((rn_root.join("macos").join("Frameworks").join("lib"), false));
     }
 
     // ── Walk candidates ──────────────────────────────────────────────────────
@@ -280,16 +288,30 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
     false
 }
 
-/// Last-resort fallback: download the prebuilt library matching this crate's
-/// version from the GitHub release and link against it.  Lets a downstream
-/// `cargo add graphviz-anywhere` work with zero local setup.
+/// Last-resort, opt-in fallback: download the prebuilt library matching this
+/// crate's version from a GitHub release and link against it.
 ///
-/// Disable with `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1` (forces a hard error so
-/// you can detect it in CI/sandbox builds).  Override the release tag with
-/// `GRAPHVIZ_ANYWHERE_RELEASE_VERSION=0.1.7` (defaults to CARGO_PKG_VERSION,
-/// useful when a crate version's matching tag hasn't shipped yet).
+/// graphviz-anywhere lives inside the `Actrium/supramark` monorepo and has no
+/// standalone release feed yet, so this path is **disabled by default** — the
+/// supported way to obtain the native library is a source build via
+/// `scripts/build-<platform>.sh` (picked up by `try_repo_output`) or a prebuilt
+/// drop-in under `packages/rust/prebuilt/`. Enable the download explicitly with
+/// `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1` once a matching release is published.
+///
+/// Configuration:
+///   * `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1` — opt in to the network fallback.
+///   * `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1`    — force it off (wins over allow).
+///   * `GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL` — override the release base URL
+///       (default `https://github.com/Actrium/supramark/releases/download`).
+///   * `GRAPHVIZ_ANYWHERE_RELEASE_VERSION`  — override the tag version
+///       (defaults to CARGO_PKG_VERSION).
 fn try_github_release() -> bool {
+    // Hard-off always wins; otherwise require explicit opt-in because no
+    // standalone release feed exists for this crate yet.
     if env::var_os("GRAPHVIZ_ANYWHERE_NO_DOWNLOAD").is_some() {
+        return false;
+    }
+    if env::var_os("GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD").is_none() {
         return false;
     }
 
@@ -325,9 +347,13 @@ fn try_github_release() -> bool {
         return false;
     }
 
-    let url = format!(
-        "https://github.com/Actrium/graphviz-anywhere/releases/download/v{release_version}/{asset}"
-    );
+    // graphviz-anywhere ships from the supramark monorepo; allow overriding the
+    // base URL for forks / mirrors that host the prebuilt assets elsewhere.
+    let base_url = env::var("GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://github.com/Actrium/supramark/releases/download".to_string());
+    let url = format!("{base_url}/v{release_version}/{asset}");
 
     let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from) else {
         return false;
@@ -395,6 +421,8 @@ fn try_github_release() -> bool {
         println!("cargo:rustc-link-lib=dylib=graphviz_api");
     }
     println!("cargo:rerun-if-env-changed=GRAPHVIZ_ANYWHERE_RELEASE_VERSION");
+    println!("cargo:rerun-if-env-changed=GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL");
+    println!("cargo:rerun-if-env-changed=GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD");
     println!("cargo:rerun-if-env-changed=GRAPHVIZ_ANYWHERE_NO_DOWNLOAD");
     true
 }
@@ -459,9 +487,11 @@ fn main() {
            b) Drop the prebuilt static lib into:\n\
                 packages/rust/prebuilt/{target}/libgraphviz_api.a\n\
               (or .lib for Windows targets)\n\
-           c) Unset GRAPHVIZ_ANYWHERE_NO_DOWNLOAD to allow auto-download from\n\
-                GitHub release v$CARGO_PKG_VERSION\n\
-           d) Build from source with scripts/build-<platform>.sh and re-run cargo.\
+           c) Build from source with scripts/build-<platform>.sh, then re-run\n\
+                cargo (the resulting output/ dir is picked up automatically).\n\
+           d) If a matching GitHub release is published, opt in to the network\n\
+                fallback with GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1 (override the\n\
+                location with GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL if needed).\
          "
     );
 }

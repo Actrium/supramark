@@ -20,13 +20,18 @@ Pod::Spec.new do |s|
   s.source_files = "*.{h,m,mm}"
   s.public_header_files = "GraphvizModule.h"
 
-  # Link against the prebuilt Graphviz wrapper downloaded by postinstall.
+  # Link against the prebuilt Graphviz core, vendored as an XCFramework. It is
+  # staged under ios/Frameworks/ by scripts/prepare-native.js (consuming
+  # output/ios/Graphviz.xcframework produced by scripts/build-ios.sh) and ships
+  # inside the npm tarball — there is no postinstall download.
   s.preserve_paths = "Frameworks/**"
+  s.vendored_frameworks = "Frameworks/Graphviz.xcframework"
   s.xcconfig = {
-    "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/Frameworks/include\"",
-    "LIBRARY_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/Frameworks/lib\"",
+    "HEADER_SEARCH_PATHS" =>
+      "\"$(PODS_TARGET_SRCROOT)/Frameworks/Graphviz.xcframework/ios-arm64/Headers\" " \
+      "\"$(PODS_TARGET_SRCROOT)/Frameworks/Graphviz.xcframework/ios-arm64_x86_64-simulator/Headers\"",
+    "OTHER_LDFLAGS" => "$(inherited)",
   }
-  s.libraries = "graphviz_api"
 
   if respond_to?(:install_modules_dependencies, true)
     install_modules_dependencies(s)

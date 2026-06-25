@@ -1,0 +1,19 @@
+# Staged native artefacts — produced by the crate-root scripts/build-<platform>.sh
+# and copied here by `node scripts/prepare-native.js`. NEVER commit these
+# binaries to git; they ship in the npm tarball via package.json `files[]`
+# (staged at prepack time), not from the repo.
+android/src/main/jniLibs/
+ios/Frameworks/
+macos/Frameworks/
+windows/Frameworks/
+
+# react-native-builder-bob build output
+lib/
+
+# Node / build noise
+node_modules/
+*.log
+
+# Android CMake external native build state
+android/.cxx/
+android/build/

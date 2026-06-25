@@ -62,6 +62,11 @@ android {
     sourceSets {
         main {
             java.srcDirs = ["src/main/java"]
+            // jniLibs/ holds the unified libgraphviz_api.so per ABI, staged by
+            // scripts/prepare-native.js. CMake imports the same file as the
+            // graphviz_core target; declaring it here makes Gradle package the
+            // .so into the APK/AAB (single-sourced — no separate libs/ copy).
+            jniLibs.srcDirs = ["src/main/jniLibs"]
         }
     }
 
