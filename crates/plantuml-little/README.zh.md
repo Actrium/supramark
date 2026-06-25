@@ -39,6 +39,16 @@ Graphviz 有两种执行模式：
 > ```
 >
 > CI 直接走 `wasm` 后端绕开了这个问题：wasm 的字体度量已固化进 `src/font_data.rs`，与主机无关。
+>
+> **Windows 上没有可用的 `native` reference 路径。** `scripts/build-windows.sh`
+> 构建 Graphviz 时不带 `gvplugin_pango` 插件（MSVC 上没有 fontconfig 体系），
+> native Graphviz 因此退回内置的*估算*文字度量、而非真实字体测量。于是由
+> graphviz 排版的图种（class、component、object、state、ER 等）布局坐标会偏离
+> 基线——例如一个 CLASS 图算出来高 `143px` 而非 `220px`。由 plantuml-little
+> 自己排版的图种（sequence、usecase、activity、wire……）仍然通过。Windows 上请
+> 用 `wasm` 后端跑 reference 套件：`PLANTUML_LITTLE_TEST_BACKEND=wasm`（与 CI
+> 同一后端），它需要 `tests/support` 下的 Node runner 能拿到
+> `@actrium/graphviz-anywhere-web` 包。
 
 当前基线对应的完整环境快照见 `tests/reference/VERSION`（jar 版本、JDK、Graphviz、字体栈）。
 
