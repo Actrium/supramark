@@ -156,8 +156,10 @@ mod exe_state_tests {
     #[test]
     fn check_file_directory_returns_is_a_directory() {
         // Java: assertEquals(ExeState.IS_A_DIRECTORY, ExeState.checkFile(dir))
-        let p = Path::new("/tmp");
-        assert_eq!(ExeState::check_file(Some(p)), ExeState::IsADirectory);
+        // Use the platform temp dir rather than a hard-coded "/tmp", which does
+        // not exist on Windows (there it would resolve to DoesNotExist).
+        let p = std::env::temp_dir();
+        assert_eq!(ExeState::check_file(Some(&p)), ExeState::IsADirectory);
     }
 
     #[test]
