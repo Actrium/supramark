@@ -72,7 +72,10 @@ export function resolveNative(
   return bridged;
 }
 
-const native = resolveNative(loadTurboModule(), NativeModules.SupramarkMermaidNative);
+const native = resolveNative(
+  loadTurboModule(),
+  NativeModules.SupramarkMermaidNative as NativeSupramarkMermaidModule | undefined
+);
 
 registerNativeEngineAdapter({
   engine: 'mermaid',

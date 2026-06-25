@@ -144,10 +144,14 @@ jobs:
         run: bun run quality
 
   # Host-side native bridge tests (JNI string/handle marshalling) — run on a
-  # host JVM with no Android NDK, emulator or gradle. graphviz-anywhere is
-  # excluded here: its host static lib requires building Graphviz from source
-  # (slow); its JNI host test and the iOS XCTest stubs (which need a macOS
-  # runner) are run out-of-band via their scripts under packages/react-native.
+  # host JVM with no Android NDK, emulator or gradle. Only d2 and mermaid run
+  # here: their cargo crates are self-contained. graphviz-anywhere and plantuml
+  # are excluded — graphviz's host static lib must be built from Graphviz source
+  # (slow), and plantuml-native transitively depends on the graphviz-anywhere
+  # crate (PlantUML embeds dot), whose build.rs needs a prebuilt graphviz lib
+  # not present on a clean CI runner. Their JNI host tests and the iOS XCTest
+  # stubs (which need a macOS runner) run out-of-band via the scripts under
+  # packages/react-native.
   native-host-tests:
     name: Native host tests (JNI)
     runs-on: ubuntu-latest
@@ -166,7 +170,7 @@ jobs:
 
       - name: Run JNI host bridge tests
         run: |
-          for pkg in d2-little mermaid-little plantuml-little; do
+          for pkg in d2-little mermaid-little; do
             echo "::group::$pkg JNI host test"
             crates/$pkg/packages/react-native/scripts/test-android-jni.sh
             echo "::endgroup::"

@@ -72,7 +72,10 @@ export function resolveNative(
   return bridged;
 }
 
-const native = resolveNative(loadTurboModule(), NativeModules.SupramarkPlantumlNative);
+const native = resolveNative(
+  loadTurboModule(),
+  NativeModules.SupramarkPlantumlNative as NativeSupramarkPlantumlModule | undefined
+);
 
 registerNativeEngineAdapter({
   engine: 'plantuml',

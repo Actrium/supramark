@@ -101,7 +101,7 @@ export function resolveNative(
 
 const GraphvizNative: NativeGraphvizModule = resolveNative(
   loadTurboModule(),
-  NativeModules.GraphvizNative
+  NativeModules.GraphvizNative as NativeGraphvizModule | undefined
 );
 
 /**

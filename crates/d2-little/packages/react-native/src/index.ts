@@ -72,7 +72,10 @@ export function resolveNative(
   return bridged;
 }
 
-const native = resolveNative(loadTurboModule(), NativeModules.SupramarkD2Native);
+const native = resolveNative(
+  loadTurboModule(),
+  NativeModules.SupramarkD2Native as NativeSupramarkD2Module | undefined
+);
 
 registerNativeEngineAdapter({
   engine: 'd2',
