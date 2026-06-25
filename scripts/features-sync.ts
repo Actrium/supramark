@@ -9,7 +9,7 @@ async function loadExtensionSpec(featurePath: string): Promise<ContainerExtensio
   if (!fs.existsSync(extTs)) return null;
 
   // 直接 import TS 源码：由 bunx tsx 执行，支持 ts/esm
-  const mod: any = await import(pathToFileURL(extTs).href);
+  const mod = (await import(pathToFileURL(extTs).href)) as { extension?: ContainerExtensionSpec };
   const spec = mod.extension as ContainerExtensionSpec | undefined;
   return spec ?? null;
 }

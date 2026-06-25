@@ -9,11 +9,14 @@ export const TouchableHighlight = 'TouchableHighlight';
 export const TextInput = 'TextInput';
 export const Modal = 'Modal';
 export const KeyboardAvoidingView = 'KeyboardAvoidingView';
-export const Platform = { OS: 'web', select: (obj: any) => obj.web || Object.values(obj)[0] };
+export const Platform = {
+  OS: 'web',
+  select: (obj: Record<string, unknown>) => obj.web ?? Object.values(obj)[0],
+};
 export const Animated = {
   View: 'Animated.View',
   Text: 'Animated.Text',
-  createAnimatedComponent: (c: any) => c,
+  createAnimatedComponent: <T>(c: T) => c,
   timing: () => ({ start: () => {} }),
   spring: () => ({ start: () => {} }),
   loop: () => ({ start: () => {} }),

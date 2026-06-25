@@ -58,8 +58,8 @@ function isVegaLiteCompiler(value: unknown): value is VegaLiteCompiler {
  */
 export default function vegaLite(modules?: unknown[]) {
   const items = modules ?? [];
-  const vega = items.find(isVegaRuntime) as VegaRuntime | undefined;
-  const compiler = items.find(isVegaLiteCompiler) as VegaLiteCompiler | undefined;
+  const vega = items.find(isVegaRuntime);
+  const compiler = items.find(isVegaLiteCompiler);
 
   return async (code: string, options?: Options): Promise<string> => {
     options?.signal?.throwIfAborted();
@@ -73,7 +73,7 @@ export default function vegaLite(modules?: unknown[]) {
 
     let spec: Record<string, unknown>;
     try {
-      spec = JSON.parse(code);
+      spec = JSON.parse(code) as Record<string, unknown>;
     } catch (e) {
       throw new DiagramRenderError(
         `Spec JSON parse error: ${e instanceof Error ? e.message : String(e)}`,

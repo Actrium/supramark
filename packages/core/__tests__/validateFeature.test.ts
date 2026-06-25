@@ -3,7 +3,6 @@
  */
 
 import { validateFeature } from '../src/feature';
-import type { SupramarkNode } from '../src/ast';
 
 describe('validateFeature', () => {
   describe('基本验证', () => {

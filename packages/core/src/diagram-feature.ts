@@ -152,7 +152,7 @@ export function defineDiagramFeature(
 
   const selector = (node: SupramarkNode): node is SupramarkDiagramNode => {
     if (node.type !== 'diagram') return false;
-    const engine = (node as SupramarkDiagramNode).engine;
+    const engine = node.engine;
     return typeof engine === 'string' && acceptedEngines.includes(engine.toLowerCase());
   };
 

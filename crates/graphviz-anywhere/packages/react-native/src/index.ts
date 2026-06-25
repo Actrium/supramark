@@ -61,6 +61,11 @@ interface NativeGraphvizModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeGraphvizSpecModule {
+  default?: NativeGraphvizModule;
+}
+
 /**
  * Resolve the native module, preferring TurboModules (new arch) with
  * fallback to the bridge-based NativeModules (old arch).
@@ -68,20 +73,20 @@ interface NativeGraphvizModule {
 function getNativeModule(): NativeGraphvizModule {
   // Try TurboModule first (new architecture)
   try {
-    const turbo = require('./NativeGraphviz').default;
+    const turbo = (require('./NativeGraphviz') as NativeGraphvizSpecModule).default;
     if (turbo) {
-      return turbo as NativeGraphvizModule;
+      return turbo;
     }
   } catch {
     // TurboModules not available, fall through
   }
 
   // Fallback to old architecture NativeModules
-  const nativeModule = NativeModules.GraphvizNative;
+  const nativeModule = NativeModules.GraphvizNative as NativeGraphvizModule | undefined;
   if (!nativeModule) {
     throw new Error(LINKING_ERROR);
   }
-  return nativeModule as NativeGraphvizModule;
+  return nativeModule;
 }
 
 const GraphvizNative: NativeGraphvizModule = getNativeModule();

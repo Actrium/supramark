@@ -84,7 +84,7 @@ export function normalizeSvg(xml: string): string {
 
   normalized = normalized.replace(
     /<text([^>]*?)style="([^"]*)"/gi,
-    (_match, attrs, existingStyle) => {
+    (_match: string, attrs: string, existingStyle: string) => {
       const styles: string[] = [];
       if (existingStyle && existingStyle.trim()) styles.push(existingStyle.trim());
 
@@ -99,7 +99,7 @@ export function normalizeSvg(xml: string): string {
 
   normalized = normalized.replace(
     /<rect([^>]*?)style="([^"]*)"/gi,
-    (_match, attrs, existingStyle) => {
+    (_match: string, attrs: string, existingStyle: string) => {
       const styles: string[] = [];
       if (existingStyle && existingStyle.trim()) styles.push(existingStyle.trim());
 
@@ -116,7 +116,7 @@ export function normalizeSvg(xml: string): string {
 
   normalized = normalized.replace(
     /<path\s+([^>]*?)style="([^"]*)"/gi,
-    (_match, attrs, existingStyle) => {
+    (_match: string, attrs: string, existingStyle: string) => {
       const styles: string[] = [];
       if (existingStyle && existingStyle.trim()) {
         styles.push(existingStyle.trim());

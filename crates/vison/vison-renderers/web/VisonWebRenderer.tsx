@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { VisonComponent } from '../shared/types';
+import { type VisonComponent } from '../shared/types';
 
 /**
  * 生产级 Web 渲染器

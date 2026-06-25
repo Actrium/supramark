@@ -3,7 +3,6 @@ import type {
   SupramarkNode,
   SupramarkRootNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
 import { makeFeatureConfigHelpers, FeatureRegistry } from '@supramark/core';
@@ -28,7 +27,7 @@ export type SupramarkMapContainerNode = SupramarkContainerNode & {
 };
 
 const isMapContainer = (node: SupramarkNode): node is SupramarkMapContainerNode => {
-  return node.type === 'container' && (node as SupramarkContainerNode).name === 'map';
+  return node.type === 'container' && node.name === 'map';
 };
 
 /**

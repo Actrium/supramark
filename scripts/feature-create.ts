@@ -13,27 +13,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 import {
   getNewFeatureLocation,
   log,
   question,
   selectMenu,
   type SelectOption,
-  type Color,
   colors,
   closeRL,
 } from './lib-feature-layout';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-
-function validateId(id: string): boolean {
-  return /^@[\w-]+\/feature-[\w-]+$/.test(id);
-}
-
-function validateVersion(version: string): boolean {
-  return /^\d+\.\d+\.\d+$/.test(version);
-}
 
 function validateContainerName(name: string): boolean {
   return /^[a-z][a-z0-9_-]*$/.test(name);

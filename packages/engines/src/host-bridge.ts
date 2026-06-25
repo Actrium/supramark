@@ -35,7 +35,7 @@ function pickContext(): CanvasRenderingContext2D | OffscreenCanvasRenderingConte
     if (typeof g.OffscreenCanvas === 'function') {
       const canvas = new g.OffscreenCanvas(8, 8);
       const ctx = canvas.getContext('2d');
-      if (ctx) return ctx as OffscreenCanvasRenderingContext2D;
+      if (ctx) return ctx;
     }
   } catch {
     // OffscreenCanvas exists but ctor / getContext threw — fall through.

@@ -34,16 +34,24 @@ interface NativeSupramarkPlantumlModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkPlantumlSpecModule {
+  default?: NativeSupramarkPlantumlModule;
+}
+
 function resolveNative(): NativeSupramarkPlantumlModule {
   // TurboModule (new arch) first.
   try {
-    const turbo = require('./NativeSupramarkPlantuml').default;
-    if (turbo) return turbo as NativeSupramarkPlantumlModule;
+    const turbo = (require('./NativeSupramarkPlantuml') as NativeSupramarkPlantumlSpecModule)
+      .default;
+    if (turbo) return turbo;
   } catch {
     // not codegen'd or new-arch disabled — fall through
   }
   // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkPlantumlNative;
+  const bridged = NativeModules.SupramarkPlantumlNative as
+    | NativeSupramarkPlantumlModule
+    | undefined;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkPlantumlModule, {
       get() {
@@ -51,7 +59,7 @@ function resolveNative(): NativeSupramarkPlantumlModule {
       },
     });
   }
-  return bridged as NativeSupramarkPlantumlModule;
+  return bridged;
 }
 
 const native = resolveNative();

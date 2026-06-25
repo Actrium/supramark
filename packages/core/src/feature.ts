@@ -683,7 +683,7 @@ export interface PlatformRenderer<TNode extends SupramarkNode, TPlatform extends
 /**
  * 平台类型
  */
-export type Platform = 'rn' | 'web' | 'cli' | string;
+export type Platform = string;
 
 /**
  * 渲染函数
@@ -849,7 +849,7 @@ export interface TestingDefinition<TNode extends SupramarkNode> {
   renderTests?: RenderTestSuite<TNode>;
 
   /** 集成测试 */
-  integrationTests?: IntegrationTestSuite<TNode>;
+  integrationTests?: IntegrationTestSuite;
 
   /** 测试覆盖率要求 */
   coverageRequirements?: CoverageRequirements;
@@ -920,15 +920,15 @@ export interface RenderTestCase<TNode, TPlatform> {
 /**
  * 集成测试套件
  */
-export interface IntegrationTestSuite<TNode> {
+export interface IntegrationTestSuite {
   /** 端到端测试用例 */
-  cases: IntegrationTestCase<TNode>[];
+  cases: IntegrationTestCase[];
 }
 
 /**
  * 集成测试用例
  */
-export interface IntegrationTestCase<TNode> {
+export interface IntegrationTestCase {
   /** 测试名称 */
   name: string;
 
@@ -1732,7 +1732,7 @@ const DIAGRAM_FEATURE_IDS_BY_FAMILY: Record<DiagramFeatureFamilyId, readonly str
  * - graphviz-family（dot / graphviz）
  */
 export function getDiagramFeatureFamily(
-  engine: SupramarkDiagramEngineId | string
+  engine: SupramarkDiagramEngineId
 ): DiagramFeatureFamilyId | null {
   const normalized = String(engine).toLowerCase();
 
@@ -1763,7 +1763,7 @@ export function getDiagramFeatureFamily(
 /**
  * 将 diagram engine 映射到对应的 feature id 列表。
  */
-export function getDiagramFeatureIdsForEngine(engine: SupramarkDiagramEngineId | string): string[] {
+export function getDiagramFeatureIdsForEngine(engine: SupramarkDiagramEngineId): string[] {
   const family = getDiagramFeatureFamily(engine);
   if (!family) {
     return [];
@@ -1801,7 +1801,7 @@ export function isFeatureGroupEnabled(
  */
 export function isDiagramFeatureEnabled(
   config: SupramarkConfig | undefined,
-  engine: SupramarkDiagramEngineId | string,
+  engine: SupramarkDiagramEngineId,
   context?: string
 ): boolean {
   const ids = getDiagramFeatureIdsForEngine(engine);
@@ -1857,8 +1857,10 @@ export function getFeatureOptionsAs<TOptions>(
  * - `getOptions(config)` — read the strongly-typed options for this feature from a SupramarkConfig.
  */
 export interface FeatureConfigHelpers<TOptions> {
-  create(enabled?: boolean, options?: TOptions): FeatureConfigWithOptions<TOptions>;
-  getOptions(config?: SupramarkConfig): TOptions | undefined;
+  // Arrow-typed properties (not method signatures) so callers can safely
+  // re-export `helpers.create` / `helpers.getOptions` without `this` binding.
+  create: (enabled?: boolean, options?: TOptions) => FeatureConfigWithOptions<TOptions>;
+  getOptions: (config?: SupramarkConfig) => TOptions | undefined;
 }
 
 /**
@@ -1879,10 +1881,10 @@ export function makeFeatureConfigHelpers<TOptions>(
   featureId: string
 ): FeatureConfigHelpers<TOptions> {
   return {
-    create(enabled = true, options) {
+    create: (enabled = true, options) => {
       return { id: featureId, enabled, options };
     },
-    getOptions(config) {
+    getOptions: (config) => {
       return getFeatureOptionsAs<TOptions>(config, featureId);
     },
   };

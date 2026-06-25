@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { discoverFeaturePackages, findFeaturePackageByShortName } from './lib-feature-layout';
+import { type discoverFeaturePackages, findFeaturePackageByShortName } from './lib-feature-layout';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

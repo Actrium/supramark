@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import type { SupramarkMathBlockNode } from '@supramark/core';
 import { getSvgViewBoxSize } from '@supramark/engines';

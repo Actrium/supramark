@@ -1,6 +1,6 @@
 const { spawnSync } = require('node:child_process');
 const { existsSync } = require('node:fs');
-const { resolve, dirname } = require('node:path');
+const { resolve } = require('node:path');
 
 const here = __dirname;
 const rootDir = resolve(here, '../..');

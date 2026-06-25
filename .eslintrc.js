@@ -27,28 +27,37 @@ module.exports = {
     },
   },
   rules: {
-    // TypeScript 相关
+    // TypeScript: type-safety
     // Explicit `any` is forbidden. Use precise types, generics, or `unknown` with a
     // narrowing guard. Untyped third-party boundaries should be wrapped in minimal interfaces.
     '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
+    // Unused code is an error: dead vars/imports/params usually signal a real mistake.
     '@typescript-eslint/no-unused-vars': [
-      'warn',
+      'error',
       {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
       },
     ],
+    // Prefer `import type { ... }` for type-only imports (bundler/tree-shaking friendly).
+    '@typescript-eslint/consistent-type-imports': [
+      'error',
+      { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+    ],
 
-    // React 相关
-    'react/react-in-jsx-scope': 'off', // React 17+ 不需要
-    'react/prop-types': 'off', // 使用 TypeScript
+    // React
+    'react/react-in-jsx-scope': 'off', // React 17+ does not need it
+    'react/prop-types': 'off', // TypeScript covers prop types
     'react/display-name': 'off',
 
-    // 通用规则
-    'no-console': ['warn', { allow: ['warn', 'error'] }],
-    'prefer-const': 'warn',
+    // General correctness/strictness
+    'no-console': ['error', { allow: ['warn', 'error'] }],
+    'prefer-const': 'error',
     'no-var': 'error',
+    eqeqeq: ['error', 'always', { null: 'ignore' }],
+    'no-implicit-coercion': 'error',
   },
   ignorePatterns: [
     'node_modules/',
@@ -81,12 +90,7 @@ module.exports = {
     'packages/core/docs/api/',
     'packages/core/docs/api/**',
 
-    // demo apps
-    'examples/',
-    'examples/**',
-
     '*.config.js',
-    'scripts/',
   ],
   overrides: [
     {
@@ -94,6 +98,20 @@ module.exports = {
       rules: {
         // React Native TurboModule fallbacks are intentionally resolved
         // synchronously to match the generated module contract.
+        '@typescript-eslint/no-var-requires': 'off',
+      },
+    },
+    {
+      // Build/codegen/install scripts, Metro launchers and the CLI write to
+      // stdout/stderr and use CommonJS require by design.
+      files: [
+        '**/scripts/**/*.{ts,js,cjs,mjs}',
+        'examples/**/*.{ts,tsx,js}',
+        'packages/cli/**/*.{ts,tsx}',
+      ],
+      env: { node: true },
+      rules: {
+        'no-console': 'off',
         '@typescript-eslint/no-var-requires': 'off',
       },
     },

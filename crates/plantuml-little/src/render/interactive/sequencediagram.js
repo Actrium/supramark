@@ -123,7 +123,7 @@
 	function initFloatingHeader() {
 	    try {
 	        const header = groupParticipantHeaders()
-            const toggleButton = createFloatingHeaderToggleButton(header);
+            createFloatingHeaderToggleButton(header);
             const floatingHeaderElement = createFloatingHeader(header)
 
             svgRoot.querySelectorAll("g.floating-header-toggle-button").forEach(button => {
@@ -147,7 +147,6 @@
 
             const isFloatingHeaderActive = window.localStorage?.getItem(LOCAL_STORAGE_FLOATING_HEADER_ACTIVE) === "true";
             svgRoot.classList.toggle("floating-header-active", isFloatingHeaderActive);
-            console.log("In accordance with local storage, setting floating header active = ", isFloatingHeaderActive);
 
         } catch(e) {
             console.error("Error while initialising floating header:", e, svgRoot);

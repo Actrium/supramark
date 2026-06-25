@@ -38,10 +38,15 @@ async function ensureRenderer(): Promise<MathJaxRenderer> {
 
 function extractSvg(adaptor: MathJaxRenderer['adaptor'], node: unknown): string {
   type AdaptorNode = Parameters<MathJaxRenderer['adaptor']['outerHTML']>[0];
+  // Required by the full project-references build (where `outerHTML`'s param
+  // resolves to MathJax's `LiteElement`); the isolated type-aware lint pass
+  // sees the adaptor as `any` and flags these as unnecessary.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const adaptorNode = node as AdaptorNode;
   const svgNode =
     adaptorNode && typeof adaptor.firstChild === 'function' ? adaptor.firstChild(adaptorNode) : null;
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const target = (svgNode ?? adaptorNode) as AdaptorNode;
   const svg = adaptor.outerHTML(target);
   if (!svg || !svg.includes('<svg')) {

@@ -34,16 +34,21 @@ interface NativeSupramarkD2Module {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkD2SpecModule {
+  default?: NativeSupramarkD2Module;
+}
+
 function resolveNative(): NativeSupramarkD2Module {
   // TurboModule (new arch) first.
   try {
-    const turbo = require('./NativeSupramarkD2').default;
-    if (turbo) return turbo as NativeSupramarkD2Module;
+    const turbo = (require('./NativeSupramarkD2') as NativeSupramarkD2SpecModule).default;
+    if (turbo) return turbo;
   } catch {
     // not codegen'd or new-arch disabled — fall through
   }
   // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkD2Native;
+  const bridged = NativeModules.SupramarkD2Native as NativeSupramarkD2Module | undefined;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkD2Module, {
       get() {
@@ -51,7 +56,7 @@ function resolveNative(): NativeSupramarkD2Module {
       },
     });
   }
-  return bridged as NativeSupramarkD2Module;
+  return bridged;
 }
 
 const native = resolveNative();

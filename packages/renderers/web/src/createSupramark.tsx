@@ -4,6 +4,7 @@ import type {
   DiagramRenderService,
   DiagramRenderResult,
 } from '@supramark/engines';
+import type { renderToString as RenderToString } from 'react-dom/server';
 import { DiagramEngineContext } from './DiagramEngineProvider.js';
 import { Supramark, type SupramarkWebProps } from './Supramark.js';
 
@@ -45,7 +46,7 @@ export function createRender(
   spec: RenderSpec
 ): (markdown: string, options?: { theme?: 'light' | 'dark' }) => Promise<string> {
   const Comp = createSupramark(spec);
-  let renderToStringPromise: Promise<typeof import('react-dom/server').renderToString> | null = null;
+  let renderToStringPromise: Promise<typeof RenderToString> | null = null;
   const loadRts = () => {
     if (!renderToStringPromise) {
       renderToStringPromise = import('react-dom/server').then(m => m.renderToString);

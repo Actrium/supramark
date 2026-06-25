@@ -3,7 +3,6 @@ import type {
   SupramarkNode,
   SupramarkRootNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { coreMarkdownExamples } from './examples.js';
 import { makeFeatureConfigHelpers } from '@supramark/core';

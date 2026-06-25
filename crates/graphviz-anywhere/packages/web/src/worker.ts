@@ -31,7 +31,7 @@ function serializeError(error: unknown): GraphvizWorkerErrorPayload {
   };
 }
 
-scope.addEventListener('message', async (event: MessageEvent<GraphvizWorkerRequest>) => {
+async function handleMessage(event: MessageEvent<GraphvizWorkerRequest>): Promise<void> {
   const request = event.data;
 
   if (!request || typeof request !== 'object') {
@@ -73,7 +73,7 @@ scope.addEventListener('message', async (event: MessageEvent<GraphvizWorkerReque
       default:
         throw new GraphvizWebError(
           'RENDER_FAILED',
-          `Unsupported worker action: ${(request as GraphvizWorkerRequest).action}`
+          `Unsupported worker action: ${String(request.action)}`
         );
     }
 
@@ -95,6 +95,12 @@ scope.addEventListener('message', async (event: MessageEvent<GraphvizWorkerReque
     };
     scope.postMessage(response);
   }
+}
+
+// `addEventListener` expects a void-returning listener, so the async handler is
+// invoked via `void` to discard its promise (errors are handled inside).
+scope.addEventListener('message', (event: MessageEvent<GraphvizWorkerRequest>) => {
+  void handleMessage(event);
 });
 
 export {};
