@@ -34,16 +34,22 @@ interface NativeSupramarkMermaidModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkMermaidSpecModule {
+  default?: NativeSupramarkMermaidModule;
+}
+
 function resolveNative(): NativeSupramarkMermaidModule {
   // TurboModule (new arch) first.
   try {
-    const turbo = require('./NativeSupramarkMermaid').default;
-    if (turbo) return turbo as NativeSupramarkMermaidModule;
+    const turbo = (require('./NativeSupramarkMermaid') as NativeSupramarkMermaidSpecModule)
+      .default;
+    if (turbo) return turbo;
   } catch {
     // not codegen'd or new-arch disabled — fall through
   }
   // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkMermaidNative;
+  const bridged = NativeModules.SupramarkMermaidNative as NativeSupramarkMermaidModule | undefined;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkMermaidModule, {
       get() {
@@ -51,7 +57,7 @@ function resolveNative(): NativeSupramarkMermaidModule {
       },
     });
   }
-  return bridged as NativeSupramarkMermaidModule;
+  return bridged;
 }
 
 const native = resolveNative();

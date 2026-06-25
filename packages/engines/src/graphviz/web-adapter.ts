@@ -8,16 +8,16 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
   const graphviz = await Graphviz.load();
 
   return {
-    async renderToSvg(code, rawOptions) {
+    renderToSvg(code, rawOptions) {
       const opt = pickGraphvizDiagramOptions(rawOptions);
-      return graphviz.layout(code, 'svg', opt.layoutEngine ?? 'dot');
+      return Promise.resolve(graphviz.layout(code, 'svg', opt.layoutEngine ?? 'dot'));
     },
-    async getCapabilities() {
-      return {
+    getCapabilities() {
+      return Promise.resolve({
         graphvizVersion: graphviz.version(),
         engines: ['dot', 'neato', 'fdp', 'sfdp', 'circo', 'twopi', 'osage', 'patchwork'],
-        formats: ['svg'],
-      };
+        formats: ['svg'] as Array<'svg'>,
+      });
     },
   };
 }

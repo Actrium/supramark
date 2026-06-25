@@ -26,6 +26,9 @@ export interface RenderSpec {
 export function createRender(
   _spec: RenderSpec
 ): (markdown: string, options?: RenderOptions) => Promise<string> {
+  // Returned render fn must satisfy the `Promise<string>` contract; the Phase 5
+  // stub only throws, so there is nothing to await yet.
+  // eslint-disable-next-line @typescript-eslint/require-await
   return async (_markdown, _options) => {
     throw new Error(
       '[@supramark/engines] createRender is not implemented yet (Phase 5). ' +

@@ -36,7 +36,7 @@ async function loadRenderer(): Promise<VisonRNRendererComponent> {
       if (!Component) {
         throw new Error('@actrium/vison-rn did not export VisonRNRenderer');
       }
-      cachedRenderer = Component as VisonRNRendererComponent;
+      cachedRenderer = Component;
       return cachedRenderer;
     });
   }

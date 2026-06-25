@@ -13,12 +13,45 @@ import type {
  * Minimal shape of a wasm-bindgen ESM module probed defensively for an
  * init entry and a sync convert/render entry.
  */
+/** wasm-bindgen init entry: may take a wasm URL/bytes, returns sync or async. */
+type WasmInitFn = (...args: unknown[]) => unknown;
+/** wasm-bindgen convert/render entry: `(code) => svg`, sync or async. */
+type WasmConvertFn = (code: string) => string | Promise<string>;
+
 interface WasmRenderModule {
   default?: unknown;
   init?: unknown;
   convert?: unknown;
   render?: unknown;
   renderSvg?: unknown;
+}
+
+/** A loaded `@actrium/graphviz-anywhere-web` Graphviz instance. */
+interface GraphvizInstance {
+  layout(dot: string, format: string, engine: string): string;
+  version(): string;
+}
+
+/** Minimal surface of the `@actrium/graphviz-anywhere-web` ESM module. */
+interface GraphvizWebModule {
+  Graphviz: { load(): Promise<GraphvizInstance> };
+}
+
+const GRAPHVIZ_WEB_SPEC = '@actrium/graphviz-anywhere-web';
+
+/** Probe a wasm-bindgen module for its optional `default`/`init` entry. */
+function pickWasmInit(mod: WasmRenderModule): WasmInitFn | null {
+  if (typeof mod.default === 'function') return mod.default as WasmInitFn;
+  if (typeof mod.init === 'function') return mod.init as WasmInitFn;
+  return null;
+}
+
+/** Probe a wasm-bindgen module for a `convert`/`render`/`renderSvg` entry. */
+function pickWasmConvert(mod: WasmRenderModule): WasmConvertFn | null {
+  if (typeof mod.convert === 'function') return mod.convert as WasmConvertFn;
+  if (typeof mod.render === 'function') return mod.render as WasmConvertFn;
+  if (typeof mod.renderSvg === 'function') return mod.renderSvg as WasmConvertFn;
+  return null;
 }
 
 export interface WebGraphvizAdapterOptions {
@@ -76,6 +109,9 @@ export function createWebDiagramEngine(
  * wrapper backed by `@actrium/graphviz-anywhere-web` (pre-loaded) so the
  * wasm call site can invoke it without returning to the JS event loop.
  */
+// loadRender contract returns Promise<DiagramRenderFn>; this loader only wires
+// up closures and resolves the render fn lazily, so no top-level await is used.
+// eslint-disable-next-line @typescript-eslint/require-await
 async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
   // Install the host text-metrics bridge before loading the wasm so the
   // wasm's metrics-host-callback impl can resolve `supramark.measureText`
@@ -88,7 +124,8 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
   const ensureGraphvizBridge = async () => {
     if (!graphvizBridgePromise) {
       graphvizBridgePromise = (async () => {
-        const { Graphviz } = await import('@actrium/graphviz-anywhere-web' as string);
+        const spec: string = GRAPHVIZ_WEB_SPEC;
+        const { Graphviz } = (await import(spec)) as GraphvizWebModule;
         const graphviz = await Graphviz.load();
 
         const g = globalThis as unknown as {
@@ -100,7 +137,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
             engine?: string,
             format?: string
           ): string => {
-            return graphviz.layout(dot, (format ?? 'svg') as string, (engine ?? 'dot') as string);
+            return graphviz.layout(dot, format ?? 'svg', engine ?? 'dot');
           };
         }
       })();
@@ -119,10 +156,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
           '@actrium/plantuml-little-web' as string
         )) as WasmRenderModule;
 
-        const init =
-          (typeof puml.default === 'function' && puml.default) ||
-          (typeof puml.init === 'function' && puml.init) ||
-          null;
+        const init = pickWasmInit(puml);
         if (init) {
           try {
             await init();
@@ -131,11 +165,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
           }
         }
 
-        const convert =
-          (typeof puml.convert === 'function' && puml.convert) ||
-          (typeof puml.render === 'function' && puml.render) ||
-          (typeof puml.renderSvg === 'function' && puml.renderSvg) ||
-          null;
+        const convert = pickWasmConvert(puml);
         if (!convert) {
           throw new Error(
             '`@actrium/plantuml-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
@@ -201,10 +231,7 @@ function plantumlNeedsGraphviz(code: string): boolean {
 async function loadWebD2Render(): Promise<DiagramRenderFn> {
   const d2 = (await import('@actrium/d2-little-web' as string)) as WasmRenderModule;
 
-  const init =
-    (typeof d2.default === 'function' && d2.default) ||
-    (typeof d2.init === 'function' && d2.init) ||
-    null;
+  const init = pickWasmInit(d2);
   if (init) {
     try {
       await init();
@@ -213,11 +240,7 @@ async function loadWebD2Render(): Promise<DiagramRenderFn> {
     }
   }
 
-  const convert =
-    (typeof d2.convert === 'function' && d2.convert) ||
-    (typeof d2.render === 'function' && d2.render) ||
-    (typeof d2.renderSvg === 'function' && d2.renderSvg) ||
-    null;
+  const convert = pickWasmConvert(d2);
   if (!convert) {
     throw new Error(
       '`@actrium/d2-little-web` is missing a convert / render entry. Expected one of: convert, render, renderSvg.'
@@ -273,16 +296,16 @@ async function loadWebGraphvizAdapter(): Promise<GraphvizRenderAdapter> {
   const graphviz = await Graphviz.load();
 
   return {
-    async renderToSvg(code, rawOptions) {
+    renderToSvg(code, rawOptions) {
       const opt = pickGraphvizDiagramOptions(rawOptions);
-      return graphviz.layout(code, 'svg', opt.layoutEngine ?? 'dot');
+      return Promise.resolve(graphviz.layout(code, 'svg', opt.layoutEngine ?? 'dot'));
     },
-    async getCapabilities() {
-      return {
+    getCapabilities() {
+      return Promise.resolve({
         graphvizVersion: graphviz.version(),
         engines: ['dot', 'neato', 'fdp', 'sfdp', 'circo', 'twopi', 'osage', 'patchwork'],
-        formats: ['svg'],
-      };
+        formats: ['svg'] as Array<'svg'>,
+      });
     },
   };
 }

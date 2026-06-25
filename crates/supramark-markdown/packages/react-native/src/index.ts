@@ -41,6 +41,11 @@ interface NativeSupramarkMarkdownModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkMarkdownSpecModule {
+  default?: NativeSupramarkMarkdownModule;
+}
+
 /**
  * Load the codegen'd TurboModule (new arch), or `null` when codegen
  * didn't run / new-arch is disabled. Kept separate from {@link
@@ -48,8 +53,9 @@ interface NativeSupramarkMarkdownModule {
  */
 function loadTurboModule(): NativeSupramarkMarkdownModule | null {
   try {
-    const turbo = require('./NativeSupramarkMarkdown').default;
-    return (turbo as NativeSupramarkMarkdownModule) ?? null;
+    const turbo = (require('./NativeSupramarkMarkdown') as NativeSupramarkMarkdownSpecModule)
+      .default;
+    return turbo ?? null;
   } catch {
     // not codegen'd or new-arch disabled — fall through
     return null;
@@ -83,7 +89,10 @@ export function resolveNative(
   return bridged;
 }
 
-const native = resolveNative(loadTurboModule(), NativeModules.SupramarkMarkdownNative);
+const native = resolveNative(
+  loadTurboModule(),
+  NativeModules.SupramarkMarkdownNative as NativeSupramarkMarkdownModule | null | undefined
+);
 
 registerNativeParserAdapter({
   parseJson: async (source: string) => native.parseJson(source),

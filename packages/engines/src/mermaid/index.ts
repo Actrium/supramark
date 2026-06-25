@@ -1,5 +1,18 @@
 import { installHostMetricsBridge } from '../host-bridge.js';
 
+/** wasm-bindgen init entry: optional, sync or async. */
+type MermaidInitFn = (...args: unknown[]) => unknown;
+/** wasm-bindgen convert/render entry: `(code) => svg`, sync or async. */
+type MermaidConvertFn = (code: string) => string | Promise<string>;
+
+/** Minimal probed surface of the `@actrium/mermaid-little-web` ESM module. */
+interface MermaidWasmModule {
+  default?: unknown;
+  init?: unknown;
+  convert?: unknown;
+  render?: unknown;
+}
+
 let renderFn:
   | ((code: string, options?: Record<string, unknown>) => Promise<string> | string)
   | null = null;
@@ -197,7 +210,7 @@ function applyFontFamilies(
   let next = svg;
 
   if (monoFontFamily) {
-    next = next.replace(/<text\b([^>]*?)>/gi, (match, attrs) => {
+    next = next.replace(/<text\b([^>]*?)>/gi, (match: string, attrs: string) => {
       const hasMonoClass = /\sclass="[^"]*\bmono\b[^"]*"/i.test(match);
       const cleanedAttrs = attrs.replace(/\sclass="[^"]*\bmono\b[^"]*"/gi, '');
       if (!hasMonoClass) {
@@ -211,7 +224,7 @@ function applyFontFamilies(
   }
 
   if (textFontFamily) {
-    next = next.replace(/<text\b([^>]*?)>/gi, (match, attrs) => {
+    next = next.replace(/<text\b([^>]*?)>/gi, (match: string, attrs: string) => {
       if (/font-family=/.test(match) || /style="[^"]*font-family:/.test(match)) {
         return match;
       }
@@ -302,12 +315,7 @@ async function ensureLoaded(): Promise<
   // as a side effect of the ESM import (`import * as wasm from "./*.wasm"`).
   // Some wasm-bindgen builds still ship a default `init()` — probe
   // defensively so a re-init does not throw.
-  const mod = (await import('@actrium/mermaid-little-web' as string)) as {
-    default?: unknown;
-    init?: unknown;
-    convert?: unknown;
-    render?: unknown;
-  };
+  const mod = (await import('@actrium/mermaid-little-web' as string)) as MermaidWasmModule;
 
   const init =
     (typeof mod.default === 'function' && mod.default) ||
@@ -315,15 +323,15 @@ async function ensureLoaded(): Promise<
     null;
   if (init) {
     try {
-      await init();
+      await (init as MermaidInitFn)();
     } catch {
       // Already initialised via the module-import side effect — ignore.
     }
   }
 
-  const convert =
-    (typeof mod.convert === 'function' && mod.convert) ||
-    (typeof mod.render === 'function' && mod.render) ||
+  const convert: MermaidConvertFn | null =
+    (typeof mod.convert === 'function' && (mod.convert as MermaidConvertFn)) ||
+    (typeof mod.render === 'function' && (mod.render as MermaidConvertFn)) ||
     null;
   if (!convert) {
     throw new Error(

@@ -1,6 +1,5 @@
 import type {
   SupramarkCodeNode,
-  SupramarkDiagramEngineId,
   SupramarkDiagramNode,
   SupramarkParentNode,
 } from '../ast.js';
@@ -17,7 +16,7 @@ export interface SupramarkFenceToken {
  */
 export function isDiagramFenceLanguage(lang?: string | null): boolean {
   if (!lang) return false;
-  const engine = lang.toLowerCase() as SupramarkDiagramEngineId;
+  const engine = lang.toLowerCase();
   return isBuiltInDiagramEngine(engine);
 }
 

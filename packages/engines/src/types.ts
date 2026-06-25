@@ -1,4 +1,9 @@
-export type DiagramEngineType = 'mermaid' | 'math' | 'dot' | 'graphviz' | string;
+/**
+ * Engine identifier. The named members ('mermaid' | 'math' | 'dot' |
+ * 'graphviz') are documentation hints; any string is accepted so hosts can
+ * register custom engines. Kept widened to `string` intentionally.
+ */
+export type DiagramEngineType = string;
 
 /** Public render result format. Successful renders are always SVG. */
 export type DiagramRenderFormat = 'svg' | 'error';
@@ -106,8 +111,8 @@ export interface RenderOptions {
   width?: number;
   /** 建议的输出高度（CSS px） */
   height?: number;
-  /** light / dark / 自定义主题名；engine 各自映射到自家 theme 体系 */
-  theme?: 'light' | 'dark' | string;
+  /** Theme name; each engine maps it to its own theme system. 'light' / 'dark' are common values, but any string is accepted. */
+  theme?: string;
 }
 
 /** 渲染错误的离散类别，host 用 `e.code` 做统一分流。 */

@@ -2,28 +2,9 @@ import React, { useContext, useEffect, useMemo, useState, type ReactNode } from 
 import type {
   SupramarkRootNode,
   SupramarkNode,
-  SupramarkParagraphNode,
-  SupramarkHeadingNode,
   SupramarkCodeNode,
-  SupramarkMathBlockNode,
-  SupramarkInlineCodeNode,
-  SupramarkListNode,
-  SupramarkListItemNode,
   SupramarkDiagramNode,
   SupramarkContainerNode,
-  SupramarkTextNode,
-  SupramarkStrongNode,
-  SupramarkEmphasisNode,
-  SupramarkLinkNode,
-  SupramarkImageNode,
-  SupramarkDeleteNode,
-  SupramarkTableNode,
-  SupramarkTableRowNode,
-  SupramarkTableCellNode,
-  SupramarkMathInlineNode,
-  SupramarkFootnoteReferenceNode,
-  SupramarkFootnoteDefinitionNode,
-  SupramarkDefinitionListNode,
   SupramarkDefinitionItemNode,
   SupramarkDefinitionTermNode,
   SupramarkDefinitionDescriptionNode,
@@ -167,7 +148,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
       try {
         onRenderStateChange?.({
           pending: true,
@@ -313,7 +294,7 @@ function renderNode(
       return (
         <p key={key} className={classNames.paragraph}>
           {renderInlineNodes(
-            (node as SupramarkParagraphNode).children,
+            node.children,
             classNames,
             rendered,
             highlighted,
@@ -322,7 +303,7 @@ function renderNode(
         </p>
       );
     case 'heading': {
-      const heading = node as SupramarkHeadingNode;
+      const heading = node;
       const content = renderInlineNodes(
         heading.children,
         classNames,
@@ -370,11 +351,11 @@ function renderNode(
       }
     }
     case 'code': {
-      const codeBlock = node as SupramarkCodeNode;
+      const codeBlock = node;
       return renderCodeBlock(codeBlock, key, classNames, highlighted);
     }
     case 'math_block': {
-      const mathBlock = node as SupramarkMathBlockNode;
+      const mathBlock = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return (
           <pre key={key} className={classNames.codeBlock}>
@@ -392,7 +373,7 @@ function renderNode(
       );
     }
     case 'list': {
-      const list = node as SupramarkListNode;
+      const list = node;
       const items = list.children.map((item, index) =>
         renderNode(item, index, classNames, rendered, highlighted, config, containerRenderers)
       );
@@ -407,7 +388,7 @@ function renderNode(
       );
     }
     case 'list_item': {
-      const item = node as SupramarkListItemNode;
+      const item = node;
       const isTaskListFeatureEnabled = isFeatureGroupEnabled(config, ['@supramark/feature-gfm']);
       const isTaskList = isTaskListFeatureEnabled && item.checked !== undefined;
 
@@ -444,7 +425,7 @@ function renderNode(
       );
     }
     case 'diagram': {
-      const diagram = node as SupramarkDiagramNode;
+      const diagram = node;
       if (!isDiagramFeatureEnabled(config, diagram.engine, 'web:diagram-feature')) {
         return renderDisabledDiagram(diagram, key, classNames);
       }
@@ -470,7 +451,7 @@ function renderNode(
       );
     }
     case 'container': {
-      const container = node as SupramarkContainerNode;
+      const container = node;
       const containerName = container.name;
 
       if (containerRenderers && containerRenderers[containerName]) {
@@ -660,7 +641,7 @@ function renderNode(
       );
     }
     case 'definition_list': {
-      const list = node as SupramarkDefinitionListNode;
+      const list = node;
       const defOptions =
         getFeatureOptionsAs<{ compact?: boolean }>(config, '@supramark/feature-definition-list') ??
         {};
@@ -669,7 +650,7 @@ function renderNode(
         return (
           <div key={key} className={classNames.paragraph}>
             {list.children.map((item, index) => {
-              const defItem = item as SupramarkDefinitionItemNode;
+              const defItem = item;
               const terms = getDefinitionTerms(defItem);
               const descriptions = getDefinitionDescriptions(defItem);
               return (
@@ -711,7 +692,7 @@ function renderNode(
       return (
         <dl key={key} className={classNames.paragraph}>
           {list.children.map((item, index) => {
-            const defItem = item as SupramarkDefinitionItemNode;
+            const defItem = item;
             const terms = getDefinitionTerms(defItem);
             const descriptions = getDefinitionDescriptions(defItem);
             return (
@@ -746,7 +727,7 @@ function renderNode(
       );
     }
     case 'table': {
-      const table = node as SupramarkTableNode;
+      const table = node;
       return (
         <table key={key} className={classNames.table}>
           <tbody className={classNames.tableBody}>
@@ -758,7 +739,7 @@ function renderNode(
       );
     }
     case 'table_row': {
-      const row = node as SupramarkTableRowNode;
+      const row = node;
       return (
         <tr key={key} className={classNames.tableRow}>
           {row.children.map((cell, index) =>
@@ -768,7 +749,7 @@ function renderNode(
       );
     }
     case 'table_cell': {
-      const cell = node as SupramarkTableCellNode;
+      const cell = node;
       const alignStyle = cell.align ? { textAlign: cell.align } : undefined;
       const content = renderInlineNodes(cell.children, classNames, rendered, highlighted, config);
 
@@ -787,14 +768,14 @@ function renderNode(
       );
     }
     case 'footnote_definition': {
-      const def = node as SupramarkFootnoteDefinitionNode;
+      const def = node;
       // def.children 是块级节点（通常是单个 paragraph），不能直接喂给 renderInlineNodes。
       // 常见形态 `[^1]: 内容。` → children = [{ type: 'paragraph', children: [text] }]
       // 做一次扁平化：若 children 就是单个 paragraph，把其 inline 内容直接铺出来；
       // 否则按块级节点渲染（允许多段脚注）。
       const soleParagraph =
         def.children.length === 1 && def.children[0]?.type === 'paragraph'
-          ? (def.children[0] as SupramarkParagraphNode)
+          ? def.children[0]
           : null;
       const body = soleParagraph
         ? renderInlineNodes(soleParagraph.children, classNames, rendered, highlighted, config)
@@ -823,7 +804,7 @@ function renderNode(
       );
     }
     case 'text':
-      return <React.Fragment key={key}>{(node as SupramarkTextNode).value}</React.Fragment>;
+      return <React.Fragment key={key}>{node.value}</React.Fragment>;
     case 'strong':
     case 'emphasis':
     case 'delete':
@@ -914,11 +895,11 @@ function renderInlineNode(
 ): React.ReactNode {
   switch (node.type) {
     case 'text': {
-      const textNode = node as SupramarkTextNode;
+      const textNode = node;
       return textNode.value;
     }
     case 'strong': {
-      const strongNode = node as SupramarkStrongNode;
+      const strongNode = node;
       return (
         <strong key={key} className={classNames.strong}>
           {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config)}
@@ -926,7 +907,7 @@ function renderInlineNode(
       );
     }
     case 'emphasis': {
-      const emphasisNode = node as SupramarkEmphasisNode;
+      const emphasisNode = node;
       return (
         <em key={key} className={classNames.emphasis}>
           {renderInlineNodes(emphasisNode.children, classNames, rendered, highlighted, config)}
@@ -934,7 +915,7 @@ function renderInlineNode(
       );
     }
     case 'inline_code': {
-      const codeNode = node as SupramarkInlineCodeNode;
+      const codeNode = node;
       return (
         <code key={key} className={classNames.inlineCode}>
           {codeNode.value}
@@ -942,7 +923,7 @@ function renderInlineNode(
       );
     }
     case 'math_inline': {
-      const mathNode = node as SupramarkMathInlineNode;
+      const mathNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return mathNode.value;
       }
@@ -956,7 +937,7 @@ function renderInlineNode(
       );
     }
     case 'link': {
-      const linkNode = node as SupramarkLinkNode;
+      const linkNode = node;
       return (
         <a key={key} href={linkNode.url} title={linkNode.title} className={classNames.link}>
           {renderInlineNodes(linkNode.children, classNames, rendered, highlighted, config)}
@@ -964,7 +945,7 @@ function renderInlineNode(
       );
     }
     case 'image': {
-      const imageNode = node as SupramarkImageNode;
+      const imageNode = node;
       return (
         <img
           key={key}
@@ -978,7 +959,7 @@ function renderInlineNode(
     case 'break':
       return <br key={key} />;
     case 'delete': {
-      const deleteNode = node as SupramarkDeleteNode;
+      const deleteNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-gfm'])) {
         return renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config);
       }
@@ -989,7 +970,7 @@ function renderInlineNode(
       );
     }
     case 'footnote_reference': {
-      const ref = node as SupramarkFootnoteReferenceNode;
+      const ref = node;
       return (
         <sup key={key} className={classNames.inlineCode}>
           <a href={`#fn-${ref.index}`} className={classNames.link}>
@@ -1009,7 +990,7 @@ function collectRenderTasks(nodes: SupramarkNode[], config?: SupramarkConfig): R
   function walk(list: SupramarkNode[]) {
     for (const node of list) {
       if (node.type === 'diagram') {
-        const diagram = node as SupramarkDiagramNode;
+        const diagram = node;
         if (
           isPreRenderedDiagramEngine(diagram.engine) &&
           isDiagramFeatureEnabled(config, diagram.engine, 'web:diagram-feature')
@@ -1022,7 +1003,7 @@ function collectRenderTasks(nodes: SupramarkNode[], config?: SupramarkConfig): R
           });
         }
       } else if (node.type === 'math_block') {
-        const mathBlock = node as SupramarkMathBlockNode;
+        const mathBlock = node;
         if (isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
           tasks.push({
             key: buildRenderKey('math', mathBlock.value, { displayMode: true }),
@@ -1032,7 +1013,7 @@ function collectRenderTasks(nodes: SupramarkNode[], config?: SupramarkConfig): R
           });
         }
       } else if (node.type === 'math_inline') {
-        const mathInline = node as SupramarkMathInlineNode;
+        const mathInline = node;
         if (isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
           tasks.push({
             key: buildRenderKey('math', mathInline.value, { displayMode: false }),
@@ -1067,7 +1048,7 @@ function collectCodeHighlightTasks(
   function walk(list: SupramarkNode[]) {
     for (const node of list) {
       if (node.type === 'code') {
-        const code = node as SupramarkCodeNode;
+        const code = node;
         tasks.push({
           key: buildCodeHighlightKey(code.value, code.lang, code.meta),
           code: code.value,

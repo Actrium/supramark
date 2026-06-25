@@ -155,6 +155,9 @@ function createRendererFromVizFactory(
       };
     },
 
+    // Satisfies the `dispose(): Promise<void>` contract; the body is currently
+    // synchronous but the async signature must be kept for callers that await.
+    // eslint-disable-next-line @typescript-eslint/require-await
     async dispose() {
       disposed = true;
     },
@@ -362,6 +365,9 @@ export function createWorkerWasmRenderer(
       });
     },
 
+    // Satisfies the `dispose(): Promise<void>` contract; the body is currently
+    // synchronous but the async signature must be kept for callers that await.
+    // eslint-disable-next-line @typescript-eslint/require-await
     async dispose() {
       if (disposed) {
         return;

@@ -16,6 +16,9 @@ type RustMarkdownModule = {
   parseJson?: (source: string) => string | Promise<string>;
 };
 
+// Must share the async Promise<RustMarkdownModule> contract with the web loader
+// variant (plugin-loader-web.ts) that the bundler swaps in; callers await it.
+// eslint-disable-next-line @typescript-eslint/require-await -- contract parity with web loader
 export async function loadRustMarkdownModule(): Promise<RustMarkdownModule> {
   // RN 下 native adapter 必须已注册（由 `@supramark/markdown-native-rn`
   // side-effect import 触发）。未注册时抛明确错误，而不是回退到 wasm。
