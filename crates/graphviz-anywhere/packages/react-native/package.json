@@ -31,9 +31,10 @@
     "build": "BROWSERSLIST_IGNORE_OLD_DATA=1 bob build",
     "prepare": "BROWSERSLIST_IGNORE_OLD_DATA=1 bob build",
     "postinstall": "node scripts/download-native.js",
+    "prepare-native": "node scripts/prepare-native.js",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "fmt": "prettier --write src",
-    "test": "echo \"no tests\""
+    "test": "bun test"
   },
   "keywords": [
     "react-native",

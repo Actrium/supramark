@@ -38,6 +38,20 @@ const ANDROID_ABIS = {
 };
 const ANDROID_JNILIBS_DEST = path.join(PKG_DIR, 'android', 'src', 'main', 'jniLibs');
 
+// C ABI header — staged into the package so the Android CMake build is
+// self-contained. A `file:` install copies the package into the consumer's
+// node_modules, which breaks any relative path that pointed back into the
+// monorepo's native crate, so we vendor the header here instead.
+const NATIVE_HEADER_SRC = path.join(
+  REPO_ROOT,
+  'crates',
+  'd2-little',
+  'packages',
+  'native',
+  'include'
+);
+const ANDROID_JNI_INCLUDE_DEST = path.join(PKG_DIR, 'android', 'src', 'main', 'jni', 'include');
+
 function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
@@ -90,7 +104,26 @@ function prepareAndroid() {
 
 const ios = prepareIOS();
 const android = prepareAndroid();
+
+// Stage the C ABI header into the package (used by the Android CMake build;
+// iOS gets its headers from inside the xcframework).
+function prepareHeader() {
+  if (!fileExists(NATIVE_HEADER_SRC)) {
+    console.warn(`⚠  Native header not found at:\n   ${NATIVE_HEADER_SRC}`);
+    return false;
+  }
+  fs.rmSync(ANDROID_JNI_INCLUDE_DEST, { recursive: true, force: true });
+  copyDirRecursive(NATIVE_HEADER_SRC, ANDROID_JNI_INCLUDE_DEST);
+  console.log(`✓ Android: copied headers → ${path.relative(REPO_ROOT, ANDROID_JNI_INCLUDE_DEST)}/`);
+  return true;
+}
+const header = prepareHeader();
+
 if (!ios && !android) {
   console.error('No native artefacts found. Build the Rust crate first.');
+  process.exit(1);
+}
+if (!header) {
+  console.error('Native header missing. Cannot proceed.');
   process.exit(1);
 }

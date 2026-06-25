@@ -20,13 +20,17 @@ Pod::Spec.new do |s|
   s.source_files = "*.{h,m,mm}"
   s.public_header_files = "GraphvizModule.h"
 
-  # Link against the prebuilt Graphviz wrapper downloaded by postinstall.
+  # Link against the prebuilt Graphviz xcframework (multi-slice:
+  # ios-arm64 device + ios-arm64_x86_64-simulator). The xcframework is
+  # staged under ios/Frameworks/ by scripts/build-ios-xcframework.sh.
+  # Using vendored_frameworks instead of flat lib/include so Xcode picks
+  # the correct slice per target (device arm64 vs simulator arm64/x86_64).
   s.preserve_paths = "Frameworks/**"
+  s.vendored_frameworks = "Frameworks/GraphvizApi.xcframework"
   s.xcconfig = {
-    "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/Frameworks/include\"",
-    "LIBRARY_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/Frameworks/lib\"",
+    "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/Frameworks/GraphvizApi.xcframework/ios-arm64/Headers\" \"$(PODS_TARGET_SRCROOT)/Frameworks/GraphvizApi.xcframework/ios-arm64_x86_64-simulator/Headers\"",
+    "OTHER_LDFLAGS" => "$(inherited)",
   }
-  s.libraries = "graphviz_api"
 
   if respond_to?(:install_modules_dependencies, true)
     install_modules_dependencies(s)

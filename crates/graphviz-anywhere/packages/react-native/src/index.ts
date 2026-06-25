@@ -66,30 +66,43 @@ interface NativeGraphvizSpecModule {
   default?: NativeGraphvizModule;
 }
 
-/**
- * Resolve the native module, preferring TurboModules (new arch) with
- * fallback to the bridge-based NativeModules (old arch).
- */
-function getNativeModule(): NativeGraphvizModule {
-  // Try TurboModule first (new architecture)
+// Load the codegen'd TurboModule, tolerating its absence (old arch or a
+// host that hasn't run codegen). Kept separate from the pure selection so
+// the latter stays unit-testable.
+function loadTurboModule(): NativeGraphvizModule | undefined {
   try {
-    const turbo = (require('./NativeGraphviz') as NativeGraphvizSpecModule).default;
-    if (turbo) {
-      return turbo;
-    }
+    return (require('./NativeGraphviz') as NativeGraphvizSpecModule).default ?? undefined;
   } catch {
     // TurboModules not available, fall through
+    return undefined;
   }
-
-  // Fallback to old architecture NativeModules
-  const nativeModule = NativeModules.GraphvizNative as NativeGraphvizModule | undefined;
-  if (!nativeModule) {
-    throw new Error(LINKING_ERROR);
-  }
-  return nativeModule;
 }
 
-const GraphvizNative: NativeGraphvizModule = getNativeModule();
+/**
+ * Resolve the native module, preferring TurboModules (new arch) with fallback
+ * to the bridge-based NativeModules (old arch). When neither is linked, return
+ * a Proxy that throws an actionable error on first use rather than at import
+ * time. Kept a pure function of its inputs so the fallback order is testable.
+ */
+export function resolveNative(
+  turbo: NativeGraphvizModule | null | undefined,
+  bridged: NativeGraphvizModule | null | undefined
+): NativeGraphvizModule {
+  if (turbo) return turbo;
+  if (!bridged) {
+    return new Proxy({} as NativeGraphvizModule, {
+      get() {
+        throw new Error(LINKING_ERROR);
+      },
+    });
+  }
+  return bridged;
+}
+
+const GraphvizNative: NativeGraphvizModule = resolveNative(
+  loadTurboModule(),
+  NativeModules.GraphvizNative as NativeGraphvizModule | undefined
+);
 
 /**
  * Render a DOT language string into the specified output format.

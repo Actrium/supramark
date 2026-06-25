@@ -95,6 +95,7 @@ build_android_abi() {
         -DANDROID_NATIVE_API_LEVEL="${ANDROID_API}" \
         -DANDROID_STL=c++_shared \
         "${GV_CMAKE_COMMON_ARGS[@]}" \
+        "${GV_BISON_EXTRA_ARGS[@]}" \
         "-DCMAKE_C_FLAGS=-O2 -fPIC" \
         -DCMAKE_INSTALL_PREFIX="${gv_install}"
 
@@ -137,13 +138,16 @@ build_android_abi() {
 
     mkdir -p "${install_dir}/lib" "${install_dir}/include"
     # WITH_EXPAT=OFF / WITH_ZLIB=OFF → no -lexpat / -lz needed.
+    # The Graphviz static libs reference C++ symbols (e.g. std::length_error),
+    # so link libc++_shared; at runtime those symbols are provided by the
+    # libc++_shared.so that React Native already bundles into the APK.
     "${cc}" -shared "${target_flag}" \
         -o "${install_dir}/lib/libgraphviz_api.so" \
         "${build_dir}/graphviz_api.o" \
         -Wl,--whole-archive \
         "${libs[@]}" \
         -Wl,--no-whole-archive \
-        -lm
+        -lm -lc++_shared
 
     cp "${WRAPPER_SRC}/graphviz_api.h" "${install_dir}/include/"
 

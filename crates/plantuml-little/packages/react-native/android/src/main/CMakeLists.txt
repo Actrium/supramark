@@ -17,11 +17,12 @@ if(NOT EXISTS "${PlantUML_NATIVE_LIB}")
     )
 endif()
 
-# Header path: the C ABI header is canonical at the native crate
-# (sibling-of-sibling-of-sibling directory). Inlining it via include
-# path so we don't duplicate the source of truth.
+# Header path: prepare-native.js stages the C ABI header into the package's
+# jni/include/ so the package is self-contained. A `file:` install copies the
+# package into the consumer's node_modules, which would break a relative path
+# pointing back at the monorepo's native crate.
 set(SUPRAMARK_PLANTUML_INCLUDE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/include")
+    "${CMAKE_CURRENT_SOURCE_DIR}/jni/include")
 
 add_library(supramark_plantuml_native SHARED IMPORTED)
 set_target_properties(supramark_plantuml_native PROPERTIES

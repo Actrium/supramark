@@ -12,6 +12,7 @@ endif()
 
 add_library(graphviz_core SHARED IMPORTED)
 set_target_properties(graphviz_core PROPERTIES
+  IMPORTED_NO_SONAME TRUE
   IMPORTED_LOCATION "${GRAPHVIZ_API_LIB}"
 )
 

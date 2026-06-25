@@ -59,6 +59,13 @@ After that:
   `libc++_shared.so` automatically; standalone Android apps may need
   `packagingOptions { jniLibs.useLegacyPackaging = true }` or an
   explicit `include 'lib/.../libc++_shared.so'`.
+- The Android library's `abiFilters` honour the app-level
+  `reactNativeArchitectures` gradle property, and otherwise default to
+  the ABIs `prepare-native.js` stages (`arm64-v8a`, `x86_64`). The
+  default build needs **both** staged — a selected ABI whose `.so` is
+  missing triggers a CMake `FATAL_ERROR`. For a faster single-ABI build
+  (local or CI), set `reactNativeArchitectures=arm64-v8a` in the app's
+  `android/gradle.properties`.
 - Both old (`NativeModules.SupramarkPlantumlNative`) and new
   (`TurboModule`) RN architectures are supported via `index.ts`'s
   resolver.
