@@ -1,0 +1,22 @@
+# Staged / downloaded native artefacts — produced by
+# `node scripts/prepare-native.js` from cargo-built target/, or fetched by
+# `node scripts/download-native.js` from release assets. NEVER commit these
+# binaries to git. The committed headers under android/libs/<abi>/include and
+# ios/Frameworks/.../Headers (plus Info.plist) stay tracked — .gitignore never
+# untracks files that are already committed.
+ios/Frameworks/
+macos/Frameworks/
+windows/Frameworks/
+android/libs/*/lib/
+android/src/main/jniLibs/
+
+# react-native-builder-bob build output
+lib/
+
+# Node / build noise
+node_modules/
+*.log
+
+# Android CMake external native build state
+android/.cxx/
+android/build/

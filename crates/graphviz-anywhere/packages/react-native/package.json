@@ -34,7 +34,7 @@
     "prepare-native": "node scripts/prepare-native.js",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "fmt": "prettier --write src",
-    "test": "echo \"no tests\""
+    "test": "bun test"
   },
   "keywords": [
     "react-native",

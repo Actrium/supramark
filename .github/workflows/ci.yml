@@ -97,10 +97,47 @@ jobs:
           name: core-coverage
           fail_ci_if_error: false
 
+      - name: React Native package tests (native-module resolution)
+        run: |
+          for pkg in graphviz-anywhere d2-little mermaid-little plantuml-little; do
+            echo "::group::$pkg resolve-native"
+            (cd "crates/$pkg/packages/react-native" && bun test)
+            echo "::endgroup::"
+          done
+
       - name: Build packages
         run: bun run build
 
       - name: Quality check
         if: matrix.node-version == '20.x'
         run: bun run quality
+
+  # Host-side native bridge tests (JNI string/handle marshalling) — run on a
+  # host JVM with no Android NDK, emulator or gradle. graphviz-anywhere is
+  # excluded here: its host static lib requires building Graphviz from source
+  # (slow); its JNI host test and the iOS XCTest stubs (which need a macOS
+  # runner) are run out-of-band via their scripts under packages/react-native.
+  native-host-tests:
+    name: Native host tests (JNI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Run JNI host bridge tests
+        run: |
+          for pkg in d2-little mermaid-little plantuml-little; do
+            echo "::group::$pkg JNI host test"
+            crates/$pkg/packages/react-native/scripts/test-android-jni.sh
+            echo "::endgroup::"
+          done
 

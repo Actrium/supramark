@@ -28,6 +28,7 @@
   },
   "scripts": {
     "typescript": "tsc --noEmit",
+    "test": "bun test",
     "build": "if command -v bob >/dev/null 2>&1; then BROWSERSLIST_IGNORE_OLD_DATA=1 bob build; else echo 'react-native-builder-bob not installed; skipping build'; fi",
     "prepack": "if command -v bob >/dev/null 2>&1; then BROWSERSLIST_IGNORE_OLD_DATA=1 bob build; fi",
     "prepare-native": "node scripts/prepare-native.js"

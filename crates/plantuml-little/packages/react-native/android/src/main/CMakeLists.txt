@@ -17,9 +17,10 @@ if(NOT EXISTS "${PlantUML_NATIVE_LIB}")
     )
 endif()
 
-# Header path: prepare-native.js 把 C ABI header 拷贝到包内的
-# jni/include/，让包自包含（file: 协议安装后包被拷贝到消费者 node_modules，
-# 原先指向 monorepo 内 native crate 的相对路径会断裂）。
+# Header path: prepare-native.js stages the C ABI header into the package's
+# jni/include/ so the package is self-contained. A `file:` install copies the
+# package into the consumer's node_modules, which would break a relative path
+# pointing back at the monorepo's native crate.
 set(SUPRAMARK_PLANTUML_INCLUDE
     "${CMAKE_CURRENT_SOURCE_DIR}/jni/include")
 

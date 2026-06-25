@@ -79,6 +79,11 @@ cd graphviz-anywhere
 
 Build outputs land in `output/<platform>/`.
 
+> On Windows, run `build-android.sh` from a Unix-like shell (e.g. Git
+> Bash) with `CMAKE_GENERATOR=Ninja` exported. The default generator
+> there is Visual Studio, which this Graphviz build does not target, and
+> the script otherwise expects `make` and `pkg-config` on `PATH`.
+
 Prebuilt native binaries are published from the current repository namespace:
 [GitHub Releases](https://github.com/Actrium/graphviz-anywhere/releases).
 

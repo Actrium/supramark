@@ -34,16 +34,29 @@ interface NativeSupramarkD2Module {
   getVersion(): Promise<string>;
 }
 
-function resolveNative(): NativeSupramarkD2Module {
-  // TurboModule (new arch) first.
+// Load the codegen'd TurboModule, tolerating its absence (old arch or a
+// host that hasn't run codegen). Kept separate from the pure selection so
+// the latter stays unit-testable.
+function loadTurboModule(): NativeSupramarkD2Module | undefined {
   try {
-    const turbo = require('./NativeSupramarkD2').default;
-    if (turbo) return turbo as NativeSupramarkD2Module;
+    return (require('./NativeSupramarkD2').default as NativeSupramarkD2Module) ?? undefined;
   } catch {
     // not codegen'd or new-arch disabled — fall through
+    return undefined;
   }
-  // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkD2Native;
+}
+
+/**
+ * Pick the native module: TurboModule (new arch) first, then the bridge-based
+ * NativeModules entry (old arch). When neither is linked, return a Proxy that
+ * throws an actionable error on first use rather than at import time. Kept a
+ * pure function of its inputs so the fallback order is unit-testable.
+ */
+export function resolveNative(
+  turbo: NativeSupramarkD2Module | null | undefined,
+  bridged: NativeSupramarkD2Module | null | undefined
+): NativeSupramarkD2Module {
+  if (turbo) return turbo;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkD2Module, {
       get() {
@@ -51,10 +64,10 @@ function resolveNative(): NativeSupramarkD2Module {
       },
     });
   }
-  return bridged as NativeSupramarkD2Module;
+  return bridged;
 }
 
-const native = resolveNative();
+const native = resolveNative(loadTurboModule(), NativeModules.SupramarkD2Native);
 
 registerNativeEngineAdapter({
   engine: 'd2',

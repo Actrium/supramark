@@ -56,11 +56,21 @@ check_build_deps() {
 # kept for belt-and-braces compat with older CMakeLists that still read them.
 #
 # Usage: cmake "${GV_CMAKE_COMMON_ARGS[@]}" ...
-# macOS 系统 bison 是 2.3，graphviz 需要 ≥3.0。优先用 homebrew bison，
-# 显式指定 BISON_EXECUTABLE 避免 CMake 缓存系统旧 bison。
+# macOS ships bison 2.3 but Graphviz needs >= 3.0. Prefer a Homebrew bison and
+# pin BISON_EXECUTABLE so CMake does not cache the stale system one. Cover both
+# Apple Silicon (/opt/homebrew) and Intel (/usr/local) Homebrew prefixes, and
+# fall back to `brew --prefix bison` when neither fixed path exists.
 GV_BISON_EXTRA_ARGS=()
-if [ -x /opt/homebrew/opt/bison/bin/bison ]; then
-    GV_BISON_EXTRA_ARGS+=("-DBISON_EXECUTABLE=/opt/homebrew/opt/bison/bin/bison")
+_gv_bison=""
+for _gv_bison_cand in /opt/homebrew/opt/bison/bin/bison /usr/local/opt/bison/bin/bison; do
+    if [ -x "${_gv_bison_cand}" ]; then _gv_bison="${_gv_bison_cand}"; break; fi
+done
+if [ -z "${_gv_bison}" ] && command -v brew >/dev/null 2>&1; then
+    _gv_bison_brew="$(brew --prefix bison 2>/dev/null)/bin/bison"
+    [ -x "${_gv_bison_brew}" ] && _gv_bison="${_gv_bison_brew}"
+fi
+if [ -n "${_gv_bison}" ]; then
+    GV_BISON_EXTRA_ARGS+=("-DBISON_EXECUTABLE=${_gv_bison}")
 fi
 
 GV_CMAKE_COMMON_ARGS=(

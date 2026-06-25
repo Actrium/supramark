@@ -138,8 +138,9 @@ build_android_abi() {
 
     mkdir -p "${install_dir}/lib" "${install_dir}/include"
     # WITH_EXPAT=OFF / WITH_ZLIB=OFF → no -lexpat / -lz needed.
-    # graphviz 静态库含 C++ 符号引用（如 std::length_error），需链接 libc++_shared，
-    # 运行时由 APK 内的 libc++_shared.so（RN 自带）提供符号。
+    # The Graphviz static libs reference C++ symbols (e.g. std::length_error),
+    # so link libc++_shared; at runtime those symbols are provided by the
+    # libc++_shared.so that React Native already bundles into the APK.
     "${cc}" -shared "${target_flag}" \
         -o "${install_dir}/lib/libgraphviz_api.so" \
         "${build_dir}/graphviz_api.o" \
