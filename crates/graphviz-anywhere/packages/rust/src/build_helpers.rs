@@ -337,4 +337,42 @@ mod tests {
         assert!(!is_ios_target("aarch64-apple-darwin"));
         assert!(!is_ios_target("aarch64-linux-android"));
     }
+
+    // ── asset_is_static (static vs. dynamic link policy) ─────────────────────────
+
+    #[test]
+    fn asset_is_static_only_for_ios() {
+        // iOS is the only target linked statically.
+        assert!(asset_is_static("aarch64-apple-ios"));
+        assert!(asset_is_static("aarch64-apple-ios-sim"));
+        assert!(asset_is_static("x86_64-apple-ios"));
+        // Desktop and Android link the self-contained shared library, so a
+        // static `.a` must never be preferred for them (build.rs derives
+        // `prefer_static` from this function).
+        assert!(!asset_is_static("x86_64-unknown-linux-gnu"));
+        assert!(!asset_is_static("aarch64-unknown-linux-gnu"));
+        assert!(!asset_is_static("aarch64-apple-darwin"));
+        assert!(!asset_is_static("x86_64-apple-darwin"));
+        assert!(!asset_is_static("x86_64-pc-windows-msvc"));
+        assert!(!asset_is_static("aarch64-linux-android"));
+    }
+
+    #[test]
+    fn asset_is_static_agrees_with_lib_filename() {
+        // The link policy must match the expected library file: static targets
+        // ship a `.a`, dynamic targets a `.so` / `.dylib`.
+        for target in [
+            "aarch64-apple-ios",
+            "x86_64-unknown-linux-gnu",
+            "aarch64-apple-darwin",
+            "aarch64-linux-android",
+        ] {
+            let ships_archive = asset_lib_filename(target).ends_with(".a");
+            assert_eq!(
+                asset_is_static(target),
+                ships_archive,
+                "asset_is_static and asset_lib_filename disagree for {target}"
+            );
+        }
+    }
 }

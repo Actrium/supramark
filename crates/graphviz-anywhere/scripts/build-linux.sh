@@ -170,10 +170,25 @@ cp "${WRAPPER_SRC}/graphviz_api.h" "${INSTALL_DIR}/include/"
 # The shared .so is kept for consumers that prefer dynamic linking.
 log_info "Building static archive libgraphviz_api.a..."
 AR="${AR:-ar}"
-# Respect cross-compilation AR (e.g. AR=aarch64-linux-gnu-ar)
-"${AR}" rcs "${INSTALL_DIR}/lib/libgraphviz_api.a" \
-    "${BUILD_DIR}/graphviz_api.o" \
-    "${GV_STATIC_LIBS[@]}"
+# Respect cross-compilation AR (e.g. AR=aarch64-linux-gnu-ar).
+#
+# `ar rcs out.a wrapper.o libfoo.a` stores each libfoo.a as an opaque archive
+# *member* rather than merging its objects, so the Graphviz symbols never end
+# up in the final archive (the linker then reports them undefined). Use an MRI
+# script: ADDLIB pulls every object out of each component static library, so
+# the result is a single self-contained archive — mirroring what the .so gets
+# via --whole-archive.
+ar_mri="${BUILD_DIR}/libgraphviz_api.mri"
+{
+    echo "CREATE ${INSTALL_DIR}/lib/libgraphviz_api.a"
+    echo "ADDMOD ${BUILD_DIR}/graphviz_api.o"
+    for _lib in "${GV_STATIC_LIBS[@]}"; do
+        echo "ADDLIB ${_lib}"
+    done
+    echo "SAVE"
+    echo "END"
+} > "${ar_mri}"
+"${AR}" -M < "${ar_mri}"
 
 # Step 5: Verify
 log_info "Verifying outputs..."

@@ -122,7 +122,11 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     // Determine whether we expect a static or dynamic lib for this target.
-    let prefer_static = is_ios_target(&target) || target_os == "macos";
+    // Only iOS links statically: a static archive cannot embed the C++ runtime
+    // / expat, so desktop targets — including macOS — link the self-contained
+    // shared library (.so/.dylib). Reuse the single `asset_is_static` policy so
+    // the repo-output path and the download fallback can never diverge.
+    let prefer_static = asset_is_static(&target);
 
     // ── Collect candidate directories ────────────────────────────────────────
 
@@ -179,14 +183,12 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
                 return true;
             }
         } else {
-            // Dynamic: prefer .a on macOS/Linux desktop for cleaner downstream
-            // linking; fall back to .so / .dylib.
-            let static_lib = dir.join("libgraphviz_api.a");
-            if static_lib.exists() && (target_os == "macos" || target_os == "linux") {
-                emit_search_path(&dir, false);
-                println!("cargo:rustc-link-lib=static=graphviz_api");
-                return true;
-            }
+            // Dynamic desktop/mobile targets: link the self-contained shared
+            // library. A static `.a` is intentionally NOT preferred here — it
+            // cannot embed the C++ runtime (libstdc++) or expat, which the
+            // unified .so already pulls in via --whole-archive; linking the .a
+            // statically would leave those symbols undefined. (Static linking
+            // is only used for iOS, handled by the want_static branch above.)
             let dylib = if target_os == "macos" {
                 dir.join("libgraphviz_api.dylib")
             } else {
