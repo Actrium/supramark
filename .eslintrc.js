@@ -79,6 +79,10 @@ module.exports = {
     'crates/d2-little/setup.js',
     'crates/mermaid-little/src/katex/vendor/**',
     'crates/mermaid-little/src/cose_bilkent_js/**',
+    // Interactive runtime injected verbatim into rendered SVGs and compared
+    // byte-for-byte by the reference tests — linting/auto-fixing it silently
+    // changes the rendered output, so treat it as an embedded asset.
+    'crates/plantuml-little/src/render/interactive/**',
 
     // docs build outputs / caches
     'docs/public/preview/',

@@ -39,7 +39,7 @@
 	function getEdgesAndDistance1Nodes(startingNode) {
 		const nodeName = startingNode.getAttribute("data-entity");
 		const escapedNodeName = escapeForCssAttributeSelector(nodeName);
-		const results = new Set();
+		let results = new Set();
 
         svg.querySelectorAll(`.link[data-entity-1="${escapedNodeName}"], .link[data-entity-2="${escapedNodeName}"]`).forEach(link => {
             const linkStartNodeName = link.getAttribute("data-entity-1");
