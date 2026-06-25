@@ -3,7 +3,6 @@ import type {
   SupramarkNode,
   SupramarkRootNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
 import { makeFeatureConfigHelpers, FeatureRegistry } from '@supramark/core';
@@ -22,7 +21,7 @@ export type SupramarkHtmlPageContainerNode = SupramarkContainerNode & {
 };
 
 const isHtmlPageContainer = (node: SupramarkNode): node is SupramarkHtmlPageContainerNode => {
-  return node.type === 'container' && (node as SupramarkContainerNode).name === 'html';
+  return node.type === 'container' && node.name === 'html';
 };
 
 /**

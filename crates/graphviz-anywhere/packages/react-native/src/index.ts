@@ -61,12 +61,17 @@ interface NativeGraphvizModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeGraphvizSpecModule {
+  default?: NativeGraphvizModule;
+}
+
 // Load the codegen'd TurboModule, tolerating its absence (old arch or a
 // host that hasn't run codegen). Kept separate from the pure selection so
 // the latter stays unit-testable.
 function loadTurboModule(): NativeGraphvizModule | undefined {
   try {
-    return (require('./NativeGraphviz').default as NativeGraphvizModule) ?? undefined;
+    return (require('./NativeGraphviz') as NativeGraphvizSpecModule).default ?? undefined;
   } catch {
     // TurboModules not available, fall through
     return undefined;

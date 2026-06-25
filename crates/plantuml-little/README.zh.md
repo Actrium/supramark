@@ -30,6 +30,26 @@ Graphviz 有两种执行模式：
 - `native`（默认）：链接 [`graphviz-anywhere`](https://github.com/Actrium/graphviz-anywhere) 的预编译 `libgraphviz_api`，速度快、无需 Node；日常 `cargo test --lib` / 开发调试推荐此模式。
 - `wasm`（通过 `PLANTUML_LITTLE_TEST_BACKEND=wasm` 开启）：启动与 Java reference 管线相同的 Node/wasm runner；CI 的 `test-reference` 任务采用这种模式以保证跨平台可重放。
 
+> **非 Linux 主机上跑 `native` 后端的字体前置条件。** native 的 Graphviz 构建会经 pango/fontconfig 真实测量文本，因此只有当 fontconfig 把 `DejaVu Sans` 解析到与基线生成时相同的字体，reference 基线才能逐字复现。全新的 macOS 没装 DejaVu，fontconfig 会静默回落到系统字体（例如 Hiragino Sans）——这会让 `textLength` 与布局坐标偏移一两个像素，于是代码明明没问题、reference 测试却挂掉。跑 native reference 套件前先装 DejaVu：
+>
+> ```sh
+> brew install --cask font-dejavu   # macOS；Linux：apt install fonts-dejavu-core
+> fc-cache -f
+> fc-match "DejaVu Sans"            # 必须报告 DejaVuSans.ttf，而不是系统回落字体
+> ```
+>
+> CI 直接走 `wasm` 后端绕开了这个问题：wasm 的字体度量已固化进 `src/font_data.rs`，与主机无关。
+>
+> **Windows 上没有可用的 `native` reference 路径。** `scripts/build-windows.sh`
+> 构建 Graphviz 时不带 `gvplugin_pango` 插件（MSVC 上没有 fontconfig 体系），
+> native Graphviz 因此退回内置的*估算*文字度量、而非真实字体测量。于是由
+> graphviz 排版的图种（class、component、object、state、ER 等）布局坐标会偏离
+> 基线——例如一个 CLASS 图算出来高 `143px` 而非 `220px`。由 plantuml-little
+> 自己排版的图种（sequence、usecase、activity、wire……）仍然通过。Windows 上请
+> 用 `wasm` 后端跑 reference 套件：`PLANTUML_LITTLE_TEST_BACKEND=wasm`（与 CI
+> 同一后端），它需要 `tests/support` 下的 Node runner 能拿到
+> `@actrium/graphviz-anywhere-web` 包。
+
 当前基线对应的完整环境快照见 `tests/reference/VERSION`（jar 版本、JDK、Graphviz、字体栈）。
 
 ## 支持的图表类型（29 种完整实现）

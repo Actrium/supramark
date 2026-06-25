@@ -119,7 +119,11 @@ function loadConfig(
       throw new Error(`Preset not found: ${args.preset}. Use --list-presets to see options.`);
     }
     const source = readFileSync(presetPath, 'utf-8');
-    return { config: JSON.parse(source), source, path: `preset:${args.preset}` };
+    return {
+      config: JSON.parse(source) as SupramarkConfig,
+      source,
+      path: `preset:${args.preset}`,
+    };
   }
 
   const configPath = resolve(args.config ?? DEFAULT_CONFIG_PATH);
@@ -131,7 +135,7 @@ function loadConfig(
   }
   const source = readFileSync(configPath, 'utf-8');
   return {
-    config: JSON.parse(source),
+    config: JSON.parse(source) as SupramarkConfig,
     source,
     path: relative(process.cwd(), configPath),
   };
@@ -140,6 +144,10 @@ function loadConfig(
 // ----------------------------------------------------------------------------
 // 主流程
 // ----------------------------------------------------------------------------
+// Public CLI entry: the `Promise<number>` signature is a stable contract that
+// callers `await` (see bin/supramark-gen.mjs), so the body stays `async` even
+// though it currently performs no asynchronous work.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let args: Args;
   try {

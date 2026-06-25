@@ -25,9 +25,9 @@ fn gen_fixture_svg() {
         }
         match mermaid_little::convert_with_id(&source, &id) {
             Ok(svg) => {
-                let out = format!("/tmp/our_{}.svg", num);
+                let out = std::env::temp_dir().join(format!("our_{}.svg", num));
                 std::fs::write(&out, &svg).unwrap();
-                eprintln!("{}: {} bytes -> {}", num, svg.len(), out);
+                eprintln!("{}: {} bytes -> {}", num, svg.len(), out.display());
             }
             Err(e) => eprintln!("ERR {}: {}", num, e),
         }

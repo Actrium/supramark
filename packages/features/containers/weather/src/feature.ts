@@ -84,12 +84,12 @@ export interface WeatherData {
  */
 function parseJsonConfig(content: string): Partial<WeatherData> {
   try {
-    const obj = JSON.parse(content);
+    const obj = JSON.parse(content) as Record<string, unknown>;
     return {
-      location: obj.location,
-      units: obj.units,
-      showForecast: obj.showForecast ?? obj.show_forecast,
-      days: obj.days,
+      location: obj.location as string | undefined,
+      units: obj.units as 'metric' | 'imperial' | undefined,
+      showForecast: (obj.showForecast ?? obj.show_forecast) as boolean | undefined,
+      days: obj.days as number | undefined,
     };
   } catch (e) {
     return { parseError: `JSON 解析错误: ${(e as Error).message}` };
@@ -243,7 +243,7 @@ function parseConfig(content: string, format: WeatherConfigFormat): Partial<Weat
     case 'toon':
       return parseToonConfig(content);
     default:
-      return { parseError: `不支持的格式: ${format}` };
+      return { parseError: `Unsupported format: ${String(format)}` };
   }
 }
 

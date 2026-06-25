@@ -88,12 +88,12 @@ const RULES: Record<string, LintRule> = {
   'metadata-name-required': {
     severity: 'error',
     message: 'Feature name 不能为空',
-    check: feature => !!feature.metadata?.name && feature.metadata.name.length > 0,
+    check: feature => Boolean(feature.metadata?.name) && feature.metadata.name.length > 0,
   },
   'metadata-description-required': {
     severity: 'warning',
     message: 'Feature description 不能为空',
-    check: feature => !!feature.metadata?.description && feature.metadata.description.length > 0,
+    check: feature => Boolean(feature.metadata?.description) && feature.metadata.description.length > 0,
   },
   'metadata-license-required': {
     severity: 'warning',
@@ -108,7 +108,7 @@ const RULES: Record<string, LintRule> = {
   'ast-type-required': {
     severity: 'error',
     message: 'AST 节点 type 必须定义',
-    check: feature => !!feature.syntax?.ast?.type && feature.syntax.ast.type.length > 0,
+    check: feature => Boolean(feature.syntax?.ast?.type) && feature.syntax.ast.type.length > 0,
   },
   'ast-interface-required-nonempty': {
     severity: 'warning',

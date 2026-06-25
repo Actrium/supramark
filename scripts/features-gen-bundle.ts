@@ -14,9 +14,7 @@ function generateBundle(platform: 'web' | 'rn') {
   const imports: string[] = [];
   const list: string[] = [];
 
-  allFeatures.forEach((f, i) => {
-    // 转换包名到变量名 (e.g. @supramark/feature-math -> mathFeature)
-    const varName = f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature';
+  allFeatures.forEach((f) => {
     imports.push(
       `import { ${f.exportName || f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature'} } from '${f.name}';`
     );

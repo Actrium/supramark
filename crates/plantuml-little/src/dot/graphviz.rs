@@ -290,8 +290,10 @@ mod tests {
 
     #[test]
     fn exe_state_check_directory() {
-        let p = Path::new("/tmp");
-        assert_eq!(ExeState::check_file(Some(p)), ExeState::IsADirectory);
+        // Use the platform temp dir rather than a hard-coded "/tmp", which does
+        // not exist on Windows (there it would resolve to DoesNotExist).
+        let p = std::env::temp_dir();
+        assert_eq!(ExeState::check_file(Some(&p)), ExeState::IsADirectory);
     }
 
     #[test]

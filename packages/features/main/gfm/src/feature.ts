@@ -4,7 +4,6 @@ import type {
   SupramarkRootNode,
   SupramarkListItemNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { gfmExamples } from './examples.js';
 import { makeFeatureConfigHelpers } from '@supramark/core';

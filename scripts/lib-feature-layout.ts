@@ -147,8 +147,6 @@ export async function selectFeature(
     grouped.get(kind)!.push(f);
   }
 
-  // 构建带分组的选项列表
-  const options: SelectOption[] = [];
   let index = 1;
   const indexToFeature = new Map<number, FeaturePackageInfo>();
 
@@ -210,7 +208,7 @@ export function discoverFeaturePackages(): FeaturePackageInfo[] {
           const shortName = pkg.name.split('/')[1]!.replace(/^feature-/, '');
           const relativeDir = path.relative(REPO_ROOT, fullPath) || '.';
 
-          let metadata: FeaturePackageInfo['metadata'] = {};
+          const metadata: FeaturePackageInfo['metadata'] = {};
           const featureFile = path.join(fullPath, 'src/feature.ts');
           if (fs.existsSync(featureFile)) {
             try {

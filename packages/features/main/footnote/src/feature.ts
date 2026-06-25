@@ -5,7 +5,6 @@ import type {
   SupramarkFootnoteReferenceNode,
   SupramarkFootnoteDefinitionNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { footnoteExamples } from './examples.js';
 import { makeFeatureConfigHelpers } from '@supramark/core';

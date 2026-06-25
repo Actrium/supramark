@@ -4,7 +4,6 @@ import type {
   SupramarkRootNode,
   SupramarkTextNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { emojiExamples } from './examples.js';
 import { makeFeatureConfigHelpers } from '@supramark/core';

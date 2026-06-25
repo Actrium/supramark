@@ -3,29 +3,11 @@ import { Text, View, Linking, TouchableOpacity, Dimensions } from 'react-native'
 import type {
   SupramarkRootNode,
   SupramarkNode,
-  SupramarkParagraphNode,
   SupramarkHeadingNode,
   SupramarkCodeNode,
   SupramarkMathBlockNode,
-  SupramarkInlineCodeNode,
-  SupramarkListNode,
-  SupramarkListItemNode,
   SupramarkDiagramNode,
   SupramarkContainerNode,
-  SupramarkTextNode,
-  SupramarkStrongNode,
-  SupramarkEmphasisNode,
-  SupramarkLinkNode,
-  SupramarkImageNode,
-  SupramarkBreakNode,
-  SupramarkDeleteNode,
-  SupramarkTableNode,
-  SupramarkTableRowNode,
-  SupramarkTableCellNode,
-  SupramarkMathInlineNode,
-  SupramarkFootnoteReferenceNode,
-  SupramarkFootnoteDefinitionNode,
-  SupramarkDefinitionListNode,
   SupramarkDefinitionItemNode,
   SupramarkDefinitionTermNode,
   SupramarkDefinitionDescriptionNode,
@@ -46,14 +28,20 @@ import { MathBlock } from './MathBlock';
 import { MathInline } from './MathInline';
 import {
   type SupramarkStyles,
-  defaultStyles,
   mergeStyles,
   darkThemeStyles,
   lightThemeStyles,
 } from './styles';
-import { ErrorBoundary, ErrorInfo, ErrorDisplay } from './ErrorBoundary';
+import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 
 type RenderedNode = React.ComponentProps<typeof Text>['children'];
+
+// Minimal shape of the optional `react-native-maps` module. Only the members
+// used here are declared; the package itself is an optional peer dependency.
+interface ReactNativeMapsModule {
+  default: React.ComponentType<Record<string, unknown>>;
+  Marker: React.ComponentType<Record<string, unknown>>;
+}
 
 function getDefinitionTerms(item: SupramarkDefinitionItemNode): SupramarkDefinitionTermNode[] {
   return item.children.filter(
@@ -154,7 +142,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const parsed = ast ?? (await parse(markdown, { config }));
         // Post-process：递归解析 opaque container 的 value。
@@ -260,7 +248,7 @@ function renderNode(
         </Text>
       );
     case 'heading': {
-      const heading = node as SupramarkHeadingNode;
+      const heading = node;
       return (
         <Text key={key} style={headingStyle(heading.depth, styles)}>
           {renderInlineNodes(heading.children, styles, highlighted, config)}
@@ -268,11 +256,11 @@ function renderNode(
       );
     }
     case 'code': {
-      const codeBlock = node as SupramarkCodeNode;
+      const codeBlock = node;
       return renderCodeBlock(codeBlock, key, styles, highlighted);
     }
     case 'math_block': {
-      const mathBlock = node as SupramarkMathBlockNode;
+      const mathBlock = node;
       // 如果禁用了 Math Feature，则降级为普通代码块展示原始 TeX
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return renderDisabledMathBlock(mathBlock, key, styles);
@@ -280,7 +268,7 @@ function renderNode(
       return <MathBlock key={key} node={mathBlock} />;
     }
     case 'list': {
-      const list = node as SupramarkListNode;
+      const list = node;
       return (
         <View key={key} style={styles.list}>
           {list.children.map((item, index) =>
@@ -290,7 +278,7 @@ function renderNode(
       );
     }
     case 'list_item': {
-      const item = node as SupramarkListItemNode;
+      const item = node;
       const isTaskList = item.checked !== undefined;
       const checkSymbol = item.checked === true ? '☑' : '☐';
 
@@ -304,7 +292,7 @@ function renderNode(
       );
     }
     case 'diagram': {
-      const diagram = node as SupramarkDiagramNode;
+      const diagram = node;
       // 如果配置中显式禁用了对应图表 Feature，则降级为代码块渲染
       if (!isDiagramFeatureEnabled(config, diagram.engine, 'rn:diagram-feature')) {
         return renderDisabledDiagram(diagram, key, styles);
@@ -312,7 +300,7 @@ function renderNode(
       return <DiagramNode key={key} node={diagram} diagramConfig={config?.diagram} />;
     }
     case 'container': {
-      const container = node as SupramarkContainerNode;
+      const container = node;
       const containerName = container.name;
 
       // 检查是否有注册的自定义渲染器
@@ -442,7 +430,7 @@ function renderNode(
       );
     }
     case 'definition_list': {
-      const list = node as SupramarkDefinitionListNode;
+      const list = node;
       const defOptions =
         getFeatureOptionsAs<{ compact?: boolean }>(config, '@supramark/feature-definition-list') ??
         {};
@@ -456,7 +444,7 @@ function renderNode(
         return (
           <View key={key} style={styles.list}>
             {list.children.map((item, index) => {
-              const defItem = item as SupramarkDefinitionItemNode;
+              const defItem = item;
               const terms = getDefinitionTerms(defItem);
               const descriptions = getDefinitionDescriptions(defItem);
               return (
@@ -490,7 +478,7 @@ function renderNode(
       return (
         <View key={key} style={styles.list}>
           {list.children.map((item, index) => {
-            const defItem = item as SupramarkDefinitionItemNode;
+            const defItem = item;
             const terms = getDefinitionTerms(defItem);
             const descriptions = getDefinitionDescriptions(defItem);
             return (
@@ -523,7 +511,7 @@ function renderNode(
       );
     }
     case 'footnote_definition': {
-      const def = node as SupramarkFootnoteDefinitionNode;
+      const def = node;
       // 新 AST v2 的 footnote_definition.children 是 block 节点（paragraph 等），
       // 不是 inline 节点。用 renderNode 渲染 children，避免 renderInlineNodes 跳过 block 节点。
       const renderFootnoteContent = () =>
@@ -547,7 +535,7 @@ function renderNode(
       );
     }
     case 'table': {
-      const table = node as SupramarkTableNode;
+      const table = node;
       return (
         <View key={key} style={styles.table}>
           {table.children.map((row, index) =>
@@ -557,7 +545,7 @@ function renderNode(
       );
     }
     case 'table_row': {
-      const row = node as SupramarkTableRowNode;
+      const row = node;
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
@@ -567,7 +555,7 @@ function renderNode(
       );
     }
     case 'table_cell': {
-      const cell = node as SupramarkTableCellNode;
+      const cell = node;
       const cellStyle = [styles.tableCell, cell.header && styles.tableHeaderCell];
       const textStyle = [
         styles.tableCellText,
@@ -587,7 +575,7 @@ function renderNode(
     case 'text':
       return (
         <Text key={key} style={styles.paragraph}>
-          {(node as SupramarkTextNode).value}
+          {node.value}
         </Text>
       );
     default:
@@ -664,11 +652,11 @@ function renderInlineNode(
 ): RenderedNode {
   switch (node.type) {
     case 'text': {
-      const textNode = node as SupramarkTextNode;
+      const textNode = node;
       return textNode.value;
     }
     case 'strong': {
-      const strongNode = node as SupramarkStrongNode;
+      const strongNode = node;
       return (
         <Text key={key} style={styles.strong}>
           {renderInlineNodes(strongNode.children, styles, highlighted, config)}
@@ -676,7 +664,7 @@ function renderInlineNode(
       );
     }
     case 'emphasis': {
-      const emphasisNode = node as SupramarkEmphasisNode;
+      const emphasisNode = node;
       return (
         <Text key={key} style={styles.emphasis}>
           {renderInlineNodes(emphasisNode.children, styles, highlighted, config)}
@@ -684,7 +672,7 @@ function renderInlineNode(
       );
     }
     case 'inline_code': {
-      const codeNode = node as SupramarkInlineCodeNode;
+      const codeNode = node;
       return (
         <Text key={key} style={styles.inlineCode}>
           {codeNode.value}
@@ -692,14 +680,14 @@ function renderInlineNode(
       );
     }
     case 'math_inline': {
-      const mathNode = node as SupramarkMathInlineNode;
+      const mathNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return mathNode.value;
       }
       return <MathInline key={key} value={mathNode.value} textStyle={styles.paragraph} />;
     }
     case 'link': {
-      const linkNode = node as SupramarkLinkNode;
+      const linkNode = node;
       return (
         <Text
           key={key}
@@ -713,7 +701,7 @@ function renderInlineNode(
       );
     }
     case 'image': {
-      const imageNode = node as SupramarkImageNode;
+      const imageNode = node;
       // RN 中暂时用文本展示图片（未来可以用 Image 组件）
       return (
         <Text key={key} style={styles.imageText}>
@@ -725,7 +713,7 @@ function renderInlineNode(
       return '\n';
     }
     case 'delete': {
-      const deleteNode = node as SupramarkDeleteNode;
+      const deleteNode = node;
       return (
         <Text key={key} style={styles.delete}>
           {renderInlineNodes(deleteNode.children, styles, highlighted, config)}
@@ -733,7 +721,7 @@ function renderInlineNode(
       );
     }
     case 'footnote_reference': {
-      const ref = node as SupramarkFootnoteReferenceNode;
+      const ref = node;
       const label = ref.index;
       if (!isFeatureGroupEnabled(undefined, ['@supramark/feature-footnote'])) {
         return `[${label}]`;
@@ -807,7 +795,7 @@ function collectCodeHighlightTasks(
   function walk(list: SupramarkNode[]) {
     for (const node of list) {
       if (node.type === 'code') {
-        const code = node as SupramarkCodeNode;
+        const code = node;
         tasks.push({
           key: buildCodeHighlightKey(code.value, code.lang, code.meta),
           code: code.value,
@@ -902,7 +890,7 @@ function renderMapNodeFromContainer(
   container: SupramarkContainerNode,
   key: number,
   styles: ReturnType<typeof mergeStyles>,
-  config?: SupramarkConfig
+  _config?: SupramarkConfig
 ): RenderedNode {
   // 从 container.data 中提取 map 数据
   const data = container.data || {};
@@ -913,10 +901,12 @@ function renderMapNodeFromContainer(
   // 尝试使用真实的 react-native-maps
   try {
     // react-native-maps is an optional dependency; keep it lazy-loaded.
+    // Cast the untyped require() result to a minimal local module shape so the
+    // downstream JSX usage stays type-safe without depending on the package types.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const MapView = require('react-native-maps').default;
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { Marker } = require('react-native-maps');
+    const maps = require('react-native-maps') as ReactNativeMapsModule;
+    const MapView = maps.default;
+    const { Marker } = maps;
 
     const { width } = Dimensions.get('window');
 
@@ -968,11 +958,11 @@ function renderMapNodeFromContainer(
             {hasMarker && (
               <Marker
                 coordinate={{
-                  latitude: marker!.lat,
-                  longitude: marker!.lng,
+                  latitude: marker.lat,
+                  longitude: marker.lng,
                 }}
-                title="标记点"
-                description={`位置: ${marker!.lat}, ${marker!.lng}`}
+                title="Marker"
+                description={`Location: ${marker.lat}, ${marker.lng}`}
                 pinColor="blue"
               />
             )}
@@ -986,7 +976,7 @@ function renderMapNodeFromContainer(
           <Text style={styles.mapCardInfo}>🔍 缩放级别：{zoom}</Text>
           {hasMarker && (
             <Text style={styles.mapCardInfo}>
-              📌 标记：{marker!.lat}, {marker!.lng}
+              Marker: {marker.lat}, {marker.lng}
             </Text>
           )}
           <Text style={[styles.mapCardInfo, { color: '#28a745', fontWeight: '500' }]}>
@@ -1061,7 +1051,7 @@ function renderMapNodeFromContainer(
           <Text style={styles.mapCardInfo}>🔍 缩放级别：{zoom}</Text>
           {hasMarkerFallback && (
             <Text style={styles.mapCardInfo}>
-              📌 标记：{marker!.lat}, {marker!.lng}
+              Marker: {marker.lat}, {marker.lng}
             </Text>
           )}
           <Text style={[styles.mapCardInfo, { color: '#ffc107', fontStyle: 'italic' }]}>

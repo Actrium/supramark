@@ -34,12 +34,17 @@ interface NativeSupramarkD2Module {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkD2SpecModule {
+  default?: NativeSupramarkD2Module;
+}
+
 // Load the codegen'd TurboModule, tolerating its absence (old arch or a
 // host that hasn't run codegen). Kept separate from the pure selection so
 // the latter stays unit-testable.
 function loadTurboModule(): NativeSupramarkD2Module | undefined {
   try {
-    return (require('./NativeSupramarkD2').default as NativeSupramarkD2Module) ?? undefined;
+    return (require('./NativeSupramarkD2') as NativeSupramarkD2SpecModule).default ?? undefined;
   } catch {
     // not codegen'd or new-arch disabled — fall through
     return undefined;

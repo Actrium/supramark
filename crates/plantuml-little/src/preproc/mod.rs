@@ -2196,11 +2196,25 @@ impl Context {
         parse_int_like(&expanded)
     }
 
+    /// Parse a source key as a URL, but reject Windows drive-letter paths.
+    /// A bare path like `c:\dir\file.puml` parses as a URL whose scheme is the
+    /// single-letter drive (`c`), which would otherwise hijack the path-based
+    /// `%filename()` / `%dirpath()` logic. Real URLs we handle (http/https/file)
+    /// always have multi-character schemes, so a one-character scheme means we
+    /// are looking at a filesystem path and should fall through to `Path`.
+    fn parse_source_url(source_key: &str) -> Option<Url> {
+        let url = Url::parse(source_key).ok()?;
+        if url.scheme().len() == 1 {
+            return None;
+        }
+        Some(url)
+    }
+
     fn current_filename_text(&self) -> String {
         let Some(source_key) = self.current_source_key() else {
             return String::new();
         };
-        if let Ok(url) = Url::parse(source_key) {
+        if let Some(url) = Self::parse_source_url(source_key) {
             return url
                 .path_segments()
                 .and_then(|mut segments| segments.next_back())
@@ -2217,7 +2231,7 @@ impl Context {
 
     fn current_dirpath_text(&self) -> String {
         if let Some(source_key) = self.current_source_key() {
-            if let Ok(url) = Url::parse(source_key) {
+            if let Some(url) = Self::parse_source_url(source_key) {
                 return parent_url(&url).to_string();
             }
             if let Some(parent) = Path::new(source_key).parent() {

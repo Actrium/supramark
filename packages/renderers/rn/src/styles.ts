@@ -5,7 +5,7 @@
  * 用户可以通过传入 styles prop 来覆盖默认样式。
  */
 
-import { StyleSheet, TextStyle, ViewStyle } from 'react-native';
+import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 /**
  * Supramark 可自定义的样式键

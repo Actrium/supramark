@@ -34,12 +34,17 @@ interface NativeSupramarkMermaidModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkMermaidSpecModule {
+  default?: NativeSupramarkMermaidModule;
+}
+
 // Load the codegen'd TurboModule, tolerating its absence (old arch or a
 // host that hasn't run codegen). Kept separate from the pure selection so
 // the latter stays unit-testable.
 function loadTurboModule(): NativeSupramarkMermaidModule | undefined {
   try {
-    return (require('./NativeSupramarkMermaid').default as NativeSupramarkMermaidModule) ?? undefined;
+    return (require('./NativeSupramarkMermaid') as NativeSupramarkMermaidSpecModule).default ?? undefined;
   } catch {
     // not codegen'd or new-arch disabled — fall through
     return undefined;

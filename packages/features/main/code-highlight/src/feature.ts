@@ -7,7 +7,9 @@ export interface CodeHighlightFeatureOptions {
    * Reserved for runtime display defaults. Compile-time language/theme assets
    * are controlled by enabled highlight preset/language/theme features.
    */
-  theme?: 'light' | 'dark' | string;
+  // `string & NonNullable<unknown>` keeps the 'light'/'dark' literals as
+  // editor autocomplete hints without collapsing the union to a bare `string`.
+  theme?: 'light' | 'dark' | (string & NonNullable<unknown>);
 }
 
 export type CodeHighlightFeatureConfig = FeatureConfigWithOptions<CodeHighlightFeatureOptions>;

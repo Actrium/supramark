@@ -1,0 +1,25 @@
+# The little-engine reference suites compare rendered output byte-for-byte
+# against committed baselines, and several runtime assets are embedded into
+# that output via include_str!. A CRLF checkout on Windows (git's default
+# core.autocrlf=true) rewrites those text files and breaks every byte-exact
+# comparison. Pin LF on checkout for all platforms so the working tree always
+# matches what the engines emit and what the baselines were generated with.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending normalized.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.wasm  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+*.zip   binary
+
+# Gradle wrapper batch script must stay CRLF to run under cmd.exe.
+*.bat text eol=crlf

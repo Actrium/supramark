@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Image, ActivityIndicator } from 'react-native';
 import type { StyleProp, ViewStyle, TextStyle, ImageStyle } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import { VisonComponent } from '../shared/types';
+import { type VisonComponent } from '../shared/types';
 
 // React Native's bundled @types/react differs from the workspace React types
 // (e.g. on bigint in ReactNode); derive the node type from Text's own children.

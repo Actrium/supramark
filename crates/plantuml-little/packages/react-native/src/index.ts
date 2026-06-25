@@ -34,12 +34,17 @@ interface NativeSupramarkPlantumlModule {
   getVersion(): Promise<string>;
 }
 
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+interface NativeSupramarkPlantumlSpecModule {
+  default?: NativeSupramarkPlantumlModule;
+}
+
 // Load the codegen'd TurboModule, tolerating its absence (old arch or a
 // host that hasn't run codegen). Kept separate from the pure selection so
 // the latter stays unit-testable.
 function loadTurboModule(): NativeSupramarkPlantumlModule | undefined {
   try {
-    return (require('./NativeSupramarkPlantuml').default as NativeSupramarkPlantumlModule) ?? undefined;
+    return (require('./NativeSupramarkPlantuml') as NativeSupramarkPlantumlSpecModule).default ?? undefined;
   } catch {
     // not codegen'd or new-arch disabled — fall through
     return undefined;

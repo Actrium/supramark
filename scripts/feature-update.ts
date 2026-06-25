@@ -13,7 +13,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  discoverFeaturePackages,
   findFeaturePackageByShortName,
   selectFeature,
   type FeaturePackageInfo,
@@ -106,29 +105,6 @@ function generateTsConfig(): string {
 interface FeatureScanResult {
   name: string;
   path: string;
-}
-
-function scanFeaturePackages(specificFeature?: string): FeatureScanResult[] {
-  const all = discoverFeaturePackages();
-
-  if (specificFeature) {
-    const target = all.filter(
-      item =>
-        item.shortName === specificFeature ||
-        item.name === specificFeature ||
-        item.name.endsWith(`/feature-${specificFeature}`)
-    );
-
-    return target.map(item => ({
-      name: item.shortName,
-      path: item.dir,
-    }));
-  }
-
-  return all.map(item => ({
-    name: item.shortName,
-    path: item.dir,
-  }));
 }
 
 interface CheckResult {

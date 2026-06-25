@@ -1,6 +1,5 @@
 import { parse } from '../src/plugin';
 import type {
-  SupramarkRootNode,
   SupramarkNode,
   SupramarkTextNode,
   SupramarkParentNode,

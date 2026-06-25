@@ -28,7 +28,7 @@ async function loadRenderer(): Promise<VisonWebRendererComponent> {
       if (!Component) {
         throw new Error('@actrium/vison-web did not export VisonWebRenderer');
       }
-      cachedRenderer = Component as VisonWebRendererComponent;
+      cachedRenderer = Component;
       return cachedRenderer;
     });
   }

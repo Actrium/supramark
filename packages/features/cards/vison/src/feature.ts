@@ -3,7 +3,6 @@ import type {
   SupramarkNode,
   SupramarkRootNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
   SupramarkFeature,
 } from '@supramark/core';
 import { FeatureRegistry, makeFeatureConfigHelpers } from '@supramark/core';
@@ -62,7 +61,7 @@ export type SupramarkVisonContainerNode = SupramarkContainerNode & {
 };
 
 const isVisonContainer = (node: SupramarkNode): node is SupramarkVisonContainerNode => {
-  return node.type === 'container' && (node as SupramarkContainerNode).name === 'vison';
+  return node.type === 'container' && node.name === 'vison';
 };
 
 export const visonFeature: SupramarkFeature<SupramarkVisonContainerNode> = {

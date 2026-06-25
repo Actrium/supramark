@@ -74,7 +74,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
           setSvg(normalized);
           setLoading(false);
         } catch (err) {
-          setError(`SVG normalization failed: ${err}`);
+          setError(`SVG normalization failed: ${String(err)}`);
           setLoading(false);
         }
       })

@@ -5,7 +5,6 @@ import type {
   SupramarkDefinitionListNode,
   SupramarkDefinitionItemNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { definitionListExamples } from './examples.js';
 import { makeFeatureConfigHelpers } from '@supramark/core';
@@ -249,7 +248,7 @@ export const definitionListFeature: SupramarkFeature<SupramarkDefinitionListNode
             const nodes = (result as SupramarkRootNode).children || [];
             const defList = nodes.find((n: SupramarkNode) => n.type === 'definition_list');
             if (!defList) return false;
-            const items = (defList as SupramarkDefinitionListNode).children || [];
+            const items = defList.children || [];
             return items.some(
               (item: SupramarkDefinitionItemNode) =>
                 item.type === 'definition_item' &&

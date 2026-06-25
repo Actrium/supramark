@@ -49,13 +49,6 @@ export interface SupramarkParseOptions {
   config?: SupramarkConfig;
 }
 
-type RustMarkdownModule = {
-  parse?: (source: string) => unknown;
-  // wasm 版同步返回 string；native TurboModule 跨 bridge 异步返回 Promise。
-  // 两种都支持，调用处统一 await。
-  parseJson?: (source: string) => string | Promise<string>;
-};
-
 /**
  * 解析 Markdown 为 Supramark AST v2。
  */

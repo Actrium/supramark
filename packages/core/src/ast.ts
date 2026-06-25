@@ -96,7 +96,9 @@ export const BUILT_IN_DIAGRAM_ENGINES = [
 
 export type BuiltInDiagramEngineId = (typeof BUILT_IN_DIAGRAM_ENGINES)[number];
 
-export type SupramarkDiagramEngineId = BuiltInDiagramEngineId | string;
+// Any string is accepted (custom engines), so the type widens to `string`.
+// The built-in ids live in `BUILT_IN_DIAGRAM_ENGINES` / `isBuiltInDiagramEngine`.
+export type SupramarkDiagramEngineId = string;
 
 export interface SupramarkDiagramNode extends SupramarkBaseNode {
   type: 'diagram';

@@ -52,7 +52,7 @@ export type AdmonitionKind = (typeof ADMONITION_CONTAINER_NAMES)[number];
 // 解析逻辑
 // ============================================================================
 
-function parseTitle(token: ContainerTokenLike, kind: string): string | undefined {
+function parseTitle(token: ContainerTokenLike, _kind: string): string | undefined {
   const info = (token.info || '').trim();
   // info 形如 "note 标题..."，第一个单词是容器名(kind)
   const parts = info.split(/\s+/).filter(Boolean);

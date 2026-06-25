@@ -51,7 +51,7 @@ function isEchartsCore(value: unknown): value is EChartsCore {
  */
 export default function echarts(modules?: unknown[]) {
   const items = modules ?? [];
-  const core = items.find(isEchartsCore) as EChartsCore | undefined;
+  const core = items.find(isEchartsCore);
   const rest = items.filter(m => m !== core);
 
   // 模块注册只需一次（echarts.use 幂等），放在工厂外部。
@@ -59,6 +59,9 @@ export default function echarts(modules?: unknown[]) {
     core.use(rest);
   }
 
+  // RenderFn contract requires a Promise return; echarts SSR is synchronous so
+  // there is no await inside, but the async signature must be kept.
+  // eslint-disable-next-line @typescript-eslint/require-await
   return async (code: string, options?: Options): Promise<string> => {
     options?.signal?.throwIfAborted();
 
@@ -71,7 +74,7 @@ export default function echarts(modules?: unknown[]) {
 
     let option: Record<string, unknown>;
     try {
-      option = JSON.parse(code);
+      option = JSON.parse(code) as Record<string, unknown>;
     } catch (e) {
       throw new DiagramRenderError(
         `ECharts option JSON parse error: ${e instanceof Error ? e.message : String(e)}`,

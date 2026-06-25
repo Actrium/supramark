@@ -5,7 +5,6 @@ import type {
   SupramarkMathInlineNode,
   SupramarkMathBlockNode,
   FeatureConfigWithOptions,
-  SupramarkConfig,
 } from '@supramark/core';
 import { makeFeatureConfigHelpers } from '@supramark/core';
 import { mathExamples } from './examples.js';
