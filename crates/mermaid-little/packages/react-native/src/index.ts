@@ -39,17 +39,29 @@ interface NativeSupramarkMermaidSpecModule {
   default?: NativeSupramarkMermaidModule;
 }
 
-function resolveNative(): NativeSupramarkMermaidModule {
-  // TurboModule (new arch) first.
+// Load the codegen'd TurboModule, tolerating its absence (old arch or a
+// host that hasn't run codegen). Kept separate from the pure selection so
+// the latter stays unit-testable.
+function loadTurboModule(): NativeSupramarkMermaidModule | undefined {
   try {
-    const turbo = (require('./NativeSupramarkMermaid') as NativeSupramarkMermaidSpecModule)
-      .default;
-    if (turbo) return turbo;
+    return (require('./NativeSupramarkMermaid') as NativeSupramarkMermaidSpecModule).default ?? undefined;
   } catch {
     // not codegen'd or new-arch disabled — fall through
+    return undefined;
   }
-  // Bridge-based fallback (old arch).
-  const bridged = NativeModules.SupramarkMermaidNative as NativeSupramarkMermaidModule | undefined;
+}
+
+/**
+ * Pick the native module: TurboModule (new arch) first, then the bridge-based
+ * NativeModules entry (old arch). When neither is linked, return a Proxy that
+ * throws an actionable error on first use rather than at import time. Kept a
+ * pure function of its inputs so the fallback order is unit-testable.
+ */
+export function resolveNative(
+  turbo: NativeSupramarkMermaidModule | null | undefined,
+  bridged: NativeSupramarkMermaidModule | null | undefined
+): NativeSupramarkMermaidModule {
+  if (turbo) return turbo;
   if (!bridged) {
     return new Proxy({} as NativeSupramarkMermaidModule, {
       get() {
@@ -60,7 +72,10 @@ function resolveNative(): NativeSupramarkMermaidModule {
   return bridged;
 }
 
-const native = resolveNative();
+const native = resolveNative(
+  loadTurboModule(),
+  NativeModules.SupramarkMermaidNative as NativeSupramarkMermaidModule | undefined
+);
 
 registerNativeEngineAdapter({
   engine: 'mermaid',

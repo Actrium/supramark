@@ -17,7 +17,18 @@ def safeExtGet(prop, fallback) {
     rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
 }
 
+// Honor the app-level `reactNativeArchitectures` gradle property so a
+// single-ABI app build only configures the ABIs it actually wants, instead
+// of always demanding a staged .so for every listed ABI (an unstaged ABI
+// would otherwise fail at CMake configure). Falls back to all four ABIs,
+// which scripts/{prepare,download}-native.js stage into jniLibs/.
+def nativeArchitectures(defaults) {
+    def value = rootProject.findProperty("reactNativeArchitectures")
+    return value ? value.split(",").collect { it.trim() }.findAll { it } : defaults
+}
+
 apply plugin: "com.android.library"
+apply plugin: "com.facebook.react"
 
 android {
     namespace "com.graphviznative"
@@ -44,7 +55,7 @@ android {
 
         ndk {
             // All four ABIs are built; x86 is required for Intel-host emulators.
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+            abiFilters.addAll(nativeArchitectures(["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]))
         }
     }
 

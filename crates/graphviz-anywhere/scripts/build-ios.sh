@@ -72,6 +72,7 @@ build_ios_arch() {
         -DCMAKE_OSX_SYSROOT="${sdk_path}" \
         -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_MIN_VERSION}" \
         "${GV_CMAKE_COMMON_ARGS[@]}" \
+        "${GV_BISON_EXTRA_ARGS[@]}" \
         "-DCMAKE_C_FLAGS=-target ${target_triple} -O2 -fPIC -fno-lto -fembed-bitcode=off -Wno-incompatible-function-pointer-types" \
         "-DCMAKE_CXX_FLAGS=-target ${target_triple} -O2 -fPIC -fno-lto -fembed-bitcode=off" \
         -DCMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE=NO \

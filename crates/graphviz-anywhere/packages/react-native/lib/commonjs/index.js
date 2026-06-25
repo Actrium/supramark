@@ -7,7 +7,7 @@ exports.default = exports.GraphvizErrorCode = void 0;
 exports.getVersion = getVersion;
 exports.renderDot = renderDot;
 var _reactNative = require("react-native");
-const LINKING_ERROR = `The package '@kookyleo/graphviz-anywhere-rn' doesn't seem to be linked. Make sure:\n\n` + _reactNative.Platform.select({
+const LINKING_ERROR = `The package '@actrium/graphviz-anywhere-rn' doesn't seem to be linked. Make sure:\n\n` + _reactNative.Platform.select({
   ios: '- You have run `pod install`\n',
   macos: '- You have run `pod install`\n',
   android: '',
