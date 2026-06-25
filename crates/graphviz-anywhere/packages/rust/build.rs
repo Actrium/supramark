@@ -17,6 +17,61 @@ fn emit_search_path(dir: &Path, dynamic: bool) {
     }
 }
 
+/// System libraries a *static* `graphviz_api` archive depends on.
+///
+/// The unified `.so`/`.dylib` embeds these via `--whole-archive`, but a static
+/// link must pull them in at the final binary. Emitting them as
+/// `rustc-link-lib` (which Cargo *does* propagate to transitive dependents,
+/// unlike an `-rpath` link-arg) lets downstream test binaries link a static
+/// graphviz with no runtime dependency on — and no rpath to — a shared lib in
+/// the build-output directory.
+/// Link a static archive, isolating it in `OUT_DIR` first.
+///
+/// On macOS the Apple linker has no `-Bstatic`, so rust cannot force a
+/// name-based `-l` to pick the `.a` over a sibling `.dylib` with the same name
+/// in the same search directory — `ld` then prefers the `.dylib` and the binary
+/// ends up with an `@rpath` load command that fails at runtime. Copying the
+/// archive into `OUT_DIR` (which holds no competing dylib) and pointing the
+/// search path there forces a genuine static link. The emitted
+/// `rustc-link-search` / `rustc-link-lib` propagate to downstream binaries
+/// (unlike an `-rpath` link-arg), so transitive test binaries link it too.
+fn emit_static_link(static_lib: &Path, link_name: &str) {
+    if let (Some(out_dir), Some(file_name)) = (
+        env::var_os("OUT_DIR").map(PathBuf::from),
+        static_lib.file_name(),
+    ) {
+        let staged = out_dir.join(file_name);
+        if std::fs::copy(static_lib, &staged).is_ok() {
+            println!("cargo:rustc-link-search=native={}", out_dir.display());
+            println!("cargo:rustc-link-lib=static={link_name}");
+            return;
+        }
+    }
+    // Fallback (e.g. OUT_DIR unset): link straight from the source directory.
+    if let Some(dir) = static_lib.parent() {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
+    println!("cargo:rustc-link-lib=static={link_name}");
+}
+
+fn emit_static_sys_libs(target_os: &str) {
+    let libs: &[&str] = match target_os {
+        // Graphviz 14.x ships C++ libraries (libstdc++), plus expat (HTML
+        // labels), zlib and libm.
+        "linux" => &["stdc++", "expat", "z", "m"],
+        // Apple: libc++ for the C++ libs; expat + zlib live in the SDK. libm is
+        // part of libSystem, so it needs no explicit flag.
+        "macos" => &["c++", "expat", "z"],
+        // build-windows.sh builds Graphviz with expat disabled and the MSVC C++
+        // runtime is linked automatically; zlib is merged into the static lib.
+        "windows" => &[],
+        _ => &[],
+    };
+    for lib in libs {
+        println!("cargo:rustc-link-lib=dylib={lib}");
+    }
+}
+
 fn try_env_override() -> bool {
     let Some(dir) = ["GRAPHVIZ_ANYWHERE_DIR", "GRAPHVIZ_NATIVE_DIR"]
         .iter()
@@ -61,8 +116,8 @@ fn try_prebuilt(manifest_dir: &Path) -> bool {
         let dir = manifest_dir.join("prebuilt").join(subdir);
         let lib = dir.join(lib_name);
         if lib.exists() {
-            emit_search_path(&dir, false);
-            println!("cargo:rustc-link-lib=static=graphviz_api");
+            emit_static_link(&lib, "graphviz_api");
+            emit_static_sys_libs(&target_os);
             return true;
         }
     }
@@ -104,8 +159,8 @@ fn try_prebuilt(manifest_dir: &Path) -> bool {
         };
         let lib = dir.join(lib_name);
         if lib.exists() {
-            emit_search_path(&dir, false);
-            println!("cargo:rustc-link-lib=static=graphviz_api");
+            emit_static_link(&lib, "graphviz_api");
+            emit_static_sys_libs(&target_os);
             return true;
         }
     }
@@ -121,12 +176,14 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
     let target = env::var("TARGET").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    // Determine whether we expect a static or dynamic lib for this target.
-    // Only iOS links statically: a static archive cannot embed the C++ runtime
-    // / expat, so desktop targets — including macOS — link the self-contained
-    // shared library (.so/.dylib). Reuse the single `asset_is_static` policy so
-    // the repo-output path and the download fallback can never diverge.
-    let prefer_static = asset_is_static(&target);
+    // Desktop targets (Linux/macOS/Windows) and iOS link the *static* archive,
+    // pulling its system-library dependencies in via `emit_static_sys_libs`.
+    // This keeps downstream test binaries free of an rpath to the output dir
+    // (Cargo does not propagate `-rpath` link-args to dependents), which
+    // otherwise makes `cargo test --workspace` fail to load the shared lib on
+    // macOS. Android keeps the shared `.so`, loaded by the React-Native runtime.
+    let prefer_static =
+        is_ios_target(&target) || matches!(target_os.as_str(), "linux" | "macos" | "windows");
 
     // ── Collect candidate directories ────────────────────────────────────────
 
@@ -176,10 +233,17 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
         }
 
         if want_static {
-            let static_lib = dir.join("libgraphviz_api.a");
+            // Unix uses `libgraphviz_api.a`; Windows uses the lib.exe-merged
+            // `graphviz_api_static.lib` (plain `graphviz_api.lib` is the import
+            // library for the DLL).
+            let (static_lib, link_name) = if target_os == "windows" {
+                (dir.join("graphviz_api_static.lib"), "graphviz_api_static")
+            } else {
+                (dir.join("libgraphviz_api.a"), "graphviz_api")
+            };
             if static_lib.exists() {
-                emit_search_path(&dir, false);
-                println!("cargo:rustc-link-lib=static=graphviz_api");
+                emit_static_link(&static_lib, link_name);
+                emit_static_sys_libs(&target_os);
                 return true;
             }
         } else {
