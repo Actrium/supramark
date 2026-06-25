@@ -25,6 +25,35 @@ fn emit_search_path(dir: &Path, dynamic: bool) {
 /// unlike an `-rpath` link-arg) lets downstream test binaries link a static
 /// graphviz with no runtime dependency on — and no rpath to — a shared lib in
 /// the build-output directory.
+/// Link a static archive, isolating it in `OUT_DIR` first.
+///
+/// On macOS the Apple linker has no `-Bstatic`, so rust cannot force a
+/// name-based `-l` to pick the `.a` over a sibling `.dylib` with the same name
+/// in the same search directory — `ld` then prefers the `.dylib` and the binary
+/// ends up with an `@rpath` load command that fails at runtime. Copying the
+/// archive into `OUT_DIR` (which holds no competing dylib) and pointing the
+/// search path there forces a genuine static link. The emitted
+/// `rustc-link-search` / `rustc-link-lib` propagate to downstream binaries
+/// (unlike an `-rpath` link-arg), so transitive test binaries link it too.
+fn emit_static_link(static_lib: &Path, link_name: &str) {
+    if let (Some(out_dir), Some(file_name)) = (
+        env::var_os("OUT_DIR").map(PathBuf::from),
+        static_lib.file_name(),
+    ) {
+        let staged = out_dir.join(file_name);
+        if std::fs::copy(static_lib, &staged).is_ok() {
+            println!("cargo:rustc-link-search=native={}", out_dir.display());
+            println!("cargo:rustc-link-lib=static={link_name}");
+            return;
+        }
+    }
+    // Fallback (e.g. OUT_DIR unset): link straight from the source directory.
+    if let Some(dir) = static_lib.parent() {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
+    println!("cargo:rustc-link-lib=static={link_name}");
+}
+
 fn emit_static_sys_libs(target_os: &str) {
     let libs: &[&str] = match target_os {
         // Graphviz 14.x ships C++ libraries (libstdc++), plus expat (HTML
@@ -87,8 +116,7 @@ fn try_prebuilt(manifest_dir: &Path) -> bool {
         let dir = manifest_dir.join("prebuilt").join(subdir);
         let lib = dir.join(lib_name);
         if lib.exists() {
-            emit_search_path(&dir, false);
-            println!("cargo:rustc-link-lib=static=graphviz_api");
+            emit_static_link(&lib, "graphviz_api");
             emit_static_sys_libs(&target_os);
             return true;
         }
@@ -131,8 +159,7 @@ fn try_prebuilt(manifest_dir: &Path) -> bool {
         };
         let lib = dir.join(lib_name);
         if lib.exists() {
-            emit_search_path(&dir, false);
-            println!("cargo:rustc-link-lib=static=graphviz_api");
+            emit_static_link(&lib, "graphviz_api");
             emit_static_sys_libs(&target_os);
             return true;
         }
@@ -215,8 +242,7 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
                 (dir.join("libgraphviz_api.a"), "graphviz_api")
             };
             if static_lib.exists() {
-                emit_search_path(&dir, false);
-                println!("cargo:rustc-link-lib=static={link_name}");
+                emit_static_link(&static_lib, link_name);
                 emit_static_sys_libs(&target_os);
                 return true;
             }
