@@ -346,9 +346,8 @@ mod tests {
         assert!(asset_is_static("aarch64-apple-ios"));
         assert!(asset_is_static("aarch64-apple-ios-sim"));
         assert!(asset_is_static("x86_64-apple-ios"));
-        // Desktop and Android link the self-contained shared library, so a
-        // static `.a` must never be preferred for them (build.rs derives
-        // `prefer_static` from this function).
+        // The published release asset for desktop/Android is the self-contained
+        // shared library (.so/.dylib), not a static archive.
         assert!(!asset_is_static("x86_64-unknown-linux-gnu"));
         assert!(!asset_is_static("aarch64-unknown-linux-gnu"));
         assert!(!asset_is_static("aarch64-apple-darwin"));
