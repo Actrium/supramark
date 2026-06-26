@@ -12,7 +12,7 @@
  *   ./scripts/build-ios.sh                       -> output/ios/Graphviz.xcframework
  *   ./scripts/build-android.sh                   -> output/android/<abi>/lib/libgraphviz_api.so
  *   ./scripts/build-macos.sh                     -> output/macos-universal/lib/libgraphviz_api.dylib
- *   ./scripts/build-windows.sh                   -> output/windows-x86_64/lib/graphviz_api.{lib,dll}
+ *   ./scripts/build-windows.sh                   -> output/windows-x86_64/{lib/graphviz_api.lib, bin/graphviz_api.dll}
  *
  * Then run `npm run prepare-native` (or `node scripts/prepare-native.js`).
  * Idempotent — re-running just refreshes. Missing platforms are skipped with a
@@ -47,8 +47,9 @@ const IOS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'ios', 'Frameworks');
 const MACOS_LIB_SRC = path.join(OUTPUT_DIR, 'macos-universal', 'lib');
 const MACOS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'macos', 'Frameworks');
 
-// ── Windows: the import lib / DLL + header. ──────────────────────────────────
+// ── Windows: the import lib (lib/) + runtime DLL (bin/) + header. ─────────────
 const WINDOWS_LIB_SRC = path.join(OUTPUT_DIR, 'windows-x86_64', 'lib');
+const WINDOWS_BIN_SRC = path.join(OUTPUT_DIR, 'windows-x86_64', 'bin');
 const WINDOWS_INCLUDE_SRC = path.join(OUTPUT_DIR, 'windows-x86_64', 'include');
 const WINDOWS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'windows', 'Frameworks');
 
@@ -142,13 +143,19 @@ function prepareWindows() {
   const libDest = path.join(WINDOWS_FRAMEWORKS_DEST, 'lib');
   const incDest = path.join(WINDOWS_FRAMEWORKS_DEST, 'include');
   copyDirRecursive(WINDOWS_LIB_SRC, libDest);
+  // build-windows.sh installs the runtime graphviz_api.dll under bin/ (CMake
+  // RUNTIME DESTINATION), separate from the import lib in lib/. Stage it too —
+  // otherwise a dynamic-link consumer ships the import lib without its DLL.
+  if (fileExists(WINDOWS_BIN_SRC)) {
+    copyDirRecursive(WINDOWS_BIN_SRC, path.join(WINDOWS_FRAMEWORKS_DEST, 'bin'));
+  }
   if (fileExists(WINDOWS_INCLUDE_SRC)) {
     copyDirRecursive(WINDOWS_INCLUDE_SRC, incDest);
   } else if (fileExists(CAPI_HEADER)) {
     fs.mkdirSync(incDest, { recursive: true });
     fs.copyFileSync(CAPI_HEADER, path.join(incDest, 'graphviz_api.h'));
   }
-  console.log('OK Windows: graphviz_api libs + headers -> windows/Frameworks/');
+  console.log('OK Windows: graphviz_api lib + dll + headers -> windows/Frameworks/');
   return true;
 }
 
