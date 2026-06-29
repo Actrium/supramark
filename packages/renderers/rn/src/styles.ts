@@ -273,6 +273,7 @@ export const defaultStyles = StyleSheet.create({
   },
   // Table styles
   table: {
+    maxWidth: '100%',
     borderWidth: 1,
     borderColor: '#ddd',
     marginBottom: 12,
@@ -284,6 +285,7 @@ export const defaultStyles = StyleSheet.create({
   },
   tableCell: {
     flex: 1,
+    flexShrink: 1,
     padding: 8,
     borderRightWidth: 1,
     borderRightColor: '#ddd',

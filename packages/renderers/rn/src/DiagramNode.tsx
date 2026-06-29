@@ -11,7 +11,7 @@ import { SvgXml } from 'react-native-svg';
 import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/core';
 import { type DiagramRenderResult } from '@supramark/engines';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
-import { normalizeSvg, normalizeSvgLight } from './svgUtils';
+import { normalizeSvg, normalizeSvgLight, stripRootSvgSize } from './svgUtils';
 
 export interface DiagramNodeProps {
   node: SupramarkDiagramNode;
@@ -153,9 +153,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
       );
     }
 
-    scalableSvg = scalableSvg
-      .replace(/(<svg[^>]*)\bwidth="[^"]*"/, '$1')
-      .replace(/(<svg[^>]*)\bheight="[^"]*"/, '$1');
+    scalableSvg = stripRootSvgSize(scalableSvg);
 
     return (
       <View style={[styles.diagram, { width: chartWidth, height }]} onLayout={handleLayout}>

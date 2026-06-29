@@ -110,8 +110,11 @@ jobs:
       - name: Build in-tree wasm packages
         run: bun run build:wasm
 
-      - name: Run tests
+      - name: Run core tests (coverage)
         run: bun run test:core -- --coverage
+
+      - name: Run workspace tests (features / renderers / engines)
+        run: bun run --filter '@supramark/feature-*' --filter '@supramark/rn' --filter '@supramark/engines' --if-present test
 
       - name: Upload coverage to Codecov
         if: matrix.node-version == '20.x'

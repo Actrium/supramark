@@ -140,3 +140,21 @@ export function normalizeSvg(xml: string): string {
 
   return normalized;
 }
+
+/**
+ * 精确删除根 <svg> 的 width/height，让外层容器的尺寸接管渲染。
+ *
+ * 只匹配第一个 <svg>：d2 输出两层嵌套 svg，内层 d2-svg 自带 width/height 且
+ * viewBox 带非零 left/top 偏移；若用全局正则误删内层 width/height，Android 上
+ * react-native-svg 会用 viewBox 维度当固有尺寸并叠加偏移，内容放大裁切只剩左上角。
+ *
+ * replacement 用函数式：避免根属性值里的 $ 被当作替换模式（$& / $` / $'）解释。
+ */
+export function stripRootSvgSize(xml: string): string {
+  const rootSvgMatch = xml.match(/<svg\b([^>]*)>/);
+  if (!rootSvgMatch) return xml;
+  const cleanedAttrs = rootSvgMatch[1]
+    .replace(/\s+width="[^"]*"/, '')
+    .replace(/\s+height="[^"]*"/, '');
+  return xml.replace(rootSvgMatch[0], () => `<svg${cleanedAttrs}>`);
+}

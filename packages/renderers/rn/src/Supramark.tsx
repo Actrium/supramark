@@ -536,8 +536,9 @@ function renderNode(
     }
     case 'table': {
       const table = node;
+      const screenWidth = Dimensions.get('window').width;
       return (
-        <View key={key} style={styles.table}>
+        <View key={key} style={[styles.table, { width: screenWidth }]}>
           {table.children.map((row, index) =>
             renderNode(row, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
           )}
