@@ -49,6 +49,10 @@ import { diagramDotFeature } from '@supramark/feature-diagram-dot';
 import '@actrium/supramark-d2-native-rn';
 import '@actrium/supramark-mermaid-native-rn';
 import '@actrium/supramark-plantuml-native-rn';
+// Side-effect: registers the native Markdown parser adapter against
+// @supramark/core's native registry so parse() routes source through the
+// linked libsupramark_markdown_native static lib (no wasm on RN).
+import '@supramark/markdown-native-rn';
 
 import { DEMOS } from '../demos';
 

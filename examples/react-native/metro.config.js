@@ -21,6 +21,20 @@ const defaultResolver = config.resolver.resolveRequest;
 
 // 配置模块解析,处理 package.json exports 和 imports 字段
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // RN must not load the wasm web parser. plugin-loader.ts re-exports the web
+  // loader whose `await import(specifier)` wasm fallback Metro cannot bundle;
+  // route every plugin-loader / plugin-loader-web request to the native-adapter
+  // loader so parse() goes through the linked libsupramark_markdown_native.
+  if (
+    platform !== 'web' &&
+    /(^|\/)plugin-loader(-web)?(\.(js|ts))?$/.test(moduleName)
+  ) {
+    return {
+      filePath: path.resolve(workspaceRoot, 'packages/core/src/plugin-loader-rn.ts'),
+      type: 'sourceFile',
+    };
+  }
+
   // workspace 内多个 TS 源文件用 Node-ESM 风格的 `./foo.js` 导入兄弟 `.ts`。
   // Metro 默认不会把 `.js` 重映射到 `.ts` —— 我们对仅相对路径 + .js 后缀的
   // 失败 case 退一步尝试同名 .ts / .tsx，保持源码端的 ESM 风格不变。
@@ -40,7 +54,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   // ECharts / Vega-Lite 走纯 JS SVG-string engine。@supramark/engines/src/*
   // 仍静态引用了部分 *-web 包名，Metro 不会跳过未调用的 `await import(...)`，
   // 所以仅把这些 wasm/web 入口短路到空 stub。
-  if (/^@kookyleo\/(d2|mermaid|plantuml)-little-web$|^@kookyleo\/graphviz-anywhere-web$/.test(moduleName)) {
+  if (/^@(kookyleo|actrium)\/(d2|mermaid|plantuml)-little-web$|^@(kookyleo|actrium)\/graphviz-anywhere-web$/.test(moduleName)) {
     return {
       filePath: path.resolve(projectRoot, 'stubs/empty.js'),
       type: 'sourceFile',
@@ -60,6 +74,16 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 
   // @supramark/engines 的 ./rn subpath — Metro 同样不支持 package.json exports
   // 的 subpath；手动映射到 source 文件。
+  // @supramark/core/rn subpath — Metro ignores package.json exports, so map it
+  // to the same RN entry as the bare specifier (index.rn.ts re-exports the
+  // native parser registry @supramark/markdown-native-rn registers into).
+  if (moduleName === '@supramark/core/rn') {
+    return {
+      filePath: path.resolve(workspaceRoot, 'packages/core/src/index.rn.ts'),
+      type: 'sourceFile',
+    };
+  }
+
   if (moduleName === '@supramark/engines/rn') {
     return {
       filePath: path.resolve(workspaceRoot, 'packages/engines/src/rn.ts'),

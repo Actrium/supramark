@@ -33,6 +33,7 @@
     "@actrium/supramark-d2-native-rn": "workspace:*",
     "@actrium/supramark-mermaid-native-rn": "workspace:*",
     "@actrium/supramark-plantuml-native-rn": "workspace:*",
+    "@supramark/markdown-native-rn": "workspace:*",
     "echarts": "^5.5.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
