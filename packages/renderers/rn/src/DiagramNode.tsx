@@ -112,8 +112,9 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
     const heightAttrMatch = svg.match(/<svg[^>]*\bheight="([^"]+)"/);
 
     const { width: screenWidth } = Dimensions.get('window');
-    // 优先用 onLayout 测得的容器宽度；未测到时回退屏宽（减常见内边距）。
-    const containerWidth = measuredWidth > 0 ? measuredWidth : screenWidth - 32;
+    // 图表宽度上限：屏宽的 90%，给气泡 padding 留空间，避免图表贴边。
+    // 用百分比而非固定像素，自适应不同宿主的 padding。
+    const maxChartWidth = screenWidth * 0.9;
     let svgWidth = 0;
     let svgHeight = 0;
 
@@ -128,9 +129,19 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
     if (svgWidth <= 0 && widthAttrMatch) svgWidth = parseFloat(widthAttrMatch[1]);
     if (svgHeight <= 0 && heightAttrMatch) svgHeight = parseFloat(heightAttrMatch[1]);
 
+    // 图表显示宽度：取 svg 内在宽度，clamp 到 [maxChartWidth×0.6, maxChartWidth]。
+    // 图表主动声明宽度撑开气泡（解决 width:100% 在纯图表消息里气泡无撑开
+    // 动力导致塌缩）；值基于 svg 内在属性，不依赖 onLayout，不与父容器形成
+    // 反馈循环（区别于旧代码 width:containerWidth 用 onLayout 回测父宽度）。
+    const minChartWidth = maxChartWidth * 0.6;
+    const intrinsicWidth = svgWidth > 0
+      ? svgWidth
+      : (measuredWidth > 0 ? measuredWidth : maxChartWidth);
+    const chartWidth = Math.max(minChartWidth, Math.min(maxChartWidth, intrinsicWidth));
+
     let height = 300;
     if (svgWidth > 0 && svgHeight > 0) {
-      height = (svgHeight / svgWidth) * containerWidth;
+      height = (svgHeight / svgWidth) * chartWidth;
       height = Math.min(height, 500);
     }
 
@@ -147,8 +158,13 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
       .replace(/(<svg[^>]*)\bheight="[^"]*"/, '$1');
 
     return (
-      <View style={[styles.diagram, { width: containerWidth, height }]} onLayout={handleLayout}>
-        <SvgXml xml={scalableSvg} width={containerWidth} height={height} />
+      <View style={[styles.diagram, { width: chartWidth, height }]} onLayout={handleLayout}>
+        <SvgXml
+          xml={scalableSvg}
+          width={chartWidth}
+          height={height}
+          preserveAspectRatio="xMidYMid meet"
+        />
       </View>
     );
   }
@@ -209,6 +225,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   placeholder: {
+    width: '100%',
     padding: 8,
     borderRadius: 4,
     borderWidth: 1,
@@ -216,6 +233,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   placeholderText: {
     fontSize: 12,
