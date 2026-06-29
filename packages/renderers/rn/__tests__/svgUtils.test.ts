@@ -278,6 +278,40 @@ test('normalizeSvg 输出所有标签 well-formed', () => {
 });
 
 // ============================================================================
+// 祖先 class 按词精确匹配（防子串误命中，对抗探针）
+// ============================================================================
+
+// 祖先段必须按词精确匹配，不能用字符串子串：.node 选择器不能命中 class="nodes"
+//（复数）的祖先。mermaid 里 node/nodes、cluster/clusters 成对共存，子串匹配会染错色。
+test('normalizeSvg .node 不子串命中 class="nodes" 祖先', () => {
+  const input =
+    '<svg><style>.node rect{fill:#9370DB}</style>' +
+    '<g class="nodes"><rect class="basic" width="10" height="10"/></g></svg>';
+  const out = normalizeSvg(input);
+  expect(out).not.toMatch(/fill="#9370DB"/);
+});
+
+// .label 选择器不能命中 class="edgeLabel"/"nodeLabel" 等子串祖先。
+test('normalizeSvg .label 不子串命中 class="edgeLabel" 祖先', () => {
+  const input =
+    '<svg><style>.label rect{fill:#ffffde}</style>' +
+    '<g class="edgeLabel"><rect class="basic" width="10" height="10"/></g></svg>';
+  const out = normalizeSvg(input);
+  expect(out).not.toMatch(/fill="#ffffde"/);
+});
+
+// 自闭合 <g class="x"/> 无 </g>，其 class 不应入栈泄漏给后续兄弟元素。
+test('normalizeSvg 自闭合 <g/> 的 class 不泄漏给兄弟元素', () => {
+  // 自闭合 g 带 class="node"，紧随其后的 rect 在另一个 g 里（class 为空）。
+  // 若自闭合 g 错误入栈，rect 会被误认为有 node 祖先而染上 #9370DB。
+  const input =
+    '<svg><style>.node rect{fill:#9370DB}</style>' +
+    '<g class="node"/><g><rect class="basic" width="10" height="10"/></g></svg>';
+  const out = normalizeSvg(input);
+  expect(out).not.toMatch(/fill="#9370DB"/);
+});
+
+// ============================================================================
 // stripRootSvgSize — 精确删除根 <svg> 的 width/height（来自 upstream/main）
 // ============================================================================
 

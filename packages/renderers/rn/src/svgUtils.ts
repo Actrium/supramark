@@ -97,8 +97,10 @@ function parseSelector(sel: string): SelectorPart[] {
 /**
  * 规则是否匹配某元素：从选择器末段（自身）往前比对祖先栈顶。
  * 末段 tag/classes 必须匹配当前元素；其余段从栈顶往下逐一匹配祖先 g 的 class。
+ * 自身段与祖先段都用数组 Array.includes 按词精确匹配——祖先栈存数组而非 join 字符串，
+ * 避免字符串 String.includes 子串匹配把 .node 误命中 nodes / .label 误命中 edgeLabel。
  */
-function ruleMatches(rule: CssRule, tag: string, classes: string[], ancestorClasses: string[]): boolean {
+function ruleMatches(rule: CssRule, tag: string, classes: string[], ancestorClasses: string[][]): boolean {
   const parts = rule.selector;
   const self = parts[parts.length - 1];
   if (self.tag && self.tag !== tag) return false;
@@ -109,9 +111,9 @@ function ruleMatches(rule: CssRule, tag: string, classes: string[], ancestorClas
     const anc = parts[i];
     let found = false;
     while (ancIdx >= 0) {
-      const ancCls = ancestorClasses[ancIdx];
+      const ancCls: string[] = ancestorClasses[ancIdx];
       ancIdx--;
-      // 祖先段无 tag 约束（mermaid 祖先都是 .class），只要 class 全满足即可。
+      // 祖先 class 按词精确匹配（Array.includes），与自身段语义一致。
       if (anc.classes.length && anc.classes.every(c => ancCls.includes(c))) {
         found = true;
         break;
@@ -148,7 +150,7 @@ export function normalizeSvg(xml: string): string {
   //    对形状/文本元素用祖先链匹配 CSS 规则，按源序合并 decls 后补进属性。
   //    自闭合标签（<rect .../>）的结尾 / 不能被吞进 attrs，否则补色后变成
   //    <rect .../ fill="..."> —— / 落在属性中间，react-native-svg 解析抛错整图空白。
-  const ancestorClasses: string[] = [];
+  const ancestorClasses: string[][] = [];
   let out = xml.replace(
     /<(\/?)(\w+)([^>]*?)(\/?)>/g,
     (full, closing: string, tag: string, attrs: string, selfClose: string) => {
@@ -160,8 +162,10 @@ export function normalizeSvg(xml: string): string {
       }
       // 开标签：g 先入栈再返回（自身不内联），形状/text 内联后返回。
       if (lower === 'g') {
+        // 自闭合 <g .../> 无对应 </g>，不入栈——否则 class 泄漏给兄弟元素且后续 </g> 弹栈错位。
+        if (selfClose) return full;
         const gClasses = attrs.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/).filter(Boolean) ?? [];
-        ancestorClasses.push(gClasses.join(' '));
+        ancestorClasses.push(gClasses);
         return full;
       }
       if (!SHAPE_TAGS.test(lower)) return full;
