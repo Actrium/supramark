@@ -6,7 +6,8 @@
   "types": "src/index.ts",
   "license": "Apache-2.0",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

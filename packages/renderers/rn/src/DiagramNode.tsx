@@ -11,7 +11,7 @@ import { SvgXml } from 'react-native-svg';
 import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/core';
 import { type DiagramRenderResult } from '@supramark/engines';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
-import { normalizeSvg, normalizeSvgLight } from './svgUtils';
+import { normalizeSvg, normalizeSvgLight, stripRootSvgSize } from './svgUtils';
 
 export interface DiagramNodeProps {
   node: SupramarkDiagramNode;
@@ -142,18 +142,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({ node, diagramConfig })
       );
     }
 
-    // 只删除根 <svg> 的 width/height，让 SvgXml 的 width="100%" + 算好的 height 接管。
-    // 必须只精确匹配第一个 <svg>：d2 输出的是两层嵌套 svg——外层无 width/height，
-    // 内层 d2-svg 带 width/height 且 viewBox="left top W H"（left/top 是 padding 偏移，常非零）。
-    // 若用全局正则误删内层 width/height，Android 上 react-native-svg 会用 viewBox 维度
-    // 当固有尺寸并叠加 left/top 偏移，内容被放大裁切，只剩左上角可见。
-    const rootSvgMatch = scalableSvg.match(/<svg\b([^>]*)>/);
-    if (rootSvgMatch) {
-      const cleanedAttrs = rootSvgMatch[1]
-        .replace(/\s+width="[^"]*"/, '')
-        .replace(/\s+height="[^"]*"/, '');
-      scalableSvg = scalableSvg.replace(rootSvgMatch[0], `<svg${cleanedAttrs}>`);
-    }
+    scalableSvg = stripRootSvgSize(scalableSvg);
 
     return (
       <View style={[styles.diagram, { width: containerWidth, height }]} onLayout={handleLayout}>
