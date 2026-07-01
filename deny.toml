@@ -117,4 +117,14 @@ ignore = [
     # url -> plantuml-little (duplicate idna in tree). Low real risk for a
     # markdown/diagram toolchain; revisit when url/plantuml dedupe idna.
     "RUSTSEC-2024-0421",
+
+    # ttf-parser is unmaintained (RUSTSEC-2026-0192); the author has
+    # stopped maintenance and future work moved to the skrifa / fontikos
+    # ecosystem. Core parsing dep of font-metrics (TtfParserMetrics) and
+    # d2-little, and through font-metrics reaches mermaid-little /
+    # plantuml-little — the measurement backbone of nearly every -little
+    # crate. Migrating to skrifa requires rewriting font-metrics' trait
+    # impl and is a larger tracking task; allow it here for now so
+    # cargo-deny stops blocking CI.
+    "RUSTSEC-2026-0192",
 ]
