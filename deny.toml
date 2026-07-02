@@ -127,4 +127,18 @@ ignore = [
     # impl and is a larger tracking task; allow it here for now so
     # cargo-deny stops blocking CI.
     "RUSTSEC-2026-0192",
+
+    # quick-xml 0.39.4 DoS advisories (RUSTSEC-2026-0194 O(N²) attribute
+    # duplicate-check CPU exhaustion, and RUSTSEC-2026-0195 unbounded
+    # namespace-declaration memory exhaustion in NsReader); transitive via
+    # plist -> syntect -> two-face -> supramark-code-highlight, which parses
+    # bundled/trusted syntax-definition data, not untrusted XML, so the real
+    # availability risk is low. A safe in-semver upgrade is currently
+    # impossible: plist 1.9.0 pins quick-xml to ^0.39.2, and syntect 5.3.0
+    # pins plist to ^1.3, so reaching the fixed quick-xml >=0.41 requires a
+    # syntect major-version bump that would ripple through code-highlight /
+    # two-face. Remove these two entries once syntect (or a plist 1.x with
+    # quick-xml >=0.41) lands.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
