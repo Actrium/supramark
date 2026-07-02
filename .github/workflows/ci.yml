@@ -179,3 +179,131 @@ jobs:
             echo "::endgroup::"
           done
 
+  # plantuml-little Rust unit tests (parser / layout / render). Issue #46:
+  # these never ran in CI because building the crate pulls graphviz-anywhere's
+  # build.rs, which needs a prebuilt libgraphviz_api. There is no published
+  # release asset, so we build the static lib from the vendored Graphviz
+  # submodule once (cached) and run `cargo test --lib`.
+  #
+  # The Java-shelling byte-exact reference-SVG suite (tests/*.rs, behind
+  # `--features metrics-ttf-parser`) is intentionally NOT run here — that
+  # heavier tier is tracked as a separate follow-up. `--lib` scopes to the
+  # src/ unit tests, which need the crate to link but not Java.
+  plantuml-tests:
+    name: plantuml-little Rust unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: false  # graphviz submodule fetched only on cache miss
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install graphviz build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake bison flex
+
+      # Cache key busts exactly when the pinned graphviz version or the build
+      # script changes; otherwise the prebuilt static lib is reused.
+      - name: Resolve graphviz submodule SHA (cache key)
+        id: gvsha
+        run: |
+          sha=$(git ls-tree HEAD crates/graphviz-anywhere/graphviz | awk '{print $3}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached libgraphviz_api
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: crates/graphviz-anywhere/output/linux-x86_64
+          key: graphviz-linux-x86_64-${{ steps.gvsha.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+
+      # On cache miss only: shallow-fetch the GitLab graphviz submodule and
+      # build the unified static library. On hit this step is skipped.
+      - name: Build libgraphviz_api from submodule (cache miss only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 crates/graphviz-anywhere/graphviz
+          bash crates/graphviz-anywhere/scripts/build-linux.sh
+
+      # graphviz-anywhere's build.rs statically links
+      # output/linux-x86_64/lib/libgraphviz_api.a via try_repo_output(), so no
+      # GRAPHVIZ_* env var or LD_LIBRARY_PATH is needed.
+      - name: cargo test -p plantuml-little --lib
+        run: cargo test -p plantuml-little --lib -- --nocapture
+
+  # plantuml-little byte-exact reference-SVG suite (issue #46, "Full" tier).
+  # The committed goldens in tests/reference/ are byte-exact against the wasm
+  # Graphviz build (@kookyleo/graphviz-anywhere-web@0.1.8), so the suite runs
+  # with PLANTUML_LITTLE_TEST_BACKEND=wasm for cross-platform determinism.
+  # scripts/check_reference_failures.sh runs `cargo test --test reference_tests`
+  # and requires the failing set to equal tests/known_failures.txt EXACTLY —
+  # bidirectional drift detection. This makes the job gating-green today (the
+  # ~50 known failures are the open render bugs) while catching every NEW
+  # regression or unexpectedly-healed fixture. No Java is needed (unlike the
+  # special_ext_reference_* suites, which are out of scope here).
+  plantuml-reference:
+    name: plantuml-little reference-SVG suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: false  # graphviz submodule fetched only on cache miss
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install graphviz build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake bison flex
+
+      - name: Resolve graphviz submodule SHA (cache key)
+        id: gvsha
+        run: |
+          sha=$(git ls-tree HEAD crates/graphviz-anywhere/graphviz | awk '{print $3}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached libgraphviz_api
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: crates/graphviz-anywhere/output/linux-x86_64
+          key: graphviz-linux-x86_64-${{ steps.gvsha.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+
+      - name: Build libgraphviz_api from submodule (cache miss only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 crates/graphviz-anywhere/graphviz
+          bash crates/graphviz-anywhere/scripts/build-linux.sh
+
+      # The wasm dot backend needs Node 22+ (README) and the published
+      # @kookyleo/graphviz-anywhere-web@0.1.8 npm tarball.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache wasm-backend node_modules
+        uses: actions/cache@v4
+        with:
+          path: crates/plantuml-little/tests/support/node_modules
+          key: plantuml-wasm-backend-${{ hashFiles('crates/plantuml-little/tests/support/package-lock.json', 'crates/plantuml-little/tests/support/package.json') }}
+
+      - name: Install wasm dot backend
+        run: npm install
+        working-directory: crates/plantuml-little/tests/support
+
+      # check_reference_failures.sh runs `cargo test --test reference_tests`
+      # and diffs the failing set against tests/known_failures.txt. The wasm
+      # backend is opted in via the env var; the native libgraphviz_api is
+      # statically linked at build time (no LD_LIBRARY_PATH needed).
+      - name: Run reference-SVG suite (xfail vs known_failures.txt)
+        env:
+          PLANTUML_LITTLE_TEST_BACKEND: wasm
+        run: bash crates/plantuml-little/scripts/check_reference_failures.sh
+
