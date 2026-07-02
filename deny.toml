@@ -125,4 +125,14 @@ ignore = [
     # low. Remove this entry once plist/syntect ship a quick-xml build with
     # the upstream fix (>= the patched 0.39.x / 0.40 release).
     "RUSTSEC-2026-0194",
+
+    # ttf-parser is unmaintained (RUSTSEC-2026-0192); the author has
+    # stopped maintenance and future work moved to the skrifa / fontikos
+    # ecosystem. Core parsing dep of font-metrics (TtfParserMetrics) and
+    # d2-little, and through font-metrics reaches mermaid-little /
+    # plantuml-little — the measurement backbone of nearly every -little
+    # crate. Migrating to skrifa requires rewriting font-metrics' trait
+    # impl and is a larger tracking task; allow it here for now so
+    # cargo-deny stops blocking CI.
+    "RUSTSEC-2026-0192",
 ]
