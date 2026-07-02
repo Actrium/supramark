@@ -312,6 +312,98 @@ test('normalizeSvg 自闭合 <g/> 的 class 不泄漏给兄弟元素', () => {
 });
 
 // ============================================================================
+// Review nit hardening — one before/after regression probe per fix
+// ============================================================================
+
+// Nit 1: rewriting a <text> style must use a function replacer. A literal-string
+// replacement lets $& / $` / $' / $n inside the new style value be interpreted as
+// replacement patterns, corrupting the attribute value.
+test('normalizeSvg <text> style rewrite is not mangled by $ replacement patterns', () => {
+  const input = `<svg><text style="font-family:'a$&b';font-size:16px">x</text></svg>`;
+  const out = normalizeSvg(input);
+  // After fix: the style value survives verbatim, with the default fill appended.
+  expect(out).toContain(`<text style="font-family:'a$&b';font-size:16px; fill: #333">`);
+  // Before fix: $& expands to the whole match, producing a nested style=" ('a' then style=").
+  expect(out).not.toContain('astyle=');
+});
+
+// Nit 2: a self-closing <text .../> must stay />-terminated after default-fill. The
+// trailing slash must be captured separately and re-emitted, otherwise it lands in the
+// middle of the attrs as the malformed <text ... fill="red"/ style=...>.
+test('normalizeSvg self-closing <text/> stays />-terminated after styling', () => {
+  const input = '<svg><style>.x{fill:red}</style><text class="x"/></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>/)?.[0] ?? '';
+  expect(text).toMatch(/fill="red"/); // fill comes from the step-2 inlining
+  expect(text).toMatch(/\/>$/); // the tag is />-terminated
+  expect(out).not.toMatch(/\/\s+\w+="[^"]*"/); // no "slash followed by attribute" malformation
+});
+
+// Nit 3: the "already has attr" guard uses (^|\s), not \b. \b also matches after the
+// hyphen in data-fill / data-stroke, so data-fill="x" would be mistaken for an existing
+// fill and skip the real CSS inlining.
+test('normalizeSvg data-fill does not block real CSS fill inlining', () => {
+  const input =
+    '<svg><style>.c{fill:red}</style><rect data-fill="x" class="c" width="1" height="1"/></svg>';
+  const out = normalizeSvg(input);
+  const rect = out.match(/<rect[^>]*>/)?.[0] ?? '';
+  expect(rect).toMatch(/fill="red"/); // data-fill is "x"; fill="red" can only be the inlined one
+  expect(rect).toContain('data-fill="x"');
+});
+
+// Nit 4: line / polyline are stroke-bearing shapes; they must receive the CSS stroke and
+// must not be given a spurious solid fill.
+test('normalizeSvg <line> receives CSS stroke without a forced fill', () => {
+  const input =
+    '<svg><style>.edge{stroke:#333}</style><line class="edge" x1="0" y1="0" x2="10" y2="10"/></svg>';
+  const out = normalizeSvg(input);
+  const line = out.match(/<line[^>]*>/)?.[0] ?? '';
+  expect(line).toMatch(/stroke="#333"/);
+  expect(line).not.toContain('fill='); // stroke-only: never invent a fill when CSS omits it
+});
+
+test('normalizeSvg <polyline> matches a class selector and gets stroke', () => {
+  const input =
+    '<svg><style>.grid{stroke:#ccc}</style><polyline class="grid" points="0,0 10,10"/></svg>';
+  const out = normalizeSvg(input);
+  const poly = out.match(/<polyline[^>]*>/)?.[0] ?? '';
+  expect(poly).toMatch(/stroke="#ccc"/);
+});
+
+// Nit 4b: a stroked shape whose CSS explicitly sets fill:none must keep fill="none"
+// (it must not be treated as "no fill" and dropped).
+test('normalizeSvg <line> keeps an explicit CSS fill:none', () => {
+  const input =
+    '<svg><style>.edge{stroke:#333;fill:none}</style><line class="edge" x1="0" y1="0" x2="1" y2="1"/></svg>';
+  const out = normalizeSvg(input);
+  const line = out.match(/<line[^>]*>/)?.[0] ?? '';
+  expect(line).toMatch(/fill="none"/);
+  expect(line).toMatch(/stroke="#333"/);
+});
+
+// Nit 5: the foreignObject -> text label color should inherit the inner span/div inline
+// color; it falls back to #333 when no color is present.
+test('normalizeSvg foreignObject label inherits the inner color', () => {
+  const input =
+    '<svg><g transform="translate(10,10)">' +
+    '<foreignObject width="40" height="16"><div xmlns="x"><span style="color:#ff0000">Hi</span></div></foreignObject>' +
+    '</g></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>Hi<\/text>/)?.[0] ?? '';
+  expect(text).toMatch(/fill:\s*#ff0000/);
+});
+
+test('normalizeSvg foreignObject falls back to #333 and ignores background-color', () => {
+  const input =
+    '<svg><foreignObject width="40" height="16">' +
+    '<div style="background-color:#fff"><span class="nodeLabel">Plain</span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>Plain<\/text>/)?.[0] ?? '';
+  expect(text).toMatch(/fill:\s*#333/);
+  expect(text).not.toMatch(/#fff/);
+});
+
+// ============================================================================
 // stripRootSvgSize — 精确删除根 <svg> 的 width/height（来自 upstream/main）
 // ============================================================================
 

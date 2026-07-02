@@ -127,7 +127,9 @@ function ruleMatches(rule: CssRule, tag: string, classes: string[], ancestorClas
 /** 双引号转单引号，避免拼进 style="..." 产生嵌套双引号（d2 font-family "d2-<hash>-font-bold"）。 */
 const sanitizeCssValue = (v: string): string => v.replace(/"/g, "'");
 
-const SHAPE_TAGS = /^(rect|path|circle|ellipse|polygon|text)$/;
+// line / polyline are stroke-only; the fill logic below stays conservative and only
+// emits a fill when the CSS supplies one (e.g. fill:none), never a spurious default.
+const SHAPE_TAGS = /^(rect|path|circle|ellipse|polygon|line|polyline|text)$/;
 
 /**
  * 规范化 SVG（用于 mermaid / d2）：
@@ -185,12 +187,14 @@ export function normalizeSvg(xml: string): string {
       const strokeWidth = pick('stroke-width');
       const fontFamily = pick('font-family');
       const fontSize = pick('font-size');
+      // "already has attr" guards use (^|\s) rather than \b: \b also matches after the
+      // hyphen in data-fill / data-stroke, which would wrongly skip real CSS inlining.
       const extra =
-        (fill && !/\bfill=/.test(attrs) ? ` fill="${sanitizeCssValue(fill)}"` : '') +
-        (stroke && !/\bstroke=/.test(attrs) ? ` stroke="${sanitizeCssValue(stroke)}"` : '') +
-        (strokeWidth && !/\bstroke-width=/.test(attrs) ? ` stroke-width="${sanitizeCssValue(strokeWidth)}"` : '') +
-        (fontFamily && !/\bfont-family=/.test(attrs) ? ` font-family="${sanitizeCssValue(fontFamily)}"` : '') +
-        (fontSize && !/\bfont-size=/.test(attrs) ? ` font-size="${sanitizeCssValue(fontSize)}"` : '');
+        (fill && !/(?:^|\s)fill=/.test(attrs) ? ` fill="${sanitizeCssValue(fill)}"` : '') +
+        (stroke && !/(?:^|\s)stroke=/.test(attrs) ? ` stroke="${sanitizeCssValue(stroke)}"` : '') +
+        (strokeWidth && !/(?:^|\s)stroke-width=/.test(attrs) ? ` stroke-width="${sanitizeCssValue(strokeWidth)}"` : '') +
+        (fontFamily && !/(?:^|\s)font-family=/.test(attrs) ? ` font-family="${sanitizeCssValue(fontFamily)}"` : '') +
+        (fontSize && !/(?:^|\s)font-size=/.test(attrs) ? ` font-size="${sanitizeCssValue(fontSize)}"` : '');
       return `<${tag}${attrs}${extra}${selfClose}>`;
     }
   );
@@ -199,29 +203,34 @@ export function normalizeSvg(xml: string): string {
   //    兜底前必须同时检查 style 和属性：step-2 可能已把 class 的 fill/font-family 内联成
   //    属性（fill="..."），此时不能再往 style 补默认值——style 优先级高于属性，会覆盖掉
   //    step-2 内联的正确颜色。
-  out = out.replace(/<text([^>]*?)>/gi, (_m, attrs: string) => {
-    const hasFillAttr = /\bfill=/.test(attrs);
-    const hasFontFamilyAttr = /\bfont-family=/.test(attrs);
-    const hasFontSizeAttr = /\bfont-size=/.test(attrs);
+  // Capture an optional trailing slash so a self-closing <text .../> stays />-terminated
+  // after we append style; otherwise the slash lands mid-attrs and breaks parsing.
+  out = out.replace(/<text([^>]*?)(\/?)>/gi, (_m, attrs: string, slash: string) => {
+    // (^|\s) guards (not \b): keep data-fill / data-font-size from masking real attributes.
+    const hasFillAttr = /(?:^|\s)fill=/.test(attrs);
+    const hasFontFamilyAttr = /(?:^|\s)font-family=/.test(attrs);
+    const hasFontSizeAttr = /(?:^|\s)font-size=/.test(attrs);
     const styleMatch = attrs.match(/\bstyle="([^"]*)"/);
     if (!styleMatch) {
       // 无 style 的 text：属性已有全部三者就不补，否则补缺的到 style。
       const needFill = !hasFillAttr;
       const needFontFamily = !hasFontFamilyAttr;
       const needFontSize = !hasFontSizeAttr;
-      if (!needFill && !needFontFamily && !needFontSize) return `<text${attrs}>`;
+      if (!needFill && !needFontFamily && !needFontSize) return `<text${attrs}${slash}>`;
       const decls =
         (needFill ? `fill: ${defaultTextFill}; ` : '') +
         (needFontFamily ? `font-family: ${defaultFontFamily}; ` : '') +
         (needFontSize ? `font-size: 16px; ` : '');
-      return `<text${attrs} style="${decls.trim().replace(/;$/, '')}">`;
+      return `<text${attrs} style="${decls.trim().replace(/;$/, '')}"${slash}>`;
     }
     let style = styleMatch[1];
     // style 里缺、且属性里也没有时才补默认值。
     if (!/fill:/.test(style) && !hasFillAttr) style += `; fill: ${defaultTextFill}`;
     if (!/font-family:/.test(style) && !hasFontFamilyAttr) style += `; font-family: ${defaultFontFamily}`;
     if (!/font-size:/.test(style) && !hasFontSizeAttr) style += `; font-size: 16px`;
-    return `<text${attrs.replace(/\bstyle="[^"]*"/, `style="${style}"`)}>`;
+    // Function replacer: a literal string would let $& / $` / $' / $n inside the new style
+    // value be interpreted as replacement patterns and corrupt it (as stripRootSvgSize does).
+    return `<text${attrs.replace(/\bstyle="[^"]*"/, () => `style="${style}"`)}${slash}>`;
   });
 
   // 4. 删除 <style>（颜色已内联）。
@@ -244,7 +253,12 @@ export function normalizeSvg(xml: string): string {
     if (!text) return '';
     const x = w / 2;
     const y = h * 0.7;
-    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${defaultTextFill}; font-family: ${defaultFontFamily}; font-size: 16px">${text}</text>`;
+    // Prefer the label's own inline text color (span/div style="color:..."). The delimiter
+    // class [;"'\s] before "color:" avoids matching background-color, so we only override
+    // when a text color is clearly present; otherwise fall back to the default.
+    const colorMatch = fo.match(/[;"'\s]color\s*:\s*([^;"']+)/i);
+    const labelFill = colorMatch ? sanitizeCssValue(colorMatch[1].trim()) : defaultTextFill;
+    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: 16px">${text}</text>`;
   });
 
   // 6. 保护 <text>，删 xml 头/注释 + 标签间空白，再恢复。
