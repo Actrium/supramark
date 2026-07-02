@@ -40,7 +40,7 @@ export interface GraphvizLoadOptions {
  *
  * @example
  * ```ts
- * import { Graphviz } from '@kookyleo/graphviz-anywhere-web';
+ * import { Graphviz } from '@actrium/graphviz-anywhere-web';
  *
  * const gv = await Graphviz.load();
  * const svg = gv.dot('digraph { a -> b; b -> c; }');

@@ -56,7 +56,7 @@ export async function loadDefaultVizWasmModule() {
     let vizModuleFactory;
     try {
         // Published-package case: resolved via the `./wasm` export.
-        vizModuleFactory = (await import('@kookyleo/graphviz-anywhere-web/wasm'));
+        vizModuleFactory = (await import('@actrium/graphviz-anywhere-web/wasm'));
     }
     catch {
         try {
