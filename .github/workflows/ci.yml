@@ -179,3 +179,59 @@ jobs:
             echo "::endgroup::"
           done
 
+  # plantuml-little Rust unit tests (parser / layout / render). Issue #46:
+  # these never ran in CI because building the crate pulls graphviz-anywhere's
+  # build.rs, which needs a prebuilt libgraphviz_api. There is no published
+  # release asset, so we build the static lib from the vendored Graphviz
+  # submodule once (cached) and run `cargo test --lib`.
+  #
+  # The Java-shelling byte-exact reference-SVG suite (tests/*.rs, behind
+  # `--features metrics-ttf-parser`) is intentionally NOT run here — that
+  # heavier tier is tracked as a separate follow-up. `--lib` scopes to the
+  # src/ unit tests, which need the crate to link but not Java.
+  plantuml-tests:
+    name: plantuml-little Rust unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: false  # graphviz submodule fetched only on cache miss
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install graphviz build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake bison flex
+
+      # Cache key busts exactly when the pinned graphviz version or the build
+      # script changes; otherwise the prebuilt static lib is reused.
+      - name: Resolve graphviz submodule SHA (cache key)
+        id: gvsha
+        run: |
+          sha=$(git ls-tree HEAD crates/graphviz-anywhere/graphviz | awk '{print $3}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached libgraphviz_api
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: crates/graphviz-anywhere/output/linux-x86_64
+          key: graphviz-linux-x86_64-${{ steps.gvsha.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+
+      # On cache miss only: shallow-fetch the GitLab graphviz submodule and
+      # build the unified static library. On hit this step is skipped.
+      - name: Build libgraphviz_api from submodule (cache miss only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 crates/graphviz-anywhere/graphviz
+          bash crates/graphviz-anywhere/scripts/build-linux.sh
+
+      # graphviz-anywhere's build.rs statically links
+      # output/linux-x86_64/lib/libgraphviz_api.a via try_repo_output(), so no
+      # GRAPHVIZ_* env var or LD_LIBRARY_PATH is needed.
+      - name: cargo test -p plantuml-little --lib
+        run: cargo test -p plantuml-little --lib -- --nocapture
+
