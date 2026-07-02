@@ -179,3 +179,43 @@ jobs:
             echo "::endgroup::"
           done
 
+  # plantuml-little's Rust tests (parser / layout / render unit tests) do not
+  # run in the "Test & Build" job — that job only exercises the RN JS wrappers,
+  # and `cargo test -p plantuml-little` needs the graphviz-anywhere native lib,
+  # which isn't on a clean runner. Build that lib once (cached), then run the
+  # library unit tests. `--lib` skips the byte-exact reference suite, which
+  # additionally needs a local Java PlantUML jar; that heavier suite can be a
+  # follow-up job. See the CI-coverage tracking issue.
+  plantuml-rust-tests:
+    name: plantuml-little Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Graphviz build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake bison flex pkg-config
+
+      - name: Graphviz submodule revision
+        id: gv
+        run: echo "sha=$(git rev-parse HEAD:crates/graphviz-anywhere/graphviz)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Graphviz native lib
+        id: gv-cache
+        uses: actions/cache@v4
+        with:
+          path: crates/graphviz-anywhere/output
+          key: graphviz-api-linux-x86_64-${{ steps.gv.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/scripts/**') }}
+
+      - name: Build Graphviz native lib
+        if: steps.gv-cache.outputs.cache-hit != 'true'
+        run: (cd crates/graphviz-anywhere && ./scripts/build-linux.sh)
+
+      - name: cargo test -p plantuml-little (lib unit tests)
+        run: cargo test -p plantuml-little --lib
+

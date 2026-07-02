@@ -1367,6 +1367,20 @@ mod tests {
     }
 
     #[test]
+    fn detect_sequence_with_bracketed_message() {
+        // A sequence message may contain brackets (e.g. an array index or an
+        // `[optional]` note). The `[...]` + arrow heuristic that sets
+        // `has_class_relation` is ambiguous and must NOT, on its own, flip such
+        // a diagram to Class — only a class-exclusive relation (`*--`, `o--`,
+        // `<|`, `|>`, ...) may do that.
+        let content = "Alice -> Bob : items[0]\nBob --> Alice : ok\n";
+        assert!(matches!(
+            detect_diagram_type(content),
+            DiagramHint::Sequence
+        ));
+    }
+
+    #[test]
     fn detect_sequence_by_arrow() {
         let content = "Alice -> Bob : Hello\n";
         assert!(matches!(
