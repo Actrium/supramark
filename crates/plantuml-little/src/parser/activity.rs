@@ -64,12 +64,16 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
     let mut old_seen_nodes = std::collections::HashSet::<String>::new();
     let mut is_old_style = false;
     let mut old_graph = OldGraphBuilder::new();
-    // Index (into `events`) of the most recent `RepeatWhile` event, so a
-    // following `-> label;` line can be attached as that loop's exit (`not`)
+    // Most recent `RepeatWhile` event, remembered as `(event_idx, line_num)` so
+    // a following `-> label;` line can be attached as that loop's exit (`not`)
     // label.  PlantUML's repeat syntax allows the exit label on its own line:
     //   repeat while (cond) is (yes)
     //   -> no;
-    let mut last_repeat_while_event_idx: Option<usize> = None;
+    // The exit-label line must come IMMEDIATELY after the `repeat while` line
+    // (adjacency checked via `line_num`); this prevents a much-later, unrelated
+    // `-> label;` from being misattached to a loop that had no exit label
+    // (review #44).
+    let mut last_repeat_while: Option<(usize, usize)> = None;
 
     for (line_num, line) in block.lines().enumerate() {
         let line_num = line_num + 1; // 1-based for diagnostics
@@ -536,7 +540,7 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
                 }
             };
             debug!("line {line_num}: repeat while ({condition}) is={is_text:?} not={not_text:?}");
-            last_repeat_while_event_idx = Some(events.len());
+            last_repeat_while = Some((events.len(), line_num));
             events.push(ActivityEvent::RepeatWhile {
                 condition,
                 is_text,
@@ -628,8 +632,12 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
         //   -> no;
         // Without this, the line falls through to old-style arrow parsing
         // which rejects it (issue #31: "old-style arrow has no source").
-        if let Some(rw_idx) = last_repeat_while_event_idx {
-            if trimmed.starts_with("->") {
+        // The attach is gated on line adjacency (`line_num == rw_line + 1`) so
+        // only the label immediately following the `repeat while` qualifies —
+        // a stray `-> label;` further down never attaches to a prior loop
+        // (review #44).
+        if let Some((rw_idx, rw_line)) = last_repeat_while {
+            if line_num == rw_line + 1 && trimmed.starts_with("->") {
                 let raw = trimmed[2..].trim().trim_end_matches(';').trim();
                 if !raw.is_empty() {
                     if let Some(ActivityEvent::RepeatWhile { not_text, .. }) =
@@ -640,10 +648,13 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
                             debug!("line {line_num}: repeat exit label -> {raw:?}");
                         }
                     }
-                    last_repeat_while_event_idx = None;
+                    last_repeat_while = None;
                     continue;
                 }
             }
+            // Any other line (or a `->` that is not immediately adjacent)
+            // closes the window for attaching an exit label to this loop.
+            last_repeat_while = None;
         }
 
         // --- Old-style arrow lines: [source] --> [label] target ---
@@ -1864,5 +1875,27 @@ mod tests {
         .unwrap();
         let diagram = parse_activity_diagram(&src).unwrap();
         assert_eq!(diagram.note_max_width, Some(100.0));
+    }
+
+    // ── issue #31: repeat-while exit label on its own line ──────────────
+    //   repeat while (more data?) is (yes)
+    //   -> no;
+    // The `-> no;` line must attach as the loop's `not_text` exit label
+    // instead of falling through to old-style arrow parsing (which rejects
+    // it with "old-style arrow has no source").  Gated on line adjacency so
+    // only a label immediately following the `repeat while` qualifies.
+    #[test]
+    fn parse_repeat_while_exit_label_on_own_line() {
+        let src = "@startuml\nrepeat\n:read;\nrepeat while (more data?) is (yes)\n-> no;\n@enduml";
+        let diagram = parse_activity_diagram(src).unwrap();
+        let rw = diagram
+            .events
+            .iter()
+            .find_map(|e| match e {
+                ActivityEvent::RepeatWhile { not_text, .. } => Some(not_text.clone()),
+                _ => None,
+            })
+            .expect("expected a RepeatWhile event");
+        assert_eq!(rw, Some("no".to_string()));
     }
 }

@@ -3485,14 +3485,40 @@ fn build_while_loopback_edge(
     let end_right = ed.x + ed.width;
     let end_cy = ed.y + ed.height / 2.0;
 
-    // Snake out to the right of whichever diamond is wider, then up/down to
-    // the while diamond's vertical centre, then back left to its right point.
-    let max_right = while_right.max(end_right);
-    let loop_x = max_right + 20.0;
+    // The vertical snake segment must clear the ENTIRE loop body, not just the
+    // two diamonds — otherwise a body wider than the diamonds (e.g. a wide
+    // action or if/else branch inside the loop) has the loop-back line routed
+    // through it (review #44).  Scan all in-flow nodes for the true right edge,
+    // mirroring `build_repeat_loopback_edge`.
+    let mut content_max_right: f64 = while_right.max(end_right);
+    for node in nodes {
+        if !matches!(
+            node.kind,
+            ActivityNodeKindLayout::Action
+                | ActivityNodeKindLayout::BackwardAction
+                | ActivityNodeKindLayout::Diamond
+                | ActivityNodeKindLayout::Hexagon { .. }
+                | ActivityNodeKindLayout::IfDiamond { .. }
+                | ActivityNodeKindLayout::Start
+                | ActivityNodeKindLayout::Stop
+                | ActivityNodeKindLayout::End
+                | ActivityNodeKindLayout::ForkBar
+        ) {
+            continue;
+        }
+        let right = node.x + node.width;
+        if right > content_max_right {
+            content_max_right = right;
+        }
+    }
+    // Snake out to the right of the widest in-flow node, then up/down to the
+    // while diamond's vertical centre, then back left to its right point.
+    let loop_x = content_max_right + 20.0;
     // Extra width beyond the current content right edge: the snake line sits
-    // at `loop_x`, so reserve `loop_x - max_right` plus a small arrow/margin
-    // slack so the line and its arrowhead stay inside the viewport.
-    let extra_right = (loop_x - max_right) + 6.0;
+    // at `loop_x`, so reserve `loop_x - content_max_right` plus a small
+    // arrow/margin slack so the line and its arrowhead stay inside the
+    // viewport.
+    let extra_right = (loop_x - content_max_right) + 6.0;
 
     let points = vec![
         (end_right, end_cy),

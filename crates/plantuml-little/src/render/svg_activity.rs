@@ -1170,29 +1170,42 @@ fn render_diamond(sg: &mut SvgGraphic, node: &ActivityNodeLayout, bg: &str, bord
     // Condition text centred inside the diamond (11pt sans-serif, matching the
     // hexagon/if-diamond condition font size).  Only drawn when present, so
     // the empty `repeat` start diamond is unaffected.
+    //
+    // `node.text` may carry multiple lines: `while (cond)` is single-line, but
+    // an `elseif` diamond carries `"{condition}\n[{label}]"` (see
+    // layout/activity.rs).  `svg_text` does not line-break, so we split on
+    // `\n` and centre the whole block, rendering each line on its own baseline
+    // — mirroring the hexagon south-label loop.  Without this the `\n`
+    // collapses into one stretched line (review #44).
     if !node.text.is_empty() {
         let font_size = HEXAGON_LABEL_FONT_SIZE_RENDER;
-        let text_w = font_metrics::text_width(&node.text, "SansSerif", font_size, false, false);
         let line_h = font_metrics::line_height("SansSerif", font_size, false, false);
         let ascent = font_metrics::ascent("SansSerif", font_size, false, false);
-        let text_x = x + (w - text_w) / 2.0;
-        let text_y = y + (h - line_h) / 2.0 + ascent;
+        let lines: Vec<&str> = node.text.split('\n').collect();
+        let block_h = line_h * lines.len() as f64;
+        // Top of the centred text block.
+        let block_top = y + (h - block_h) / 2.0;
         sg.set_fill_color(TEXT_COLOR);
-        sg.svg_text(
-            &node.text,
-            text_x,
-            text_y,
-            Some("sans-serif"),
-            font_size,
-            None,
-            None,
-            None,
-            text_w,
-            crate::klimt::svg::LengthAdjust::Spacing,
-            None,
-            0,
-            None,
-        );
+        for (i, line) in lines.iter().enumerate() {
+            let text_w = font_metrics::text_width(line, "SansSerif", font_size, false, false);
+            let text_x = x + (w - text_w) / 2.0;
+            let baseline_y = block_top + i as f64 * line_h + ascent;
+            sg.svg_text(
+                line,
+                text_x,
+                baseline_y,
+                Some("sans-serif"),
+                font_size,
+                None,
+                None,
+                None,
+                text_w,
+                crate::klimt::svg::LengthAdjust::Spacing,
+                None,
+                0,
+                None,
+            );
+        }
     }
 }
 
