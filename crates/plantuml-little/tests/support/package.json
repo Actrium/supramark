@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Private helper package for the deterministic wasm Graphviz backend used by plantuml-little's reference tests. Not published. The graphviz-anywhere-web dep is pinned to an exact version because reference SVGs are byte-exact against that wasm build (see tests/reference/VERSION); any drift produces sub-pixel float diffs in Graphviz layout output. Kept on the published @kookyleo/ artifact on purpose (the rest of the monorepo moved to @actrium/): @actrium/graphviz-anywhere-web@0.1.8 is not published, and this fixture downloads a real npm tarball. Migrate to @actrium/ only once an identical wasm build is published there.",
   "dependencies": {
-    "@kookyleo/graphviz-anywhere-web": "0.1.8"
+    "@kookyleo/graphviz-anywhere-web": "0.1.8",
+    "@actrium/graphviz-anywhere-web": "npm:@kookyleo/graphviz-anywhere-web@0.1.8"
   }
 }

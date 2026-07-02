@@ -292,7 +292,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/plantuml-little/tests/support/node_modules
-          key: plantuml-wasm-backend-${{ hashFiles('crates/plantuml-little/tests/support/package-lock.json') }}
+          key: plantuml-wasm-backend-${{ hashFiles('crates/plantuml-little/tests/support/package-lock.json', 'crates/plantuml-little/tests/support/package.json') }}
 
       - name: Install wasm dot backend
         run: npm install
