@@ -1151,6 +1151,10 @@ fn render_single_column_table_action(
 /// close the shape, drawn through `borderColor.apply(stroke).bg(backColor)`.
 /// stroke-width comes from the activity diamond style (0.5px in stable
 /// PlantUML 1.2026.x).
+///
+/// When `node.text` is non-empty (e.g. a `while (condition)` diamond), the
+/// condition text is centred inside the diamond — matching Java's
+/// `FtileDiamondInside` behaviour for `while` loop conditions.
 fn render_diamond(sg: &mut SvgGraphic, node: &ActivityNodeLayout, bg: &str, border: &str) {
     let x = node.x;
     let y = node.y;
@@ -1162,6 +1166,34 @@ fn render_diamond(sg: &mut SvgGraphic, node: &ActivityNodeLayout, bg: &str, bord
         points: vec![cx, y, x + w, cy, cx, y + h, x, cy, cx, y],
     }
     .draw(sg, &DrawStyle::filled(bg, border, 0.5));
+
+    // Condition text centred inside the diamond (11pt sans-serif, matching the
+    // hexagon/if-diamond condition font size).  Only drawn when present, so
+    // the empty `repeat` start diamond is unaffected.
+    if !node.text.is_empty() {
+        let font_size = HEXAGON_LABEL_FONT_SIZE_RENDER;
+        let text_w = font_metrics::text_width(&node.text, "SansSerif", font_size, false, false);
+        let line_h = font_metrics::line_height("SansSerif", font_size, false, false);
+        let ascent = font_metrics::ascent("SansSerif", font_size, false, false);
+        let text_x = x + (w - text_w) / 2.0;
+        let text_y = y + (h - line_h) / 2.0 + ascent;
+        sg.set_fill_color(TEXT_COLOR);
+        sg.svg_text(
+            &node.text,
+            text_x,
+            text_y,
+            Some("sans-serif"),
+            font_size,
+            None,
+            None,
+            None,
+            text_w,
+            crate::klimt::svg::LengthAdjust::Spacing,
+            None,
+            0,
+            None,
+        );
+    }
 }
 
 /// Hexagonal diamond used by `repeat while (cond) is (label)`.

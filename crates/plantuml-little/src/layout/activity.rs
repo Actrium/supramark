@@ -870,6 +870,19 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
     let mut deferred_if_edges: Vec<DeferredIfEdges> = Vec::new();
     // Deferred break edges: (from_node_idx, from_y, exit_diamond_idx)
     let mut deferred_break_edges: Vec<(usize, f64, usize)> = Vec::new();
+
+    // While-loop tracking.  Each `while (cond) is (label)` opens a frame that
+    // remembers the condition diamond's geometry; the matching `endwhile
+    // (label)` closes it and records a loop-back edge (endwhile → while) plus
+    // the `is` / `endwhile` branch labels.  Mirrors the repeat loop-back
+    // machinery but for the simpler `while`/`endwhile` construct.
+    struct WhileFrame {
+        while_idx: usize,
+        is_label: String,
+    }
+    let mut while_stack: Vec<WhileFrame> = Vec::new();
+    // Closed while frames: (while_idx, endwhile_idx, is_label, endwhile_label)
+    let mut while_loopbacks: Vec<(usize, usize, String, String)> = Vec::new();
     // Pre-scan: for each `If` event, determine whether it has a matching `Else`.
     // This is needed so we can decide the branch layout direction up front.
     let if_has_else: HashMap<usize, bool> = {
@@ -1377,12 +1390,10 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
 
             // ---- While / EndWhile → diamonds ---------------------------------
             ActivityEvent::While { condition, label } => {
-                let combined = if label.is_empty() {
-                    condition.clone()
-                } else {
-                    format!("{condition}\n[{label}]")
-                };
-                let (w, h) = diamond_size(&combined);
+                // Condition text lives inside the diamond; the `is (label)` is
+                // rendered on the arrow entering the loop body (see loop-back
+                // pass), so it is NOT folded into the condition text here.
+                let (w, h) = diamond_size(&condition);
                 let cx = swimlane_center_x(&swimlane_layouts, current_lane_idx);
                 let x = cx - w / 2.0;
                 let y = y_cursor;
@@ -1394,8 +1405,12 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
                     y,
                     width: w,
                     height: h,
-                    text: combined,
+                    text: condition.clone(),
                     skip_in_flow: false,
+                });
+                while_stack.push(WhileFrame {
+                    while_idx: node_index,
+                    is_label: label.clone(),
                 });
                 last_flow_node_idx = Some(node_index);
                 node_index += 1;
@@ -1403,12 +1418,10 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
             }
 
             ActivityEvent::EndWhile { label } => {
-                let text = if label.is_empty() {
-                    String::new()
-                } else {
-                    format!("[{label}]")
-                };
-                let (w, h) = diamond_size(if text.is_empty() { "end" } else { &text });
+                // The `endwhile` diamond acts as the loop merge point.  Its
+                // label is rendered on the arrow exiting the loop downward, so
+                // the diamond itself stays empty (like Java's FtileDiamond).
+                let (w, h) = (HEXAGON_HALF_SIZE * 2.0, HEXAGON_HALF_SIZE * 2.0);
                 let cx = swimlane_center_x(&swimlane_layouts, current_lane_idx);
                 let x = cx - w / 2.0;
                 let y = y_cursor;
@@ -1420,9 +1433,13 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
                     y,
                     width: w,
                     height: h,
-                    text,
+                    text: String::new(),
                     skip_in_flow: false,
                 });
+                let end_idx = node_index;
+                if let Some(frame) = while_stack.pop() {
+                    while_loopbacks.push((frame.while_idx, end_idx, frame.is_label, label.clone()));
+                }
                 last_flow_node_idx = Some(node_index);
                 node_index += 1;
                 y_cursor += h + node_gap;
@@ -2906,6 +2923,44 @@ pub fn layout_activity(diagram: &ActivityDiagram) -> Result<ActivityLayout> {
         }
     }
 
+    // --- Pass 3d: `while`/`endwhile` loop-back edges -------------------------
+    // For each closed while frame, stamp the `is` label on the while→first-body
+    // edge and the `endwhile` label on the endwhile→next edge, then append the
+    // loop-back edge snaking from endwhile back to while along the right side.
+    for &(while_idx, end_idx, ref is_label, ref end_label) in &while_loopbacks {
+        // while → first interior body node: the build_edges edge whose
+        // from_index == while_idx.
+        if !is_label.is_empty() {
+            for edge in edges.iter_mut() {
+                if edge.from_index == while_idx {
+                    edge.label = is_label.clone();
+                    break;
+                }
+            }
+        }
+        // endwhile → next flow node: the build_edges edge whose from_index ==
+        // end_idx.
+        if !end_label.is_empty() {
+            for edge in edges.iter_mut() {
+                if edge.from_index == end_idx {
+                    edge.label = end_label.clone();
+                    break;
+                }
+            }
+        }
+        if let Some((loopback_edge, extra)) =
+            build_while_loopback_edge(&nodes, while_idx, end_idx)
+        {
+            log::debug!(
+                "  while loop-back while={while_idx} → endwhile={end_idx} extra_right={extra}"
+            );
+            if extra > loopback_extra_right {
+                loopback_extra_right = extra;
+            }
+            edges.push(loopback_edge);
+        }
+    }
+
     // Reorder edges to match Java's `FtileRepeat` + assembly draw order.
     //
     // Java builds the repeat body bottom-up: inner `ConnectionVerticalDown`s
@@ -3408,6 +3463,53 @@ fn build_backward_loopback_edges(
     // The backward box is already in the node bounds, so no extra width
     // is needed beyond what compute_bounds already provides.
     Some((vec![edge1, edge2], 0.0))
+}
+
+/// Build the `while`/`endwhile` loop-back edge: from the `endwhile` diamond's
+/// right side, snaking right and up to the `while` diamond's right side (arrow
+/// pointing back at `while`).  Returns the edge plus the extra right-side width
+/// the snake needs beyond the current content bounds.
+///
+/// This mirrors `build_repeat_loopback_edge` but for the simpler `while` loop:
+/// there is no hexagon and no East `is` label on the shape, so the path is a
+/// plain 4-point snake rendered as a `Normal` edge (polyline + end arrowhead).
+fn build_while_loopback_edge(
+    nodes: &[ActivityNodeLayout],
+    while_idx: usize,
+    endwhile_idx: usize,
+) -> Option<(ActivityEdgeLayout, f64)> {
+    let wd = nodes.get(while_idx)?;
+    let ed = nodes.get(endwhile_idx)?;
+    let while_right = wd.x + wd.width;
+    let while_cy = wd.y + wd.height / 2.0;
+    let end_right = ed.x + ed.width;
+    let end_cy = ed.y + ed.height / 2.0;
+
+    // Snake out to the right of whichever diamond is wider, then up/down to
+    // the while diamond's vertical centre, then back left to its right point.
+    let max_right = while_right.max(end_right);
+    let loop_x = max_right + 20.0;
+    // Extra width beyond the current content right edge: the snake line sits
+    // at `loop_x`, so reserve `loop_x - max_right` plus a small arrow/margin
+    // slack so the line and its arrowhead stay inside the viewport.
+    let extra_right = (loop_x - max_right) + 6.0;
+
+    let points = vec![
+        (end_right, end_cy),
+        (loop_x, end_cy),
+        (loop_x, while_cy),
+        (while_right, while_cy),
+    ];
+    Some((
+        ActivityEdgeLayout {
+            from_index: endwhile_idx,
+            to_index: while_idx,
+            label: String::new(),
+            points,
+            kind: ActivityEdgeKindLayout::Normal,
+        },
+        extra_right,
+    ))
 }
 
 /// Compute a render-order permutation so the inner repeat body (the interior
