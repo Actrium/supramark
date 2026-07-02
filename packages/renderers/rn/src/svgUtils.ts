@@ -253,11 +253,15 @@ export function normalizeSvg(xml: string): string {
     if (!text) return '';
     const x = w / 2;
     const y = h * 0.7;
-    // Prefer the label's own inline text color (span/div style="color:..."). The delimiter
-    // class [;"'\s] before "color:" avoids matching background-color, so we only override
-    // when a text color is clearly present; otherwise fall back to the default.
-    const colorMatch = fo.match(/[;"'\s]color\s*:\s*([^;"']+)/i);
-    const labelFill = colorMatch ? sanitizeCssValue(colorMatch[1].trim()) : defaultTextFill;
+    // Prefer the label's own text color, read only from a style="..." attribute (never the
+    // visible label text) and only a real `color` property — the (?:^|;) boundary keeps
+    // `background-color` from matching. Last match wins, i.e. the innermost span's color.
+    // Strip a trailing !important: it's a cascade directive, not a valid SVG fill value.
+    let labelFill = defaultTextFill;
+    for (const sm of fo.matchAll(/style\s*=\s*"([^"]*)"/gi)) {
+      const decl = sm[1].match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
+      if (decl) labelFill = sanitizeCssValue(decl[1].replace(/\s*!important\s*$/i, '').trim());
+    }
     return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: 16px">${text}</text>`;
   });
 

@@ -76,17 +76,19 @@ export function installHostMetricsBridge(): void {
     return;
   }
 
-const measureText: MeasureFn = (family, text, size, bold) => {
-  try {
-    ctx.font = `${bold ? 'bold ' : ''}${size}px ${family}`;
-    const m = ctx.measureText(text);
-    const ascent = typeof m.actualBoundingBoxAscent === 'number' ? m.actualBoundingBoxAscent : size * 0.8;
-    const descent = typeof m.actualBoundingBoxDescent === 'number' ? m.actualBoundingBoxDescent : size * 0.2;
-    return { width: m.width, ascent, descent };
-  } catch {
-    return fallbackBox(text, size);
-  }
-};
+  const measureText: MeasureFn = (family, text, size, bold) => {
+    try {
+      ctx.font = `${bold ? 'bold ' : ''}${size}px ${family}`;
+      const m = ctx.measureText(text);
+      const ascent =
+        typeof m.actualBoundingBoxAscent === 'number' ? m.actualBoundingBoxAscent : size * 0.8;
+      const descent =
+        typeof m.actualBoundingBoxDescent === 'number' ? m.actualBoundingBoxDescent : size * 0.2;
+      return { width: m.width, ascent, descent };
+    } catch {
+      return fallbackBox(text, size);
+    }
+  };
 
   g.supramark = { ...(existing ?? {}), measureText };
   installed = true;

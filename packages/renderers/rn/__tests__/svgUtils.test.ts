@@ -403,6 +403,37 @@ test('normalizeSvg foreignObject falls back to #333 and ignores background-color
   expect(text).not.toMatch(/#fff/);
 });
 
+test('normalizeSvg foreignObject color comes from a style attr, not visible text', () => {
+  // A label whose visible text literally contains "color: red" must not be read
+  // as a CSS declaration; the fill stays the default.
+  const input =
+    '<svg><foreignObject width="80" height="16">' +
+    '<div><span class="nodeLabel">set color: red here</span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>[^<]*<\/text>/)?.[0] ?? '';
+  expect(text).toMatch(/fill:\s*#333/);
+  expect(text).not.toMatch(/fill:\s*red/);
+});
+
+test('normalizeSvg foreignObject inner span color wins over the outer', () => {
+  const input =
+    '<svg><foreignObject width="40" height="16">' +
+    '<div style="color:#111111"><span style="color:#00ff00">Hi</span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>Hi<\/text>/)?.[0] ?? '';
+  expect(text).toMatch(/fill:\s*#00ff00/);
+});
+
+test('normalizeSvg foreignObject color drops a trailing !important', () => {
+  const input =
+    '<svg><foreignObject width="40" height="16">' +
+    '<div><span style="color:#0000ff !important">Hi</span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const text = out.match(/<text[^>]*>Hi<\/text>/)?.[0] ?? '';
+  expect(text).toMatch(/fill:\s*#0000ff/);
+  expect(text).not.toMatch(/!important/);
+});
+
 // ============================================================================
 // stripRootSvgSize — 精确删除根 <svg> 的 width/height（来自 upstream/main）
 // ============================================================================
