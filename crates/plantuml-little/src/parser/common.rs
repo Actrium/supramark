@@ -542,8 +542,13 @@ pub fn detect_diagram_type(content: &str) -> DiagramHint {
         }
         return DiagramHint::Component;
     }
-    // Sequence arrows override class relations when no class keywords present
-    if has_seq_arrow && !has_class_kw {
+    // Sequence arrows override plain class associations when no class keywords
+    // are present — BUT a class-exclusive relation (`*--`, `o--`, `<|`, `|>`,
+    // …) unambiguously marks a class diagram, so it must win over the
+    // ambiguous `-->`/`->` arrow.  Without this guard, `Class01 *-- Class02`
+    // combined with `Class05 --> Class06` was misdetected as a sequence
+    // diagram (see issue #29).
+    if has_seq_arrow && !has_class_kw && !has_class_relation {
         return DiagramHint::Sequence;
     }
     if has_class_kw || has_class_relation {
