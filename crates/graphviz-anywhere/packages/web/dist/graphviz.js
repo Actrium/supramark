@@ -21,7 +21,7 @@ var _Graphviz_module;
 import { DEFAULT_ENGINE, DEFAULT_FORMAT, GraphvizWebError, } from './shared.js';
 async function loadDefaultFactory() {
     try {
-        const mod = (await import('@kookyleo/graphviz-anywhere-web/wasm'));
+        const mod = (await import('@actrium/graphviz-anywhere-web/wasm'));
         return mod.default;
     }
     catch {
@@ -42,7 +42,7 @@ async function loadDefaultFactory() {
  *
  * @example
  * ```ts
- * import { Graphviz } from '@kookyleo/graphviz-anywhere-web';
+ * import { Graphviz } from '@actrium/graphviz-anywhere-web';
  *
  * const gv = await Graphviz.load();
  * const svg = gv.dot('digraph { a -> b; b -> c; }');
