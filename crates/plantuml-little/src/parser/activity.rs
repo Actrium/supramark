@@ -64,6 +64,12 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
     let mut old_seen_nodes = std::collections::HashSet::<String>::new();
     let mut is_old_style = false;
     let mut old_graph = OldGraphBuilder::new();
+    // Index (into `events`) of the most recent `RepeatWhile` event, so a
+    // following `-> label;` line can be attached as that loop's exit (`not`)
+    // label.  PlantUML's repeat syntax allows the exit label on its own line:
+    //   repeat while (cond) is (yes)
+    //   -> no;
+    let mut last_repeat_while_event_idx: Option<usize> = None;
 
     for (line_num, line) in block.lines().enumerate() {
         let line_num = line_num + 1; // 1-based for diagnostics
@@ -530,6 +536,7 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
                 }
             };
             debug!("line {line_num}: repeat while ({condition}) is={is_text:?} not={not_text:?}");
+            last_repeat_while_event_idx = Some(events.len());
             events.push(ActivityEvent::RepeatWhile {
                 condition,
                 is_text,
@@ -613,6 +620,30 @@ pub fn parse_activity_diagram(source: &str) -> Result<ActivityDiagram> {
                 events.push(ActivityEvent::GotoSyncBar(name));
             }
             continue;
+        }
+
+        // --- `-> label;` after a `repeat while`: attach as the loop's exit
+        // (not) label.  PlantUML allows the exit label on its own line:
+        //   repeat while (cond) is (yes)
+        //   -> no;
+        // Without this, the line falls through to old-style arrow parsing
+        // which rejects it (issue #31: "old-style arrow has no source").
+        if let Some(rw_idx) = last_repeat_while_event_idx {
+            if trimmed.starts_with("->") {
+                let raw = trimmed[2..].trim().trim_end_matches(';').trim();
+                if !raw.is_empty() {
+                    if let Some(ActivityEvent::RepeatWhile { not_text, .. }) =
+                        events.get_mut(rw_idx)
+                    {
+                        if not_text.is_none() {
+                            *not_text = Some(raw.to_string());
+                            debug!("line {line_num}: repeat exit label -> {raw:?}");
+                        }
+                    }
+                    last_repeat_while_event_idx = None;
+                    continue;
+                }
+            }
         }
 
         // --- Old-style arrow lines: [source] --> [label] target ---
