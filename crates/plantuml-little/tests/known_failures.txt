@@ -18,33 +18,18 @@
 #     over by adding it here.
 #
 # Keep the list sorted. One test name per line. '#' prefix for comments.
-
-# Java emits raw PNG bytes (DITAA) or raw JCCKIT chart format that
-# plantuml-little does not support — convert_fixture panics by design.
-reference_fixtures_ditaa_basic_puml
-reference_fixtures_jcckit_basic_puml
-
-# Java reference SVG is an "An error has occured" page (Java fails on
-# these inputs); plantuml-little renders the diagram normally. Bytes
-# diverge structurally, no useful comparison.
-reference_fixtures_dev_newline_link_URL_tooltip_puml
-reference_fixtures_wbs_link_url_tooltip_01_puml
-
-# `\n`-escaped inline note containing `{{ !theme … }}` triggers Java's
-# error path (preprocessor never expands `!theme` inside an inline-form
-# embedded subdiagram). The error page is then decorated by
-# `PSystemError.getTextBlock12026` with a wallclock-based message banner
-# (Patreon at min 1/8/13/55, Liberapay at 15, Dedication at 30/39/48).
-# Both committed reference SVGs were captured during a Patreon minute
-# and contain Java's Patreon banner PNG + QR-code asset. Reproducing
-# byte-exact output requires bundling those Java-internal PNGs and
-# pinning the wallclock minute, so this is intentionally left as a
-# known failure. plantuml-little still emits a structurally-equivalent
-# (un-decorated) error page; functional behaviour matches.
-reference_fixtures_component_subdiagram_theme_02_puml
-reference_fixtures_dev_newline_subdiagram_theme_puml
-
-# Residual layout drift in less-trodden diagram types — small height /
-# polygon-point differences that exceed the fuzzy 2.51 tolerance.
-# Worth investigating and fixing in a follow-up.
-reference_fixtures_sprite_svg2GroupsWithStyle_puml
+#
+# This list contains only tests that RUN and FAIL. Fixtures that are
+# structurally incomparable with the Java baseline — DITAA/JCCKIT raw
+# bytes, Java "An error has occured" pages, wallclock-decorated error
+# banners, etc. — are excluded from the run via `#[ignore]` on the
+# `reference_test!` macro in reference_tests.rs (with a per-test reason
+# string), so they never reach the "failures:" set this file is compared
+# against and must NOT be listed here.
+#
+# As of PR #47 wiring check_reference_failures.sh into CI, every runnable
+# reference fixture passes (262 passed, 0 failed), so this list is empty.
+# The previously-listed fixtures (ditaa/jcckit basic, dev/wbs tooltip,
+# subdiagram theme, sprite svg2GroupsWithStyle) are all #[ignore]'d in
+# code; listing them here was vestigial and made the bidirectional check
+# report them as "unexpectedly passing".
