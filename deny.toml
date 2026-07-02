@@ -117,4 +117,12 @@ ignore = [
     # url -> plantuml-little (duplicate idna in tree). Low real risk for a
     # markdown/diagram toolchain; revisit when url/plantuml dedupe idna.
     "RUSTSEC-2024-0421",
+
+    # quick-xml 0.39.4 O(N²) CPU DoS in BytesStart::attributes() duplicate
+    # check (RUSTSEC-2026-0194); transitive via plist -> syntect ->
+    # two-face -> supramark-code-highlight, which parses bundled/trusted
+    # syntax-definition data, not untrusted XML. Real availability risk is
+    # low. Remove this entry once plist/syntect ship a quick-xml build with
+    # the upstream fix (>= the patched 0.39.x / 0.40 release).
+    "RUSTSEC-2026-0194",
 ]
