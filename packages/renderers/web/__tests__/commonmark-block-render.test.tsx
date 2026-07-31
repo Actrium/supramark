@@ -38,17 +38,20 @@ function createContainer(): TestContainer {
 
 async function renderAst(
   ast: SupramarkRootNode,
-  options?: { allowDangerousHtml?: boolean }
+  options?: { allowDangerousHtml?: boolean; gfmTagfilter?: boolean; flattenNestedStrong?: boolean }
 ): Promise<TestContainer> {
   const container = createContainer();
+  const opts = options
+    ? {
+        options: {
+          ...(options.allowDangerousHtml ? { allowDangerousHtml: true } : {}),
+          ...(options.gfmTagfilter ? { gfmTagfilter: true } : {}),
+          ...(options.flattenNestedStrong ? { flattenNestedStrong: true } : {}),
+        },
+      }
+    : undefined;
   await act(async () => {
-    root?.render(
-      <Supramark
-        markdown=""
-        ast={ast}
-        config={options?.allowDangerousHtml ? { options: { allowDangerousHtml: true } } : undefined}
-      />
-    );
+    root?.render(<Supramark markdown="" ast={ast} config={opts} />);
   });
   return container;
 }
@@ -79,6 +82,23 @@ function listItem(children: SupramarkRootNode['children']) {
 
 function raw(value: string, block = true) {
   return { type: 'raw', format: 'html', value, block } as const;
+}
+
+function tableCell(content: string, header: boolean, align?: 'left' | 'right' | 'center') {
+  return {
+    type: 'table_cell',
+    header,
+    ...(align ? { align } : {}),
+    children: [text(content)],
+  } as const;
+}
+
+function tableRow(cells: ReturnType<typeof tableCell>[]) {
+  return { type: 'table_row', children: cells } as const;
+}
+
+function table(rows: ReturnType<typeof tableRow>[], align?: ('left' | 'right' | 'center')[]) {
+  return { type: 'table', align: align ?? [], children: rows } as const;
 }
 
 describe('CommonMark block rendering', () => {
@@ -136,6 +156,142 @@ describe('CommonMark block rendering', () => {
     const codeMatch = container.innerHTML.match(/<code[^>]*>/i);
     expect(codeMatch).not.toBeNull();
     expect(codeMatch![0]).not.toMatch(/language-/i);
+  });
+});
+
+describe('cmark-gfm nested-strong flattening (opt-in)', () => {
+  // cmark-gfm 0.29's HTML renderer suppresses the <strong> wrapper when a
+  // strong node's parent is itself strong (html.c, CMARK_NODE_STRONG),
+  // collapsing the nested `<strong><strong>foo</strong></strong>` that the
+  // delimiter run algorithm produces into a single flat `<strong>foo</strong>`.
+  // CommonMark 0.31 does NOT do this — its spec keeps the nesting — so the
+  // flattening is opt-in via `options.flattenNestedStrong` (the cmark-gfm
+  // conformance harness enables it; the default stays nested). Only STRONG is
+  // suppressed; nested <em> always stays nested. See issue #144.
+
+  function strong(children: SupramarkRootNode['children']) {
+    return { type: 'strong', children } as const;
+  }
+  function emph(children: SupramarkRootNode['children']) {
+    return { type: 'emphasis', children } as const;
+  }
+
+  test('default keeps nested strong-strong (CommonMark 0.31 behavior)', async () => {
+    // `****foo****` -> <p><strong><strong>foo</strong></strong></p> by default
+    const ast = makeRoot([
+      { type: 'paragraph', children: [strong([strong([text('foo')])])] },
+    ]);
+    const container = await renderAst(ast);
+    expect(container.innerHTML).toContain('<strong><strong>foo</strong></strong>');
+  });
+
+  test('flattens nested strong-strong to a single <strong> when opted in', async () => {
+    // `****foo****` -> <p><strong>foo</strong></p>
+    const ast = makeRoot([
+      { type: 'paragraph', children: [strong([strong([text('foo')])])] },
+    ]);
+    const container = await renderAst(ast, { flattenNestedStrong: true });
+    expect(container.innerHTML).toContain('<strong>foo</strong>');
+    expect(container.innerHTML).not.toContain('<strong><strong>');
+  });
+
+  test('flattens strong child of strong but keeps intervening text (opted in)', async () => {
+    // `__foo, __bar__, baz__` -> <p><strong>foo, bar, baz</strong></p>
+    const ast = makeRoot([
+      {
+        type: 'paragraph',
+        children: [
+          strong([text('foo, '), strong([text('bar')]), text(', baz')]),
+        ],
+      },
+    ]);
+    const container = await renderAst(ast, { flattenNestedStrong: true });
+    expect(container.innerHTML).toContain('<strong>foo, bar, baz</strong>');
+    expect(container.innerHTML).not.toContain('<strong><strong>');
+  });
+
+  test('preserves nested emphasis (only strong is suppressed, opted in)', async () => {
+    // `*(*foo*)*` -> <p><em>(<em>foo</em>)</em></p>
+    const ast = makeRoot([
+      {
+        type: 'paragraph',
+        children: [
+          emph([text('('), emph([text('foo')]), text(')')]),
+        ],
+      },
+    ]);
+    const container = await renderAst(ast, { flattenNestedStrong: true });
+    expect(container.innerHTML).toContain('<em>(<em>foo</em>)</em>');
+  });
+
+  test('keeps inner strong whose parent is emphasis, not strong (opted in)', async () => {
+    // `**_**b**_**` -> <p><strong><em><strong>b</strong></em></strong></p>
+    const ast = makeRoot([
+      {
+        type: 'paragraph',
+        children: [strong([emph([strong([text('b')])])])],
+      },
+    ]);
+    const container = await renderAst(ast, { flattenNestedStrong: true });
+    expect(container.innerHTML).toContain('<strong><em><strong>b</strong></em></strong>');
+  });
+
+  test('flattens strong-strong inside a raw-HTML paragraph (serialize path, opted in)', async () => {
+    // `****foo**** <b>x</b>` -> the paragraph contains raw HTML, so it goes
+    // through serializeInlineNode; the inner strong must still suppress.
+    const ast = makeRoot([
+      {
+        type: 'paragraph',
+        children: [strong([strong([text('foo')])]), raw('<b>x</b>', false), text(' ')],
+      },
+    ]);
+    const container = await renderAst(ast, { allowDangerousHtml: true, flattenNestedStrong: true });
+    expect(container.innerHTML).toContain('<strong>foo</strong>');
+    expect(container.innerHTML).not.toContain('<strong><strong>');
+  });
+});
+
+describe('Raw HTML active-formatting-element reconstruction across blocks', () => {
+  // cmark-gfm spec-0652: a paragraph with unclosed inline formatting tags
+  // (`<strong> … <em>`) followed by a raw block. cmark emits the raw tokens
+  // verbatim, and the browser's tree-construction reconstructs the open
+  // strong/em across `</p>` into the following block. The renderer folds the
+  // paragraph and following serializable raw siblings into one RawHtml
+  // fragment so a single parse owns the reconstruction (verified end-to-end by
+  // the real-Chromium conformance gate). In a non-reconstructing DOM
+  // (happy-dom) the observable guard is that the paragraph-level path no
+  // longer leaves a trailing reconstructed `<strong><em>…</em></strong>`
+  // artifact between the paragraph and the following block.
+  function inlineRaw(value: string) {
+    return { type: 'raw', format: 'html', value, block: false } as const;
+  }
+  function blockRaw(value: string) {
+    return { type: 'raw', format: 'html', value, block: true } as const;
+  }
+
+  test('folds the paragraph and following raw block into one fragment', async () => {
+    const ast = makeRoot([
+      {
+        type: 'paragraph',
+        children: [
+          inlineRaw('<strong>'),
+          text(' '),
+          inlineRaw('<title>'),
+          text(' '),
+          inlineRaw('<style>'),
+          text(' '),
+          inlineRaw('<em>'),
+        ],
+      },
+      blockRaw('<blockquote>\n  &lt;xmp> is disallowed.\n</blockquote>\n'),
+    ]);
+    const container = await renderAst(ast, { allowDangerousHtml: true, gfmTagfilter: true });
+    const html = container.innerHTML;
+    // The paragraph-level reconstruction artifact (a trailing empty
+    // <strong><em>…</em></strong> between </p> and the blockquote) is gone.
+    expect(html).not.toContain('<strong><em>');
+    // The blockquote is still rendered as a sibling block.
+    expect(html).toContain('<blockquote>');
   });
 });
 
@@ -337,5 +493,86 @@ describe('CommonMark raw HTML', () => {
     const secondHtml = container.innerHTML.replace(/<span style="display: ?none[^>]*><\/span>/, '');
     expect((secondHtml.match(/<span>x<\/span>/g) ?? []).length).toBe(0);
     expect((secondHtml.match(/<span>y<\/span>/g) ?? []).length).toBe(1);
+  });
+});
+
+// GFM tables: cmark-gfm wraps the header row in <thead>, the rest in <tbody>,
+// and emits the obsolete `align` attribute (not an inline style) on aligned
+// cells. See issue #144 (cmark-gfm conformance).
+describe('GFM table rendering', () => {
+  test('splits the header row into <thead> and body rows into <tbody>', async () => {
+    const ast = makeRoot([
+      table([
+        tableRow([tableCell('foo', true), tableCell('bar', true)]),
+        tableRow([tableCell('baz', false), tableCell('bim', false)]),
+      ]),
+    ]);
+    const container = await renderAst(ast);
+    const html = container.innerHTML;
+    expect(html).toContain('<thead>');
+    expect(html).toContain('</thead>');
+    expect(html).toContain('<tbody>');
+    expect(html).toContain('</tbody>');
+    expect(html).toMatch(
+      /<thead>\s*<tr[^>]*>\s*<th[^>]*>foo<\/th>\s*<th[^>]*>bar<\/th>\s*<\/tr>\s*<\/thead>/
+    );
+    expect(html).toMatch(
+      /<tbody>\s*<tr[^>]*>\s*<td[^>]*>baz<\/td>\s*<td[^>]*>bim<\/td>\s*<\/tr>\s*<\/tbody>/
+    );
+  });
+
+  test('emits align attribute (not inline style) on aligned cells', async () => {
+    const ast = makeRoot([
+      table(
+        [
+          tableRow([tableCell('aaa', true, 'left'), tableCell('ccc', true, 'center')]),
+          tableRow([tableCell('fff', false, 'left'), tableCell('hhh', false, 'center')]),
+        ],
+        ['left', 'center']
+      ),
+    ]);
+    const container = await renderAst(ast);
+    const html = container.innerHTML;
+    expect(html).toMatch(/<th[^>]*align="left"[^>]*>aaa<\/th>/);
+    expect(html).toMatch(/<th[^>]*align="center"[^>]*>ccc<\/th>/);
+    expect(html).toMatch(/<td[^>]*align="left"[^>]*>fff<\/td>/);
+    expect(html).not.toMatch(/text-align/);
+  });
+
+  test('emits <thead> only with no <tbody> when the table has just a header row', async () => {
+    const ast = makeRoot([table([tableRow([tableCell('abc', true), tableCell('def', true)])])]);
+    const container = await renderAst(ast);
+    const html = container.innerHTML;
+    expect(html).toContain('<thead>');
+    expect(html).not.toContain('<tbody');
+  });
+});
+
+// GFM task lists: cmark-gfm's html_render emits `<input ... /> ` with a literal
+// trailing space before the item text. The parser consumes the marker's
+// separator whitespace (cmark's `spacechar+`), so the text node carries no
+// leading space and the renderer emits the literal space here. See issue #144.
+describe('GFM task list rendering', () => {
+  function taskItem(checked: boolean, content: string) {
+    return {
+      type: 'list_item',
+      checked,
+      children: [text(content)],
+    } as const;
+  }
+
+  test('preserves the leading space between the checkbox and the item text', async () => {
+    const ast = makeRoot([
+      {
+        type: 'list',
+        ordered: false,
+        children: [taskItem(false, 'foo'), taskItem(true, 'bar')],
+      },
+    ]);
+    const container = await renderAst(ast);
+    const html = container.innerHTML;
+    expect(html).toMatch(/<input[^>]*>\sfoo/);
+    expect(html).toMatch(/<input[^>]*checked[^>]*>\sbar/);
+    expect(html).not.toMatch(/<input[^>]*>foo/);
   });
 });

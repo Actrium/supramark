@@ -292,9 +292,13 @@ pub enum SupramarkNode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ParseOptions {
-    gfm_tables: bool,
-    gfm_strikethrough: bool,
+pub struct ParseOptions {
+    pub gfm_tables: bool,
+    pub gfm_strikethrough: bool,
+    /// GFM bare-URL/email autolink extension. On by default to match the
+    /// cmark-gfm profile; the CommonMark conformance suite disables it so
+    /// bare URLs stay literal (CommonMark spec has no bare-URL autolink).
+    pub gfm_autolink: bool,
 }
 
 impl Default for ParseOptions {
@@ -302,6 +306,7 @@ impl Default for ParseOptions {
         Self {
             gfm_tables: true,
             gfm_strikethrough: true,
+            gfm_autolink: true,
         }
     }
 }
@@ -310,7 +315,7 @@ pub fn parse(source: &str) -> SupramarkNode {
     parse_with_options(source, ParseOptions::default())
 }
 
-fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
+pub fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
     let md = create_parser(options);
     let index = OffsetIndex::new(source);
     let (mut children, diagnostics) = map_document(source, &md, &index);
@@ -351,6 +356,10 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
     }
     if options.gfm_strikethrough {
         crate::plugins::extra::strikethrough::add(&mut md);
+    }
+    if options.gfm_autolink {
+        // GFM autolink extension: bare www./scheme-URL/email linkification.
+        crate::plugins::extra::gfm_autolink::add(&mut md);
     }
 
     md
@@ -419,6 +428,7 @@ fn map_children(children: &[Node], index: &OffsetIndex, base_offset: usize) -> V
         .iter()
         .flat_map(|child| map_node(child, index, base_offset))
         .collect();
+    let mapped = reassemble_split_footnote_refs(mapped, index);
     rescan_adjacent_text_runs(mapped, index)
 }
 
@@ -652,6 +662,193 @@ fn map_inline_text(
     }
 
     nodes
+}
+
+/// Reassemble a footnote reference `[^label]` whose label was split by an
+/// inline raw-HTML token (e.g. `[^"><script>…</script>]`). cmark-gfm treats
+/// the entire `[…]` as the label string — it does not render the embedded
+/// HTML — so the reference is reconstructed by absorbing the intervening
+/// `Raw(html)`/`Text` siblings up to the closing `]`. Without this, the
+/// raw-HTML inline rule consumes the `<…>` before the footnote post-process
+/// sees the full `[^…]`, leaking the tag into the output (an XSS vector).
+fn reassemble_split_footnote_refs(
+    nodes: Vec<SupramarkNode>,
+    index: &OffsetIndex,
+) -> Vec<SupramarkNode> {
+    let mut out = Vec::with_capacity(nodes.len());
+    let mut i = 0;
+    while i < nodes.len() {
+        let (text_before, after_caret, open_pos, open_value_len, open_k) = match &nodes[i] {
+            SupramarkNode::Text { value, position } => {
+                match find_unclosed_footnote_open(value) {
+                    Some((tb, ac)) => {
+                        let k = value.len() - ac.len() - 2; // index of '['
+                        (tb, ac, position.clone(), value.len(), k)
+                    }
+                    None => {
+                        out.push(nodes[i].clone());
+                        i += 1;
+                        continue;
+                    }
+                }
+            }
+            _ => {
+                out.push(nodes[i].clone());
+                i += 1;
+                continue;
+            }
+        };
+        let mut label = after_caret.to_owned();
+        let mut found_close = None;
+        let mut j = i + 1;
+        while j < nodes.len() {
+            match &nodes[j] {
+                SupramarkNode::Raw { format, value, .. } if format == "html" => {
+                    label.push_str(value);
+                    j += 1;
+                }
+                SupramarkNode::Text { value, position } => match value.find(']') {
+                    Some(br) => {
+                        label.push_str(&value[..br]);
+                        found_close = Some(Close {
+                            idx: j,
+                            br,
+                            value_len: value.len(),
+                            text_after: value[br + 1..].to_owned(),
+                            position: position.clone(),
+                        });
+                        break;
+                    }
+                    None => {
+                        label.push_str(value);
+                        j += 1;
+                    }
+                },
+                _ => break,
+            }
+        }
+        match found_close {
+            Some(close) => {
+                if !text_before.is_empty() {
+                    out.push(SupramarkNode::Text {
+                        value: text_before.to_owned(),
+                        position: sub_text_position(
+                            index,
+                            open_pos.as_ref(),
+                            open_value_len,
+                            0,
+                            open_k,
+                        ),
+                    });
+                }
+                out.push(SupramarkNode::FootnoteReference {
+                    index: 0,
+                    identifier: normalize_footnote_identifier(&label),
+                    label,
+                    position: ref_position(
+                        index,
+                        open_pos.as_ref(),
+                        open_value_len,
+                        open_k,
+                        close.position.as_ref(),
+                        close.value_len,
+                        close.br,
+                    ),
+                });
+                if !close.text_after.is_empty() {
+                    out.push(SupramarkNode::Text {
+                        value: close.text_after,
+                        position: sub_text_position(
+                            index,
+                            close.position.as_ref(),
+                            close.value_len,
+                            close.br + 1,
+                            close.value_len,
+                        ),
+                    });
+                }
+                i = close.idx + 1;
+            }
+            None => {
+                out.push(nodes[i].clone());
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+struct Close {
+    idx: usize,
+    br: usize,
+    value_len: usize,
+    text_after: String,
+    position: Option<SourcePosition>,
+}
+
+/// Slice a parent Text node's position to cover `value[lo..hi]`. Only valid
+/// when the value's byte length equals the position span (the invariant
+/// `map_inline_text` relies on); otherwise `None` is safer than a wrong
+/// sub-position.
+fn sub_text_position(
+    index: &OffsetIndex,
+    parent: Option<&SourcePosition>,
+    value_len: usize,
+    lo: usize,
+    hi: usize,
+) -> Option<SourcePosition> {
+    let parent = parent?;
+    if parent.end.byte_offset.saturating_sub(parent.start.byte_offset) != value_len {
+        return None;
+    }
+    Some(SourcePosition {
+        start: index.point_at(parent.start.byte_offset + lo),
+        end: index.point_at(parent.start.byte_offset + hi),
+    })
+}
+
+/// Position for a reassembled `[^…]` footnote reference: from the `[` in the
+/// opening text node to just past the closing `]` in the closing text node.
+fn ref_position(
+    index: &OffsetIndex,
+    open: Option<&SourcePosition>,
+    open_value_len: usize,
+    open_k: usize,
+    close: Option<&SourcePosition>,
+    close_value_len: usize,
+    close_br: usize,
+) -> Option<SourcePosition> {
+    let open = open?;
+    let close = close?;
+    if open.end.byte_offset.saturating_sub(open.start.byte_offset) != open_value_len {
+        return None;
+    }
+    if close.end.byte_offset.saturating_sub(close.start.byte_offset) != close_value_len {
+        return None;
+    }
+    Some(SourcePosition {
+        start: index.point_at(open.start.byte_offset + open_k),
+        end: index.point_at(close.start.byte_offset + close_br + 1),
+    })
+}
+
+/// If `value` contains a `[^` whose remainder has no closing `]` in the same
+/// text node, return `(text_before_caret, label_so_far)`. Otherwise `None`
+/// (the reference is either absent or complete within this node, so the
+/// normal per-text scan handles it).
+fn find_unclosed_footnote_open(value: &str) -> Option<(&str, &str)> {
+    let bytes = value.as_bytes();
+    let mut k = 0;
+    while k + 1 < bytes.len() {
+        if bytes[k] == b'[' && bytes[k + 1] == b'^' {
+            let rest = &value[k + 2..];
+            if !rest.contains(']') {
+                return Some((&value[..k], rest));
+            }
+        }
+        k += 1;
+    }
+    None
 }
 
 fn rescan_adjacent_text_runs(nodes: Vec<SupramarkNode>, index: &OffsetIndex) -> Vec<SupramarkNode> {
@@ -898,10 +1095,25 @@ fn strip_task_marker_from_text(value: &mut String) -> Option<bool> {
     };
 
     let rest = &trimmed[marker_len..];
-    let rest = rest.strip_prefix([' ', '\t']).unwrap_or(rest);
-    let mut replacement = String::new();
+    // cmark-gfm's tasklist scan (ext_scanners.re) requires one or more
+    // spacechars (`[ \t]`) after the `[ ]`/`[x]` marker and consumes them as
+    // the separator — the text content starts after the separator, and the
+    // single space in the HTML output comes from the renderer's literal
+    // (`"<input ... /> "`), not from the text node. Mirror that:
+    //   * no separator whitespace => not a task-list item (cmark leaves
+    //     `[ ]foo` literal), so bail;
+    //   * a separator => consume all of it so the text node is `foo`, not
+    //     `\tfoo` / `  foo`.
+    // Previously the raw separator was preserved, which forced the web
+    // renderer to rely on whitespace-collapse to match cmark and left RN
+    // showing a stray tab / doubled space.
+    let content = rest.trim_start_matches(|c| c == ' ' || c == '\t');
+    if content.len() == rest.len() {
+        return None;
+    }
+    let mut replacement = String::with_capacity(leading_len + content.len());
     replacement.push_str(&value[..leading_len]);
-    replacement.push_str(rest);
+    replacement.push_str(content);
     *value = replacement;
     Some(checked)
 }
@@ -1690,6 +1902,45 @@ mod tests {
     }
 
     #[test]
+    fn reassembles_footnote_ref_split_by_inline_raw_html() {
+        // A `[^label]` whose label contains `<` must be tokenized as one
+        // footnote reference — the inline raw-HTML rule must not split it,
+        // otherwise the embedded tag leaks into the output (XSS). cmark-gfm
+        // treats the whole `[…]` as the label string and percent-encodes it.
+        let ast = parse("Hello[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: pwned\n");
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::Paragraph {
+            children: paragraph,
+            ..
+        } = &children[0]
+        else {
+            panic!("expected paragraph");
+        };
+        let reference = paragraph
+            .iter()
+            .find_map(|node| match node {
+                SupramarkNode::FootnoteReference { .. } => Some(node),
+                _ => None,
+            })
+            .expect("footnote reference");
+        match reference {
+            SupramarkNode::FootnoteReference {
+                label,
+                identifier,
+                index,
+                ..
+            } => {
+                assert_eq!(label, "\"><script>alert(1)</script>");
+                assert_eq!(identifier, "\"><script>alert(1)</script>");
+                assert_eq!(*index, 1, "footnote reference should match its definition");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
     fn maps_multiple_inline_math_runs_split_by_text_tokens() {
         let ast = parse("Inline $E = mc^2$ and $A = \\pi r^2$.");
         let SupramarkNode::Root { children, .. } = ast else {
@@ -1759,6 +2010,121 @@ mod tests {
         ));
     }
 
+    /// Walk the paragraph children and return (value, byte-offset span) for
+    /// text fragments and autolink links produced by a bare-URL/email split.
+    fn autolink_split_spans(input: &str) -> Vec<(String, Option<(usize, usize)>)> {
+        let ast = parse(input);
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::Paragraph { children: p, .. } = &children[0] else {
+            panic!("expected paragraph");
+        };
+        p.iter()
+            .filter_map(|n| match n {
+                SupramarkNode::Text { value, position } => {
+                    Some((value.clone(), byte_span(position)))
+                }
+                SupramarkNode::Link { children, position, .. } => {
+                    let text = children
+                        .iter()
+                        .filter_map(|c| match c {
+                            SupramarkNode::Text { value, .. } => Some(value.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    Some((text, byte_span(position)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn byte_span(position: &Option<SourcePosition>) -> Option<(usize, usize)> {
+        position
+            .as_ref()
+            .map(|p| (p.start.byte_offset, p.end.byte_offset))
+    }
+
+    #[test]
+    fn bare_email_autolink_preserves_source_positions() {
+        // "see foo@bar.baz now" -> Text("see ") | Link("foo@bar.baz") | Text(" now")
+        // The original text node's srcmap must be sliced onto each fragment;
+        // before the fix every split node carried position: None.
+        assert_eq!(
+            autolink_split_spans("see foo@bar.baz now"),
+            vec![
+                ("see ".to_owned(), Some((0, 4))),
+                ("foo@bar.baz".to_owned(), Some((4, 15))),
+                (" now".to_owned(), Some((15, 19))),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_www_autolink_preserves_source_positions() {
+        // "go www.example.com here" -> Text("go ") | Link | Text(" here")
+        assert_eq!(
+            autolink_split_spans("go www.example.com here"),
+            vec![
+                ("go ".to_owned(), Some((0, 3))),
+                ("www.example.com".to_owned(), Some((3, 18))),
+                (" here".to_owned(), Some((18, 23))),
+            ]
+        );
+    }
+
+    #[test]
+    fn chained_at_skipped_region_keeps_text_position() {
+        // `a@a@a@a post b@c.d`: the `a@a@a@a` chain finds no email (no dot),
+        // so it is skipped as plain text and the `b@c.d` link is matched.
+        // The pre-link text fragment must still carry a contiguous position
+        // spanning from the start through the link's start.
+        assert_eq!(
+            autolink_split_spans("a@a@a@a post b@c.d"),
+            vec![
+                ("a@a@a@a post ".to_owned(), Some((0, 13))),
+                ("b@c.d".to_owned(), Some((13, 18))),
+            ]
+        );
+    }
+
+    #[test]
+    fn reassembled_footnote_ref_carries_position() {
+        // The `[^…<…>]` footnote reference is reassembled across an inline
+        // raw-HTML split; the resulting FootnoteReference (and the text-before
+        // / text-after fragments) must carry source positions, not None.
+        let ast = parse("Hi[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: x\n");
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::Paragraph { children: p, .. } = &children[0] else {
+            panic!("expected paragraph");
+        };
+        let spans: Vec<Option<(usize, usize)>> = p
+            .iter()
+            .filter_map(|n| match n {
+                SupramarkNode::Text { position, .. } => Some(byte_span(position)),
+                SupramarkNode::FootnoteReference { position, .. } => Some(byte_span(position)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            spans.iter().all(Option::is_some),
+            "no node should lose its position: {spans:?}"
+        );
+        let r#ref = p
+            .iter()
+            .find_map(|n| match n {
+                SupramarkNode::FootnoteReference { position, .. } => byte_span(position),
+                _ => None,
+            })
+            .expect("reassembled footnote reference");
+        // Spans from the `[` (offset 2, after "Hi") to just past the closing `]`.
+        assert_eq!(r#ref, (2, 32));
+    }
+
     #[test]
     fn html_block_closing_tag_paragraph_interruption() {
         // CommonMark 0.31.2 HTML block type-6 start condition uses a name list
@@ -1817,5 +2183,65 @@ mod tests {
             };
             assert_eq!(lang.as_deref(), Some(expected_lang));
         }
+    }
+
+    #[test]
+    fn task_marker_consumes_separator_whitespace() {
+        // cmark-gfm's tasklist scan consumes the marker plus its trailing
+        // `spacechar+` separator; the text node carries the content with no
+        // leading whitespace, regardless of whether the source separator was a
+        // space, a tab, or several spaces. Previously the raw separator was
+        // preserved, leaving `\tfoo` / `  foo` in the text node.
+        fn first_text(nodes: &[SupramarkNode]) -> &str {
+            match &nodes[0] {
+                SupramarkNode::Paragraph { children, .. } => first_text(children),
+                SupramarkNode::Text { value, .. } => value,
+                _ => panic!("expected text"),
+            }
+        }
+        for (input, expected_text) in [
+            ("- [ ] foo", "foo"),
+            ("- [ ]\tfoo", "foo"),
+            ("- [ ]  foo", "foo"),
+            ("- [x] bar", "bar"),
+        ] {
+            let ast = parse(input);
+            let SupramarkNode::Root { children, .. } = ast else {
+                panic!("expected root for {input}");
+            };
+            let SupramarkNode::List { children: items, .. } = &children[0] else {
+                panic!("expected list for {input}");
+            };
+            let SupramarkNode::ListItem { children, .. } = &items[0] else {
+                panic!("expected list item for {input}");
+            };
+            assert_eq!(first_text(children), expected_text, "for input {input}");
+        }
+    }
+
+    #[test]
+    fn task_marker_requires_separator_whitespace() {
+        // cmark-gfm does NOT treat `[ ]foo` (no separator) as a task list
+        // item; the marker must be followed by `spacechar+`. The text node
+        // stays literal.
+        fn first_text(nodes: &[SupramarkNode]) -> &str {
+            match &nodes[0] {
+                SupramarkNode::Paragraph { children, .. } => first_text(children),
+                SupramarkNode::Text { value, .. } => value,
+                _ => panic!("expected text"),
+            }
+        }
+        let ast = parse("- [ ]foo");
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::List { children: items, .. } = &children[0] else {
+            panic!("expected list");
+        };
+        let SupramarkNode::ListItem { checked, children, .. } = &items[0] else {
+            panic!("expected list item");
+        };
+        assert!(checked.is_none(), "no-separator should not be a task item");
+        assert_eq!(first_text(children), "[ ]foo");
     }
 }

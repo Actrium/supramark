@@ -1630,6 +1630,44 @@ export interface SupramarkConfig {
      */
     allowDangerousHtml?: boolean;
 
+    /**
+     * GFM "Disallowed Raw HTML" (tagfilter): drop a small allowlist of unsafe
+     * tags (`<title>`, `<textarea>`, `<style>`, `<xmp>`, `<iframe>`,
+     * `<noembed>`, `<noframes>`, `<script>`, `<plaintext>`) when rendering
+     * raw HTML.
+     *
+     * - Default `false`: raw HTML (when `allowDangerousHtml` is on) is passed
+     *   through verbatim.
+     * - Set to `true`: the tagfilter rewrites those tags so the browser does
+     *   not treat them as raw markup. cmark-gfm applies this only in its
+     *   "Disallowed Raw HTML" / "HTML tag filter" spec sections; hosts
+     *   rendering untrusted markdown with raw HTML on should opt in.
+     */
+    gfmTagfilter?: boolean;
+
+    /**
+     * GFM footnote section rendering: emit the trailing `<section>` with
+     * back-references, mirroring cmark-gfm's footnote extension output.
+     *
+     * - Default `false`: footnote definitions render as plain blocks.
+     * - Set to `true`: the GFM footnote section format is emitted. CommonMark
+     *   has no footnotes extension, so the default stays off.
+     */
+    gfmFootnoteStyle?: boolean;
+
+    /**
+     * Flatten a `<strong>` whose parent is also `<strong>` (cmark-gfm 0.29's
+     * `html.c` `CMARK_NODE_STRONG` rule), so `__foo, __bar__, baz__` renders
+     * as a single `<strong>foo, bar, baz</strong>` instead of the nested
+     * `<strong>foo, <strong>bar</strong>, baz</strong>` the delimiter-run
+     * algorithm produces.
+     *
+     * - Default `false`: keep the nesting (CommonMark 0.31 behavior — the two
+     *   references diverge on the same input).
+     * - Set to `true`: flatten, matching cmark-gfm 0.29.
+     */
+    flattenNestedStrong?: boolean;
+
     /** Other global configuration */
     [key: string]: unknown;
   };

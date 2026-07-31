@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 fn main() {
     let mut input = "-".to_owned();
     let mut output = "-".to_owned();
+    let mut no_gfm_autolink = false;
 
     {
         let mut cli = argparse::ArgumentParser::new();
@@ -20,6 +21,12 @@ fn main() {
         cli.refer(&mut input)
             .add_argument("file", argparse::Store, "File to read");
 
+        cli.refer(&mut no_gfm_autolink).add_option(
+            &["--no-gfm-autolink"],
+            argparse::StoreTrue,
+            "Disable the GFM bare-URL/email autolink extension (CommonMark profile)",
+        );
+
         cli.parse_args_or_exit();
     }
 
@@ -32,7 +39,11 @@ fn main() {
     };
 
     let source = String::from_utf8_lossy(&vec);
-    let ast = supramark_markdown::parse(&source);
+    let mut options = supramark_markdown::ParseOptions::default();
+    if no_gfm_autolink {
+        options.gfm_autolink = false;
+    }
+    let ast = supramark_markdown::parse_with_options(&source, options);
     let result = serde_json::to_string_pretty(&ast).unwrap();
 
     if output == "-" {

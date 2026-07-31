@@ -1,4 +1,13 @@
-import React, { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type {
   SupramarkRootNode,
   SupramarkNode,
@@ -9,6 +18,7 @@ import type {
   SupramarkDefinitionTermNode,
   SupramarkDefinitionDescriptionNode,
   SupramarkRawNode,
+  SupramarkFootnoteReferenceNode,
   SupramarkDiagramConfig,
   SupramarkConfig,
   SupramarkCodeHighlightResult,
@@ -306,6 +316,23 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     return containerRenderers ?? {};
   }, [containerRenderers]);
 
+  const footnoteStyle = isGfmFootnoteStyle(config);
+  const footnoteMeta = useMemo(
+    () => (footnoteStyle && parsedDocument ? buildFootnoteMeta(parsedDocument.root) : null),
+    [footnoteStyle, parsedDocument],
+  );
+  // In GFM footnote-section mode, definitions are hoisted to a trailing
+  // <section>; filter them out of the body so they don't also render in place
+  // (renderNode also returns null for them, but removing them here keeps the
+  // body clean for raw-HTML sibling merging).
+  const bodyChildren = useMemo(
+    () =>
+      footnoteStyle && parsedDocument
+        ? parsedDocument.root.children.filter(n => n.type !== 'footnote_definition')
+        : parsedDocument?.root.children ?? [],
+    [footnoteStyle, parsedDocument],
+  );
+
   if (parseError) {
     if (errorFallback) {
       return <>{errorFallback(parseError)}</>;
@@ -331,23 +358,36 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
       classNamePrefix={errorClassNamePrefix}
     >
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
-        <div className={mergedClassNames.root}>
-          {mergeRawNodes(
-            parsedDocument.root.children,
-            (node, index) =>
-              renderNode(
-                node,
-                index,
-                mergedClassNames,
-                parsedDocument.rendered,
-                parsedDocument.highlighted,
-                config,
-                mergedContainerRenderers
-              ),
-            mergedClassNames,
-            config
-          )}
-        </div>
+        <FootnoteMetaContext.Provider value={footnoteMeta}>
+          <div className={mergedClassNames.root}>
+            {mergeRawNodes(
+              bodyChildren,
+              (node, index) =>
+                renderNode(
+                  node,
+                  index,
+                  mergedClassNames,
+                  parsedDocument.rendered,
+                  parsedDocument.highlighted,
+                  config,
+                  mergedContainerRenderers,
+                ),
+              mergedClassNames,
+              config,
+              parsedDocument.highlighted
+            )}
+            {footnoteMeta && footnoteMeta.defs.length > 0 && (
+              <FootnoteSection
+                defs={footnoteMeta.defs}
+                classNames={mergedClassNames}
+                rendered={parsedDocument.rendered}
+                highlighted={parsedDocument.highlighted}
+                config={config}
+                containerRenderers={mergedContainerRenderers}
+              />
+            )}
+          </div>
+        </FootnoteMetaContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
   );
@@ -400,6 +440,289 @@ function escapeHtmlAttr(value: string): string {
 // defined with raw HTML passed through.
 function isDangerousHtmlAllowed(config?: SupramarkConfig): boolean {
   return config?.options?.allowDangerousHtml === true;
+}
+
+// GFM "Disallowed Raw HTML" (tagfilter): cmark-gfm escapes the opening `<` of a
+// small set of block-level raw HTML tags — `title`, `textarea`, `style`, `xmp`,
+// `iframe`, `noembed`, `noframes`, `script`, `plaintext` — to `&lt;` so they
+// render as visible text instead of being interpreted by the browser. The
+// extension is opt-in via `options.gfmTagfilter`; the conformance harness
+// enables it only for the GFM tagfilter sections, matching cmark-gfm's
+// per-extension enabling. CommonMark has no such filter and is unaffected.
+const TAGFILTER_DISALLOWED_TAGS = new Set([
+  'title',
+  'textarea',
+  'style',
+  'xmp',
+  'iframe',
+  'noembed',
+  'noframes',
+  'script',
+  'plaintext',
+]);
+
+function isTagfilterEnabled(config?: SupramarkConfig): boolean {
+  return config?.options?.gfmTagfilter === true;
+}
+
+// Replace the leading `<` of every disallowed tag (open or close,
+// case-insensitive) with `&lt;`; allowed tags and non-tag `<` pass through.
+function tagfilterEscape(html: string): string {
+  return html.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/g, (match: string, slash: string, name: string) =>
+    TAGFILTER_DISALLOWED_TAGS.has(name.toLowerCase()) ? `&lt;${slash}${name}` : match
+  );
+}
+
+function maybeTagfilter(value: string, config?: SupramarkConfig): string {
+  return isTagfilterEnabled(config) ? tagfilterEscape(value) : value;
+}
+
+// GFM footnote section. cmark-gfm hoists footnote definitions to a trailing
+// `<section class="footnotes" data-footnotes><ol><li id="fn-N">…</li></ol></section>`,
+// renders references as `<sup class="footnote-ref"><a href="#fn-N" id="fnref-N" data-footnote-ref>N</a></sup>`,
+// and appends one backref per reference to the definition's last paragraph (or
+// after the last block when it isn't a paragraph). Unreferenced definitions are
+// dropped; references with no definition stay literal `[^label]`. The extension
+// is opt-in via `options.gfmFootnoteStyle`; the conformance harness enables it
+// only for the cmark-gfm "Footnotes" section, so the default (inline) footnote
+// rendering and CommonMark are unaffected.
+type FootnoteRefMeta = {
+  occurrence: number;
+  defIndex: number;
+  defIdentifier: string;
+};
+type FootnoteDefMeta = {
+  index: number;
+  label?: string;
+  identifier: string;
+  children: SupramarkNode[];
+  occurrences: number[];
+};
+type FootnoteMeta = {
+  refMeta: Map<SupramarkFootnoteReferenceNode, FootnoteRefMeta>;
+  defs: FootnoteDefMeta[];
+};
+
+const FootnoteMetaContext = createContext<FootnoteMeta | null>(null);
+
+function isGfmFootnoteStyle(config?: SupramarkConfig): boolean {
+  return config?.options?.gfmFootnoteStyle === true;
+}
+
+// cmark-gfm 0.29's HTML renderer (html.c, CMARK_NODE_STRONG) suppresses the
+// inner `<strong>` wrapper when a strong node's parent is also strong, so
+// `__foo, __bar__, baz__` flattens to `<strong>foo, bar, baz</strong>` instead
+// of the nested `<strong>foo, <strong>bar</strong>, baz</strong>` the
+// delimiter-run algorithm produces. CommonMark 0.31 does NOT do this — its
+// spec (and reference cmark) keep the nesting. The two references diverge on
+// the same input, so the flattening is opt-in via `options.flattenNestedStrong`;
+// the cmark-gfm conformance harness enables it, the default (and CommonMark)
+// stays nested. Only STRONG is suppressed; nested <em> always emits.
+function isFlattenNestedStrongEnabled(config?: SupramarkConfig): boolean {
+  return config?.options?.flattenNestedStrong === true;
+}
+
+// Mirror cmark-gfm's URL-fragment escaping for footnote identifiers: keep
+// URL-safe chars (including `/`, `(`, `)`, alphanumerics) literal and
+// percent-encode the rest, so `"`, `<`, `>` become %22/%3C/%3E. `encodeURIComponent`
+// matches except it also encodes `/`, which cmark leaves literal in fragments.
+function footnoteHrefEscape(s: string): string {
+  let out = '';
+  for (const ch of s) {
+    out += ch === '/' ? ch : encodeURIComponent(ch);
+  }
+  return out;
+}
+
+function buildFootnoteMeta(root: SupramarkRootNode): FootnoteMeta {
+  const defsById = new Map<string, FootnoteDefMeta>();
+  const collectDefs = (list: SupramarkNode[]) => {
+    for (const n of list) {
+      if (n.type === 'footnote_definition') {
+        const d = n;
+        defsById.set(d.identifier, {
+          index: d.index,
+          label: d.label,
+          identifier: d.identifier,
+          children: d.children,
+          occurrences: [],
+        });
+      }
+      if ('children' in n && Array.isArray(n.children)) collectDefs(n.children);
+    }
+  };
+  collectDefs(root.children);
+
+  const refMeta = new Map<SupramarkFootnoteReferenceNode, FootnoteRefMeta>();
+  const occCount = new Map<string, number>();
+  const referenced = new Set<string>();
+  const walkRefs = (list: SupramarkNode[]) => {
+    for (const n of list) {
+      if (n.type === 'footnote_reference') {
+        const r = n;
+        const def = defsById.get(r.identifier);
+        if (def) {
+          const k = (occCount.get(r.identifier) ?? 0) + 1;
+          occCount.set(r.identifier, k);
+          referenced.add(r.identifier);
+          refMeta.set(r, {
+            occurrence: k,
+            defIndex: def.index,
+            defIdentifier: def.identifier,
+          });
+        }
+      }
+      if ('children' in n && Array.isArray(n.children)) walkRefs(n.children);
+    }
+  };
+  walkRefs(root.children);
+
+  for (const def of defsById.values()) {
+    if (referenced.has(def.identifier)) {
+      def.occurrences = Array.from(
+        { length: occCount.get(def.identifier) ?? 0 },
+        (_, i) => i + 1,
+      );
+    }
+  }
+  const defs = [...defsById.values()]
+    .filter(d => referenced.has(d.identifier))
+    .sort((a, b) => a.index - b.index);
+
+  return { refMeta, defs };
+}
+
+function FootnoteRef({ node }: { node: SupramarkFootnoteReferenceNode }) {
+  const meta = useContext(FootnoteMetaContext);
+  const refMeta = meta?.refMeta.get(node);
+  if (!refMeta) {
+    // Unresolved reference (no matching definition) stays literal.
+    return <>[^{node.label ?? ''}]</>;
+  }
+  const suffix = refMeta.occurrence === 1 ? '' : `-${refMeta.occurrence}`;
+  const id = footnoteHrefEscape(refMeta.defIdentifier);
+  return (
+    <sup className="footnote-ref">
+      <a href={`#fn-${id}`} id={`fnref-${id}${suffix}`} data-footnote-ref="">
+        {refMeta.defIndex}
+      </a>
+    </sup>
+  );
+}
+
+function FootnoteBackref({
+  def,
+  occurrence,
+}: {
+  def: FootnoteDefMeta;
+  occurrence: number;
+}) {
+  const suffix = occurrence === 1 ? '' : `-${occurrence}`;
+  const id = footnoteHrefEscape(def.identifier);
+  const idx = occurrence === 1 ? `${def.index}` : `${def.index}-${occurrence}`;
+  return (
+    <a
+      href={`#fnref-${id}${suffix}`}
+      className="footnote-backref"
+      data-footnote-backref=""
+      data-footnote-backref-idx={idx}
+      aria-label={`Back to reference ${idx}`}
+    >
+      ↩
+      {occurrence > 1 && <sup className="footnote-ref">{occurrence}</sup>}
+    </a>
+  );
+}
+
+function renderFootnoteBackrefs(def: FootnoteDefMeta): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  def.occurrences.forEach((occ, i) => {
+    if (i > 0) nodes.push(' ');
+    nodes.push(<FootnoteBackref key={occ} def={def} occurrence={occ} />);
+  });
+  return nodes;
+}
+
+function FootnoteDefLi({
+  def,
+  classNames,
+  rendered,
+  highlighted,
+  config,
+  containerRenderers,
+}: {
+  def: FootnoteDefMeta;
+  classNames: SupramarkClassNames;
+  rendered: Map<string, DiagramRenderResult>;
+  highlighted: Map<string, SupramarkCodeHighlightResult>;
+  config?: SupramarkConfig;
+  containerRenderers: Record<string, ContainerRendererWeb> | undefined;
+}) {
+  const children = def.children;
+  const last = children[children.length - 1];
+  const lastIsParagraph = last?.type === 'paragraph';
+  const backrefs = renderFootnoteBackrefs(def);
+  const blocks = children.map((child, index) => {
+    if (index === children.length - 1 && child.type === 'paragraph') {
+      const para = child as { type: 'paragraph'; children: SupramarkNode[] };
+      return (
+        <p key={index} className={classNames.paragraph}>
+          {renderInlineNodes(para.children, classNames, rendered, highlighted, config)}
+          {' '}
+          {backrefs}
+        </p>
+      );
+    }
+    return renderNode(
+      child,
+      index,
+      classNames,
+      rendered,
+      highlighted,
+      config,
+      containerRenderers,
+    );
+  });
+  return (
+    <li id={`fn-${footnoteHrefEscape(def.identifier)}`}>
+      {blocks}
+      {!lastIsParagraph && backrefs}
+    </li>
+  );
+}
+
+function FootnoteSection({
+  defs,
+  classNames,
+  rendered,
+  highlighted,
+  config,
+  containerRenderers,
+}: {
+  defs: FootnoteDefMeta[];
+  classNames: SupramarkClassNames;
+  rendered: Map<string, DiagramRenderResult>;
+  highlighted: Map<string, SupramarkCodeHighlightResult>;
+  config?: SupramarkConfig;
+  containerRenderers: Record<string, ContainerRendererWeb> | undefined;
+}) {
+  return (
+    <section className="footnotes" data-footnotes="">
+      <ol>
+        {defs.map((def, index) => (
+          <FootnoteDefLi
+            key={index}
+            def={def}
+            classNames={classNames}
+            rendered={rendered}
+            highlighted={highlighted}
+            config={config}
+            containerRenderers={containerRenderers}
+          />
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 // React's component model emits one DOM element per node, so it cannot express
@@ -462,8 +785,12 @@ function RawHtml({ value }: { value: string }): React.ReactNode {
 // host with dangerouslySetInnerHTML. Fragments fall through to null — the
 // documented React limitation (cases involving comments, declarations, or
 // split open/close tags stay unmatched in conformance runs).
-function renderRawNode(node: SupramarkRawNode, key: number): React.ReactNode {
-  const value = node.value ?? '';
+function renderRawNode(
+  node: SupramarkRawNode,
+  key: number,
+  config?: SupramarkConfig
+): React.ReactNode {
+  const value = maybeTagfilter(node.value ?? '', config);
   const tagMatch = value.match(/^<([a-zA-Z][\w-]*)/);
   if (!tagMatch) return React.createElement(RawHtml, { key, value });
   const tag = tagMatch[1].toLowerCase();
@@ -554,7 +881,8 @@ function mergeRawNodes(
   children: SupramarkNode[],
   renderSingle: (node: SupramarkNode, key: number) => React.ReactNode,
   classNames?: SupramarkClassNames,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  highlighted?: Map<string, SupramarkCodeHighlightResult>
 ): React.ReactNode[] {
   // Raw HTML is opt-in. When disabled, skip raw-merge entirely so raw nodes
   // fall through to their per-node renderer (which drops them) and no
@@ -564,6 +892,36 @@ function mergeRawNodes(
   let i = 0;
   while (i < children.length) {
     const node = children[i];
+    // Paragraph with unclosed inline formatting elements (e.g. spec-0652's
+    // `<strong> … <em>`): cmark emits the raw tokens verbatim, and the
+    // browser's tree-construction reconstructs the active formatting elements
+    // across `</p>` into following blocks. Rendering the paragraph alone via
+    // RawHtml only reconstructs within the paragraph's fragment; to reproduce
+    // the cross-block leak, fold the paragraph and following serializable
+    // siblings into one RawHtml fragment so a single parse owns the
+    // reconstruction. Falls through when there is nothing to fold into or a
+    // following block can't be statically serialized.
+    if (allowDangerous && node?.type === 'paragraph' && classNames) {
+      const inlineHtml = inlineNodesToHtml(node.children, classNames, config);
+      if (inlineHtml !== null && unclosedInlineFormattingTags(inlineHtml).length > 0) {
+        const following = children.slice(i + 1);
+        const serializedFollowing =
+          following.length > 0 ? serializeBlocksToHtml(following, classNames, config, highlighted) : '';
+        if (serializedFollowing !== null) {
+          const classAttr = classNames.paragraph
+            ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
+            : '';
+          result.push(
+            React.createElement(RawHtml, {
+              key: i,
+              value: `<p${classAttr}>${inlineHtml}</p>\n${serializedFollowing}`,
+            })
+          );
+          i = children.length;
+          continue;
+        }
+      }
+    }
     if (allowDangerous && node?.type === 'raw') {
       const rawNode = node;
       const value = rawNode.value ?? '';
@@ -589,7 +947,7 @@ function mergeRawNodes(
           // container (e.g. `<del>\n<p>…</p>\n</del>`) that the reference
           // HTML relies on, and a React host element drops them.
           if (inner.some(hasBlockChild) && classNames) {
-            const serialized = serializeBlocksToHtml(inner, classNames, config);
+            const serialized = serializeBlocksToHtml(inner, classNames, config, highlighted);
             const closeValue =
               (children[closeIdx] as SupramarkRawNode).value ?? '';
             if (serialized !== null) {
@@ -607,7 +965,7 @@ function mergeRawNodes(
             React.createElement(
               open.tag,
               { key: i, ...attrs },
-              mergeRawNodes(inner, renderSingle, classNames, config)
+              mergeRawNodes(inner, renderSingle, classNames, config, highlighted)
             )
           );
           i = closeIdx + 1;
@@ -628,7 +986,8 @@ function mergeRawNodes(
           const serialized = serializeBlocksToHtml(
             following,
             classNames,
-            config
+            config,
+            highlighted
           );
           if (serialized !== null) {
             result.push(
@@ -783,7 +1142,8 @@ function renderNode(
             (child, index) =>
               renderNode(child, index, classNames, rendered, highlighted, config, containerRenderers),
             classNames,
-            config
+            config,
+            highlighted
           )}
         </blockquote>
       );
@@ -846,16 +1206,17 @@ function renderNode(
               disabled
               className={classNames.taskCheckbox}
             />
-            {item.children.map((child, index) =>
-              renderNode(
-                child,
-                index,
-                classNames,
-                rendered,
-                highlighted,
-                config,
-                containerRenderers
-              )
+            {/* cmark-gfm html_render emits `<input ... /> ` with a trailing
+              space before the item text; the parser consumes the separator
+              whitespace, so emit the literal space here to keep DOM parity. */}
+            {' '}
+            {renderListItemChildren(
+              item.children,
+              classNames,
+              rendered,
+              highlighted,
+              config,
+              containerRenderers
             )}
           </li>
         );
@@ -1166,14 +1527,32 @@ function renderNode(
       );
     }
     case 'table': {
+      // cmark-gfm splits the leading header row(s) into <thead> and the rest
+      // into <tbody>. A header-only table (no body rows) emits <thead> only.
       const table = node;
+      const rows = table.children;
+      let firstBodyRow = rows.findIndex(
+        (row) => !(row as { children?: Array<{ header?: boolean }> }).children?.[0]?.header
+      );
+      if (firstBodyRow < 0) firstBodyRow = rows.length;
+      const headRows = rows.slice(0, firstBodyRow);
+      const bodyRows = rows.slice(firstBodyRow);
       return (
         <table key={key} className={classNames.table}>
-          <tbody className={classNames.tableBody}>
-            {table.children.map((row, index) =>
-              renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
-            )}
-          </tbody>
+          {headRows.length > 0 && (
+            <thead className={classNames.tableHead}>
+              {headRows.map((row, index) =>
+                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+              )}
+            </thead>
+          )}
+          {bodyRows.length > 0 && (
+            <tbody className={classNames.tableBody}>
+              {bodyRows.map((row, index) =>
+                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+              )}
+            </tbody>
+          )}
         </table>
       );
     }
@@ -1189,25 +1568,64 @@ function renderNode(
     }
     case 'table_cell': {
       const cell = node;
-      const alignStyle = cell.align ? { textAlign: cell.align } : undefined;
+      // cmark-gfm 0.29.0.gfm.13 emits the obsolete but standard `align`
+      // attribute (not an inline `style`) on table cells. The conformance gate
+      // (issue #144) compares the full attribute set against cmark's DOM, so
+      // using `style={{ textAlign }}` here would add an attribute cmark does
+      // not emit and fail every alignment case. Emitting `align` keeps DOM
+      // parity; it is deprecated but universally supported and carries the
+      // alignment through to the consumer's CSS.
+      const alignAttr = cell.align ? { align: cell.align } : undefined;
+      // When a cell contains inline raw HTML (e.g. `<strong>hello</strong>`),
+      // emit the cell's inline run as a single raw HTML string so the browser's
+      // tree-construction owns the structure — matching cmark-gfm, which passes
+      // inline HTML through verbatim. React's one-element-per-node model would
+      // otherwise split `<strong>` and `</strong>` into an empty element plus a
+      // stray close tag, losing the wrapping. Falls back to the component model
+      // when there is no raw HTML or a child cannot be statically serialized.
+      const rawHtml = inlineNodesToHtml(cell.children, classNames, config);
+      if (rawHtml !== null) {
+        if (cell.header) {
+          return (
+            <th
+              key={key}
+              {...alignAttr}
+              className={classNames.tableHeaderCell}
+              dangerouslySetInnerHTML={{ __html: rawHtml }}
+            />
+          );
+        }
+        return (
+          <td
+            key={key}
+            {...alignAttr}
+            className={classNames.tableCell}
+            dangerouslySetInnerHTML={{ __html: rawHtml }}
+          />
+        );
+      }
       const content = renderInlineNodes(cell.children, classNames, rendered, highlighted, config);
 
       if (cell.header) {
         return (
-          <th key={key} style={alignStyle} className={classNames.tableHeaderCell}>
+          <th key={key} {...alignAttr} className={classNames.tableHeaderCell}>
             {content}
           </th>
         );
       }
 
       return (
-        <td key={key} style={alignStyle} className={classNames.tableCell}>
+        <td key={key} {...alignAttr} className={classNames.tableCell}>
           {content}
         </td>
       );
     }
     case 'footnote_definition': {
       const def = node;
+      // When the GFM footnote section is enabled, definitions are hoisted to a
+      // trailing `<section class="footnotes">` by FootnoteSection and must not
+      // also render at their source position.
+      if (isGfmFootnoteStyle(config)) return null;
       // def.children are block-level nodes (usually a single paragraph) and can't be
       // fed to renderInlineNodes directly.
       // Common shape `[^1]: content.` → children = [{ type: 'paragraph', children: [text] }]
@@ -1265,7 +1683,7 @@ function renderNode(
       // rendered, preserving the pre-raw-HTML default (no innerHTML /
       // dangerouslySetInnerHTML surface from untrusted markdown).
       if (!isDangerousHtmlAllowed(config)) return null;
-      return renderRawNode(node, key);
+      return renderRawNode(node, key, config);
     default:
       return null;
   }
@@ -1329,10 +1747,11 @@ function renderInlineNodes(
   classNames: SupramarkClassNames,
   rendered: Map<string, DiagramRenderResult>,
   highlighted: Map<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: SupramarkNode['type']
 ): React.ReactNode {
   return mergeRawNodes(nodes, (node, index) =>
-    renderInlineNode(node, index, classNames, rendered, highlighted, config)
+    renderInlineNode(node, index, classNames, rendered, highlighted, config, parentType)
   );
 }
 
@@ -1357,11 +1776,12 @@ function inlineNodesToHtml(
 function serializeInlineList(
   nodes: SupramarkNode[],
   classNames: SupramarkClassNames,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: SupramarkNode['type']
 ): string | null {
   let out = '';
   for (const node of nodes) {
-    const piece = serializeInlineNode(node, classNames, config);
+    const piece = serializeInlineNode(node, classNames, config, parentType);
     if (piece === null) return null;
     out += piece;
   }
@@ -1371,26 +1791,34 @@ function serializeInlineList(
 function serializeInlineNode(
   node: SupramarkNode,
   classNames: SupramarkClassNames,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: SupramarkNode['type']
 ): string | null {
   const cls = (value?: string) => (value ? ` class="${escapeHtmlAttr(value)}"` : '');
   switch (node.type) {
     case 'text':
       return escapeHtmlText(node.value);
     case 'raw':
-      return node.value ?? '';
+      return maybeTagfilter(node.value ?? '', config);
     case 'strong': {
-      const inner = serializeInlineList(node.children, classNames, config);
-      return inner === null ? null : `<strong${cls(classNames.strong)}>${inner}</strong>`;
+      const inner = serializeInlineList(node.children, classNames, config, 'strong');
+      if (inner === null) return null;
+      // Mirror cmark-gfm's HTML renderer: a strong whose parent is also a
+      // strong emits no wrapper at all, so `****foo****` flattens to a
+      // single <strong>foo</strong>. (Children are still recursed with
+      // parentType='strong' since the suppressed node is still a strong
+      // ancestor to its own children.) Opt-in (CommonMark 0.31 keeps nesting).
+      if (parentType === 'strong' && isFlattenNestedStrongEnabled(config)) return inner;
+      return `<strong${cls(classNames.strong)}>${inner}</strong>`;
     }
     case 'emphasis': {
-      const inner = serializeInlineList(node.children, classNames, config);
+      const inner = serializeInlineList(node.children, classNames, config, 'emphasis');
       return inner === null ? null : `<em${cls(classNames.emphasis)}>${inner}</em>`;
     }
     case 'inline_code':
       return `<code${cls(classNames.inlineCode)}>${escapeHtmlText(node.value)}</code>`;
     case 'link': {
-      const inner = serializeInlineList(node.children, classNames, config);
+      const inner = serializeInlineList(node.children, classNames, config, 'link');
       if (inner === null) return null;
       const title = node.title ? ` title="${escapeHtmlAttr(node.title)}"` : '';
       return `<a href="${escapeHtmlAttr(node.url)}"${title}${cls(classNames.link)}>${inner}</a>`;
@@ -1402,7 +1830,7 @@ function serializeInlineNode(
     case 'break':
       return '<br />\n';
     case 'delete': {
-      const inner = serializeInlineList(node.children, classNames, config);
+      const inner = serializeInlineList(node.children, classNames, config, 'delete');
       if (inner === null) return null;
       return isFeatureGroupEnabled(config, ['@supramark/feature-gfm'])
         ? `<del${cls(classNames.delete)}>${inner}</del>`
@@ -1439,7 +1867,8 @@ function hasBlockChild(node: SupramarkNode): boolean {
 function serializeBlockToHtml(
   node: SupramarkNode,
   classNames: SupramarkClassNames,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  highlighted?: Map<string, SupramarkCodeHighlightResult>
 ): string | null {
   switch (node.type) {
     case 'paragraph': {
@@ -1460,10 +1889,17 @@ function serializeBlockToHtml(
       const preClassAttr = classNames.codeBlock
         ? ` class="${escapeHtmlAttr(classNames.codeBlock)}"`
         : '';
-      return `<pre${preClassAttr}><code${codeClassAttr}>${escapeHtmlText(node.value)}</code></pre>\n`;
+      // When this code block was folded into a RawHtml fragment (cross-block
+      // active-formatting reconstruction), the normal React renderCodeBlock
+      // path is bypassed — so emit the highlighted spans here too, mirroring
+      // renderCodeBlock's token structure, otherwise the fold silently drops
+      // syntax highlighting for any code block following an unclosed-inline
+      // paragraph.
+      const inner = serializeCodeInner(node, highlighted);
+      return `<pre${preClassAttr}><code${codeClassAttr}>${inner}</code></pre>\n`;
     }
     case 'raw':
-      return node.value ?? '';
+      return maybeTagfilter(node.value ?? '', config);
     case 'thematic_break':
       return '<hr />\n';
     case 'heading': {
@@ -1483,15 +1919,58 @@ function serializeBlockToHtml(
 function serializeBlocksToHtml(
   nodes: SupramarkNode[],
   classNames: SupramarkClassNames,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  highlighted?: Map<string, SupramarkCodeHighlightResult>
 ): string | null {
   let out = '';
   for (const node of nodes) {
-    const piece = serializeBlockToHtml(node, classNames, config);
+    const piece = serializeBlockToHtml(node, classNames, config, highlighted);
     if (piece === null) return null;
     out += piece;
   }
   return out;
+}
+
+// Emits the inner HTML for a fenced code block when it is serialized into a
+// RawHtml fragment. Mirrors renderCodeBlock: highlighted spans when a result
+// exists for this block's key, otherwise the plain escaped source.
+function serializeCodeInner(
+  codeBlock: SupramarkCodeNode,
+  highlighted?: Map<string, SupramarkCodeHighlightResult>
+): string {
+  const highlight = highlighted?.get(
+    buildCodeHighlightKey(codeBlock.value, codeBlock.lang, codeBlock.meta)
+  );
+  if (!highlight) {
+    return escapeHtmlText(codeBlock.value);
+  }
+  let out = '';
+  for (let lineIndex = 0; lineIndex < highlight.lines.length; lineIndex++) {
+    const line = highlight.lines[lineIndex];
+    for (const token of line.tokens) {
+      const css = codeTokenInlineCss(token);
+      out += css
+        ? `<span style="${css}">${escapeHtmlText(token.text)}</span>`
+        : escapeHtmlText(token.text);
+    }
+    if (lineIndex < highlight.lines.length - 1) out += '\n';
+  }
+  return out;
+}
+
+function codeTokenInlineCss(token: {
+  color?: string;
+  backgroundColor?: string;
+  fontStyle?: Array<'bold' | 'italic' | 'underline'>;
+}): string {
+  const parts: string[] = [];
+  if (token.color) parts.push(`color:${token.color}`);
+  if (token.backgroundColor) parts.push(`background:${token.backgroundColor}`);
+  const fontStyle = token.fontStyle ?? [];
+  if (fontStyle.includes('bold')) parts.push('font-weight:bold');
+  if (fontStyle.includes('italic')) parts.push('font-style:italic');
+  if (fontStyle.includes('underline')) parts.push('text-decoration:underline');
+  return parts.join(';');
 }
 
 // Detect a block raw whose value is an open tag with no matching close tag in
@@ -1513,13 +1992,40 @@ function unclosedBlockContainerOpen(
   return tag;
 }
 
+// HTML5 active formatting elements (HTML spec, "list of active formatting
+// elements"). cmark emits raw inline HTML verbatim, so an unclosed formatting
+// tag in one block leaks into following blocks when the browser reconstructs
+// the active formatting elements across the block boundary — e.g. spec-0652's
+// `<strong> … <em>` paragraph wraps the following blockquote's text in
+// `<strong><em>` after `</p>`. Returning the set of tags opened but not closed
+// in a serialized inline run lets mergeRawNodes fold following siblings into
+// one RawHtml fragment so the browser's tree-construction reproduces cmark's
+// reconstruction in a single parse.
+const HTML_FORMATTING_TAGS = new Set([
+  'a', 'b', 'big', 'code', 'em', 'font', 'i', 'nobr', 's', 'small', 'strike',
+  'strong', 'tt', 'u',
+]);
+function unclosedInlineFormattingTags(html: string): string[] {
+  const counts: Record<string, number> = {};
+  const re = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[1].toLowerCase();
+    if (!HTML_FORMATTING_TAGS.has(tag)) continue;
+    const closing = m[0].charCodeAt(1) === 47; // '</'
+    counts[tag] = (counts[tag] ?? 0) + (closing ? -1 : 1);
+  }
+  return Object.keys(counts).filter((t) => counts[t] > 0);
+}
+
 function renderInlineNode(
   node: SupramarkNode,
   key: number,
   classNames: SupramarkClassNames,
   rendered: Map<string, DiagramRenderResult>,
   highlighted: Map<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: SupramarkNode['type']
 ): React.ReactNode {
   switch (node.type) {
     case 'text': {
@@ -1528,9 +2034,22 @@ function renderInlineNode(
     }
     case 'strong': {
       const strongNode = node;
+      // cmark-gfm's HTML renderer suppresses the <strong> wrapper when a
+      // strong node's parent is also strong (html.c CMARK_NODE_STRONG),
+      // collapsing `****foo****` to a single `<strong>foo</strong>` instead
+      // of the nested `<strong><strong>foo</strong></strong>` the delimiter
+      // algorithm produces. Only STRONG is suppressed — nested <em> stays.
+      // Opt-in (CommonMark 0.31 keeps the nesting).
+      if (parentType === 'strong' && isFlattenNestedStrongEnabled(config)) {
+        return (
+          <React.Fragment key={key}>
+            {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
+          </React.Fragment>
+        );
+      }
       return (
         <strong key={key} className={classNames.strong}>
-          {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config)}
+          {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
         </strong>
       );
     }
@@ -1538,7 +2057,7 @@ function renderInlineNode(
       const emphasisNode = node;
       return (
         <em key={key} className={classNames.emphasis}>
-          {renderInlineNodes(emphasisNode.children, classNames, rendered, highlighted, config)}
+          {renderInlineNodes(emphasisNode.children, classNames, rendered, highlighted, config, 'emphasis')}
         </em>
       );
     }
@@ -1568,7 +2087,7 @@ function renderInlineNode(
       const linkNode = node;
       return (
         <a key={key} href={linkNode.url} title={linkNode.title} className={classNames.link}>
-          {renderInlineNodes(linkNode.children, classNames, rendered, highlighted, config)}
+          {renderInlineNodes(linkNode.children, classNames, rendered, highlighted, config, 'link')}
         </a>
       );
     }
@@ -1596,16 +2115,19 @@ function renderInlineNode(
     case 'delete': {
       const deleteNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-gfm'])) {
-        return renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config);
+        return renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete');
       }
       return (
         <del key={key} className={classNames.delete}>
-          {renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config)}
+          {renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete')}
         </del>
       );
     }
     case 'footnote_reference': {
       const ref = node;
+      if (isGfmFootnoteStyle(config)) {
+        return <FootnoteRef key={key} node={ref} />;
+      }
       return (
         <sup key={key} className={classNames.inlineCode}>
           <a href={`#fn-${ref.index}`} className={classNames.link}>
@@ -1620,7 +2142,7 @@ function renderInlineNode(
       // rendered, preserving the pre-raw-HTML default (no innerHTML /
       // dangerouslySetInnerHTML surface from untrusted markdown).
       if (!isDangerousHtmlAllowed(config)) return null;
-      return renderRawNode(node, key);
+      return renderRawNode(node, key, config);
     default:
       return null;
   }

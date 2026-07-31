@@ -52,6 +52,6 @@ pub(crate) use parser::main::MarkdownParser;
 pub(crate) use parser::node::{Node, NodeValue};
 pub(crate) use parser::renderer::Renderer;
 pub use supramark::{
-    parse, Diagnostic, DiagnosticSeverity, ExtensionMode, ParserInfo, SourcePoint, SourcePosition,
-    SupramarkNode, TableAlign,
+    parse, parse_with_options, Diagnostic, DiagnosticSeverity, ExtensionMode, ParseOptions,
+    ParserInfo, SourcePoint, SourcePosition, SupramarkNode, TableAlign,
 };

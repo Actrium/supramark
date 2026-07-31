@@ -3,6 +3,7 @@ import path from 'node:path';
 import pixelmatch from 'pixelmatch';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
+import { effectiveExpected } from '../expected-overrides.mjs';
 
 const VIEWPORT_WIDTH = 800;
 const INITIAL_VIEWPORT_HEIGHT = 600;
@@ -79,6 +80,25 @@ export async function compareVisualCases({
     await page.setContent(DOCUMENT_SHELL, { waitUntil: 'load' });
 
     for (const testCase of cases) {
+      // cmark-gfm's test file marks crash-safety edge cases with an `<IGNORE>`
+      // sentinel as the expected HTML (auto-passed by test/spec_tests.py). The
+      // sentinel is not a real target, but the cmark-gfm binary produces real
+      // HTML for these inputs; lib/expected-overrides.mjs captures that real
+      // output and we screenshot it as the expected. With no recorded override
+      // we fall back to auto-pass. See issue #144 (extensions-0020).
+      const expected = effectiveExpected(testCase);
+      if (expected.isIgnoreWithoutOverride) {
+        // No real expected HTML to screenshot against. Surface as skipped so
+        // the visual summary cannot count a comparison that never happened.
+        results.push({
+          id: testCase.id,
+          section: testCase.source.section,
+          status: 'skip',
+          skipped: 'ignore-sentinel',
+        });
+        continue;
+      }
+      const expectedHtml = expected.html;
       const actualHtml = actualHtmlById.get(testCase.id);
       if (actualHtml === undefined) {
         results.push({
@@ -93,16 +113,16 @@ export async function compareVisualCases({
       }
 
       try {
-        const expectedHeight = await measureFixture(page, testCase.expected.html);
+        const expectedHeight = await measureFixture(page, expectedHtml);
         const actualHeight = await measureFixture(page, actualHtml);
         const height = Math.max(expectedHeight, actualHeight, 96);
         if (height > MAX_CAPTURE_HEIGHT) {
           throw new Error(`Rendered height ${height}px exceeds the ${MAX_CAPTURE_HEIGHT}px cap`);
         }
         await page.setViewportSize({ width: VIEWPORT_WIDTH, height });
-        const expected = await captureFixture(page, testCase.expected.html, height);
+        const expectedShot = await captureFixture(page, expectedHtml, height);
         const actual = await captureFixture(page, actualHtml, height);
-        const expectedPng = PNG.sync.read(expected);
+        const expectedPng = PNG.sync.read(expectedShot);
         const actualPng = PNG.sync.read(actual);
         const diffPng = new PNG({ width: VIEWPORT_WIDTH, height });
         const diffPixels = pixelmatch(
@@ -132,7 +152,7 @@ export async function compareVisualCases({
           const actualPath = path.join(outputDirectory, 'actual.png');
           const diffPath = path.join(outputDirectory, 'diff.png');
           await Promise.all([
-            writeFile(expectedPath, expected),
+            writeFile(expectedPath, expectedShot),
             writeFile(actualPath, actual),
             writeFile(diffPath, PNG.sync.write(diffPng)),
           ]);
@@ -157,7 +177,8 @@ export async function compareVisualCases({
     await browser.close();
   }
 
-  const failures = results.filter(result => result.status !== 'pass');
+  const failures = results.filter(result => result.status === 'fail' || result.status === 'error');
+  const skipped = results.filter(result => result.status === 'skip' || result.skipped);
   const bySection = summarize(results, sectionName);
   return {
     schemaVersion: 1,
@@ -168,7 +189,8 @@ export async function compareVisualCases({
     viewport: { width: VIEWPORT_WIDTH, deviceScaleFactor: 1 },
     thresholds: { pixelThreshold, maxDiffPixels, maxDiffRatio },
     total: results.length,
-    passed: results.length - failures.length,
+    passed: results.length - failures.length - skipped.length,
+    skipped: skipped.length,
     failed: results.filter(result => result.status === 'fail').length,
     errors: results.filter(result => result.status === 'error').length,
     notPassed: failures.length,
@@ -217,12 +239,14 @@ function summarize(results, sectionName) {
       sectionLabel: sectionName(result.section),
       total: 0,
       passed: 0,
+      skipped: 0,
       failed: 0,
       errors: 0,
     };
     const counts = summary[result.section];
     counts.total += 1;
-    if (result.status === 'pass') counts.passed += 1;
+    if (result.status === 'skip' || result.skipped) counts.skipped += 1;
+    else if (result.status === 'pass') counts.passed += 1;
     else if (result.status === 'error') counts.errors += 1;
     else counts.failed += 1;
   }

@@ -9,6 +9,7 @@
 pub mod deflist;
 pub mod ext;
 pub mod footnote;
+pub mod gfm_autolink;
 #[cfg(feature = "linkify")]
 pub mod linkify;
 pub mod math;

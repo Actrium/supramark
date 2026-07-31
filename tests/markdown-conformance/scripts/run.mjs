@@ -21,6 +21,7 @@ import {
   findFirstDifference,
   htmlToSemanticTree,
 } from '../lib/semantic/html-semantics.mjs';
+import { effectiveExpected } from '../lib/expected-overrides.mjs';
 // Display names for CommonMark spec sections. The section keys below already
 // match the spec's own English headings, so this map is effectively the
 // identity function today; it is kept as a lookup table (rather than
@@ -70,6 +71,19 @@ const DEFAULT_BINARY = path.join(
   process.platform === 'win32' ? 'supramark-markdown.exe' : 'supramark-markdown'
 );
 const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_BINARY);
+// Issue #144's premise is that Supramark ships its DEFAULT parser config, and
+// the gate must measure exactly that — not a per-section toggle of the GFM
+// autolink extension. The default config has GFM bare-URL/email autolink ON
+// (crates/supramark-markdown/src/supramark.rs), so bare `https://`, `www.`
+// and `foo@bar` are linkified. CommonMark 0.31.2 has no such extension, and
+// cmark-gfm's CommonMark-core "Autolinks" section expects them literal — so
+// the small set of cases that contain bare URLs diverge under the default
+// config. Those divergences are legitimate GFM-vs-CommonMark differences,
+// not parser bugs; they are recorded in each baseline's failure lists with a
+// caveat rather than hidden by toggling the extension off here.
+function parserArgsFor() {
+  return ['-'];
+}
 const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 // Gate mode decides what a non-zero exit means (see buildGate below).
 // 'regression' (default) fails only on movement away from the recorded
@@ -177,6 +191,7 @@ if (visualEnabled) {
 }
 const failedCases = results.filter(result => result.status === 'fail');
 const errors = results.filter(result => result.status === 'error');
+const skippedCases = results.filter(result => result.status === 'skip' || result.skipped);
 const notPassed = [...failedCases, ...errors];
 const typeMismatchCount = failedCases.filter(result => result.typeDifference).length;
 const sectionSummary = summarize(results, result => result.section);
@@ -227,9 +242,10 @@ const summary = {
   sourceCommit: version.commit,
   parserBinary,
   total: results.length,
-  passed: results.length - notPassed.length,
+  passed: results.length - notPassed.length - skippedCases.length,
   failed: failedCases.length,
   errors: errors.length,
+  skipped: skippedCases.length,
   notPassed: notPassed.length,
   typeMismatches: typeMismatchCount,
   overallNotPassedCases: overallNotPassedCases.size,
@@ -301,9 +317,9 @@ if (summary.result === 'fail') {
   ]);
 }
 
-console.log(`${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, not passed ${summary.notPassed}`);
+console.log(`${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, not passed ${summary.notPassed}`);
 if (summary.visual.enabled) {
-  console.log(`${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, not passed ${summary.visual.notPassed}`);
+  console.log(`${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, skipped ${summary.visual.skipped}, not passed ${summary.visual.notPassed}`);
 } else {
   console.log(`${sourceDisplayName} visual comparison: not run (enable with run-visual.mjs ${sourceName})`);
 }
@@ -374,7 +390,7 @@ function buildGate({ mode, baseline, notPassedCount, semanticErrorCount, visualE
 }
 
 function runCase(testCase) {
-  const parsed = spawnSync(parserBinary, ['-'], {
+  const parsed = spawnSync(parserBinary, parserArgsFor(testCase), {
     input: testCase.input.markdown,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -435,19 +451,40 @@ function compareProductionCase(testCase) {
 }
 
 function compareHtmlCase(testCase, ast, actualHtml) {
-  const expected = htmlToSemanticTree(testCase.expected.html);
+  // cmark-gfm's test file marks a few crash-safety edge cases with an
+  // `<IGNORE>` sentinel as the expected HTML, and test/spec_tests.py
+  // auto-passes them. The sentinel is not a real rendering target, but the
+  // cmark-gfm 0.29.0.gfm.13 binary does produce real HTML for these inputs;
+  // lib/expected-overrides.mjs captures that real output and we compare
+  // Supramark against it instead of skipping. See issue #144 (extensions-0020).
+  const expected = effectiveExpected(testCase);
+  if (expected.isIgnoreWithoutOverride) {
+    // `<IGNORE>` with no binary override recorded: there is no real expected
+    // HTML to compare against (the fixture's sentinel is not a rendering
+    // target and no cmark-binary output was captured). Surface this as a
+    // skipped case rather than inflating `passed`, so the summary cannot
+    // claim a comparison that never happened.
+    return {
+      id: testCase.id,
+      section: testCase.source.section,
+      status: 'skip',
+      skipped: 'ignore-sentinel',
+    };
+  }
+  const expectedTree = htmlToSemanticTree(expected.html);
   const actual = htmlToSemanticTree(actualHtml);
-  const difference = findFirstDifference(expected, actual);
+  const difference = findFirstDifference(expectedTree, actual);
   const actualSemanticTypes = collectSemanticTypesFromTree(actual);
   const actualNodeTypes = collectAstTypes(ast);
-  const typeDifference = compareTypes(testCase.expected.semanticTypes, actualSemanticTypes);
+  const typeDifference = compareTypes(expected.semanticTypes, actualSemanticTypes);
   return {
     id: testCase.id,
     section: testCase.source.section,
     status: difference || typeDifference ? 'fail' : 'pass',
-    expectedSemanticTypes: testCase.expected.semanticTypes,
+    expectedSemanticTypes: expected.semanticTypes,
     actualSemanticTypes,
     actualNodeTypes,
+    ...(expected.isIgnoreOverride ? { ignoreOverride: true } : {}),
     ...(typeDifference ? { typeDifference } : {}),
     ...(difference ? { difference } : {}),
   };
@@ -468,18 +505,19 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
     '## Semantic comparison results',
     '',
     `- Passed: ${summaryDocument.passed}`,
+    `- Skipped (\`<IGNORE>\` without override): ${summaryDocument.skipped}`,
     `- Semantic differences: ${summaryDocument.failed}`,
     `- Execution errors: ${summaryDocument.errors}`,
     `- Render type mismatches: ${summaryDocument.typeMismatches}`,
     '',
     '### Semantic results by section',
     '',
-    '| Section | Total | Passed | Semantic diff | Execution error |',
-    '| --- | ---: | ---: | ---: | ---: |',
+    '| Section | Total | Passed | Skipped | Semantic diff | Execution error |',
+    '| --- | ---: | ---: | ---: | ---: | ---: |',
   ];
   for (const [section, counts] of Object.entries(summaryDocument.bySection)) {
     lines.push(
-      `| ${escapeTableCell(`${counts.sectionLabel} (${section})`)} | ${counts.total} | ${counts.passed} | ${counts.failed} | ${counts.errors} |`
+      `| ${escapeTableCell(`${counts.sectionLabel} (${section})`)} | ${counts.total} | ${counts.passed} | ${counts.skipped} | ${counts.failed} | ${counts.errors} |`
     );
   }
   lines.push('', '### Not-passing semantic cases', '');
@@ -506,17 +544,18 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
       `- Style profile: \`${summaryDocument.visual.profile}\``,
       `- Pinned width: ${summaryDocument.visual.viewport?.width ?? '-'}px`,
       `- Passed: ${summaryDocument.visual.passed}/${summaryDocument.visual.total}`,
+      `- Skipped (\`<IGNORE>\` without override): ${summaryDocument.visual.skipped}`,
       `- Pixel differences: ${summaryDocument.visual.failed}`,
       `- Execution errors: ${summaryDocument.visual.errors}`,
       '',
       '### Visual results by section',
       '',
-      '| Section | Total | Passed | Pixel diff | Execution error |',
-      '| --- | ---: | ---: | ---: | ---: |'
+      '| Section | Total | Passed | Skipped | Pixel diff | Execution error |',
+      '| --- | ---: | ---: | ---: | ---: | ---: |'
     );
     for (const [section, counts] of Object.entries(summaryDocument.visual.bySection ?? {})) {
       lines.push(
-        `| ${escapeTableCell(`${counts.sectionLabel} (${section})`)} | ${counts.total} | ${counts.passed} | ${counts.failed} | ${counts.errors} |`
+        `| ${escapeTableCell(`${counts.sectionLabel} (${section})`)} | ${counts.total} | ${counts.passed} | ${counts.skipped} | ${counts.failed} | ${counts.errors} |`
       );
     }
     lines.push('', '### Not-passing visual cases', '');
@@ -593,9 +632,10 @@ function summarize(values, getKey) {
   const result = {};
   for (const value of values) {
     const key = getKey(value);
-    result[key] ??= { total: 0, passed: 0, failed: 0, errors: 0 };
+    result[key] ??= { total: 0, passed: 0, failed: 0, errors: 0, skipped: 0 };
     result[key].total += 1;
-    if (value.status === 'pass') result[key].passed += 1;
+    if (value.status === 'skip' || value.skipped) result[key].skipped += 1;
+    else if (value.status === 'pass') result[key].passed += 1;
     else if (value.status === 'error') result[key].errors += 1;
     else result[key].failed += 1;
   }

@@ -1,4 +1,7 @@
-use supramark_markdown::{parse, DiagnosticSeverity, ExtensionMode, SupramarkNode, TableAlign};
+use supramark_markdown::{
+    parse, parse_with_options, DiagnosticSeverity, ExtensionMode, ParseOptions, SupramarkNode,
+    TableAlign,
+};
 
 #[test]
 fn public_api_outputs_ast_v2_with_positions() {
@@ -127,6 +130,11 @@ fn public_api_maps_task_list_items() {
 
     assert_eq!(*first_checked, Some(true));
     assert_eq!(*second_checked, Some(false));
+    // cmark-gfm's tasklist scan consumes the `[x]`/`[ ]` marker plus its
+    // trailing separator whitespace (ext_scanners.re `spacechar+`); the text
+    // node carries the item text with no leading whitespace, and the single
+    // space in `<input ... /> Done` comes from the renderer's literal, not the
+    // text node.
     assert_eq!(first_text(first_children), "Done");
     assert_eq!(first_text(second_children), "Todo");
 }
@@ -137,6 +145,281 @@ fn first_text(nodes: &[SupramarkNode]) -> &str {
         SupramarkNode::Text { value, .. } => value,
         _ => panic!("expected text"),
     }
+}
+
+// GFM autolink extension (cmark-gfm 0.29 conformance, spec-0621..0631 +
+// extensions-0019). Bare www./scheme-URL/email text is linkified into a Link
+// node whose child text is the raw matched substring, mirroring cmark-gfm's
+// postprocess pass. See issue #144.
+fn first_link(nodes: &[SupramarkNode]) -> (&str, &str) {
+    match &nodes[0] {
+        SupramarkNode::Paragraph { children, .. } => first_link(children),
+        SupramarkNode::Link { url, children, .. } => {
+            let SupramarkNode::Text { value, .. } = &children[0] else {
+                panic!("expected text child, got {:?}", children);
+            };
+            (url, value)
+        }
+        _ => panic!("expected link, got {:?}", nodes[0]),
+    }
+}
+
+#[test]
+fn gfm_autolink_www_basic() {
+    // spec-0621: `www.commonmark.org` -> <a href="http://www.commonmark.org">www.commonmark.org</a>
+    let ast = parse("www.commonmark.org\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, text) = first_link(&children);
+    assert_eq!(url, "http://www.commonmark.org");
+    assert_eq!(text, "www.commonmark.org");
+}
+
+#[test]
+fn gfm_autolink_www_paren_balancing() {
+    // spec-0624: parens inside the path are kept, a trailing unmatched `)` is stripped.
+    let ast = parse("www.google.com/search?q=Markup+(business))\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, _text) = first_link(&children);
+    assert_eq!(url, "http://www.google.com/search?q=Markup+(business)");
+}
+
+#[test]
+fn gfm_autolink_www_lt_truncation() {
+    // spec-0627: `www.commonmark.org/he<lp` -> URL ends at `<`.
+    let ast = parse("www.commonmark.org/he<lp\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, _text) = first_link(&children);
+    assert_eq!(url, "http://www.commonmark.org/he");
+}
+
+#[test]
+fn gfm_autolink_scheme_url() {
+    // spec-0628: bare http://, https://, ftp:// URLs are linkified.
+    let ast = parse("https://encrypted.google.com/search?q=Markup+(business)\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, _text) = first_link(&children);
+    assert_eq!(
+        url,
+        "https://encrypted.google.com/search?q=Markup+(business)"
+    );
+}
+
+#[test]
+fn gfm_autolink_email_basic() {
+    // spec-0629: `foo@bar.baz` -> mailto: link.
+    let ast = parse("foo@bar.baz\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, text) = first_link(&children);
+    assert_eq!(url, "mailto:foo@bar.baz");
+    assert_eq!(text, "foo@bar.baz");
+}
+
+#[test]
+fn gfm_autolink_email_trailing_punct_stripped() {
+    // spec-0631: trailing `.`, `-`, `_` after the domain are not part of the link.
+    let ast = parse("foo@bar.baz/_test_link\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let (url, _text) = first_link(&children);
+    assert_eq!(url, "mailto:foo@bar.baz");
+}
+
+#[test]
+fn gfm_autolink_does_not_linkify_inside_link() {
+    // Text already inside a markdown link must not be re-linkified (cmark-gfm
+    // postprocess skips CMARK_NODE_LINK). `[x](http://a.b)` keeps the link text
+    // `x` verbatim.
+    let ast = parse("[click www.example.com](http://x.y)\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    let SupramarkNode::Link { children: link_children, .. } = &children[0] else {
+        panic!("expected link, got {:?}", children[0]);
+    };
+    // The link text is the single literal `click www.example.com` — no nested
+    // autolink child.
+    assert!(link_children.iter().all(|c| !matches!(
+        c,
+        SupramarkNode::Link { .. }
+    )));
+}
+
+#[test]
+fn gfm_autolink_does_not_linkify_inside_code_span() {
+    // cmark-gfm's autolink postprocess only walks text nodes, never the
+    // content of a code span. `` `<http://foo.bar.`baz>` `` keeps the URL
+    // literal inside the code span (spec-0355).
+    let ast = parse("`<http://foo.bar.`baz>`\n");
+    let para = paragraph_children(ast);
+    let SupramarkNode::InlineCode { value, .. } = &para[0] else {
+        panic!("expected inline code, got {:?}", para[0]);
+    };
+    assert_eq!(value, "<http://foo.bar.");
+    // Trailing literal text is also untouched.
+    let SupramarkNode::Text { value, .. } = &para[1] else {
+        panic!("expected trailing text, got {:?}", para[1]);
+    };
+    assert_eq!(value, "baz>`");
+}
+
+#[test]
+fn gfm_autolink_does_not_linkify_image_alt() {
+    // cmark-gfm leaves URLs inside an image's alt text literal — the alt is
+    // collected as a plain string attribute, not rendered content. The GFM
+    // autolink postprocess must not enter image children (extensions-0019).
+    let ast = parse("![http://inline.com/image](http://inline.com/image)\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    let SupramarkNode::Image { url, alt, .. } = &children[0] else {
+        panic!("expected image, got {:?}", children[0]);
+    };
+    assert_eq!(url, "http://inline.com/image");
+    assert_eq!(alt, "http://inline.com/image");
+}
+
+#[test]
+fn gfm_autolink_option_disables_bare_url_linkification() {
+    // The CommonMark conformance suite parses with the GFM autolink extension
+    // disabled so bare URLs stay literal (CommonMark spec has no bare-URL
+    // autolink). `parse` (default) linkifies; `parse_with_options` with
+    // `gfm_autolink: false` does not.
+    let default_ast = parse("https://example.com\n");
+    let SupramarkNode::Root { children, .. } = default_ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    assert!(
+        matches!(children[0], SupramarkNode::Link { .. }),
+        "default profile should autolink bare URLs"
+    );
+
+    let mut options = ParseOptions::default();
+    options.gfm_autolink = false;
+    let ast = parse_with_options("https://example.com\n", options);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    let SupramarkNode::Text { value, .. } = &children[0] else {
+        panic!("expected literal text, got {:?}", children[0]);
+    };
+    assert_eq!(value, "https://example.com");
+}
+
+// GFM strikethrough (cmark-gfm 0.29 conformance, extensions-0018). Both `~x~`
+// and `~~x~~` produce a single <del>; runs of 3+ tildes and mismatched lengths
+// stay literal. See issue #144.
+fn paragraph_children(ast: SupramarkNode) -> Vec<SupramarkNode> {
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph, got {:?}", children[0]);
+    };
+    children.clone()
+}
+
+#[test]
+fn gfm_strikethrough_single_tilde() {
+    // extensions-0018: `~one~` -> <del>one</del>
+    let para = paragraph_children(parse("~one~\n"));
+    assert!(matches!(
+        &para[0],
+        SupramarkNode::Delete { children, .. } if matches!(&children[0], SupramarkNode::Text { value, .. } if value == "one")
+    ));
+}
+
+#[test]
+fn gfm_strikethrough_double_tilde_single_del() {
+    // extensions-0018: `~~two~~` -> a single <del>two</del> (not nested).
+    let para = paragraph_children(parse("~~two~~\n"));
+    let SupramarkNode::Delete { children, .. } = &para[0] else {
+        panic!("expected delete, got {:?}", para[0]);
+    };
+    assert!(matches!(
+        &children[0],
+        SupramarkNode::Text { value, .. } if value == "two"
+    ));
+    // No nested Delete.
+    assert!(children.iter().all(|c| !matches!(c, SupramarkNode::Delete { .. })));
+}
+
+#[test]
+fn gfm_strikethrough_three_tildes_literal() {
+    // extensions-0018: a run of 3+ tildes is not a delimiter — it stays literal.
+    // (Wrapped in a paragraph so the leading `~~~` isn't read as a code fence.)
+    let para = paragraph_children(parse("x ~~~three~~~ y\n"));
+    // No Delete node formed; the tildes survive as text.
+    assert!(para.iter().all(|c| !matches!(c, SupramarkNode::Delete { .. })));
+    let joined: String = para
+        .iter()
+        .filter_map(|c| match c {
+            SupramarkNode::Text { value, .. } => Some(value.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(joined, "x ~~~three~~~ y");
+}
+
+#[test]
+fn gfm_strikethrough_mismatched_lengths_literal() {
+    // extensions-0018: `~mismatch~~` -> literal (opener and closer must have
+    // equal length).
+    let para = paragraph_children(parse("~mismatch~~\n"));
+    let SupramarkNode::Text { value, .. } = &para[0] else {
+        panic!("expected literal text, got {:?}", para[0]);
+    };
+    assert_eq!(value, "~mismatch~~");
+}
+
+#[test]
+fn gfm_strikethrough_mixed_single_and_double() {
+    // extensions-0018: `~one~ ~~two~~` -> <del>one</del> <del>two</del>
+    let para = paragraph_children(parse("~one~ ~~two~~\n"));
+    let dels: Vec<_> = para
+        .iter()
+        .filter_map(|c| match c {
+            SupramarkNode::Delete { children, .. } => Some(children.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dels.len(), 2, "expected two <del>, got {para:?}");
+}
+
+#[test]
+fn gfm_strikethrough_inner_tilde_preserved() {
+    // extensions-0018: `~is ~ legit~` -> <del>is ~ legit</del>. The middle `~`
+    // is flanked by spaces (neither open nor close) so it stays literal inside.
+    let para = paragraph_children(parse("~is ~ legit~\n"));
+    let SupramarkNode::Delete { children, .. } = &para[0] else {
+        panic!("expected delete, got {:?}", para[0]);
+    };
+    let SupramarkNode::Text { value, .. } = &children[0] else {
+        panic!("expected text child, got {:?}", children);
+    };
+    assert_eq!(value, "is ~ legit");
 }
 
 #[test]
@@ -664,6 +947,54 @@ fn nests_footnote_definition_inside_blockquote() {
         panic!("expected footnote definition nested in blockquote, got {bq:?}");
     };
     assert_eq!(label, "a");
+}
+
+#[test]
+fn footnote_definition_absorbs_indented_continuation() {
+    // cmark-gfm footnote definitions are containers: lines indented >= 4 past
+    // the definition base become block children (blockquote, indented code,
+    // paragraph). Regression guard for cmark-gfm extensions-0023.
+    let src = "[^a]:\n    > quoted.\n\n        code line\n\n    para line.\n";
+    let ast = parse(src);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::FootnoteDefinition { children, label, .. } = &children[0] else {
+        panic!("expected footnote definition, got {:?}", &children[0]);
+    };
+    assert_eq!(label, "a");
+    // blockquote, code, paragraph — in source order.
+    assert!(matches!(children[0], SupramarkNode::Blockquote { .. }));
+    assert!(matches!(children[1], SupramarkNode::Code { .. }));
+    assert!(matches!(children[2], SupramarkNode::Paragraph { .. }));
+    if let SupramarkNode::Code { value, .. } = &children[1] {
+        assert_eq!(value, "code line\n");
+    }
+    // The indented continuation must NOT leak as a root-level code block.
+    assert!(
+        children.len() == 3,
+        "footnote def should own all continuation, got {children:?}"
+    );
+}
+
+#[test]
+fn footnote_definition_continuation_ends_at_new_block() {
+    // A non-indented line that opens a new block (another definition) ends the
+    // current definition's continuation; it is not absorbed.
+    let ast = parse("[^a]: first\n\n[^b]: second.\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::FootnoteDefinition { label: a, children: a_children, .. } = &children[0]
+    else {
+        panic!("expected first definition, got {:?}", &children[0]);
+    };
+    assert_eq!(a, "a");
+    assert_eq!(a_children.len(), 1, "first def should have one paragraph child");
+    let SupramarkNode::FootnoteDefinition { label: b, .. } = &children[1] else {
+        panic!("expected second definition, got {:?}", &children[1]);
+    };
+    assert_eq!(b, "b");
 }
 
 #[test]

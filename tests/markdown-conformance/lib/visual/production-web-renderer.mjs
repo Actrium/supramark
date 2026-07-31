@@ -55,9 +55,30 @@ export async function renderWithProductionWebRenderer({ cases, astById }) {
 
       const pageErrorOffset = pageErrors.length;
       try {
+        // GFM "Disallowed Raw HTML" (tagfilter) is a per-extension feature in
+        // cmark-gfm: only the spec.txt "Disallowed Raw HTML (extension)" and
+        // extensions.txt "HTML tag filter" sections are rendered with the
+        // filter on. Mirror that here so CommonMark-core raw HTML (passthrough)
+        // is unaffected.
+        const tagfilterSections = new Set([
+          'Disallowed Raw HTML (extension)',
+          'HTML tag filter',
+        ]);
+        const gfmTagfilter = tagfilterSections.has(testCase.source?.section ?? '');
+        // GFM footnote section format (trailing <section> + backrefs) is a
+        // per-extension feature; enable it only for the cmark-gfm Footnotes
+        // family of sections. CommonMark has no footnotes extension.
+        const sectionName = testCase.source?.section ?? '';
+        const gfmFootnoteStyle =
+          testCase.id.startsWith('cmark-gfm-') && sectionName.toLowerCase().includes('footnote');
+        // cmark-gfm 0.29's HTML renderer flattens nested strong (a strong
+        // whose parent is strong emits no <strong> wrapper), while CommonMark
+        // 0.31 keeps the nesting. The two references diverge on the same
+        // input, so the flattening is enabled only for the cmark-gfm source.
+        const flattenNestedStrong = testCase.id.startsWith('cmark-gfm-');
         const response = await page.evaluate(
           request => window.renderSupramarkCase(request),
-          { id: testCase.id, markdown: testCase.input.markdown, ast }
+          { id: testCase.id, markdown: testCase.input.markdown, ast, gfmTagfilter, gfmFootnoteStyle, flattenNestedStrong }
         );
         const errors = [...response.errors, ...pageErrors.slice(pageErrorOffset)];
         if (errors.length > 0) errorsById.set(testCase.id, errors);

@@ -41,6 +41,7 @@ export interface SupramarkClassNames {
 
   // Tables
   table?: string;
+  tableHead?: string; // thead element
   tableBody?: string; // tbody element
   tableRow?: string; // tr element
   tableCell?: string; // td element
@@ -106,6 +107,7 @@ export const tailwindClassNames: SupramarkClassNames = {
   image: 'max-w-full h-auto',
   delete: 'line-through',
   table: 'border-collapse border border-gray-300 dark:border-gray-700 mb-4 w-full',
+  tableHead: '',
   tableBody: '',
   tableRow: 'border-b border-gray-300 dark:border-gray-700',
   tableCell: 'border border-gray-300 dark:border-gray-700 px-4 py-2',
@@ -144,6 +146,7 @@ export const minimalClassNames: SupramarkClassNames = {
   image: 'sm-img',
   delete: 'sm-del',
   table: 'sm-table',
+  tableHead: 'sm-thead',
   tableBody: 'sm-tbody',
   tableRow: 'sm-tr',
   tableCell: 'sm-td',

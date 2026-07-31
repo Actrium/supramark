@@ -970,9 +970,12 @@ function renderInlineNodes(
   nodes: SupramarkNode[],
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: string
 ): RenderedNode {
-  return nodes.map((node, index) => renderInlineNode(node, index, styles, highlighted, config));
+  return nodes.map((node, index) =>
+    renderInlineNode(node, index, styles, highlighted, config, parentType)
+  );
 }
 
 function renderInlineNode(
@@ -980,7 +983,8 @@ function renderInlineNode(
   key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig
+  config?: SupramarkConfig,
+  parentType?: string
 ): RenderedNode {
   switch (node.type) {
     case 'text': {
@@ -989,9 +993,25 @@ function renderInlineNode(
     }
     case 'strong': {
       const strongNode = node;
+      // cmark-gfm 0.29 flattens a strong whose parent is strong; CommonMark
+      // 0.31 keeps the nesting. The two references diverge, so flattening is
+      // opt-in via `options.flattenNestedStrong` (mirrors the web renderer).
+      // RN nested <Text style={strong}> renders bold-on-bold (= bold) either
+      // way, so this is a behavioral-consistency no-op visually, but it keeps
+      // the same config from yielding structurally different output per
+      // platform.
+      if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
+        return renderInlineNodes(
+          strongNode.children,
+          styles,
+          highlighted,
+          config,
+          'strong'
+        );
+      }
       return (
         <Text key={key} style={styles.strong}>
-          {renderInlineNodes(strongNode.children, styles, highlighted, config)}
+          {renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong')}
         </Text>
       );
     }

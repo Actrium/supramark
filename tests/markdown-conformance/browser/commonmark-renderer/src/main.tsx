@@ -6,6 +6,9 @@ type RenderRequest = {
   id: string;
   markdown: string;
   ast: unknown;
+  gfmTagfilter?: boolean;
+  gfmFootnoteStyle?: boolean;
+  flattenNestedStrong?: boolean;
 };
 
 type RenderResponse = {
@@ -66,7 +69,14 @@ function RenderCase({
       markdown={request.markdown}
       ast={request.ast as never}
       classNames={{ root: 'commonmark-production-root' }}
-      config={{ options: { allowDangerousHtml: true } }}
+      config={{
+        options: {
+          allowDangerousHtml: true,
+          ...(request.gfmTagfilter ? { gfmTagfilter: true } : {}),
+          ...(request.gfmFootnoteStyle ? { gfmFootnoteStyle: true } : {}),
+          ...(request.flattenNestedStrong ? { flattenNestedStrong: true } : {}),
+        },
+      }}
       onError={onError}
       onRenderStateChange={onRenderStateChange}
     />
