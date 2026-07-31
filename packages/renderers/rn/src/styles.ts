@@ -51,6 +51,10 @@ export interface SupramarkStyles {
   textCenter?: TextStyle;
   textRight?: TextStyle;
 
+  // Blockquote & thematic break
+  blockquote?: ViewStyle;
+  thematicBreak?: ViewStyle;
+
   // Diagram
   diagramPlaceholder?: ViewStyle;
   diagramPlaceholderText?: TextStyle;
@@ -278,6 +282,18 @@ export const defaultStyles = StyleSheet.create({
     maxWidth: '100%',
     borderWidth: 1,
     borderColor: '#ddd',
+  },
+  blockquote: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#d0d7de',
+    paddingLeft: 12,
+    paddingVertical: 2,
+    marginVertical: 4,
+  },
+  thematicBreak: {
+    height: 1,
+    backgroundColor: '#d0d7de',
+    marginVertical: 8,
   },
   tableRow: {
     flexDirection: 'row',

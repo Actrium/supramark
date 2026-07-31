@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "bun test"
+    "test": "bun run --cwd ../../../crates/supramark-markdown/packages/web build && bun test"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
