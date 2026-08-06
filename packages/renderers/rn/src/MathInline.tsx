@@ -5,14 +5,26 @@ import { getSvgViewBoxSize } from '@supramark/engines';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
 import { normalizeSvgLight } from './svgUtils';
 
+function buildMathRenderOptions(
+  displayMode: boolean,
+  timeoutMs?: number
+): Record<string, unknown> {
+  const options: Record<string, unknown> = { displayMode };
+  if (typeof timeoutMs === 'number' && timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+    options.timeout = timeoutMs;
+  }
+  return options;
+}
+
 interface MathInlineProps {
   value: string;
   textStyle?: TextStyle;
+  timeoutMs?: number;
 }
 
 const defaultDiagramEngine = createReactNativeDiagramEngine();
 
-export const MathInline: React.FC<MathInlineProps> = ({ value, textStyle }) => {
+export const MathInline: React.FC<MathInlineProps> = ({ value, textStyle, timeoutMs }) => {
   const fontSize = textStyle?.fontSize ?? 16;
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
   const [svg, setSvg] = useState<string | null>(null);
@@ -27,7 +39,7 @@ export const MathInline: React.FC<MathInlineProps> = ({ value, textStyle }) => {
     defaultDiagramEngine.render({
       engine: 'math',
       code: value,
-      options: { displayMode: false },
+      options: buildMathRenderOptions(false, timeoutMs),
     })
       .then(result => {
         if (cancelled) return;
@@ -57,7 +69,7 @@ export const MathInline: React.FC<MathInlineProps> = ({ value, textStyle }) => {
     return () => {
       cancelled = true;
     };
-  }, [value, fontSize]);
+  }, [value, fontSize, timeoutMs]);
 
   if (failed || !dimensions || !svg) {
     return (

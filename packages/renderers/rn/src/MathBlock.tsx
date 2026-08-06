@@ -6,13 +6,25 @@ import { getSvgViewBoxSize } from '@supramark/engines';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
 import { normalizeSvgLight } from './svgUtils';
 
+function buildMathRenderOptions(
+  displayMode: boolean,
+  timeoutMs?: number
+): Record<string, unknown> {
+  const options: Record<string, unknown> = { displayMode };
+  if (typeof timeoutMs === 'number' && timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+    options.timeout = timeoutMs;
+  }
+  return options;
+}
+
 interface MathBlockProps {
   node: SupramarkMathBlockNode;
+  timeoutMs?: number;
 }
 
 const defaultDiagramEngine = createReactNativeDiagramEngine();
 
-export const MathBlock: React.FC<MathBlockProps> = ({ node }) => {
+export const MathBlock: React.FC<MathBlockProps> = ({ node, timeoutMs }) => {
   const [svg, setSvg] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -29,7 +41,7 @@ export const MathBlock: React.FC<MathBlockProps> = ({ node }) => {
     defaultDiagramEngine.render({
       engine: 'math',
       code: node.value,
-      options: { displayMode: true },
+      options: buildMathRenderOptions(true, timeoutMs),
     })
       .then(result => {
         if (cancelled) return;
@@ -51,7 +63,7 @@ export const MathBlock: React.FC<MathBlockProps> = ({ node }) => {
     return () => {
       cancelled = true;
     };
-  }, [node.value]);
+  }, [node.value, timeoutMs]);
 
   if (loading && !svg) {
     return (

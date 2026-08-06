@@ -467,7 +467,7 @@ function renderNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return renderDisabledMathBlock(mathBlock, key, styles);
       }
-      return <MathBlock key={key} node={mathBlock} />;
+      return <MathBlock key={key} node={mathBlock} timeoutMs={config?.diagram?.defaultTimeoutMs} />;
     }
     case 'list': {
       const list = node;
@@ -1016,7 +1016,7 @@ function renderInlineNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return mathNode.value;
       }
-      return <MathInline key={key} value={mathNode.value} textStyle={styles.paragraph} />;
+      return <MathInline key={key} value={mathNode.value} textStyle={styles.paragraph} timeoutMs={config?.diagram?.defaultTimeoutMs} />;
     }
     case 'link': {
       const linkNode = node;

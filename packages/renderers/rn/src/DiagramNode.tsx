@@ -311,6 +311,13 @@ function buildRenderOptions(
     }
   }
 
+  if (base.timeout === undefined) {
+    const fallback = diagramConfig?.defaultTimeoutMs;
+    if (typeof fallback === 'number' && fallback > 0 && Number.isFinite(fallback)) {
+      base.timeout = fallback;
+    }
+  }
+
   if (!meta) {
     return Object.keys(base).length > 0 ? base : undefined;
   }

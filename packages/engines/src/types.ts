@@ -9,7 +9,7 @@ export type DiagramEngineType = string;
 export type DiagramRenderFormat = 'svg' | 'error';
 
 export interface DiagramErrorInfo {
-  code: 'render_error' | 'unsupported_engine';
+  code: 'render_error' | 'render_timeout' | 'unsupported_engine';
   message: string;
   details?: string;
 }
