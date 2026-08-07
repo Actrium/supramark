@@ -1653,10 +1653,14 @@ export interface SupramarkConfig {
  * @returns a Supramark configuration object
  *
  * Behavior note: the returned config always has `options.cache: true`, meaning the
- * host runtime (@supramark/rn / @supramark/web) enables a process-level runtime cache
- * — reused by parsed documents and normalized diagram SVGs across scenarios like
- * virtual-list remounts. This cache is bounded by default (by entry count) and can be
- * adjusted or disabled via `diagram.defaultCache` / `diagram.engines[engine].cache`.
+ * RN host runtime (@supramark/rn) enables a process-level runtime cache — reused by
+ * parsed documents and normalized diagram SVGs across scenarios like virtual-list
+ * remounts. This cache is bounded by default (both entry count and a total-byte cap)
+ * and can be adjusted or disabled via `diagram.defaultCache` / `diagram.engines[engine].cache`.
+ *
+ * Note: the web runtime (@supramark/web) does NOT maintain a document or diagram
+ * result cache of its own — it only forwards `engineConfig.cache` into engine
+ * options. The runtime cache described here is an RN-only facility (see #124).
  * Hosts built on {@link createConfigFromRegistry} therefore get this caching behavior
  * by default; to disable it, pass a config that explicitly overrides
  * `options.cache: false`.

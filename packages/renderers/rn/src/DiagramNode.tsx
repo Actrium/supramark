@@ -78,7 +78,11 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
       ),
     [diagramConfig, globalCache, node.engine]
   );
-  const diagramCache = getRendererCache<CachedDiagramResult>('diagram', cachePolicy);
+  const diagramCache = getRendererCache<CachedDiagramResult>(
+    'diagram',
+    cachePolicy,
+    value => value.svg.length
+  );
   // Include every render-affecting input so cached SVG cannot cross option variants.
   const diagramCacheKey = useMemo(
     () =>

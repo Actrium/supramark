@@ -18,9 +18,24 @@ export interface LRUCacheOptions {
 
   /**
    * Optional value size estimator (used to estimate memory footprint).
+   *
+   * When {@link maxBytes} is set, entries are also evicted once total estimated
+   * size exceeds it, so this should return a byte-like number for the bound to
+   * be meaningful. Returning 1 (as the RN renderer did before #124) makes the
+   * byte cap a no-op.
    * @default (value) => JSON.stringify(value).length
    */
   sizeCalculator?: (value: unknown) => number;
+
+  /**
+   * Optional total-size cap. When set, `set()` evicts oldest entries until
+   * `totalSize <= maxBytes` (in addition to the entry-count `maxSize` bound).
+   * A single entry larger than `maxBytes` is retained alone (it cannot be
+   * evicted to make room for itself), so size is best-effort, not a hard
+   * guarantee. `undefined` disables the byte bound.
+   * @default undefined
+   */
+  maxBytes?: number;
 }
 
 interface CacheEntry<T> {
@@ -51,8 +66,9 @@ interface CacheEntry<T> {
  */
 export class LRUCache<T> {
   private cache: Map<string, CacheEntry<T>>;
-  private readonly maxSize: number;
-  private readonly ttl: number | undefined;
+  private maxSize: number;
+  private ttl: number | undefined;
+  private maxBytes: number | undefined;
   private readonly sizeCalculator: (value: unknown) => number;
   private totalSize: number = 0;
 
@@ -60,6 +76,7 @@ export class LRUCache<T> {
     this.cache = new Map();
     this.maxSize = options.maxSize ?? 100;
     this.ttl = options.ttl;
+    this.maxBytes = options.maxBytes;
     this.sizeCalculator =
       options.sizeCalculator ??
       (value => {
@@ -69,6 +86,68 @@ export class LRUCache<T> {
           return 1;
         }
       });
+  }
+
+  /**
+   * Reconfigure bounds at runtime. maxSize / ttl / maxBytes are updated in
+   * place and over-capacity entries are evicted. Used by callers that key a
+   * cache by namespace alone (so a policy change reconfigures rather than
+   * strands the old cache — see #124). The size estimator cannot change
+   * after construction (existing entries keep their recorded size); pass a
+   * correct {@link LRUCacheOptions.sizeCalculator} up front.
+   */
+  reconfigure(options: {
+    maxSize?: number;
+    ttl?: number;
+    maxBytes?: number;
+  }): void {
+    if (options.maxSize !== undefined) {
+      this.maxSize = Number.isFinite(options.maxSize)
+        ? Math.max(0, Math.floor(options.maxSize))
+        : this.maxSize;
+    }
+    if ('ttl' in options) {
+      const configuredTtl = options.ttl;
+      this.ttl =
+        configuredTtl !== undefined &&
+        Number.isFinite(configuredTtl) &&
+        configuredTtl > 0
+          ? configuredTtl
+          : undefined;
+    }
+    if ('maxBytes' in options) {
+      const configuredMaxBytes = options.maxBytes;
+      this.maxBytes =
+        configuredMaxBytes !== undefined &&
+        Number.isFinite(configuredMaxBytes) &&
+        configuredMaxBytes > 0
+          ? configuredMaxBytes
+          : undefined;
+    }
+    this.evictToFit();
+  }
+
+  /**
+   * Evict oldest entries until both the count and byte bounds are satisfied.
+   * `protectedKey` is never evicted by this call — used by {@link set} so a
+   * freshly inserted entry that alone exceeds `maxBytes` is retained rather
+   * than immediately dropped (the work to produce it has already happened).
+   */
+  private evictToFit(protectedKey?: string): void {
+    while (
+      this.cache.size > this.maxSize ||
+      (this.maxBytes !== undefined && this.totalSize > this.maxBytes)
+    ) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey === undefined || firstKey === protectedKey) {
+        break;
+      }
+      const firstEntry = this.cache.get(firstKey);
+      if (firstEntry) {
+        this.totalSize -= firstEntry.size;
+      }
+      this.cache.delete(firstKey);
+    }
   }
 
   /**
@@ -121,17 +200,10 @@ export class LRUCache<T> {
     this.cache.set(key, entry);
     this.totalSize += size;
 
-    // If capacity is exceeded, evict the oldest entry (the first one in the Map)
-    while (this.cache.size > this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey !== undefined) {
-        const firstEntry = this.cache.get(firstKey);
-        if (firstEntry) {
-          this.totalSize -= firstEntry.size;
-        }
-        this.cache.delete(firstKey);
-      }
-    }
+    // Evict oldest entries until both the count and byte bounds hold. The
+    // freshly inserted entry is protected: an item larger than maxBytes is
+    // retained alone rather than evicted to make room for itself.
+    this.evictToFit(key);
   }
 
   /**
@@ -185,12 +257,14 @@ export class LRUCache<T> {
     size: number;
     maxSize: number;
     totalSize: number;
+    maxBytes: number | undefined;
     ttl: number | undefined;
   } {
     return {
       size: this.cache.size,
       maxSize: this.maxSize,
       totalSize: this.totalSize,
+      maxBytes: this.maxBytes,
       ttl: this.ttl,
     };
   }
