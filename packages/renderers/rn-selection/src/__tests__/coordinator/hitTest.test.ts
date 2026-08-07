@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { SupramarkTextNode } from '@supramark/core';
 import type { SelectionTextUnit, SelectionUnit } from '../../model';
+import { buildTextMetrics } from '../../metrics';
 import { buildUnitIndex } from '../../resolve';
 import type { LayoutRect, RegisteredBlock } from '../../coordinator/registry';
 import {
   chooseBlock,
+  containingBlock,
   localizePoint,
   pointInRect,
   resolvePointToSelection,
@@ -49,6 +51,26 @@ describe('hitTest primitives', () => {
     expect(verticalGap({ x: 0, y: 10 }, rectA)).toBe(0);
     expect(verticalGap({ x: 0, y: -5 }, rectA)).toBe(5);
     expect(verticalGap({ x: 0, y: 25 }, rectA)).toBe(5);
+  });
+
+  test('containingBlock requires a direct rect hit', () => {
+    expect(containingBlock(blocks(), { x: 50, y: 10 })?.nodeId).toBe('A');
+    expect(containingBlock(blocks(), { x: 50, y: 24 })).toBeNull();
+    expect(
+      containingBlock([{ nodeId: 'A', unitIds: ['A#0'], kind: 'text' }], { x: 10, y: 10 })
+    ).toBeNull();
+  });
+
+  test('a nested viewport clips both visible hits and hidden blocks', () => {
+    const partial = blocks()[0];
+    partial.clipRect = { x: 0, y: 10, w: 100, h: 20 };
+    expect(containingBlock([partial], { x: 50, y: 15 })?.nodeId).toBe('A');
+    expect(containingBlock([partial], { x: 50, y: 5 })).toBeNull();
+
+    const hidden = blocks()[1];
+    hidden.clipRect = { x: 0, y: 100, w: 100, h: 20 };
+    expect(containingBlock([hidden], { x: 50, y: 40 })).toBeNull();
+    expect(chooseBlock([hidden], { x: 50, y: 40 })).toBeNull();
   });
 });
 
@@ -139,12 +161,27 @@ describe('resolvePointToSelection', () => {
     });
   });
 
-  test('a block with an injected measure returns a precise offset', () => {
+  test('a measured block resolves the point to a character offset', () => {
+    // One 100pt line holding 'AAAAA': each character occupies 20pt, so x=65
+    // sits in the left half of the fourth character and snaps back to 3.
     const measured = blocks();
-    measured[0].measure = { localOffsetAt: () => 3 };
-    expect(resolvePointToSelection(measured, { x: 10, y: 10 }, index)).toEqual({
+    measured[0].metrics = buildTextMetrics([{ text: 'AAAAA', x: 0, y: 0, width: 100, height: 20 }]);
+    expect(resolvePointToSelection(measured, { x: 65, y: 10 }, index)).toEqual({
       nodeId: 'A',
       unitId: 'A#0',
+      offset: 3,
+    });
+  });
+
+  test('metrics are read relative to the block rect and its content offset', () => {
+    // Block B starts at y=30 and pads its text by 4pt: the same local x/y as
+    // the test above must resolve identically once both are subtracted.
+    const measured = blocks();
+    measured[1].metrics = buildTextMetrics([{ text: 'BBBBB', x: 0, y: 0, width: 100, height: 12 }]);
+    measured[1].contentOffset = { x: 8, y: 4 };
+    expect(resolvePointToSelection(measured, { x: 73, y: 40 }, index)).toEqual({
+      nodeId: 'B',
+      unitId: 'B#0',
       offset: 3,
     });
   });
@@ -158,17 +195,31 @@ describe('resolvePointToSelection', () => {
     expect(chooseBlock(bare, { x: 10, y: 10 })).toBeNull();
   });
 
-  test('localizePoint honors an injected measure directly', () => {
+  test('localizePoint reads a block metrics table directly', () => {
     const block: RegisteredBlock = {
       nodeId: 'A',
       unitIds: ['A#0'],
       kind: 'text',
       rect: rectA,
-      measure: { localOffsetAt: () => 4 },
+      metrics: buildTextMetrics([{ text: 'AAAAA', x: 0, y: 0, width: 100, height: 20 }]),
     };
-    const point = localizePoint(block, { x: 10, y: 10 }, index);
+    const point = localizePoint(block, { x: 85, y: 10 }, index);
     expect(point).not.toBeNull();
     expect(point?.unitId).toBe('A#0');
     expect(point?.offset).toBe(4);
+  });
+
+  test('an empty metrics table falls back to the coarse before/after rule', () => {
+    // A block registered but not yet measured must not resolve every point to
+    // offset 0: it degrades to the pre-metrics behaviour instead.
+    const block: RegisteredBlock = {
+      nodeId: 'A',
+      unitIds: ['A#0'],
+      kind: 'text',
+      rect: rectA,
+      metrics: buildTextMetrics([]),
+    };
+    expect(localizePoint(block, { x: 90, y: 15 }, index)?.offset).toBe(5);
+    expect(localizePoint(block, { x: 10, y: 2 }, index)?.offset).toBe(0);
   });
 });

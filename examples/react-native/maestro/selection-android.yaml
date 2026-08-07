@@ -1,0 +1,22 @@
+appId: com.supramarkrndemo
+env:
+  BUNDLE_URL: 'http://localhost:8090/.expo/.virtual-metro-entry.bundle?platform=android&dev=true&minify=false'
+---
+- launchApp:
+    appId: com.supramarkrndemo
+    arguments:
+      supramarkBundleURL: ${BUNDLE_URL}
+- assertVisible: Selection Demo
+- swipe:
+    start: 151,240
+    end: 152,240
+    duration: 900
+- waitForAnimationToEnd
+- assertVisible: selected 1 units
+- assertVisible: Copy
+- swipe:
+    start: 250,287
+    end: 605,312
+    duration: 900
+- waitForAnimationToEnd
+- assertVisible: selected 4 units

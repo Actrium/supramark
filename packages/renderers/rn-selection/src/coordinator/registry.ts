@@ -1,6 +1,6 @@
 import type { SelectionNodeId, SelectionUnit } from '../model';
+import type { SegmentTextMetrics } from '../metrics';
 import { buildUnitIndex, type SelectionUnitIndex } from '../resolve';
-import type { TextSegmentHandle } from '../nativePrimitive';
 
 /** A block's laid-out box in the `SelectionRoot`'s coordinate space. */
 export interface LayoutRect {
@@ -10,31 +10,66 @@ export interface LayoutRect {
   h: number;
 }
 
-/**
- * Optional, injectable per-block character mapping: a segment-local point maps
- * to a segment-local UTF-16 offset. Real device text metrics are deferred; the
- * coordinator falls back to before/after when a block supplies no measure. Kept
- * pure so tests can inject fakes.
- */
-export interface SegmentMeasure {
-  localOffsetAt(localX: number, localY: number): number;
+/** Offset of a block's text content box from the block's own top-left. */
+export interface ContentOffset {
+  x: number;
+  y: number;
 }
 
 /**
- * A rendered document block registered upward into the registry. `handle` and
- * `measure` are present only for native text segments; atoms/boundaries carry
- * neither.
+ * A rendered document block registered upward into the registry.
+ *
+ * `metrics` and `contentOffset` are what a text block contributes to the
+ * self-drawn selection: the line table it laid out, and where that table's
+ * origin sits inside the block's box. Both are absent until the block's text
+ * has been measured (and always absent for atoms/boundaries), so every consumer
+ * has to degrade gracefully — hit-testing falls back to before/after, and the
+ * highlight falls back to the whole block rect.
  */
 export interface RegisteredBlock {
   nodeId: SelectionNodeId;
   unitIds: readonly SelectionNodeId[];
   kind: 'text' | 'atom' | 'boundary';
   rect?: LayoutRect;
-  handle?: TextSegmentHandle;
-  measure?: SegmentMeasure;
+  metrics?: SegmentTextMetrics;
+  contentOffset?: ContentOffset;
+  /** Nearest nested scroll viewport that owns this block, when any. */
+  viewportId?: string;
+  /** Visible clip in SelectionRoot coordinates, supplied by the viewport. */
+  clipRect?: LayoutRect;
+  /** Viewport offset at which `rect` was last measured or translated. */
+  viewportOffset?: ContentOffset;
 }
 
-export type RegistryChange = 'register' | 'unregister' | 'layout' | 'units';
+interface RegisteredViewport {
+  rect?: LayoutRect;
+  offset: ContentOffset;
+}
+
+export type RegistryChange =
+  | 'register'
+  | 'unregister'
+  | 'layout'
+  | 'units'
+  | 'metrics'
+  | 'viewport';
+
+/** Intersection in root coordinates, or null when the rectangles do not overlap. */
+export function intersectLayoutRects(a: LayoutRect, b: LayoutRect): LayoutRect | null {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.w, b.x + b.w);
+  const bottom = Math.min(a.y + a.h, b.y + b.h);
+  if (right <= x || bottom <= y) return null;
+  return { x, y, w: right - x, h: bottom - y };
+}
+
+/** The part of a block that can currently receive touches or be painted. */
+export function visibleBlockRect(block: RegisteredBlock): LayoutRect | null {
+  if (block.rect === undefined) return null;
+  if (block.clipRect === undefined) return block.rect;
+  return intersectLayoutRects(block.rect, block.clipRect);
+}
 
 /** Blocks whose units are absent from the index sort after every indexed one. */
 const ORDER_LAST = Number.MAX_SAFE_INTEGER;
@@ -61,6 +96,7 @@ export function orderKey(block: RegisteredBlock, index: SelectionUnitIndex): num
 export class SelectionRegistry {
   private _index: SelectionUnitIndex;
   private blocks = new Map<SelectionNodeId, RegisteredBlock>();
+  private viewports = new Map<string, RegisteredViewport>();
   private listeners = new Set<(change: RegistryChange, nodeId: SelectionNodeId) => void>();
   private orderCache: RegisteredBlock[] | null = null;
   private unitToNode: Map<SelectionNodeId, SelectionNodeId> | null = null;
@@ -123,15 +159,31 @@ export class SelectionRegistry {
    * back to `unregister` as an identity guard — see that method.
    */
   register(block: RegisteredBlock): RegisteredBlock {
-    // Preserve a previously measured rect when a re-registration carries none.
-    // A React block re-registers (effect cleanup + re-run) with no rect while
-    // its `onLayout` does not re-fire on an unchanged layout; without this the
-    // measured box would be lost and the overlay/hit-test would go blank.
+    // Preserve previously measured geometry when a re-registration carries
+    // none. A React block re-registers (effect cleanup + re-run) with no rect
+    // and no metrics while its `onLayout` / `onTextLayout` do not re-fire on an
+    // unchanged layout; without this the measured box and line table would be
+    // lost and the overlay/hit-test would go blank.
     const existing = this.blocks.get(block.nodeId);
-    const next =
-      existing?.rect !== undefined && block.rect === undefined
-        ? { ...block, rect: existing.rect }
-        : block;
+    const next = { ...block };
+    if (existing !== undefined) {
+      if (next.rect === undefined && next.viewportId === existing.viewportId) {
+        next.rect = existing.rect;
+        next.viewportOffset = existing.viewportOffset;
+      }
+      if (next.metrics === undefined) next.metrics = existing.metrics;
+      if (next.contentOffset === undefined) next.contentOffset = existing.contentOffset;
+    }
+    if (next.viewportId !== undefined) {
+      const viewport = this.viewports.get(next.viewportId);
+      next.clipRect = viewport?.rect;
+      if (next.viewportOffset === undefined && viewport !== undefined) {
+        next.viewportOffset = { ...viewport.offset };
+      }
+    } else {
+      next.clipRect = undefined;
+      next.viewportOffset = undefined;
+    }
     this.blocks.set(block.nodeId, next);
     this.orderCache = null;
     this.unitToNode = null;
@@ -178,7 +230,96 @@ export class SelectionRegistry {
     const block = this.blocks.get(nodeId);
     if (!block) return;
     block.rect = rect;
+    if (block.viewportId !== undefined) {
+      const viewport = this.viewports.get(block.viewportId);
+      block.viewportOffset = viewport === undefined ? undefined : { ...viewport.offset };
+      block.clipRect = viewport?.rect;
+    }
     this.notify('layout', nodeId);
+  }
+
+  /** Register a nested scroll viewport and attach any already-mounted blocks. */
+  registerViewport(viewportId: string, initialOffset: ContentOffset = { x: 0, y: 0 }): () => void {
+    const viewport: RegisteredViewport = { offset: { ...initialOffset } };
+    this.viewports.set(viewportId, viewport);
+    for (const block of this.blocks.values()) {
+      if (block.viewportId !== viewportId) continue;
+      block.clipRect = viewport.rect;
+      block.viewportOffset = { ...viewport.offset };
+    }
+    this.notify('viewport', viewportId);
+    return () => {
+      if (this.viewports.get(viewportId) !== viewport) return;
+      this.viewports.delete(viewportId);
+      for (const block of this.blocks.values()) {
+        if (block.viewportId !== viewportId) continue;
+        block.clipRect = undefined;
+        block.viewportOffset = undefined;
+      }
+      this.notify('viewport', viewportId);
+    };
+  }
+
+  /** Update the viewport's visible bounds in SelectionRoot coordinates. */
+  updateViewportLayout(viewportId: string, rect: LayoutRect): void {
+    const viewport = this.viewports.get(viewportId);
+    if (viewport === undefined) return;
+    viewport.rect = rect;
+    for (const block of this.blocks.values()) {
+      if (block.viewportId === viewportId) block.clipRect = rect;
+    }
+    this.notify('viewport', viewportId);
+  }
+
+  /**
+   * Move all mounted blocks synchronously with their scroll viewport.
+   *
+   * Native measurement is asynchronous and one callback per FlatList cell can
+   * arrive several frames late. A scroll offset is already the exact movement,
+   * so translate each cached root-space rect by its delta and publish once.
+   */
+  updateViewportScroll(viewportId: string, offset: ContentOffset): void {
+    const viewport = this.viewports.get(viewportId);
+    if (viewport === undefined) return;
+    if (viewport.offset.x === offset.x && viewport.offset.y === offset.y) return;
+    viewport.offset = { ...offset };
+    for (const block of this.blocks.values()) {
+      if (block.viewportId !== viewportId || block.rect === undefined) continue;
+      const previous = block.viewportOffset ?? offset;
+      block.rect = {
+        ...block.rect,
+        x: block.rect.x + previous.x - offset.x,
+        y: block.rect.y + previous.y - offset.y,
+      };
+      block.viewportOffset = { ...offset };
+      block.clipRect = viewport.rect;
+    }
+    this.notify('viewport', viewportId);
+  }
+
+  /**
+   * Record the line table a text block laid out. Re-measured on every text or
+   * width change, so this is the hot path for streaming Markdown: it mutates in
+   * place and bumps the version rather than re-registering, keeping the block's
+   * rect and unit ids intact.
+   */
+  setMetrics(nodeId: SelectionNodeId, metrics: SegmentTextMetrics): void {
+    const block = this.blocks.get(nodeId);
+    if (!block) return;
+    block.metrics = metrics;
+    this.notify('metrics', nodeId);
+  }
+
+  /**
+   * Record where a block's text content box starts relative to the block's own
+   * box. Line coordinates are relative to the text, block rects to the root, so
+   * without this every highlight would be off by the block's padding.
+   */
+  setContentOffset(nodeId: SelectionNodeId, offset: ContentOffset): void {
+    const block = this.blocks.get(nodeId);
+    if (!block) return;
+    block.contentOffset = offset;
+    this.notify('metrics', nodeId);
   }
 
   getBlock(nodeId: SelectionNodeId): RegisteredBlock | undefined {

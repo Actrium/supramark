@@ -3,6 +3,8 @@ import type { SelectionPoint } from '../model';
 import { SelectionContext, type SelectionContextValue } from './SelectionContext';
 import type { SelectionSnapshot, SelectionStore } from './state';
 
+const noopRefreshLayouts = () => {};
+
 /**
  * Subscribe a component to a `SelectionStore` and expose its bound actions.
  * Pure wiring: `useSyncExternalStore` reads the store's cached snapshot (the
@@ -28,6 +30,15 @@ export function useDocumentSelection(store: SelectionStore): {
   return { snapshot, ...actions };
 }
 
+/**
+ * Subscribe to just the snapshot. Same `useSyncExternalStore` contract as
+ * `useDocumentSelection`, without minting the action object — for the several
+ * internal components that only need to know what is selected.
+ */
+export function useSelectionSnapshot(store: SelectionStore): SelectionSnapshot {
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+}
+
 /** Read the selection context; throws when used outside a `SelectionRoot`. */
 export function useSelectionContext(): SelectionContextValue {
   const value = useContext(SelectionContext);
@@ -43,4 +54,12 @@ export function useSelectionContext(): SelectionContextValue {
  */
 export function useSelectionStore(): SelectionStore {
   return useSelectionContext().store;
+}
+
+/**
+ * Re-measure registered selectable blocks against the current SelectionRoot.
+ * Use this from nested ScrollView / FlatList `onScroll` handlers.
+ */
+export function useSelectionLayoutRefresh(): () => void {
+  return useSelectionContext().refreshLayouts ?? noopRefreshLayouts;
 }

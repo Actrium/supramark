@@ -1,26 +1,21 @@
 import type { SelectionNodeId, SelectionPoint, SelectionRange } from '../model';
 import { locateSelectionPoint, type SelectionUnitIndex } from '../resolve';
 import { snapToGraphemeBoundary } from '../text';
-import type {
-  SegmentLongPressEvent,
-  SegmentMenuActionEvent,
-  TextSegmentHandle,
-} from '../nativePrimitive';
 import type { RegisteredBlock } from '../coordinator/registry';
-import type {
-  SelectableRichTextLongPressEvent,
-  SelectableRichTextMenuActionEvent,
-  SelectableRichTextRef,
-} from '@boomsi/react-native-selectable-text';
 
 /**
- * Pure mapping helpers between a native text segment's local UTF-16 offsets
- * and Supramark's global `SelectionPoint`s, plus a thin non-pure wrapper that
- * turns a vendored `SelectableRichTextRef` into a `TextSegmentHandle`.
+ * Pure mapping between a rendered text segment's local UTF-16 offsets and
+ * Supramark's document-wide `SelectionPoint`s.
  *
- * This module never imports a react-native *value* — only the vendored ref
- * type, and only as `import type` — so it loads cleanly under `bun test`
- * without pulling in React Native at runtime.
+ * "Segment" no longer means a native text view with its own selection state —
+ * the native command bridge is gone (see `SELECTION_PLAN.md`). It means one
+ * block's laid-out text: the string the block rendered, whose offsets index
+ * both its line metrics (`metrics.ts`) and the units it registered. This
+ * mapping is what lets a finger position become a document range and a document
+ * range become a highlight.
+ *
+ * Every function here is pure and free of React Native imports, so the module
+ * loads under `bun test` unchanged.
  */
 
 /** Segment-local UTF-16 `[start, end)` span contributed by one unit. */
@@ -95,32 +90,22 @@ export function pointToSegmentOffset(spans: readonly SegmentSpan[], point: Selec
   return span.start + clamp(point.offset, 0, span.end - span.start);
 }
 
-/** Normalize a native long-press event into a document-agnostic anchor/focus range. */
-export function longPressToRange(
-  event: SegmentLongPressEvent,
-  spans: readonly SegmentSpan[]
+/** Turn a segment-local `[start, end)` pair into a document range. */
+export function segmentSelectionToRange(
+  spans: readonly SegmentSpan[],
+  startUtf16: number,
+  endUtf16: number
 ): SelectionRange {
   return {
-    anchor: segmentOffsetToPoint(spans, event.startUtf16),
-    focus: segmentOffsetToPoint(spans, event.endUtf16),
-  };
-}
-
-/** Normalize a native menu-action event into a document-agnostic anchor/focus range. */
-export function menuActionToRange(
-  event: SegmentMenuActionEvent,
-  spans: readonly SegmentSpan[]
-): SelectionRange {
-  return {
-    anchor: segmentOffsetToPoint(spans, event.startUtf16),
-    focus: segmentOffsetToPoint(spans, event.endUtf16),
+    anchor: segmentOffsetToPoint(spans, startUtf16),
+    focus: segmentOffsetToPoint(spans, endUtf16),
   };
 }
 
 /**
  * Map a document `SelectionRange` into this segment's local `[start, end)`
- * UTF-16 pair, ordered ascending, ready to hand to
- * `TextSegmentCommands.selectRange` / `copyRange`.
+ * UTF-16 pair, ordered ascending, ready to hand to `rectsForRange` so the
+ * highlight can be drawn over exactly this block's share of the selection.
  *
  * Endpoints are resolved with `locateSelectionPoint` on the full document
  * index — the same resolution `resolveSelectionRange` uses — and then
@@ -173,13 +158,12 @@ export function rangeToSegmentSelection(
   const a = project(locateSelectionPoint(index, range.anchor));
   const f = project(locateSelectionPoint(index, range.focus));
   // Snap to the same grapheme-cluster boundaries the serializer uses. Without
-  // this the native highlight and the clipboard disagree inside a cluster:
-  // `project` is built on `locateSelectionPoint`, which does not snap, while
-  // `resolveSelectionRange` -> `splitTextUnit` widens outward. The native view
-  // would then be told to select a range ending on a lone surrogate and would
-  // resolve it by its own rule, so the user sees one thing highlighted and
-  // pastes another. Widening (start backward, end forward) matches the
-  // serializer's direction exactly, so both consumers land on one range.
+  // this the highlight and the clipboard disagree inside a cluster: `project`
+  // is built on `locateSelectionPoint`, which does not snap, while
+  // `resolveSelectionRange` -> `splitTextUnit` widens outward — so the rect
+  // would stop mid-emoji while the copied text contained the whole thing.
+  // Widening (start backward, end forward) matches the serializer's direction
+  // exactly, so both consumers land on one range.
   const segmentText = segmentTextFromSpans(index, spans);
   const startUtf16 = snapToGraphemeBoundary(segmentText, Math.min(a, f), 'backward');
   const endUtf16 = snapToGraphemeBoundary(segmentText, Math.max(a, f), 'forward');
@@ -188,12 +172,12 @@ export function rangeToSegmentSelection(
 
 /**
  * Reassemble the segment's visible plain text from its span table, so
- * `rangeToSegmentSelection` can snap against the same string the native view
- * holds. Spans are contiguous and ordered by construction
+ * `rangeToSegmentSelection` can snap against the same string the block laid
+ * out. Spans are contiguous and ordered by construction
  * (`buildSegmentSpans`), and every span's unit is a text/break unit — those
  * are the only kinds with a non-zero `textLength`.
  */
-function segmentTextFromSpans(index: SelectionUnitIndex, spans: readonly SegmentSpan[]): string {
+export function segmentTextFromSpans(index: SelectionUnitIndex, spans: readonly SegmentSpan[]): string {
   let text = '';
   for (const span of spans) {
     const unitIndex = index.byUnitId.get(span.unitId);
@@ -202,60 +186,4 @@ function segmentTextFromSpans(index: SelectionUnitIndex, spans: readonly Segment
     if (unit.kind === 'text' || unit.kind === 'break') text += unit.text;
   }
   return text;
-}
-
-/**
- * Normalize the vendored `onTextLongPress` payload into a document-agnostic
- * `SegmentLongPressEvent`. Offsets are preserved verbatim — order-normalization
- * happens downstream in `segmentOffsetToPoint` / `resolveSelectionRange`, not
- * here — while `selectedText` is derived by slicing `paragraphText` with
- * `min`/`max` so it stays stable even if native ever sends reversed offsets.
- */
-export function normalizeLongPress(e: SelectableRichTextLongPressEvent): SegmentLongPressEvent {
-  const start = Math.min(e.selectionStart, e.selectionEnd);
-  const end = Math.max(e.selectionStart, e.selectionEnd);
-  return {
-    startUtf16: e.selectionStart,
-    endUtf16: e.selectionEnd,
-    selectedText: e.paragraphText.slice(start, end),
-    local: { x: e.locationX, y: e.locationY },
-    page: { x: e.pageX, y: e.pageY },
-  };
-}
-
-/**
- * Normalize the vendored `onMenuAction` payload into a document-agnostic
- * `SegmentMenuActionEvent`. Offsets are preserved verbatim (see
- * `normalizeLongPress`); `selectedText` is passed through as reported by native.
- */
-export function normalizeMenuAction(e: SelectableRichTextMenuActionEvent): SegmentMenuActionEvent {
-  return {
-    id: e.id,
-    title: e.title,
-    startUtf16: e.selectionStart,
-    endUtf16: e.selectionEnd,
-    selectedText: e.selectedText,
-  };
-}
-
-/**
- * Wrap a vendored `SelectableRichTextRef` as a `TextSegmentHandle`. Only the
- * ref's methods are used at runtime; the ref type itself is erased at
- * compile time, so this file never pulls in a react-native value import.
- *
- * Takes an accessor rather than the ref itself: a React `useRef` is `null`
- * until the native view mounts, and the handle is registered from an effect
- * that may run before it. Reading through the accessor on every call keeps the
- * handle valid across remounts too, where a captured ref value would go stale.
- */
-export function createSegmentHandle(
-  nodeId: SelectionNodeId,
-  getRef: () => SelectableRichTextRef | null | undefined
-): TextSegmentHandle {
-  return {
-    nodeId,
-    selectRange: (start, end) => getRef()?.selectRange(start, end),
-    clearSelection: () => getRef()?.clearSelection(),
-    copyRange: (start, end) => getRef()?.copyRange(start, end),
-  };
 }

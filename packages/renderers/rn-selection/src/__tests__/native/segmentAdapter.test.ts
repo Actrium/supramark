@@ -5,13 +5,11 @@ import { buildUnitIndex, resolveSelectionRange } from '../../resolve';
 import { serializeSelectionUnits } from '../../serialize';
 import {
   buildSegmentSpans,
-  longPressToRange,
-  menuActionToRange,
-  normalizeLongPress,
-  normalizeMenuAction,
   pointToSegmentOffset,
   rangeToSegmentSelection,
   segmentOffsetToPoint,
+  segmentSelectionToRange,
+  segmentTextFromSpans,
 } from '../../native/segmentAdapter';
 
 // A throwaway AST node — segmentAdapter copies `node` but never inspects it.
@@ -94,33 +92,28 @@ describe('segmentOffsetToPoint / pointToSegmentOffset', () => {
   });
 });
 
-describe('event translation', () => {
+describe('segment range translation', () => {
   const units: SelectionUnit[] = [tUnit('h#1', 'h', 'Hello'), tUnit('h#2', 'h', 'World')];
   const index = buildUnitIndex(units);
   const spans = buildSegmentSpans({ unitIds: ['h#1', 'h#2'] }, index);
 
-  test('longPressToRange builds anchor/focus from segment-local offsets', () => {
-    const range = longPressToRange(
-      {
-        startUtf16: 2,
-        endUtf16: 7,
-        selectedText: 'lloWo',
-        local: { x: 0, y: 0 },
-        page: { x: 0, y: 0 },
-      },
-      spans
-    );
+  test('segmentSelectionToRange builds anchor/focus from segment-local offsets', () => {
+    // This is the path a long press takes now: the gesture layer resolves a
+    // word to a local [start, end) and hands it straight to the document model.
+    const range = segmentSelectionToRange(spans, 2, 7);
     expect(range.anchor).toEqual({ nodeId: 'h', unitId: 'h#1', offset: 2 });
     expect(range.focus).toEqual({ nodeId: 'h', unitId: 'h#2', offset: 2 });
   });
 
-  test('menuActionToRange mirrors the long-press mapping', () => {
-    const range = menuActionToRange(
-      { startUtf16: 2, endUtf16: 7, selectedText: 'lloWo', id: 'copy' },
-      spans
-    );
-    expect(range.anchor).toEqual({ nodeId: 'h', unitId: 'h#1', offset: 2 });
-    expect(range.focus).toEqual({ nodeId: 'h', unitId: 'h#2', offset: 2 });
+  test('segmentSelectionToRange round-trips through rangeToSegmentSelection', () => {
+    const range = segmentSelectionToRange(spans, 2, 7);
+    expect(rangeToSegmentSelection(range, index, spans)).toEqual({ startUtf16: 2, endUtf16: 7 });
+  });
+
+  test('segmentTextFromSpans reassembles what the block laid out', () => {
+    // The word-boundary scan runs against this string, so it has to be exactly
+    // the text whose offsets the spans describe.
+    expect(segmentTextFromSpans(index, spans)).toBe('HelloWorld');
   });
 
   test('rangeToSegmentSelection orders the result ascending regardless of direction', () => {
@@ -236,68 +229,13 @@ describe('rangeToSegmentSelection document-index projection', () => {
   });
 });
 
-describe('normalizeLongPress / normalizeMenuAction', () => {
-  test('long-press maps a raw event into the segment-local form', () => {
-    expect(
-      normalizeLongPress({
-        paragraphText: 'Hello world',
-        selectionStart: 0,
-        selectionEnd: 5,
-        locationX: 1,
-        locationY: 2,
-        pageX: 3,
-        pageY: 4,
-      })
-    ).toEqual({
-      startUtf16: 0,
-      endUtf16: 5,
-      selectedText: 'Hello',
-      local: { x: 1, y: 2 },
-      page: { x: 3, y: 4 },
-    });
-  });
-
-  test('long-press with reversed offsets slices with min/max but preserves offsets', () => {
-    const out = normalizeLongPress({
-      paragraphText: 'Hello world',
-      selectionStart: 5,
-      selectionEnd: 0,
-      locationX: 0,
-      locationY: 0,
-      pageX: 0,
-      pageY: 0,
-    });
-    expect(out.selectedText).toBe('Hello');
-    expect(out.startUtf16).toBe(5);
-    expect(out.endUtf16).toBe(0);
-  });
-
-  test('menu-action maps a raw event verbatim', () => {
-    expect(
-      normalizeMenuAction({
-        id: 'copy',
-        title: 'Copy',
-        selectedText: 'world',
-        selectionStart: 6,
-        selectionEnd: 11,
-      })
-    ).toEqual({
-      id: 'copy',
-      title: 'Copy',
-      selectedText: 'world',
-      startUtf16: 6,
-      endUtf16: 11,
-    });
-  });
-});
-
-// The resolve path and the native path must agree on where a selection may be
-// cut. `resolveSelectionRange` -> `splitTextUnit` grapheme-snaps outward; the
-// native plan is built from `locateSelectionPoint`, which does not. Before the
-// snap was added to `rangeToSegmentSelection`, a focus landing inside a
-// surrogate pair produced a native range one code unit shorter than the text
-// the clipboard actually received: the user saw one thing highlighted and
-// pasted another.
+// The resolve path and the highlight path must agree on where a selection may
+// be cut. `resolveSelectionRange` -> `splitTextUnit` grapheme-snaps outward,
+// while the projection is built from `locateSelectionPoint`, which does not.
+// Before the snap was added to `rangeToSegmentSelection`, a focus landing
+// inside a surrogate pair produced a highlight one code unit shorter than the
+// text the clipboard received: the user saw one thing highlighted and pasted
+// another.
 describe('rangeToSegmentSelection grapheme agreement with the serializer', () => {
   const STAR = '\u{1F31F}'; // astral, 2 UTF-16 units
 

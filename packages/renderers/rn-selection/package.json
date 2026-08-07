@@ -10,14 +10,10 @@
     "test": "bun test"
   },
   "peerDependencies": {
-    "@boomsi/react-native-selectable-text": "*",
     "react": ">=18.0.0",
-    "react-native": ">=0.81.0"
+    "react-native": ">=0.72.0"
   },
   "peerDependenciesMeta": {
-    "@boomsi/react-native-selectable-text": {
-      "optional": true
-    },
     "react": {
       "optional": true
     },

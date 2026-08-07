@@ -1,0 +1,33 @@
+appId: supramark-rn-demo
+env:
+  BUNDLE_URL: 'http://localhost:8090/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false'
+---
+- launchApp:
+    appId: supramark-rn-demo
+    arguments:
+      supramarkBundleURL: ${BUNDLE_URL}
+- assertVisible: Selection Demo
+- assertVisible: Flat row 01 selection target.
+- swipe:
+    start: 86%,45%
+    end: 86%,28%
+    duration: 700
+- waitForAnimationToEnd
+- assertVisible: Flat row 08 selection target.
+- longPressOn: Flat row 08 selection target.
+- waitForAnimationToEnd
+- assertVisible: selected 1 units
+- assertVisible: visible selection rects 1
+- assertVisible: Copy
+- takeScreenshot: selection-flatlist
+- swipe:
+    start: 86%,45%
+    end: 86%,23%
+    duration: 700
+- swipe:
+    start: 86%,45%
+    end: 86%,23%
+    duration: 700
+- waitForAnimationToEnd
+- assertVisible: selected 1 units
+- assertVisible: visible selection rects 0

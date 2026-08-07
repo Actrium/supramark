@@ -10,6 +10,8 @@
     "start": "node start.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "e2e:selection:android": "node scripts/selection-e2e-android.mjs",
+    "e2e:selection:ios": "node scripts/selection-e2e-ios.mjs",
     "web": "expo start --web"
   },
   "dependencies": {
@@ -31,7 +33,6 @@
     "expo": "~54",
     "expo-status-bar": "~1.12.1",
     "@actrium/graphviz-anywhere-rn": "workspace:*",
-    "@boomsi/react-native-selectable-text": "workspace:*",
     "@actrium/supramark-d2-native-rn": "workspace:*",
     "@actrium/supramark-mermaid-native-rn": "workspace:*",
     "@actrium/supramark-plantuml-native-rn": "workspace:*",
@@ -47,6 +48,7 @@
   "devDependencies": {
     "@react-native-community/cli": "^20.0.2",
     "@types/react": "~18.2.79",
+    "pngjs": "3.4.0",
     "typescript": "~5.3.3"
   }
 }

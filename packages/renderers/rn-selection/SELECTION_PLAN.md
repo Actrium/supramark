@@ -213,7 +213,12 @@ All still pure TypeScript except the typecheck-only React wiring; 100 unit tests
 - Offsets remain UTF-16 code units at the API surface; only *slicing* is
   grapheme-safe.
 
-### Interaction direction (decided)
+### Interaction direction (decided, then REVERSED — see below)
+
+> **Superseded.** The command-bridge direction recorded in this section and
+> implemented in the next one was reversed; see "Interaction direction
+> (reversed): fully self-drawn". Both are kept because the reversal only makes
+> sense against the argument it overturns.
 
 The coordinator draws its own overlay today while the vendored component's
 command surface (`selectRange` / `selectParagraphAt` / `copyRange` — native
@@ -239,7 +244,7 @@ Workstreams, in order:
    vendored component's floors (see README "Platform requirements") and keep
    them in sync as the bridge lands.
 
-### Command bridge (implemented, device verification pending)
+### Command bridge (implemented, then removed — see the reversal below)
 
 All four workstreams above are in place (19 new unit tests; 145 total):
 
@@ -286,6 +291,79 @@ Still pending on-device: real long-press gesture → native menu round-trip,
 handle dragging inside a native selection, and behavior with
 `clearSelectionOnMenuAction` (native clears itself; the bridge's pushed record
 goes stale until the next range change — benign, but worth observing).
+
+### Interaction direction (reversed): fully self-drawn
+
+The command bridge was the wrong trade. Four things decided it:
+
+1. **It only ever served the case we least need.** Native text selection is
+   per-text-view by construction, so `planNativeSelection` vetoes anything
+   spanning two blocks. The requirement is cross-block continuous selection —
+   heading + body + list — which our own overlay had to draw regardless. We
+   were paying for a second selection implementation that covered only the
+   degenerate case.
+2. **One document, two interactions.** Long-press one paragraph and you got
+   native handles and the system edit menu; drag across two and you got a flat
+   block rectangle with no handles and no menu. Nothing in the UI explained why.
+3. **Two owners for one selection is a bug generator.** The duplicate highlight
+   and the yield mechanism that fixed it; the store staying `selected` after the
+   native side silently cleared itself, which needed a whole new codegen event
+   to observe; `clearSelection` not dismissing an already-presented
+   `UIEditMenuInteraction`. All the same root cause.
+4. **The menu was not ours.** Item order, grouping, icons, styling and above all
+   the dismissal lifecycle belonged to UIKit and to Android's `ActionMode`, and
+   the two disagreed on all of it. Every product action meant touching
+   Objective-C++, Kotlin and the codegen spec.
+
+What we give up, deliberately: the iOS magnifier while dragging a handle (the
+best thing about native selection, and not reimplemented here), haptics, the
+platform text-selection accessibility affordances, and system menu items such
+as Look Up and Translate. Accessibility is the highest residual risk and is
+tracked as its own milestone rather than treated as closed.
+
+**Target: the text view renders text and reports metrics; everything else is
+ours.**
+
+- `metrics.ts` — the whole contract between a rendered block and the selection
+  UI: a line table, plus pure `offsetAtLocalPoint` (point to offset) and
+  `rectsForRange` (range to rectangles). Three interchangeable providers:
+  React Native `onTextLayout` (the default, no native code); an exact provider
+  filling `charXs` from `NSLayoutManager` / `android.text.Layout` (follow-up);
+  and `Range.getClientRects()` on web (later).
+- `coordinator/overlay.ts` — per-line highlight rectangles, projecting the
+  document range onto each covered block through the existing
+  `rangeToSegmentSelection`. Falls back to the whole block rect when a block has
+  no metrics yet, so nothing regresses while a provider is missing.
+- `coordinator/handles.ts` + `SelectionHandles.tsx` — drag handles from the
+  first and last rectangle, with a touch radius far larger than the drawn knob.
+- `coordinator/toolbar.ts` + `SelectionToolbar.tsx` — the action bar: item
+  model, placement arithmetic (prefer above, flip below, clamp into the
+  viewport, arrow tracks the selection centre), host-supplied `toolbarItems`,
+  and a `renderToolbar` escape hatch.
+- `coordinator/gesture.ts` — a pure state machine (`idle -> pending ->
+  extending | handle -> idle`) fed touch events plus an injected clock, so the
+  long-press threshold is tested by advancing a number. Tap-to-dismiss lives
+  here, which is what makes the store/native desync structurally impossible.
+- `words.ts` — word granularity for the long press, `Intl.Segmenter` with a
+  script-class fallback for Hermes.
+
+Retired with the bridge: `nativeBridge.ts`, `blockSink.ts`, the overlay's
+`yieldNodeId`, `SelectionContext.nativePushed`, `nativePrimitive.ts`'s
+`TextSegmentHandle` command surface, the vendored-type shim, and the vendored
+peer dependency. `native/selectable-rich-text` stays in the tree, unwired, as
+the natural home for the exact-metrics work.
+
+Consequences worth stating plainly: the package is now plain TypeScript against
+public React Native APIs, so the Fabric-only and Android >= 0.85 floors are
+gone (peer range back to `>= 0.72`), and the same pure geometry will serve
+`@supramark/web`.
+
+**Still pending on device**: the touch dispatch and responder negotiation with
+an enclosing `ScrollView`; long-press threshold and move-tolerance tuning;
+handle knob geometry and hit slop; and whether `onTextLayout` line coordinates
+need any adjustment for padding or `lineHeight` on either platform. The
+decision-making those feed is unit-tested; the wiring is not, and cannot be
+without a device.
 
 ## Initial Scope
 

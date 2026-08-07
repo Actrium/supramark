@@ -75,6 +75,10 @@ module.exports = {
     '**/*.tsbuildinfo',
 
     // vendored/generated runtime bundles
+    // Full upstream Graphviz checkout (Git submodule), including generated
+    // Windows vcpkg/Meson documentation assets. It is not repository-owned JS.
+    'crates/graphviz-anywhere/graphviz/',
+    'crates/graphviz-anywhere/graphviz/**',
     'packages/renderers/rn-selection/native/selectable-rich-text/',
     'packages/renderers/rn-selection/native/selectable-rich-text/**',
     'crates/d2-little/mathjax.js',

@@ -184,7 +184,6 @@
         "@actrium/supramark-d2-native-rn": "workspace:*",
         "@actrium/supramark-mermaid-native-rn": "workspace:*",
         "@actrium/supramark-plantuml-native-rn": "workspace:*",
-        "@boomsi/react-native-selectable-text": "workspace:*",
         "@supramark/core": "workspace:*",
         "@supramark/feature-admonition": "workspace:*",
         "@supramark/feature-core-markdown": "workspace:*",
@@ -214,6 +213,7 @@
       "devDependencies": {
         "@react-native-community/cli": "^20.0.2",
         "@types/react": "~18.2.79",
+        "pngjs": "3.4.0",
         "typescript": "~5.3.3",
       },
     },
@@ -604,12 +604,10 @@
         "typescript": "^5.5.0",
       },
       "peerDependencies": {
-        "@boomsi/react-native-selectable-text": "*",
         "react": ">=18.0.0",
-        "react-native": ">=0.81.0",
+        "react-native": ">=0.72.0",
       },
       "optionalPeers": [
-        "@boomsi/react-native-selectable-text",
         "react",
         "react-native",
       ],

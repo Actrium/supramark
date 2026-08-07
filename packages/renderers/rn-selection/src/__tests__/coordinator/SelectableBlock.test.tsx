@@ -2,25 +2,40 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { create, act, type ReactTestRenderer } from 'react-test-renderer';
 
-// react-native's JS entry contains Flow syntax bun cannot load, and the
-// vendored native component needs a real native view; both are mocked as host
-// strings so react-test-renderer can render the tree and we can read props off
-// it. bun's `mock.module` registry is process-wide, so both mocks live here,
-// in the only file that renders React.
+// react-native's JS entry contains Flow syntax bun cannot load, so its
+// components are mocked as host strings: react-test-renderer can then render
+// the tree and we can read props off it and invoke them. bun's `mock.module`
+// registry is process-wide, so the mock lives here, in the only file that
+// renders React.
 mock.module('react-native', () => ({
   View: 'View',
   Text: 'Text',
-  StyleSheet: { create: (s: unknown) => s },
-}));
-mock.module('@boomsi/react-native-selectable-text', () => ({
-  SelectableRichText: 'SelectableRichText',
+  TouchableOpacity: 'TouchableOpacity',
+  PanResponder: {
+    create: (config: Record<string, unknown>) => ({
+      panHandlers: {
+        onStartShouldSetResponder: config.onStartShouldSetPanResponder,
+        onStartShouldSetResponderCapture: config.onStartShouldSetPanResponderCapture,
+        onMoveShouldSetResponder: config.onMoveShouldSetPanResponder,
+        onMoveShouldSetResponderCapture: config.onMoveShouldSetPanResponderCapture,
+        onResponderGrant: config.onPanResponderGrant,
+        onResponderMove: config.onPanResponderMove,
+        onResponderRelease: config.onPanResponderRelease,
+        onResponderTerminate: config.onPanResponderTerminate,
+        onResponderTerminationRequest: config.onPanResponderTerminationRequest,
+        onShouldBlockNativeResponder: config.onShouldBlockNativeResponder,
+      },
+    }),
+  },
+  StyleSheet: { absoluteFill: {}, create: (s: unknown) => s },
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
 const { SelectableBlock } = await import('../../coordinator/SelectableBlock');
-const { SelectionContext } = await import('../../coordinator/SelectionContext');
+const { SelectionContext, SelectionViewportContext } =
+  await import('../../coordinator/SelectionContext');
 const { SelectionRegistry } = await import('../../coordinator/registry');
 
 type ContextValue = React.ContextType<typeof SelectionContext>;
@@ -46,8 +61,19 @@ function makeContext(units: SelectionUnitLike[]): NonNullable<ContextValue> {
       return () => registry.unregister(block.nodeId, registered);
     },
     updateLayout: (nodeId, rect) => registry.updateLayout(nodeId, rect),
+    refreshLayouts: () => {},
+    registerViewport: (viewportId, offset) => registry.registerViewport(viewportId, offset),
+    measureViewportLayout: (viewportId, _node, rect) =>
+      registry.updateViewportLayout(viewportId, rect),
+    updateViewportScroll: (viewportId, offset) => registry.updateViewportScroll(viewportId, offset),
+    setViewportInteractionActive: () => {},
+    cancelPendingGesture: () => {},
+    selectWordInBlock: () => {},
     updateUnits: (nodeId, unitIds) => registry.updateUnits(nodeId, unitIds),
-    createBlockSink: () => ({}),
+    setMetrics: (nodeId, metrics) => registry.setMetrics(nodeId, metrics),
+    setContentOffset: (nodeId, offset) => registry.setContentOffset(nodeId, offset),
+    toolbarItems: [],
+    runToolbarItem: () => {},
   };
 }
 
@@ -75,26 +101,180 @@ function renderBlock(
   return r;
 }
 
-describe('SelectableBlock native props', () => {
-  test('does not force `selectable` on the vendored view', () => {
+describe('SelectableBlock rendering', () => {
+  test('renders a plain Text, not a native selection component', () => {
+    // The whole point of the self-drawn direction: no vendored native view, no
+    // `selectable` prop, nothing on the platform side holding selection state.
+    // A plain `<Text>` is what removes the Fabric-only / Android >= 0.85 floors.
     const r = renderBlock();
-    const native = r.root.findByType('SelectableRichText' as unknown as React.ElementType);
-
-    // The vendored component defaults `selectable` to false on purpose: with it
-    // on, UITextView / Android TextView run their own long-press word selection
-    // alongside `onTextLongPress`, painting a second native highlight under the
-    // coordinator overlay. The commands turn it on transiently instead
-    // (`selectTextRangeWithStart` / `clearTextSelection`), so passing it here
-    // would defeat that discipline. Assert the prop is absent, not merely
-    // falsy — passing `selectable={false}` explicitly would also be wrong,
-    // because it would override a future default change.
-    expect('selectable' in native.props).toBe(false);
-
-    // Sanity: the rest of the wiring is still attached, so this is not passing
-    // because the component failed to render.
-    expect(typeof native.props.onTextLongPress).toBe('function');
-    expect(typeof native.props.onMenuAction).toBe('function');
+    const text = r.root.findByType('Text' as unknown as React.ElementType);
+    expect('selectable' in text.props).toBe(false);
+    // The two measurements the coordinator needs are both wired.
+    expect(typeof text.props.onTextLayout).toBe('function');
+    expect(typeof text.props.onLayout).toBe('function');
     expect(renderer).not.toBeNull();
+  });
+
+  test('onTextLayout publishes a line table into the registry', () => {
+    const ctx = makeContext([textUnit('p1#0', 'hello world')]);
+    const { registry } = ctx;
+    let r!: ReactTestRenderer;
+    act(() => {
+      r = create(
+        <SelectionContext.Provider value={ctx}>
+          <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+            hello world
+          </SelectableBlock>
+        </SelectionContext.Provider>
+      );
+    });
+    renderer = r;
+    const text = r.root.findByType('Text' as unknown as React.ElementType);
+
+    act(() => {
+      text.props.onLayout({ nativeEvent: { layout: { x: 4, y: 2, width: 100, height: 20 } } });
+      text.props.onTextLayout({
+        nativeEvent: {
+          lines: [
+            { text: 'hello ', x: 0, y: 0, width: 60, height: 20 },
+            { text: 'world', x: 0, y: 20, width: 50, height: 20 },
+          ],
+        },
+      });
+    });
+
+    const block = registry.getBlock('p1');
+    expect(block?.contentOffset).toEqual({ x: 4, y: 2 });
+    expect(block?.metrics?.textLength).toBe(11);
+    expect(block?.metrics?.lines.map(l => [l.start, l.end])).toEqual([
+      [0, 6],
+      [6, 11],
+    ]);
+  });
+
+  test('onLayout publishes a fallback rect while native root measurement is pending', () => {
+    const ctx = {
+      ...makeContext([textUnit('p1#0', 'hello')]),
+      measureLayout: () => {},
+    };
+    let r!: ReactTestRenderer;
+    act(() => {
+      r = create(
+        <SelectionContext.Provider value={ctx}>
+          <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+            hello
+          </SelectableBlock>
+        </SelectionContext.Provider>
+      );
+    });
+    renderer = r;
+    const view = r.root.findByType('View' as unknown as React.ElementType);
+
+    act(() => {
+      view.props.onLayout({ nativeEvent: { layout: { x: 8, y: 13, width: 55, height: 21 } } });
+    });
+
+    expect(ctx.registry.getBlock('p1')?.rect).toEqual({ x: 8, y: 13, w: 55, h: 21 });
+  });
+
+  test('nested text forwards its native long press in text-local coordinates', () => {
+    const calls: unknown[] = [];
+    const ctx = {
+      ...makeContext([textUnit('p1#0', 'hello')]),
+      selectWordInBlock: (...args: unknown[]) => calls.push(args),
+    };
+    let r!: ReactTestRenderer;
+    act(() => {
+      r = create(
+        <SelectionContext.Provider value={ctx}>
+          <SelectionViewportContext.Provider value="list">
+            <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+              hello
+            </SelectableBlock>
+          </SelectionViewportContext.Provider>
+        </SelectionContext.Provider>
+      );
+    });
+    renderer = r;
+    const text = r.root.findByType('Text' as unknown as React.ElementType);
+
+    act(() => {
+      text.props.onLongPress({ nativeEvent: { locationX: 17, locationY: 9 } });
+    });
+
+    expect(calls).toEqual([['p1', { x: 17, y: 9 }]]);
+  });
+
+  test('nested onLayout never publishes a cell-local rect over root-space geometry', () => {
+    const measured: unknown[][] = [];
+    const ctx = {
+      ...makeContext([textUnit('p1#0', 'hello')]),
+      measureLayout: (...args: unknown[]) => measured.push(args),
+    };
+    let r!: ReactTestRenderer;
+    act(() => {
+      r = create(
+        <SelectionContext.Provider value={ctx}>
+          <SelectionViewportContext.Provider value="list">
+            <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+              hello
+            </SelectableBlock>
+          </SelectionViewportContext.Provider>
+        </SelectionContext.Provider>
+      );
+    });
+    renderer = r;
+    const view = r.root.findByType('View' as unknown as React.ElementType);
+
+    act(() => {
+      view.props.onLayout({ nativeEvent: { layout: { x: 8, y: 96, width: 55, height: 21 } } });
+    });
+
+    expect(ctx.registry.getBlock('p1')?.rect).toBeUndefined();
+    expect(measured).toHaveLength(1);
+    expect(measured[0]?.[2]).toEqual({ x: 8, y: 96, w: 55, h: 21 });
+  });
+
+  test('remeasures a captured nested layout after block registration changes', () => {
+    const measured: unknown[][] = [];
+    const ctx = {
+      ...makeContext([textUnit('p1#0', 'hello')]),
+      measureLayout: (...args: unknown[]) => measured.push(args),
+    };
+    let r!: ReactTestRenderer;
+    act(() => {
+      r = create(
+        <SelectionContext.Provider value={ctx}>
+          <SelectionViewportContext.Provider value={undefined}>
+            <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+              hello
+            </SelectableBlock>
+          </SelectionViewportContext.Provider>
+        </SelectionContext.Provider>
+      );
+    });
+    renderer = r;
+    const view = r.root.findByType('View' as unknown as React.ElementType);
+
+    act(() => {
+      view.props.onLayout({ nativeEvent: { layout: { x: 8, y: 96, width: 55, height: 21 } } });
+    });
+    expect(measured).toHaveLength(1);
+
+    act(() => {
+      r.update(
+        <SelectionContext.Provider value={ctx}>
+          <SelectionViewportContext.Provider value="list">
+            <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+              hello
+            </SelectableBlock>
+          </SelectionViewportContext.Provider>
+        </SelectionContext.Provider>
+      );
+    });
+
+    expect(measured).toHaveLength(2);
+    expect(measured[1]?.[2]).toEqual({ x: 8, y: 96, w: 55, h: 21 });
   });
 });
 

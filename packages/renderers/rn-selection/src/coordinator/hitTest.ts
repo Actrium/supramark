@@ -1,7 +1,22 @@
 import type { SelectionPoint } from '../model';
+import { offsetAtLocalPoint } from '../metrics';
 import type { SelectionUnitIndex } from '../resolve';
 import { buildSegmentSpans, segmentOffsetToPoint } from '../native/segmentAdapter';
-import type { LayoutRect, RegisteredBlock } from './registry';
+import { visibleBlockRect, type LayoutRect, type RegisteredBlock } from './registry';
+
+interface VisibleBlock {
+  block: RegisteredBlock;
+  rect: LayoutRect;
+}
+
+function visibleBlocks(blocks: readonly RegisteredBlock[]): VisibleBlock[] {
+  const visible: VisibleBlock[] = [];
+  for (const block of blocks) {
+    const rect = visibleBlockRect(block);
+    if (rect !== null) visible.push({ block, rect });
+  }
+  return visible;
+}
 
 /** A point in the `SelectionRoot`'s coordinate space. */
 export interface Point {
@@ -34,16 +49,14 @@ function horizontalGap(p: Point, r: LayoutRect): number {
  * has a layout rect yet.
  */
 export function chooseBlock(blocks: readonly RegisteredBlock[], p: Point): RegisteredBlock | null {
-  const laid = blocks.filter(
-    (b): b is RegisteredBlock & { rect: LayoutRect } => b.rect !== undefined
-  );
+  const laid = visibleBlocks(blocks);
   if (laid.length === 0) return null;
 
   // (1) A block that directly contains the point wins (earliest in doc order).
-  for (const b of laid) if (pointInRect(p, b.rect)) return b;
+  for (const entry of laid) if (pointInRect(p, entry.rect)) return entry.block;
 
   // (2) Blocks whose y-band contains the point: choose nearest by x, ties -> earliest.
-  const band = laid.filter(b => verticalGap(p, b.rect) === 0);
+  const band = laid.filter(entry => verticalGap(p, entry.rect) === 0);
   if (band.length > 0) {
     let best = band[0];
     let bestDist = horizontalGap(p, best.rect);
@@ -54,7 +67,7 @@ export function chooseBlock(blocks: readonly RegisteredBlock[], p: Point): Regis
         bestDist = dist;
       }
     }
-    return best;
+    return best.block;
   }
 
   // (3) Otherwise the block with the smallest vertical gap, ties -> earlier.
@@ -67,7 +80,23 @@ export function chooseBlock(blocks: readonly RegisteredBlock[], p: Point): Regis
       bestGap = gap;
     }
   }
-  return best;
+  return best.block;
+}
+
+/**
+ * Pick only a block whose measured rect directly contains the point. Long-press
+ * selection uses this stricter hit-test so pressing unregistered UI, fixture
+ * text, or whitespace does not select some unrelated nearest block.
+ */
+export function containingBlock(
+  blocks: readonly RegisteredBlock[],
+  p: Point
+): RegisteredBlock | null {
+  for (const block of blocks) {
+    const rect = visibleBlockRect(block);
+    if (rect !== null && pointInRect(p, rect)) return block;
+  }
+  return null;
 }
 
 /**
@@ -102,10 +131,15 @@ function blockEndPoint(block: RegisteredBlock, index: SelectionUnitIndex): Selec
 }
 
 /**
- * Localize a point inside a chosen block to a `SelectionPoint`. Precise text
- * char-hit needs an injected `block.measure` (device metrics deferred); without
- * one this degrades to a coarse before/after by the point's position relative to
- * the rect's mid-lines. Null when the block renders no units.
+ * Localize a point inside a chosen block to a `SelectionPoint`.
+ *
+ * With a line table (`block.metrics`) this is a real character hit-test: the
+ * root-space point is moved into the block's text content box and resolved
+ * through `offsetAtLocalPoint`, then mapped back onto the document unit stream.
+ * A block that has not been measured yet — or one that is not text at all —
+ * degrades to a coarse before/after by the point's position relative to the
+ * rect's mid-lines, which is what the whole layer did before metrics existed.
+ * Null when the block renders no units.
  */
 export function localizePoint(
   block: RegisteredBlock,
@@ -113,8 +147,13 @@ export function localizePoint(
   index: SelectionUnitIndex
 ): SelectionPoint | null {
   const rect = block.rect as LayoutRect;
-  if (block.measure) {
-    const offset = block.measure.localOffsetAt(p.x - rect.x, p.y - rect.y);
+  if (block.metrics && block.metrics.lines.length > 0) {
+    const origin = block.contentOffset ?? { x: 0, y: 0 };
+    const offset = offsetAtLocalPoint(
+      block.metrics,
+      p.x - rect.x - origin.x,
+      p.y - rect.y - origin.y
+    );
     return segmentOffsetToPoint(buildSegmentSpans(block, index), offset);
   }
   const after =
@@ -134,15 +173,15 @@ export function resolvePointToSelection(
 ): SelectionPoint | null {
   const block = chooseBlock(blocks, p);
   if (!block) return null;
-  const rect = block.rect as LayoutRect;
-  const laid = blocks.filter(b => b.rect !== undefined);
+  const rect = visibleBlockRect(block) as LayoutRect;
+  const laid = visibleBlocks(blocks);
 
   // Before the first laid-out block -> document start.
-  if (block === laid[0] && p.y < rect.y) {
+  if (block === laid[0].block && p.y < rect.y) {
     return blockStartPoint(block);
   }
   // After the last laid-out block -> document end.
-  if (block === laid[laid.length - 1] && p.y > rect.y + rect.h) {
+  if (block === laid[laid.length - 1].block && p.y > rect.y + rect.h) {
     return blockEndPoint(block, index);
   }
   return localizePoint(block, p, index);

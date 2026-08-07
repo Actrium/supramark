@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { SupramarkTextNode } from '@supramark/core';
-import type { SelectionBreakUnit, SelectionTextUnit } from '../../model';
+import { buildTextMetrics } from '../../metrics';
+import type {
+  SelectionBreakUnit,
+  SelectionRange,
+  SelectionTextUnit,
+  SelectionUnit,
+} from '../../model';
+import { buildUnitIndex, resolveSelectionRange } from '../../resolve';
 import type { LayoutRect, RegisteredBlock } from '../../coordinator/registry';
-import { computeOverlayRects } from '../../coordinator/overlay';
+import { computeSelectionRects } from '../../coordinator/overlay';
 
 // overlay copies `node` but never inspects it.
 const NODE = { type: 'text', value: '' } as SupramarkTextNode;
@@ -28,120 +35,231 @@ const block = (
   rect: LayoutRect | undefined
 ): RegisteredBlock => ({ nodeId, unitIds, kind: 'text', rect });
 
-describe('computeOverlayRects', () => {
+/** Resolve a range against a unit stream the way the store does. */
+function rectsFor(
+  blocks: readonly RegisteredBlock[],
+  units: readonly SelectionUnit[],
+  range: SelectionRange | null
+) {
+  const index = buildUnitIndex(units);
+  const covered = range === null ? [] : resolveSelectionRange(units, range, index);
+  return computeSelectionRects({ blocks, range, units: covered, index });
+}
+
+describe('computeSelectionRects block fallback', () => {
+  // A block with no metrics yet cannot place a rect inside its own text, so it
+  // highlights whole — the behaviour the whole layer had before metrics.
+  const units: SelectionUnit[] = [tUnit('a#0', 'a', 'hello'), brk('a#1', 'a')];
+  const range: SelectionRange = {
+    anchor: { nodeId: 'a', unitId: 'a#0', offset: 0 },
+    focus: { nodeId: 'a', unitId: 'a#0', offset: 5 },
+  };
+
   test('empty selection yields no rects', () => {
     const blocks = [block('a', ['a#0'], { x: 0, y: 0, w: 10, h: 20 })];
-    expect(computeOverlayRects(blocks, [])).toEqual([]);
+    expect(rectsFor(blocks, units, null)).toEqual([]);
   });
 
-  test('a single covered block yields its rect', () => {
+  test('a covered unmeasured block yields its whole rect', () => {
     const rect = { x: 0, y: 0, w: 10, h: 20 };
-    const blocks = [block('a', ['a#0'], rect)];
-    expect(computeOverlayRects(blocks, [tUnit('a#0', 'a', 'x')])).toEqual([rect]);
+    expect(rectsFor([block('a', ['a#0'], rect)], units, range)).toEqual([rect]);
   });
 
   test('a covered block without a layout rect is skipped', () => {
-    const blocks = [block('a', ['a#0'], undefined)];
-    expect(computeOverlayRects(blocks, [tUnit('a#0', 'a', 'x')])).toEqual([]);
+    expect(rectsFor([block('a', ['a#0'], undefined)], units, range)).toEqual([]);
   });
 
-  test('partial unit coverage still highlights the whole block', () => {
+  test('the fallback copies the rect rather than aliasing the registry', () => {
     const rect = { x: 0, y: 0, w: 10, h: 20 };
-    const blocks = [block('a', ['a#0', 'a#1'], rect)];
-    // Only a#0 covered; block-level highlight still returns the full rect.
-    expect(computeOverlayRects(blocks, [tUnit('a#0', 'a', 'x')])).toEqual([rect]);
-  });
-
-  test('two vertically contiguous covered blocks merge into one union rect', () => {
-    const blocks = [
-      block('a', ['a#0'], { x: 0, y: 0, w: 30, h: 20 }),
-      block('b', ['b#0'], { x: 0, y: 20, w: 50, h: 20 }),
-    ];
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    expect(computeOverlayRects(blocks, covered)).toEqual([{ x: 0, y: 0, w: 50, h: 40 }]);
-  });
-
-  test('blocks separated by more than mergeGap stay distinct', () => {
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 40, w: 50, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA), block('b', ['b#0'], rectB)];
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    expect(computeOverlayRects(blocks, covered)).toEqual([rectA, rectB]);
-  });
-
-  test('an uncovered middle block splits the overlay', () => {
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 20, w: 30, h: 20 };
-    const rectC = { x: 0, y: 40, w: 30, h: 20 };
-    const blocks = [
-      block('a', ['a#0'], rectA),
-      block('b', ['b#0'], rectB),
-      block('c', ['c#0'], rectC),
-    ];
-    // Middle uncovered: a and c are non-adjacent (gap from y=20 top of a to
-    // y=40 of c exceeds mergeGap) so they stay two rects.
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('c#0', 'c', 'z')];
-    expect(computeOverlayRects(blocks, covered)).toEqual([rectA, rectC]);
+    const [out] = rectsFor([block('a', ['a#0'], rect)], units, range);
+    expect(out).not.toBe(rect);
+    expect(out).toEqual(rect);
   });
 
   test('a covered break unit not owned by any block adds no phantom rect', () => {
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA)];
-    const covered = [tUnit('a#0', 'a', 'x'), brk('a#1', 'a')];
-    // a#1 (break) is not in any block.unitIds -> only the text block highlights.
-    expect(computeOverlayRects(blocks, covered)).toEqual([rectA]);
+    const rect = { x: 0, y: 0, w: 30, h: 20 };
+    const wide: SelectionRange = {
+      anchor: { nodeId: 'a', unitId: 'a#0', offset: 0 },
+      focus: { nodeId: 'a', unitId: 'a#1', offset: 1 },
+    };
+    // a#1 (the block break) belongs to no block.unitIds -> one rect, not two.
+    expect(rectsFor([block('a', ['a#0'], rect)], units, wide)).toEqual([rect]);
+  });
+});
+
+describe('computeSelectionRects text precision', () => {
+  // One block, one 100pt line of 'hello world' (11 chars => ~9.09pt each).
+  const units: SelectionUnit[] = [tUnit('p#0', 'p', 'hello world'), brk('p#1', 'p')];
+  const measured = (): RegisteredBlock => ({
+    nodeId: 'p',
+    unitIds: ['p#0'],
+    kind: 'text',
+    rect: { x: 10, y: 100, w: 200, h: 20 },
+    metrics: buildTextMetrics([{ text: 'hello world', x: 0, y: 0, width: 110, height: 20 }]),
   });
 
-  test('merge is order-independent', () => {
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 20, w: 50, h: 20 };
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    const sorted = [block('a', ['a#0'], rectA), block('b', ['b#0'], rectB)];
-    const reversed = [block('b', ['b#0'], rectB), block('a', ['a#0'], rectA)];
-    expect(computeOverlayRects(reversed, covered)).toEqual(computeOverlayRects(sorted, covered));
+  test('a partial selection highlights only the selected characters', () => {
+    const rects = rectsFor([measured()], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 0 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 5 },
+    });
+    // 'hello' = 5 of 11 characters => 50pt wide, at the block's origin.
+    expect(rects).toEqual([{ x: 10, y: 100, w: 50, h: 20 }]);
   });
 
-  test('the merge does not mutate the source registry rects', () => {
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 20, w: 50, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA), block('b', ['b#0'], rectB)];
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    computeOverlayRects(blocks, covered);
-    expect(rectA).toEqual({ x: 0, y: 0, w: 30, h: 20 });
-    expect(rectB).toEqual({ x: 0, y: 20, w: 50, h: 20 });
+  test('a selection in the middle of the line starts where the text does', () => {
+    const rects = rectsFor([measured()], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 6 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 11 },
+    });
+    expect(rects).toEqual([{ x: 70, y: 100, w: 50, h: 20 }]);
   });
 
-  test('yieldNodeId skips the block the native side has taken over', () => {
-    // Single-block commit: native bridge pushed block 'a' via selectRange, so
-    // the overlay must yield for 'a' (let native handles + menu paint alone) and
-    // not stack a full-width rect underneath.
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA)];
-    const covered = [tUnit('a#0', 'a', 'x')];
-    expect(computeOverlayRects(blocks, covered, undefined, 'a')).toEqual([]);
+  test('rects are offset by the block content box', () => {
+    const block = measured();
+    block.contentOffset = { x: 8, y: 4 };
+    const rects = rectsFor([block], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 0 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 5 },
+    });
+    expect(rects).toEqual([{ x: 18, y: 104, w: 50, h: 20 }]);
   });
 
-  test('yieldNodeId null for cross-block paints every covered block', () => {
-    // Cross-block range is never pushed native (planNativeSelection vetoes a
-    // second owner), so yieldNodeId is null and every covered block paints.
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 20, w: 50, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA), block('b', ['b#0'], rectB)];
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    expect(computeOverlayRects(blocks, covered, undefined, null)).toEqual([
-      { x: 0, y: 0, w: 50, h: 40 },
+  test('a multi-line block yields one rect per line', () => {
+    const block: RegisteredBlock = {
+      nodeId: 'p',
+      unitIds: ['p#0'],
+      kind: 'text',
+      rect: { x: 0, y: 0, w: 60, h: 40 },
+      metrics: buildTextMetrics([
+        { text: 'hello ', x: 0, y: 0, width: 60, height: 20 },
+        { text: 'world', x: 0, y: 20, width: 50, height: 20 },
+      ]),
+    };
+    const rects = rectsFor([block], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 3 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 8 },
+    });
+    // First line: from character 3 to its end, stretched to the full line
+    // width because the selection continues onto the next line.
+    expect(rects).toEqual([
+      { x: 30, y: 0, w: 30, h: 20 },
+      { x: 0, y: 20, w: 20, h: 20 },
     ]);
   });
 
-  test('yieldNodeId only skips its own block, not a neighboring covered block', () => {
-    // Single-block commit on 'a' while 'b' is also covered (e.g. a cross-block
-    // range transition): 'a' yields, 'b' still paints. In practice the bridge
-    // clears its push before a cross-block commit lands, but the overlay must
-    // still be correct if both ever coincide.
-    const rectA = { x: 0, y: 0, w: 30, h: 20 };
-    const rectB = { x: 0, y: 20, w: 50, h: 20 };
-    const blocks = [block('a', ['a#0'], rectA), block('b', ['b#0'], rectB)];
-    const covered = [tUnit('a#0', 'a', 'x'), tUnit('b#0', 'b', 'y')];
-    expect(computeOverlayRects(blocks, covered, undefined, 'a')).toEqual([rectB]);
+  test('an unselected line contributes no rect', () => {
+    const block: RegisteredBlock = {
+      nodeId: 'p',
+      unitIds: ['p#0'],
+      kind: 'text',
+      rect: { x: 0, y: 0, w: 60, h: 40 },
+      metrics: buildTextMetrics([
+        { text: 'hello ', x: 0, y: 0, width: 60, height: 20 },
+        { text: 'world', x: 0, y: 20, width: 50, height: 20 },
+      ]),
+    };
+    const rects = rectsFor([block], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 6 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 11 },
+    });
+    expect(rects).toEqual([{ x: 0, y: 20, w: 50, h: 20 }]);
+  });
+
+  test('clips a partially visible line to its nested scroll viewport', () => {
+    const block = measured();
+    block.clipRect = { x: 0, y: 110, w: 200, h: 30 };
+    const rects = rectsFor([block], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 0 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 5 },
+    });
+    expect(rects).toEqual([
+      {
+        x: 10,
+        y: 110,
+        w: 50,
+        h: 10,
+        startHandleVisible: false,
+        endHandleVisible: false,
+      },
+    ]);
+  });
+
+  test('does not paint a selected block outside its nested viewport', () => {
+    const block = measured();
+    block.clipRect = { x: 0, y: 200, w: 200, h: 30 };
+    const rects = rectsFor([block], units, {
+      anchor: { nodeId: 'p', unitId: 'p#0', offset: 0 },
+      focus: { nodeId: 'p', unitId: 'p#0', offset: 5 },
+    });
+    expect(rects).toEqual([]);
+  });
+});
+
+describe('computeSelectionRects across blocks', () => {
+  const units: SelectionUnit[] = [
+    tUnit('a#0', 'a', 'aaaa'),
+    brk('a#1', 'a'),
+    tUnit('b#0', 'b', 'bbbb'),
+    brk('b#1', 'b'),
+  ];
+  const range: SelectionRange = {
+    anchor: { nodeId: 'a', unitId: 'a#0', offset: 2 },
+    focus: { nodeId: 'b', unitId: 'b#0', offset: 2 },
+  };
+
+  const blockA = (): RegisteredBlock => ({
+    nodeId: 'a',
+    unitIds: ['a#0'],
+    kind: 'text',
+    rect: { x: 0, y: 0, w: 40, h: 20 },
+    metrics: buildTextMetrics([{ text: 'aaaa', x: 0, y: 0, width: 40, height: 20 }]),
+  });
+  const blockB = (): RegisteredBlock => ({
+    nodeId: 'b',
+    unitIds: ['b#0'],
+    kind: 'text',
+    rect: { x: 0, y: 20, w: 40, h: 20 },
+    metrics: buildTextMetrics([{ text: 'bbbb', x: 0, y: 0, width: 40, height: 20 }]),
+  });
+
+  test('each block contributes its own share of the range', () => {
+    // The first block runs from the anchor to its end (stretched, because the
+    // selection continues), the second from its start to the focus.
+    expect(rectsFor([blockA(), blockB()], units, range)).toEqual([
+      { x: 20, y: 0, w: 20, h: 20 },
+      { x: 0, y: 20, w: 20, h: 20 },
+    ]);
+  });
+
+  test('adjacent rects are not merged', () => {
+    // The old block-level overlay merged vertically contiguous rects into one
+    // union box. Per-line rects must stay separate: merging would square off
+    // the ragged first and last lines that make a text selection readable.
+    const rects = rectsFor([blockA(), blockB()], units, range);
+    expect(rects.length).toBe(2);
+  });
+
+  test('an uncovered block in between contributes nothing', () => {
+    const middle: RegisteredBlock = {
+      nodeId: 'z',
+      unitIds: ['z#0'],
+      kind: 'text',
+      rect: { x: 0, y: 10, w: 40, h: 5 },
+    };
+    const rects = rectsFor([blockA(), middle, blockB()], units, range);
+    expect(rects).toEqual([
+      { x: 20, y: 0, w: 20, h: 20 },
+      { x: 0, y: 20, w: 20, h: 20 },
+    ]);
+  });
+
+  test('a measured and an unmeasured block mix without either disappearing', () => {
+    const bare = blockB();
+    delete bare.metrics;
+    expect(rectsFor([blockA(), bare], units, range)).toEqual([
+      { x: 20, y: 0, w: 20, h: 20 },
+      { x: 0, y: 20, w: 40, h: 20 },
+    ]);
   });
 });

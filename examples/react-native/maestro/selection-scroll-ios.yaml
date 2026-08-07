@@ -1,0 +1,22 @@
+appId: supramark-rn-demo
+env:
+  BUNDLE_URL: 'http://localhost:8090/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false'
+---
+- launchApp:
+    appId: supramark-rn-demo
+    arguments:
+      supramarkBundleURL: ${BUNDLE_URL}
+- assertVisible: Selection Demo
+- swipe:
+    start: 50%,80%
+    end: 50%,25%
+    duration: 900
+- swipe:
+    start: 50%,80%
+    end: 50%,25%
+    duration: 900
+- swipe:
+    start: 50%,80%
+    end: 50%,25%
+    duration: 900
+- assertVisible: Scroll sentinel

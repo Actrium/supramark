@@ -1,0 +1,13 @@
+appId: supramark-rn-demo
+env:
+  BUNDLE_URL: 'http://localhost:8090/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false'
+---
+- launchApp:
+    appId: supramark-rn-demo
+    arguments:
+      supramarkBundleURL: ${BUNDLE_URL}
+- assertVisible: Selection Demo
+- tapOn: Select CJK half
+- waitForAnimationToEnd
+- assertVisible: cjk half
+- takeScreenshot: selection-cjk-half

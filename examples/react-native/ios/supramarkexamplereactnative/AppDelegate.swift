@@ -53,6 +53,8 @@ public class AppDelegate: ExpoAppDelegate {
 }
 
 class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
+  private let bundleURLArgument = "supramarkBundleURL"
+
   // Extension point for config-plugins
 
   override func sourceURL(for bridge: RCTBridge) -> URL? {
@@ -62,9 +64,32 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
+    if let url = bundleURLFromLaunchArguments() {
+      return url
+    }
     return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry")
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
+  }
+
+  private func bundleURLFromLaunchArguments() -> URL? {
+    let args = ProcessInfo.processInfo.arguments
+    let keys = [bundleURLArgument, "-\(bundleURLArgument)"]
+
+    for key in keys {
+      if let index = args.firstIndex(of: key) {
+        let valueIndex = args.index(after: index)
+        if valueIndex < args.endIndex {
+          return URL(string: args[valueIndex])
+        }
+      }
+    }
+
+    if let value = UserDefaults.standard.string(forKey: bundleURLArgument), !value.isEmpty {
+      return URL(string: value)
+    }
+
+    return nil
   }
 }

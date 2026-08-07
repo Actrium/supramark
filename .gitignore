@@ -5,6 +5,7 @@ node_modules/
 
 # Testing
 coverage/
+examples/react-native/maestro/artifacts/
 
 # Production
 dist/
