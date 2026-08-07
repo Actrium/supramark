@@ -5,6 +5,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  explicitInputConfigs,
+  inputGlobConfigs,
+  matchesInputGlob,
+} from '../lib/source-fixtures.mjs';
 
 const SUITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY_ROOT = path.resolve(SUITE_ROOT, '..', '..');
@@ -34,7 +39,7 @@ async function run(name, suppliedSourceDirectory) {
   const sourceRepository = suppliedSourceDirectory
     ? verifySuppliedRepository(suppliedSourceDirectory, sourceConfig)
     : await pullPinnedRepository(sourceConfig);
-  const inputConfigs = sourceConfig.inputs ?? [{ path: sourceConfig.input }];
+  const inputConfigs = resolveInputConfigs(sourceRepository, sourceConfig);
   if (inputConfigs.length === 0 || inputConfigs.some(input => !input.path)) {
     throw new Error(`Source ${name} must configure at least one input path`);
   }
@@ -45,7 +50,7 @@ async function run(name, suppliedSourceDirectory) {
       maxBuffer: 32 * 1024 * 1024,
     }),
   }));
-  const imported = importerModule.default(sourceDocuments, sourceConfig);
+  const imported = await importerModule.default(sourceDocuments, sourceConfig);
   const outputDirectory = path.join(FIXTURES_ROOT, name);
   const casesDocument = {
     schemaVersion: 1,
@@ -53,7 +58,12 @@ async function run(name, suppliedSourceDirectory) {
     profile: sourceConfig.profile,
     cases: imported.cases,
   };
-  const versionDocument = buildVersionDocument(sourceConfig, imported.cases, imported);
+  const versionDocument = buildVersionDocument(
+    sourceConfig,
+    inputConfigs,
+    imported.cases,
+    imported
+  );
 
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(
@@ -68,6 +78,38 @@ async function run(name, suppliedSourceDirectory) {
   console.log(
     `Imported ${imported.cases.length} ${name} cases from ${sourceConfig.revision} into ${outputDirectory}`
   );
+}
+
+function resolveInputConfigs(repositoryDirectory, sourceConfig) {
+  const resolved = explicitInputConfigs(sourceConfig).map(input => ({ ...input }));
+  const seen = new Set(resolved.map(input => input.path));
+  const inputGlobs = inputGlobConfigs(sourceConfig);
+  if (inputGlobs.length === 0) return resolved;
+
+  const repositoryPaths = git(
+    ['-C', repositoryDirectory, 'ls-tree', '-r', '--name-only', sourceConfig.revision],
+    { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }
+  )
+    .split(/\r?\n/)
+    .filter(Boolean);
+
+  for (const inputGlob of inputGlobs) {
+    if (!inputGlob.pattern) throw new Error(`Source ${sourceConfig.name} has an empty input glob`);
+    const matches = repositoryPaths.filter(filePath => matchesInputGlob(filePath, inputGlob));
+    if (matches.length === 0) {
+      throw new Error(
+        `Source ${sourceConfig.name} input glob matched no files: ${inputGlob.pattern}`
+      );
+    }
+    for (const filePath of matches) {
+      if (seen.has(filePath)) {
+        throw new Error(`Source ${sourceConfig.name} config selects ${filePath} more than once`);
+      }
+      seen.add(filePath);
+      resolved.push({ ...inputGlob, path: filePath });
+    }
+  }
+  return resolved;
 }
 
 async function pullPinnedRepository(sourceConfig) {
@@ -140,7 +182,7 @@ function verifyCommit(repositoryDirectory, revision) {
   }
 }
 
-function buildVersionDocument(sourceConfig, cases, imported) {
+function buildVersionDocument(sourceConfig, inputConfigs, cases, imported) {
   const sectionCounts = new Map();
   for (const testCase of cases) {
     sectionCounts.set(
@@ -148,11 +190,28 @@ function buildVersionDocument(sourceConfig, cases, imported) {
       (sectionCounts.get(testCase.source.section) ?? 0) + 1
     );
   }
-  if (sourceConfig.inputs && imported.sourceFiles?.length !== sourceConfig.inputs.length) {
+  const usesFixtureList = Boolean(sourceConfig.inputs || sourceConfig.inputGlobs);
+  if (usesFixtureList && imported.sourceFiles?.length !== inputConfigs.length) {
     throw new Error(`Importer ${sourceConfig.importer} returned incomplete source file metadata`);
   }
-  const fixtureMetadata = sourceConfig.inputs
-    ? { fixtures: imported.sourceFiles }
+  if (
+    usesFixtureList &&
+    imported.sourceFiles.some((sourceFile, index) => sourceFile.path !== inputConfigs[index].path)
+  ) {
+    throw new Error(`Importer ${sourceConfig.importer} returned source files in the wrong order`);
+  }
+  const fixtureMetadata = usesFixtureList
+    ? {
+        fixtures: imported.sourceFiles,
+        ...(sourceConfig.inputGlobs
+          ? { fixturePatterns: sourceConfig.inputGlobs.map(inputGlob => inputGlob.pattern) }
+          : {}),
+        ...(sourceConfig.inputGlobs
+          ? {
+              fixtureExcludes: sourceConfig.inputGlobs.map(inputGlob => inputGlob.exclude ?? []),
+            }
+          : {}),
+      }
     : { fixture: sourceConfig.input };
 
   return {

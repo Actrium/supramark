@@ -5,8 +5,10 @@
   "scripts": {
     "import:commonmark": "node scripts/import.mjs commonmark",
     "import:cmark-gfm": "node scripts/import.mjs cmark-gfm",
+    "import:micromark": "node scripts/import.mjs micromark",
     "validate:commonmark": "node scripts/validate.mjs commonmark",
     "validate:cmark-gfm": "node scripts/validate.mjs cmark-gfm",
+    "validate:micromark": "node scripts/validate.mjs micromark",
     "test:source": "node scripts/run.mjs",
     "test:source:visual": "node scripts/run-visual.mjs",
     "baseline:source": "node scripts/update-baseline.mjs",
@@ -15,7 +17,10 @@
     "baseline:commonmark": "node scripts/update-baseline.mjs commonmark",
     "test:cmark-gfm": "node scripts/run.mjs cmark-gfm",
     "test:cmark-gfm:visual": "node scripts/run-visual.mjs cmark-gfm",
-    "baseline:cmark-gfm": "node scripts/update-baseline.mjs cmark-gfm"
+    "baseline:cmark-gfm": "node scripts/update-baseline.mjs cmark-gfm",
+    "test:micromark": "node scripts/run.mjs micromark",
+    "test:micromark:visual": "node scripts/run-visual.mjs micromark",
+    "baseline:micromark": "node scripts/update-baseline.mjs micromark"
   },
   "dependencies": {
     "parse5": "7.3.0",

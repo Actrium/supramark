@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  explicitInputConfigs,
+  inputGlobConfigs,
+  isConfiguredInputPath,
+  matchesInputGlob,
+} from '../lib/source-fixtures.mjs';
 
 const SUITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY_ROOT = path.resolve(SUITE_ROOT, '..', '..');
@@ -34,20 +40,45 @@ async function validate(name) {
   assert(version.repository === sourceConfig.repository, 'source repository mismatch');
   assert(version.version === sourceConfig.version, 'source version mismatch');
   assert(version.commit === sourceConfig.revision, 'configured source commit mismatch');
-  const configuredPaths = (sourceConfig.inputs ?? [{ path: sourceConfig.input }]).map(
-    input => input.path
-  );
+  const explicitPaths = explicitInputConfigs(sourceConfig).map(input => input.path);
+  const inputGlobs = inputGlobConfigs(sourceConfig);
   const versionFixtures = version.fixtures ?? [
     { path: version.fixture, sourceSha256: version.sourceSha256, caseCount: version.caseCount },
   ];
-  assert(
-    JSON.stringify(versionFixtures.map(fixture => fixture.path)) === JSON.stringify(configuredPaths),
-    'configured fixture paths mismatch'
-  );
-  for (const fixture of versionFixtures) {
-    assert(/^[0-9a-f]{64}$/.test(fixture.sourceSha256), `${fixture.path}: invalid source SHA-256`);
-    assert(Number.isInteger(fixture.caseCount) && fixture.caseCount > 0, `${fixture.path}: invalid case count`);
+  const versionPaths = versionFixtures.map(fixture => fixture.path);
+  if (inputGlobs.length === 0) {
+    assert(JSON.stringify(versionPaths) === JSON.stringify(explicitPaths), 'configured fixture paths mismatch');
+  } else {
+    for (const explicitPath of explicitPaths) {
+      assert(versionPaths.includes(explicitPath), `configured fixture is missing: ${explicitPath}`);
+    }
+    for (const inputGlob of inputGlobs) {
+      assert(
+        versionPaths.some(filePath => matchesInputGlob(filePath, inputGlob)),
+        `configured fixture glob is empty: ${inputGlob.pattern}`
+      );
+    }
+    assert(
+      JSON.stringify(version.fixturePatterns) ===
+        JSON.stringify(inputGlobs.map(inputGlob => inputGlob.pattern)),
+      'configured fixture patterns mismatch'
+    );
+    assert(
+      JSON.stringify(version.fixtureExcludes) ===
+        JSON.stringify(inputGlobs.map(inputGlob => inputGlob.exclude ?? [])),
+      'configured fixture exclusions mismatch'
+    );
   }
+  assert(new Set(versionPaths).size === versionPaths.length, 'version.json contains duplicate fixture paths');
+  for (const fixture of versionFixtures) {
+    assert(isConfiguredInputPath(fixture.path, sourceConfig), `${fixture.path}: unconfigured fixture path`);
+    assert(/^[0-9a-f]{64}$/.test(fixture.sourceSha256), `${fixture.path}: invalid source SHA-256`);
+    assert(Number.isInteger(fixture.caseCount) && fixture.caseCount >= 0, `${fixture.path}: invalid case count`);
+  }
+  assert(
+    versionFixtures.reduce((total, fixture) => total + fixture.caseCount, 0) === version.caseCount,
+    'fixture case counts do not add up to the source case count'
+  );
   assert(version.license === sourceConfig.license, 'source license mismatch');
   assert(/^[0-9a-f]{40}$/.test(version.commit), 'version.json does not contain a full commit');
   assert(/^[0-9a-f]{64}$/.test(version.sourceSha256), 'invalid source SHA-256');
@@ -58,15 +89,18 @@ async function validate(name) {
   const fixtureCounts = new Map();
   for (const testCase of document.cases) {
     assert(testCase.schemaVersion === 1, `${testCase.id}: unsupported case schema version`);
+    assert(/^[a-z0-9][a-z0-9._-]*$/.test(testCase.id), `${testCase.id}: invalid case ID`);
     assert(!ids.has(testCase.id), `${testCase.id}: duplicate case ID`);
     ids.add(testCase.id);
     assert(testCase.source.name === name, `${testCase.id}: source name mismatch`);
     assert(testCase.source.repository === version.repository, `${testCase.id}: repository mismatch`);
     assert(testCase.source.version === version.version, `${testCase.id}: version mismatch`);
     assert(testCase.source.revision === version.commit, `${testCase.id}: source commit mismatch`);
-    assert(configuredPaths.includes(testCase.source.path), `${testCase.id}: fixture path mismatch`);
+    assert(versionPaths.includes(testCase.source.path), `${testCase.id}: fixture path mismatch`);
     const upstreamKey = `${testCase.source.path}\0${testCase.source.upstreamId}`;
     assert(!upstreamIds.has(upstreamKey), `${testCase.id}: duplicate upstream ID`);
+    assert(Number.isInteger(testCase.source.startLine) && testCase.source.startLine >= 1, `${testCase.id}: invalid start line`);
+    assert(Number.isInteger(testCase.source.endLine) && testCase.source.endLine >= testCase.source.startLine, `${testCase.id}: invalid end line`);
     upstreamIds.add(upstreamKey);
     fixtureCounts.set(
       testCase.source.path,
@@ -74,9 +108,41 @@ async function validate(name) {
     );
     assert(testCase.profile === document.profile, `${testCase.id}: profile mismatch`);
     assert(typeof testCase.input.markdown === 'string', `${testCase.id}: missing Markdown input`);
+    if (testCase.input.upstreamOptions !== undefined) {
+      assert(
+        testCase.input.upstreamOptions &&
+          typeof testCase.input.upstreamOptions === 'object' &&
+          !Array.isArray(testCase.input.upstreamOptions),
+        `${testCase.id}: invalid upstream options`
+      );
+    }
+    if (testCase.input.upstreamEncoding !== undefined) {
+      assert(
+        typeof testCase.input.upstreamEncoding === 'string' && testCase.input.upstreamEncoding.length > 0,
+        `${testCase.id}: invalid upstream encoding`
+      );
+    }
+    assert(
+      testCase.expected.kind === 'normative' || testCase.expected.kind === 'implementation',
+      `${testCase.id}: invalid expected result kind`
+    );
     assert(typeof testCase.expected.html === 'string', `${testCase.id}: missing expected HTML`);
+    assert(
+      testCase.expected.comparison === 'semantic-html' || testCase.expected.comparison === 'exact-html',
+      `${testCase.id}: invalid comparison mode`
+    );
     assert(Array.isArray(testCase.expected.semanticTypes), `${testCase.id}: missing semantic types`);
     assert(Array.isArray(testCase.coverage.candidateNodeTypes), `${testCase.id}: missing node type mapping`);
+    assert(
+      Array.isArray(testCase.coverage.syntax) && testCase.coverage.syntax.length > 0,
+      `${testCase.id}: missing syntax mapping`
+    );
+    assert(
+      Array.isArray(testCase.coverage.featureIds) &&
+        testCase.coverage.featureIds.length > 0 &&
+        testCase.coverage.featureIds.every(featureId => /^@supramark\/feature-/.test(featureId)),
+      `${testCase.id}: invalid feature mapping`
+    );
     assert(
       testCase.coverage.renderers.includes('web') &&
         testCase.coverage.renderers.includes('react-native'),
@@ -89,7 +155,7 @@ async function validate(name) {
   }
 
   for (const fixture of versionFixtures) {
-    assert(fixtureCounts.get(fixture.path) === fixture.caseCount, `${fixture.path}: case count mismatch`);
+    assert((fixtureCounts.get(fixture.path) ?? 0) === fixture.caseCount, `${fixture.path}: case count mismatch`);
   }
 
   const actualSections = Object.fromEntries(

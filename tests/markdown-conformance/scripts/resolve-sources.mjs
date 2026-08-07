@@ -17,10 +17,7 @@ if (availableSources.length === 0) {
 
 const requested = process.argv.slice(2).join(' ').trim() || 'all';
 const requestedSources = requested
-  // U+FF0C is the fullwidth comma. A CJK IME produces it instead of the ASCII
-  // one, so a source list typed with that keyboard still splits correctly.
-  // Written as an escape rather than the literal character to keep this file
-  // free of CJK codepoints.
+  // cjk-allow: accept a fullwidth comma in user-provided source lists.
   .split(/[,\uFF0C]/)
   .map(source => source.trim())
   .filter(Boolean);

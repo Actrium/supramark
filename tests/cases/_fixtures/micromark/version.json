@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "source": "micromark",
+  "repository": "https://github.com/micromark/micromark",
+  "version": "4.0.2",
+  "commit": "774a70c6bae6dd94486d3385dbd9a0f14550b709",
+  "fixtures": [
+    {
+      "path": "packages/micromark/package.json",
+      "role": "manifest",
+      "sourceSha256": "e2423e9665ea6d21d78cb520e812249cdbce2428bd6a6e9b38438a2569b05f2d",
+      "caseCount": 0
+    },
+    {
+      "path": "test/io/misc/bom.js",
+      "sourceSha256": "057241c87a996f82faa939dd10742fff1dbc02c95508d2cf17a73b55532282b0",
+      "caseCount": 4
+    },
+    {
+      "path": "test/io/content/definition.js",
+      "sourceSha256": "bb61cec955947f0f8e80d92307b59d1d477c7626de5ae7ecba25d5d9471082dd",
+      "caseCount": 65
+    },
+    {
+      "path": "test/io/document/block-quote.js",
+      "sourceSha256": "3f1b15547b1b345b13f133a1966c2caf90f9e030ac00d10547d17ad50d7c1632",
+      "caseCount": 28
+    },
+    {
+      "path": "test/io/document/list-item.js",
+      "sourceSha256": "0542ad1672569a0e434def00c88c69b1f8b74f1f9b15b77a2a7f802132ddc4de",
+      "caseCount": 94
+    },
+    {
+      "path": "test/io/flow/code-fenced.js",
+      "sourceSha256": "d7e110135b7f25003d360c732a37b32378ca3efeea62d792c0ae4ef6f9929935",
+      "caseCount": 42
+    },
+    {
+      "path": "test/io/flow/code-indented.js",
+      "sourceSha256": "760b37652589d27fb1b3559df2eeb3ed536f6670007c829cf78a65915f3c7541",
+      "caseCount": 28
+    },
+    {
+      "path": "test/io/flow/heading-atx.js",
+      "sourceSha256": "00a52c7ed2e54ed27ad51d4660b1307edff2fa13789d6a920133df73743d4a35",
+      "caseCount": 33
+    },
+    {
+      "path": "test/io/flow/heading-setext.js",
+      "sourceSha256": "874b63ada6b38b657025d06ab4d1c78f5668f72484cf53a3c2cb2965f1511abf",
+      "caseCount": 43
+    },
+    {
+      "path": "test/io/flow/html.js",
+      "sourceSha256": "d3d765273ea9f3b26b3afc6e45aa55095b601af6640740e265320a3bde093b97",
+      "caseCount": 149
+    },
+    {
+      "path": "test/io/flow/thematic-break.js",
+      "sourceSha256": "41964a4988d60c88fa56cc24ec30469b36e337e8b53ab2cb0c3010cd07618f95",
+      "caseCount": 28
+    },
+    {
+      "path": "test/io/misc/dangerous-html.js",
+      "sourceSha256": "c655fd8a2ebcdf4f78667ea765cb00a5f8454dfe2d22fee2154912f621b29595",
+      "caseCount": 3
+    },
+    {
+      "path": "test/io/misc/dangerous-protocols.js",
+      "sourceSha256": "7390dbe16e59bed42eadb3e2f991e3a0d7cd5cc4747ccedeb62f724b3c9fafd2",
+      "caseCount": 31
+    },
+    {
+      "path": "test/io/misc/default-line-ending.js",
+      "sourceSha256": "2a19a74d05e444e940463027ea2b8467911d6fdad211ba19b64f9d17c7fd6f69",
+      "caseCount": 6
+    },
+    {
+      "path": "test/io/misc/line-ending.js",
+      "sourceSha256": "788236bbf421a41e120e6c025a965198b8ec52b99ce54e1f5904fd2b6090e892",
+      "caseCount": 25
+    },
+    {
+      "path": "test/io/misc/tab.js",
+      "sourceSha256": "50fd20df3b627937a5e041ad10afafa17fea7411346ac3e05b372316fd9f68c6",
+      "caseCount": 44
+    },
+    {
+      "path": "test/io/misc/typed-array.js",
+      "sourceSha256": "12390cf955cb61d0f0592be8e1688d306d1afe72199168b311fe5d136949b532",
+      "caseCount": 3
+    },
+    {
+      "path": "test/io/misc/url.js",
+      "sourceSha256": "f280fafa6eacff445e116f6f3de300f0d4c626df9201d4d66f94d69e159e4784",
+      "caseCount": 17
+    },
+    {
+      "path": "test/io/misc/zero.js",
+      "sourceSha256": "de1975443cdf57c50d4908e3996c1712a73f0ddcd288bcdadcd41f753a845b59",
+      "caseCount": 3
+    },
+    {
+      "path": "test/io/text/autolink.js",
+      "sourceSha256": "68f4f0e7bfbea12ee612c015a19c1ac5177947365cd7f09a45bc99fa43c1ceb1",
+      "caseCount": 39
+    },
+    {
+      "path": "test/io/text/character-escape.js",
+      "sourceSha256": "084ac60a11845fa338f673ea3fcad85aa62ab043403f45670b4e208aade51e85",
+      "caseCount": 12
+    },
+    {
+      "path": "test/io/text/character-reference.js",
+      "sourceSha256": "99229b95cbec4722591a036918f6f45e88aebcf8971b195e88d52312b3451e19",
+      "caseCount": 31
+    },
+    {
+      "path": "test/io/text/code.js",
+      "sourceSha256": "3175707a096cea46361bbda8f15c45adbb824f0624b6d02ca7f2ff26d9f5c4c9",
+      "caseCount": 26
+    },
+    {
+      "path": "test/io/text/emphasis.js",
+      "sourceSha256": "51dd5de05092e057f2827834c8a3c4f504fa0e5207471974630165a2b44f3105",
+      "caseCount": 135
+    },
+    {
+      "path": "test/io/text/hard-break.js",
+      "sourceSha256": "cfa6714f8840b97cef4ae68cb19650e2bbbf09a7ca0bc6b51d1ce02d563ec27d",
+      "caseCount": 24
+    },
+    {
+      "path": "test/io/text/html.js",
+      "sourceSha256": "509babb79f582e260f077bb4835b2cd63b905c68ee9a58385941fdcdeae1be2d",
+      "caseCount": 67
+    },
+    {
+      "path": "test/io/text/image.js",
+      "sourceSha256": "93a97a3c6634a72c25ff8a1f0557523b4c13772f51d09b165fad63a855ca1ea8",
+      "caseCount": 33
+    },
+    {
+      "path": "test/io/text/link-reference.js",
+      "sourceSha256": "48cb94cc015a9a3fe8fc2af814059fee03d1f381bdb24d32c6bd750ce7c540a4",
+      "caseCount": 58
+    },
+    {
+      "path": "test/io/text/link-resource.js",
+      "sourceSha256": "c553343e9984d275627ab3b12c3c79e383e4a01db9b2c8558433bf24cdf8d391",
+      "caseCount": 75
+    },
+    {
+      "path": "test/io/text/soft-break.js",
+      "sourceSha256": "55fcb3282f718c9d9b75b36e5d25eda20e45e9623fa3528ef29504f63b25b93d",
+      "caseCount": 2
+    },
+    {
+      "path": "test/io/text/text.js",
+      "sourceSha256": "4e10081a55bb554590aa25825b26146710fa1f32dd9cd0f9aedf9f7502fa986b",
+      "caseCount": 3
+    }
+  ],
+  "fixturePatterns": [
+    "test/io/**/*.js"
+  ],
+  "fixtureExcludes": [
+    [
+      "test/io/**/index.js",
+      "test/io/misc/bom.js",
+      "test/io/misc/constants.js"
+    ]
+  ],
+  "license": "MIT",
+  "sourceSha256": "c522b8a737a720e9f8dba51c4553c15631f7a6414f043c61ee0deb2b86eaf27c",
+  "caseCount": 1151,
+  "sections": {
+    "ATX headings": 33,
+    "Autolinks": 39,
+    "Backslash escapes": 12,
+    "Block quotes": 28,
+    "Code spans": 26,
+    "Emphasis and strong emphasis": 135,
+    "Entity and numeric character references": 31,
+    "Fenced code blocks": 42,
+    "Hard line breaks": 24,
+    "HTML blocks": 149,
+    "Images": 33,
+    "Indented code blocks": 28,
+    "Link reference definitions": 65,
+    "Links": 181,
+    "List items": 94,
+    "Raw HTML": 70,
+    "Setext headings": 43,
+    "Soft line breaks": 33,
+    "Tabs": 44,
+    "Textual content": 13,
+    "Thematic breaks": 28
+  }
+}

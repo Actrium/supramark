@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Data sources to run (comma-separated: commonmark,cmark-gfm; or all)"
+        description: "Data sources to run (comma-separated: commonmark,cmark-gfm,micromark; or all)"
         type: string
         required: true
         default: "all"

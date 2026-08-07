@@ -1,5 +1,7 @@
 # Markdown Conformance
 
+[English](README.md) | 中文
+
 本目录是 Markdown 标准数据导入与渲染对照测试套件。统一用例数据单独保存在
 `tests/cases/_fixtures/`，这里仅保存执行工具、配置、浏览器宿主、依赖和运行产物。
 
@@ -58,7 +60,19 @@ node tests/markdown-conformance/scripts/import.mjs cmark-gfm
 node tests/markdown-conformance/scripts/validate.mjs cmark-gfm
 ```
 
-新增数据源时只需增加 source 配置和适配器；通用约定见 `config/sources/README.md`。
+## micromark 数据导入
+
+micromark 适配器从固定 commit 的 `test/io/**/*.js` 自动发现核心 Markdown→HTML 断言，排除
+仅聚合模块、流测试和常量表测试，在隔离捕获环境中保留 Markdown、期望 HTML、上游选项、
+测试名称及源码行号，共生成 1151 条统一用例。新增匹配文件无需修改导入入口或逐项配置路径。
+
+```powershell
+node tests/markdown-conformance/scripts/import.mjs micromark
+node tests/markdown-conformance/scripts/validate.mjs micromark
+```
+
+新增数据源时只需增加 source 配置和适配器。通用入口支持单文件、显式多文件、glob 文件集、
+同步/异步适配器和 Markdown/HTML 成对夹具；约定见 `config/sources/README.md`。
 
 ## 测试命令
 
@@ -77,14 +91,14 @@ node tests/markdown-conformance/scripts/run.mjs <source-name>
 node tests/markdown-conformance/scripts/run-visual.mjs <source-name>
 ```
 
-当前可直接运行 `commonmark` 和 `cmark-gfm`。例如：
+当前可直接运行 `commonmark`、`cmark-gfm` 和 `micromark`。例如：
 
 ```powershell
-node tests/markdown-conformance/scripts/run.mjs cmark-gfm
-node tests/markdown-conformance/scripts/run-visual.mjs cmark-gfm
+node tests/markdown-conformance/scripts/run.mjs micromark
+node tests/markdown-conformance/scripts/run-visual.mjs micromark
 ```
 
-每个数据源都走同一套 `run.mjs` / `run-visual.mjs`，不存在专用运行脚本；`test:commonmark` 之类的 npm script 只是带上数据源名的快捷方式。新增数据源只需提供配置、统一用例和导入适配器。
+原有 `run-commonmark.mjs` 与 `run-commonmark-visual.mjs` 保留为兼容入口。新增数据源只需提供配置、统一用例和导入适配器，不再新增专用运行脚本。
 
 可设置：
 
@@ -111,18 +125,17 @@ node tests/markdown-conformance/scripts/run-visual.mjs cmark-gfm
 `packages/renderers/web/src/Supramark.tsx` 生产 React Renderer。浏览器宿主只隔离图表引擎和
 浏览器 WASM Parser，避免重复解析；最终 DOM 来自生产 Renderer。
 
-GitHub Actions 工作流位于 `.github/workflows/markdown-conformance.yml`。工作流先校验所选数据源，
+GitHub Actions 工作流位于 `.github/workflows/commonmark-conformance.yml`。工作流先校验所选数据源，
 再通过动态 matrix 为每个数据源独立导入、验证、对照、上传报告并维护聚合 Issue。失败运行会上传完整
 中文报告并生成 `issue.md` 与 `issue-metadata.json`；启用 Issue 开关后会创建或更新聚合 Issue。Pull Request 只验证和上传产物。
 Issue 标题格式为 `[<数据源显示名>] 验证结果问题：存在未通过用例`，并自动添加 `bug` 标签；稳定标记用于更新同一数据源已有的聚合 Issue。
 
 手动运行工作流时可以配置：
 
-- `sources`：执行的数据源；支持单个名称、逗号分隔的多个名称或 `all`。例如 `commonmark`、`cmark-gfm`、`commonmark,cmark-gfm`。
+- `sources`：执行的数据源；支持单个名称、逗号分隔的多个名称或 `all`。例如 `micromark`、`cmark-gfm,micromark`。
 - `create_issue`：失败后是否创建或更新聚合 Issue，默认开启。
 - `run_visual`：是否执行浏览器视觉对照；关闭时只运行语义对照，默认开启。
-- `fail_workflow`：判定失败时是否将工作流标记为失败，默认开启。
-- `gate_mode`：失败判定方式，`regression`（仅新增失败判失败，默认）或 `absolute`（存在未通过用例即判失败）；详见「失败判定」。
+- `fail_workflow`：存在未通过用例时是否将工作流标记为失败，默认开启。
 - `issue_repository`：Issue 目标仓库，格式为 `owner/repo`；留空时使用当前仓库。
 
 push 使用仓库 Actions Variables 控制相同行为：
@@ -143,24 +156,10 @@ Pull Request 始终不会自动创建 Issue，即使 `COMMONMARK_AUTO_ISSUE=true
 
 ## 批准基线
 
-批准基线按数据源位于 `tests/markdown-conformance/baselines/<source-name>.json`，用于在 Issue 中区分新增失败、已恢复和持续失败，同时决定运行的退出码（见下节「失败判定」）。只有完整运行该数据源的全部用例、视觉测试已执行且语义与视觉执行错误均为 0 时，才允许更新：
+批准基线按数据源位于 `tests/markdown-conformance/baselines/<source-name>.json`，用于在 Issue 中区分新增失败、已恢复和持续失败。只有完整运行该数据源的全部用例、视觉测试已执行且语义与视觉执行错误均为 0 时，才允许更新：
 
 ```powershell
 node tests/markdown-conformance/scripts/update-baseline.mjs <source-name>
 ```
 
-基线更新属于人工批准动作，不应在普通 Actions 运行中自动执行。
-
-## 失败判定
-
-退出码由「相对基线是否退步」决定，而不是「是否存在未通过用例」。数据源允许携带一批已知失败（cmark-gfm 起始为语义 58、视觉 29），若按绝对数量判定，main 会长期标红，而 PR 又无法得知自己是否让情况变坏。
-
-默认 `regression` 模式下，以下三种情况判定为失败：
-
-- 相对基线出现新增失败（`baseline.overall.added` 非空）；
-- 存在执行错误（语义或视觉），意味着 parser 或测试框架本身出错，而不是用例结论不一致 —— panic 绝不能被当成「已知失败」吸收；
-- 基线不可用（缺失、数据源不匹配、对照目标不匹配）。此时没有可比对的对象，静默通过等于报告了一次什么都没检查的绿色运行。这也让 `RUN_VISUAL=false` 变为显式失败：视觉运行与基线都以 `production-web-renderer-dom` 为对照目标，只跑语义会落到 `baseline-target-mismatch`。
-
-判定结果写入 `summary.json` 的 `gate` 字段，并在运行日志中输出一行 `gate[...]: PASS/FAIL - <原因>`。
-
-`workflow_dispatch` 的 `gate_mode` 输入或环境变量 `CONFORMANCE_GATE=absolute` 可切回按绝对数量判定；`FAIL_ON_FAILURES=0` 仍然是「只出报告、永不失败」的总开关。
+原有 `update-commonmark-baseline.mjs` 保留为兼容入口。基线更新属于人工批准动作，不应在普通 Actions 运行中自动执行。

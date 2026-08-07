@@ -93,6 +93,13 @@
       "properties": {
         "markdown": {
           "type": "string"
+        },
+        "upstreamOptions": {
+          "type": "object"
+        },
+        "upstreamEncoding": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -107,7 +114,10 @@
       ],
       "properties": {
         "kind": {
-          "const": "normative"
+          "enum": [
+            "normative",
+            "implementation"
+          ]
         },
         "html": {
           "type": "string"

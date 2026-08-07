@@ -1,0 +1,41 @@
+{
+  "name": "micromark",
+  "displayName": "micromark",
+  "repository": "https://github.com/micromark/micromark",
+  "version": "4.0.2",
+  "revision": "774a70c6bae6dd94486d3385dbd9a0f14550b709",
+  "license": "MIT",
+  "profile": "commonmark",
+  "importer": "micromark",
+  "versionProbe": {
+    "path": "packages/micromark/package.json",
+    "pattern": "\\\"version\\\"\\s*:\\s*\\\"([^\\\"]+)\\\""
+  },
+  "inputs": [
+    {
+      "path": "packages/micromark/package.json",
+      "role": "manifest"
+    },
+    {
+      "path": "test/io/misc/bom.js",
+      "skipTestTitlePatterns": [
+        "\\(stream\\)$"
+      ],
+      "ignoredImports": [
+        "import concatStream from 'concat-stream'",
+        "import {stream} from 'micromark/stream'",
+        "import {slowStream} from '../../util/slow-stream.js'"
+      ]
+    }
+  ],
+  "inputGlobs": [
+    {
+      "pattern": "test/io/**/*.js",
+      "exclude": [
+        "test/io/**/index.js",
+        "test/io/misc/bom.js",
+        "test/io/misc/constants.js"
+      ]
+    }
+  ]
+}
