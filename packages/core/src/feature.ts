@@ -1235,17 +1235,52 @@ export class FeatureRegistry {
   // via SupramarkNode.
   private static features = new Map<string, SupramarkFeature<SupramarkNode>>();
 
+  // IDs we have already warned about for being replaced. Keeps HMR dev loop
+  // quiet: every feature edit yields a fresh module instance, and without
+  // dedup the warn would fire on every single save. Reset in `clear()` so
+  // watch-mode test re-runs stay deterministic.
+  private static warnedDuplicateIds = new Set<string>();
+
   /**
    * Register a Feature.
    *
+   * Idempotent: a feature whose id is already in the registry replaces the
+   * previous entry instead of throwing. This is required for Vite HMR — when
+   * a feature module is hot-updated it re-evaluates the top-level
+   * `FeatureRegistry.register(...)` call with a fresh feature object, and
+   * throwing during module evaluation breaks the hot-reload loop with an
+   * uncaught error that only a full page reload can clear. Re-registering
+   * the exact same object reference is a no-op.
+   *
    * @param feature - the Feature definition
-   * @throws if the Feature ID already exists
    */
   static register<TNode extends SupramarkNode>(feature: SupramarkFeature<TNode>): void {
     const id = feature.metadata.id;
+    const existing = this.features.get(id);
 
-    if (this.features.has(id)) {
-      throw new Error(`Feature "${id}" is already registered`);
+    if (existing === (feature as unknown)) {
+      // Re-importing the exact same module (e.g. a no-op HMR update)
+      // yields the same object reference — nothing to do.
+      return;
+    }
+
+    if (existing !== undefined) {
+      // A different object under an existing id usually means a duplicated
+      // @supramark/* package in node_modules (two versions side by side), each
+      // evaluating its own top-level `register()`. Warn so the collision is
+      // observable in production without breaking HMR or the no-throw contract.
+      // Intentionally not gated on `import.meta.hot`: core is consumed under
+      // react-native / bun test / ts-jest where `import.meta` is unreliable.
+      // Dedup per id: HMR re-fires this branch on every save, but the signal
+      // only needs to land once per session.
+      if (!this.warnedDuplicateIds.has(id)) {
+        this.warnedDuplicateIds.add(id);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Feature "${id}" is already registered; the previous entry is being replaced. ` +
+            `This is expected under Vite HMR, but in production usually means a duplicated package.`,
+        );
+      }
     }
 
     // A feature is registered for a specific node subtype (e.g. SupramarkDiagramNode),
@@ -1314,6 +1349,7 @@ export class FeatureRegistry {
    */
   static clear(): void {
     this.features.clear();
+    this.warnedDuplicateIds.clear();
   }
 }
 
