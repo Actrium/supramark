@@ -115,7 +115,14 @@ function createReactNativeGraphvizAdapterLoader(): () => Promise<GraphvizRenderA
 
   return () => {
     if (!adapterPromise) {
-      adapterPromise = loadReactNativeGraphvizAdapter();
+      // Drop the cached promise on rejection so a transient native-module /
+      // graphviz load failure is retried on the next render. Mirrors the web
+      // loader. See #161.
+      const promise = loadReactNativeGraphvizAdapter();
+      promise.catch(() => {
+        if (adapterPromise === promise) adapterPromise = null;
+      });
+      adapterPromise = promise;
     }
     return adapterPromise;
   };

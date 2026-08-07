@@ -3,7 +3,7 @@ import { pickGraphvizDiagramOptions } from './index.js';
 
 let cached: Promise<GraphvizRenderAdapter> | null = null;
 
-async function loadAdapter(): Promise<GraphvizRenderAdapter> {
+async function buildAdapter(): Promise<GraphvizRenderAdapter> {
   const { Graphviz } = await import('@actrium/graphviz-anywhere-web');
   const graphviz = await Graphviz.load();
 
@@ -22,6 +22,19 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
   };
 }
 
+/** Resolve the cached adapter, dropping the cache on rejection so a transient
+ * wasm load failure is retried on the next call. See #161. */
+function getAdapter(): Promise<GraphvizRenderAdapter> {
+  if (!cached) {
+    const promise = buildAdapter();
+    promise.catch(() => {
+      if (cached === promise) cached = null;
+    });
+    cached = promise;
+  }
+  return cached;
+}
+
 /**
  * Graphviz web adapter — lazy-loads the Embind wasm module on first use.
  * Each render allocates a fresh `CGraphviz` instance because the underlying
@@ -29,13 +42,11 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
  */
 const webAdapter: GraphvizRenderAdapter = {
   async renderToSvg(code, options) {
-    if (!cached) cached = loadAdapter();
-    const adapter = await cached;
+    const adapter = await getAdapter();
     return adapter.renderToSvg(code, options);
   },
   async getCapabilities() {
-    if (!cached) cached = loadAdapter();
-    const adapter = await cached;
+    const adapter = await getAdapter();
     return adapter.getCapabilities?.() ?? { engines: [], formats: ['svg'] };
   },
 };

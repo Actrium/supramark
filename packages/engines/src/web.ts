@@ -154,7 +154,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
 
   const ensureGraphvizBridge = async () => {
     if (!graphvizBridgePromise) {
-      graphvizBridgePromise = (async () => {
+      const promise = (async () => {
         // Static string literal so vite/rollup can bundle the module at build
         // time. (The `optimizeDeps.exclude` in vite.config still keeps it
         // un-pre-bundled in dev so viz.wasm stays a sibling of viz.js.)
@@ -175,6 +175,12 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
           };
         }
       })();
+      // Clear on rejection so a transient Graphviz load / bridge-install
+      // failure is retried on the next render. See #161.
+      promise.catch(() => {
+        if (graphvizBridgePromise === promise) graphvizBridgePromise = null;
+      });
+      graphvizBridgePromise = promise;
     }
 
     return graphvizBridgePromise;
@@ -182,7 +188,7 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
 
   const loadPlantuml = async (): Promise<DiagramRenderFn> => {
     if (!plantumlPromise) {
-      plantumlPromise = (async () => {
+      const promise = (async () => {
         // Load the wasm module. wasm-bindgen's ESM-wasm build initialises via
         // the `import * from '*.wasm'` side effect, so no separate init call is
         // needed. Some builds still ship a default `init()` — probe defensively.
@@ -217,6 +223,15 @@ async function loadWebPlantumlRender(): Promise<DiagramRenderFn> {
           return normalized;
         };
       })();
+      // Clear on rejection so a transient wasm import / init failure is
+      // retried on the next render instead of pinning the rejection inside
+      // the closure forever — `engine.ts`'s outer cache holds the *fulfilled*
+      // render-fn closure, so without this clear the wasm rejection is
+      // unreachable from the outside and every later render stays failed. See #161.
+      promise.catch(() => {
+        if (plantumlPromise === promise) plantumlPromise = null;
+      });
+      plantumlPromise = promise;
     }
     return plantumlPromise;
   };
@@ -414,7 +429,16 @@ function createWebGraphvizAdapterLoader(): () => Promise<GraphvizRenderAdapter> 
 
   return () => {
     if (!adapterPromise) {
-      adapterPromise = loadWebGraphvizAdapter();
+      // Drop the cached promise on rejection so a transient Graphviz.load /
+      // wasm-init failure is retried on the next render instead of being
+      // pinned for the engine's lifetime. `engine.ts`'s outer cache already
+      // clears its own field, but this inner closure cache is what the outer
+      // loader re-invokes, so without this clear the retry is a no-op. See #161.
+      const promise = loadWebGraphvizAdapter();
+      promise.catch(() => {
+        if (adapterPromise === promise) adapterPromise = null;
+      });
+      adapterPromise = promise;
     }
     return adapterPromise;
   };

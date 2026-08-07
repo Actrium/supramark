@@ -19,7 +19,7 @@ async function ensureRenderer(): Promise<MathJaxRenderer> {
     return rendererPromise;
   }
 
-  rendererPromise = Promise.resolve().then(() => {
+  const promise = Promise.resolve().then(() => {
     const adaptor = liteAdaptor();
     RegisterHTMLHandler(adaptor);
 
@@ -32,6 +32,13 @@ async function ensureRenderer(): Promise<MathJaxRenderer> {
 
     return { adaptor, document };
   });
+  // Drop the cached promise on rejection so a transient MathJax init failure
+  // is retried on the next render instead of being pinned for the module's
+  // lifetime. See #161.
+  promise.catch(() => {
+    if (rendererPromise === promise) rendererPromise = null;
+  });
+  rendererPromise = promise;
 
   return rendererPromise;
 }

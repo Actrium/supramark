@@ -10,7 +10,7 @@ import {
 
 let cached: Promise<GraphvizRenderAdapter> | null = null;
 
-async function loadAdapter(): Promise<GraphvizRenderAdapter> {
+async function buildAdapter(): Promise<GraphvizRenderAdapter> {
   const mod = await import('@actrium/graphviz-anywhere-rn');
   // Tolerate the CJS/ESM interop shapes Metro produces for this package's
   // CommonJS main; see resolveGraphvizAnywhereRnExports.
@@ -31,6 +31,19 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
   };
 }
 
+/** Resolve the cached adapter, dropping the cache on rejection so a transient
+ * native-module init failure is retried on the next call. See #161. */
+function getAdapter(): Promise<GraphvizRenderAdapter> {
+  if (!cached) {
+    const promise = buildAdapter();
+    promise.catch(() => {
+      if (cached === promise) cached = null;
+    });
+    cached = promise;
+  }
+  return cached;
+}
+
 /**
  * Graphviz RN adapter — thin wrapper over `@actrium/graphviz-anywhere-rn`'s
  * native module (JSI TurboModule on new arch, NativeModule bridge on old arch).
@@ -38,13 +51,11 @@ async function loadAdapter(): Promise<GraphvizRenderAdapter> {
  */
 const rnAdapter: GraphvizRenderAdapter = {
   async renderToSvg(code, options) {
-    if (!cached) cached = loadAdapter();
-    const adapter = await cached;
+    const adapter = await getAdapter();
     return adapter.renderToSvg(code, options);
   },
   async getCapabilities() {
-    if (!cached) cached = loadAdapter();
-    const adapter = await cached;
+    const adapter = await getAdapter();
     return adapter.getCapabilities?.() ?? { engines: [...GRAPHVIZ_LAYOUT_ENGINES], formats: ['svg'] };
   },
 };
