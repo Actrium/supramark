@@ -57,6 +57,7 @@ build_single_arch() {
     # record/HTML labels (e.g. plantuml-little) need this.
     cmake -S "${GV_PATCHED}" -B "${build_dir}/graphviz" \
         "${GV_CMAKE_COMMON_ARGS[@]}" \
+        "${GV_BISON_EXTRA_ARGS[@]}" \
         -DWITH_EXPAT=ON \
         -DWITH_ZLIB=ON \
         "-DCMAKE_C_FLAGS=-O2 -fPIC -Wno-incompatible-function-pointer-types" \

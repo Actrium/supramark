@@ -24,15 +24,19 @@ Pod::Spec.new do |s|
   s.source_files = "ios/*.{h,m,mm}"
   s.public_header_files = "ios/SupramarkD2Module.h"
 
-  # The vendored xcframework is staged under ios/Frameworks/ by
-  # scripts/prepare-native.js (consuming target/ios-xcframeworks/ from
-  # the workspace root after cargo build + scripts/build-ios-xcframework.sh).
-  s.preserve_paths = "ios/Frameworks/**"
-  s.vendored_frameworks = "ios/Frameworks/SupramarkD2.xcframework"
-  s.xcconfig = {
+  # iOS keeps the static XCFramework; macOS uses a dylib so multiple Rust
+  # static libraries do not link duplicate runtimes into the host.
+  s.preserve_paths = ["ios/Frameworks/**", "macos/Frameworks/**"]
+  s.ios.vendored_frameworks = "ios/Frameworks/SupramarkD2.xcframework"
+  s.osx.vendored_libraries = "macos/Frameworks/lib/libsupramark_d2_native.dylib"
+  s.ios.xcconfig = {
     "HEADER_SEARCH_PATHS" =>
       "\"$(PODS_TARGET_SRCROOT)/ios/Frameworks/SupramarkD2.xcframework/ios-arm64/Headers\" " \
       "\"$(PODS_TARGET_SRCROOT)/ios/Frameworks/SupramarkD2.xcframework/ios-arm64_x86_64-simulator/Headers\"",
+    "OTHER_LDFLAGS" => "$(inherited)",
+  }
+  s.osx.xcconfig = {
+    "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/macos/Frameworks/include\"",
     "OTHER_LDFLAGS" => "$(inherited)",
   }
 

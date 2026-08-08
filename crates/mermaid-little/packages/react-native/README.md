@@ -1,8 +1,8 @@
 # @actrium/supramark-mermaid-native-rn
 
-React Native FFI wrapper around `supramark-mermaid-native` — a Rust staticlib
-that turns Mermaid source into SVG. iOS via xcframework + ObjC bridge,
-Android via JNI + `cargo ndk`-built `.so` per ABI.
+React Native FFI wrapper around `supramark-mermaid-native` that turns Mermaid
+source into SVG. iOS uses a static XCFramework, macOS uses a universal dylib,
+and Android uses JNI with a `cargo ndk`-built `.so` per ABI.
 
 This package side-registers a `d2` engine with `@supramark/engines/rn`
 on import.
@@ -20,8 +20,8 @@ const svg = await engine.render('mermaid', 'a -> b -> c');
 ## Build prerequisites (monorepo dev)
 
 This package consumes binary artefacts built by the
-`crates/mermaid-little/packages/native` Cargo target. Before running
-`pod install` / Android Gradle build:
+`crates/mermaid-little/packages/native` Cargo target. Repository maintainers
+build and stage them before publishing:
 
 ```bash
 # 1. iOS (3 slices + xcframework assembly)
@@ -33,20 +33,27 @@ scripts/build-ios-xcframework.sh supramark-mermaid-native \
   crates/mermaid-little/packages/native/include libsupramark_mermaid_native.a \
   target/ios-xcframeworks/SupramarkMermaid.xcframework
 
-# 2. Android (4 ABIs)
+# 2. macOS (arm64 + x86_64 dylib; also stages all Apple package artefacts)
+bun run native:macos:build
+
+# 3. Android (4 ABIs)
 rustup target add aarch64-linux-android armv7-linux-androideabi \
                   x86_64-linux-android i686-linux-android
 ANDROID_NDK_HOME=/opt/homebrew/share/android-ndk \
   cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release \
     -p supramark-mermaid-native
 
-# 3. Stage artefacts into this package
+# 4. Stage every available artefact (safe to rerun)
 cd crates/mermaid-little/packages/react-native
 node scripts/prepare-native.js
 ```
 
 After that:
+
 - iOS: `pod install` in your RN app's `ios/` finds the xcframework
+- macOS: the standard CocoaPods/autolinking flow finds the package-root
+  podspec and embeds the universal dylib; no manual Podfile entry or binary
+  patch is required
 - Android: `gradlew :supramark-mermaid-native:assembleDebug` (or via the RN
   CLI) picks up the per-ABI `.so` files in `android/src/main/jniLibs/`
 
@@ -55,6 +62,8 @@ After that:
 - iOS deployment target is **15.1** (matches the staticlib's
   cross-compile target — lowering it without a rebuild causes ABI
   mismatch at link time)
+- macOS deployment target is **11.0**. Published dylibs contain both arm64 and
+  x86_64 and use an `@rpath` install name.
 - Android NDK STL is `c++_shared`. RN ≥ 0.71 bundles
   `libc++_shared.so` automatically; standalone Android apps may need
   `packagingOptions { jniLibs.useLegacyPackaging = true }` or an
@@ -70,11 +79,11 @@ After that:
   (`TurboModule`) RN architectures are supported via `index.ts`'s
   resolver.
 
+Published npm tarballs contain the staged native binaries directly. Consumers
+do not run the monorepo build commands or a postinstall download.
+
 ## Out of scope (TODO)
 
-- GitHub Release based postinstall download (today the prebuilt
-  artefacts must be cargo-built locally — there's no published binary
-  channel yet)
 - text-metrics callback wiring (`supramark_install_metrics_callback`)
   is currently NOT installed; d2 falls back to its embedded
   `MermaidGoEmulationMetrics`. Wiring host fonts is a follow-up.

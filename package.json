@@ -46,6 +46,8 @@
     "license:check": "bun scripts/license-check.ts",
     "check:diagram-specifiers": "bun scripts/check-diagram-bare-specifiers.ts",
     "build:wasm": "bun scripts/build-wasm.ts",
+    "native:macos:build": "bash scripts/build-macos-xcframeworks.sh",
+    "native:macos:verify": "node scripts/verify-macos-native-packages.js",
     "build:profile": "bun scripts/build-profile.ts",
     "feature:preview:web": "bun scripts/feature-preview-web.ts",
     "docs:dev": "vitepress dev docs",

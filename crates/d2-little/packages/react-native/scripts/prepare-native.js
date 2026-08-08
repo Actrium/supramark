@@ -8,6 +8,8 @@
  *   - `cargo build --release --target <ios-triple>  -p supramark-d2-native`
  *   - `scripts/build-ios-xcframework.sh ...` (at repo root, produces
  *     target/ios-xcframeworks/SupramarkD2.xcframework)
+ *   - `bun run native:macos:build` (at repo root, produces the universal
+ *     target/macos-universal/release dylib)
  *   - `cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release
  *      -p supramark-d2-native`
  *
@@ -23,18 +25,20 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..');
 const PKG_DIR = path.resolve(__dirname, '..');
 const TARGET_DIR = path.join(REPO_ROOT, 'target');
 
-const IOS_XCFRAMEWORK_SRC = path.join(
-  TARGET_DIR,
-  'ios-xcframeworks',
-  'SupramarkD2.xcframework'
-);
+const IOS_XCFRAMEWORK_SRC = path.join(TARGET_DIR, 'ios-xcframeworks', 'SupramarkD2.xcframework');
 const IOS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'ios', 'Frameworks');
 
+// macOS consumes a universal dylib so each native module keeps its Rust
+// runtime isolated when CocoaPods links all diagram engines into one host.
+const MACOS_DYLIB_NAME = 'libsupramark_d2_native.dylib';
+const MACOS_DYLIB_SRC = path.join(TARGET_DIR, 'macos-universal', 'release', MACOS_DYLIB_NAME);
+const MACOS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'macos', 'Frameworks');
+
 const ANDROID_ABIS = {
-  'arm64-v8a':    'aarch64-linux-android',
-  'armeabi-v7a':  'armv7-linux-androideabi',
-  'x86_64':       'x86_64-linux-android',
-  'x86':          'i686-linux-android',
+  'arm64-v8a': 'aarch64-linux-android',
+  'armeabi-v7a': 'armv7-linux-androideabi',
+  x86_64: 'x86_64-linux-android',
+  x86: 'i686-linux-android',
 };
 const ANDROID_JNILIBS_DEST = path.join(PKG_DIR, 'android', 'src', 'main', 'jniLibs');
 
@@ -66,7 +70,12 @@ function copyDirRecursive(src, dest) {
 }
 
 function fileExists(p) {
-  try { fs.accessSync(p); return true; } catch { return false; }
+  try {
+    fs.accessSync(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function prepareIOS() {
@@ -78,7 +87,9 @@ function prepareIOS() {
   fs.rmSync(IOS_FRAMEWORKS_DEST, { recursive: true, force: true });
   fs.mkdirSync(IOS_FRAMEWORKS_DEST, { recursive: true });
   copyDirRecursive(IOS_XCFRAMEWORK_SRC, path.join(IOS_FRAMEWORKS_DEST, 'SupramarkD2.xcframework'));
-  console.log(`✓ iOS: copied SupramarkD2.xcframework → ${path.relative(REPO_ROOT, IOS_FRAMEWORKS_DEST)}`);
+  console.log(
+    `✓ iOS: copied SupramarkD2.xcframework → ${path.relative(REPO_ROOT, IOS_FRAMEWORKS_DEST)}`
+  );
   return true;
 }
 
@@ -97,13 +108,40 @@ function prepareAndroid() {
     console.log(`✓ Android ${abi}: copied .so → jniLibs/${abi}/`);
   }
   if (!anyFound) {
-    console.warn(`   Run \`cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release -p supramark-d2-native\` first.`);
+    console.warn(
+      `   Run \`cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release -p supramark-d2-native\` first.`
+    );
   }
   return anyFound;
 }
 
+// Stage the universal dylib and C ABI header at the paths declared by the
+// package-root podspec.
+function prepareMacOS() {
+  if (!fileExists(MACOS_DYLIB_SRC)) {
+    console.warn(`⚠  macOS dylib not found at:\n   ${MACOS_DYLIB_SRC}`);
+    console.warn('   Run `bun run native:macos:build` from the repo root first.');
+    return false;
+  }
+  if (!fileExists(NATIVE_HEADER_SRC)) {
+    console.warn(`⚠  Native header not found at:\n   ${NATIVE_HEADER_SRC}`);
+    return false;
+  }
+  const libDest = path.join(MACOS_FRAMEWORKS_DEST, 'lib');
+  const includeDest = path.join(MACOS_FRAMEWORKS_DEST, 'include');
+  fs.rmSync(MACOS_FRAMEWORKS_DEST, { recursive: true, force: true });
+  fs.mkdirSync(libDest, { recursive: true });
+  fs.copyFileSync(MACOS_DYLIB_SRC, path.join(libDest, MACOS_DYLIB_NAME));
+  copyDirRecursive(NATIVE_HEADER_SRC, includeDest);
+  console.log(
+    `✓ macOS: copied universal dylib + headers → ${path.relative(REPO_ROOT, MACOS_FRAMEWORKS_DEST)}/`
+  );
+  return true;
+}
+
 const ios = prepareIOS();
 const android = prepareAndroid();
+const macos = prepareMacOS();
 
 // Stage the C ABI header into the package (used by the Android CMake build;
 // iOS gets its headers from inside the xcframework).
@@ -119,7 +157,7 @@ function prepareHeader() {
 }
 const header = prepareHeader();
 
-if (!ios && !android) {
+if (!ios && !android && !macos) {
   console.error('No native artefacts found. Build the Rust crate first.');
   process.exit(1);
 }

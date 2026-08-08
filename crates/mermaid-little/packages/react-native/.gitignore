@@ -1,6 +1,7 @@
 # Staged native artefacts — produced by `node scripts/prepare-native.js`
 # from cargo-built target/. NEVER commit these binaries to git.
 ios/Frameworks/
+macos/Frameworks/
 android/src/main/jniLibs/
 
 # react-native-builder-bob build output
