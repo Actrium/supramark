@@ -21,6 +21,17 @@ export type GraphvizEngine = 'dot' | 'neato' | 'fdp' | 'sfdp' | 'circo' | 'twopi
  * Output formats supported by Graphviz.
  */
 export type GraphvizFormat = 'svg' | 'png' | 'pdf' | 'ps' | 'json' | 'dot' | 'xdot' | 'plain';
+interface NativeGraphvizModule {
+    renderDot(dot: string, engine: string, format: string): Promise<string>;
+    getVersion(): Promise<string>;
+}
+/**
+ * Resolve the native module, preferring TurboModules (new arch) with fallback
+ * to the bridge-based NativeModules (old arch). When neither is linked, return
+ * a Proxy that throws an actionable error on first use rather than at import
+ * time. Kept a pure function of its inputs so the fallback order is testable.
+ */
+export declare function resolveNative(turbo: NativeGraphvizModule | null | undefined, bridged: NativeGraphvizModule | null | undefined): NativeGraphvizModule;
 /**
  * Render a DOT language string into the specified output format.
  *

@@ -32,29 +32,38 @@ export const GraphvizErrorCode = {
  * Output formats supported by Graphviz.
  */
 
-/**
- * Resolve the native module, preferring TurboModules (new arch) with
- * fallback to the bridge-based NativeModules (old arch).
- */
-function getNativeModule() {
-  // Try TurboModule first (new architecture)
+/** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
+
+// Load the codegen'd TurboModule, tolerating its absence (old arch or a
+// host that hasn't run codegen). Kept separate from the pure selection so
+// the latter stays unit-testable.
+function loadTurboModule() {
   try {
-    const turbo = require('./NativeGraphviz').default;
-    if (turbo) {
-      return turbo;
-    }
+    return require('./NativeGraphviz').default ?? undefined;
   } catch {
     // TurboModules not available, fall through
+    return undefined;
   }
-
-  // Fallback to old architecture NativeModules
-  const nativeModule = NativeModules.GraphvizNative;
-  if (!nativeModule) {
-    throw new Error(LINKING_ERROR);
-  }
-  return nativeModule;
 }
-const GraphvizNative = getNativeModule();
+
+/**
+ * Resolve the native module, preferring TurboModules (new arch) with fallback
+ * to the bridge-based NativeModules (old arch). When neither is linked, return
+ * a Proxy that throws an actionable error on first use rather than at import
+ * time. Kept a pure function of its inputs so the fallback order is testable.
+ */
+export function resolveNative(turbo, bridged) {
+  if (turbo) return turbo;
+  if (!bridged) {
+    return new Proxy({}, {
+      get() {
+        throw new Error(LINKING_ERROR);
+      }
+    });
+  }
+  return bridged;
+}
+const GraphvizNative = resolveNative(loadTurboModule(), NativeModules.GraphvizNative);
 
 /**
  * Render a DOT language string into the specified output format.
