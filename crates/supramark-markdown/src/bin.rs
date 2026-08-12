@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 fn main() {
     let mut input = "-".to_owned();
     let mut output = "-".to_owned();
+    let mut options_json: Option<String> = None;
     let mut no_gfm_autolink = false;
 
     {
@@ -17,6 +18,14 @@ fn main() {
 
         cli.refer(&mut output)
             .add_option(&["-o", "--output"], argparse::Store, "File to write");
+
+        // Per-case parse options as JSON (see `ParseOptions`).
+        // `{ "disable": ["codeIndented"], "allowDangerousHtml": true, ... }`.
+        cli.refer(&mut options_json).add_option(
+            &["--options"],
+            argparse::StoreOption,
+            "Parse options as JSON (default: supramark defaults)",
+        );
 
         cli.refer(&mut input)
             .add_argument("file", argparse::Store, "File to read");
@@ -39,7 +48,14 @@ fn main() {
     };
 
     let source = String::from_utf8_lossy(&vec);
-    let mut options = supramark_markdown::ParseOptions::default();
+    let mut options = match options_json {
+        Some(json) => serde_json::from_str::<supramark_markdown::ParseOptions>(&json)
+            .unwrap_or_else(|e| {
+                eprintln!("failed to parse --options JSON: {e}");
+                std::process::exit(1);
+            }),
+        None => supramark_markdown::ParseOptions::default(),
+    };
     if no_gfm_autolink {
         options.gfm_autolink = false;
     }

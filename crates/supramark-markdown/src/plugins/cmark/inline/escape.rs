@@ -24,7 +24,9 @@ impl InlineRule for EscapeScanner {
         }
 
         match chars.next() {
-            Some('\n') => {
+            // Hard break escape: `\` at end of line. Gated so `hardBreakEscape`
+            // can be disabled without affecting `characterEscape` (same scanner).
+            Some('\n') if !state.md.disable_hard_break_escape => {
                 // skip leading whitespaces from next line
                 let mut len = 2;
                 while let Some(' ' | '\t') = chars.next() {
@@ -32,7 +34,9 @@ impl InlineRule for EscapeScanner {
                 }
                 Some((Node::new(Hardbreak), len))
             }
-            Some(chr) => {
+            // Character escape: `\` + ASCII punctuation. Gated so
+            // `characterEscape` can be disabled without affecting `hardBreakEscape`.
+            Some(chr) if !state.md.disable_character_escape => {
                 let start = state.pos;
                 let end = state.pos + 1 + chr.len_utf8();
 
@@ -53,7 +57,8 @@ impl InlineRule for EscapeScanner {
                 });
                 Some((node, end - start))
             }
-            None => None,
+            // Construct disabled — fall through so `\` stays literal text.
+            _ => None,
         }
     }
 }

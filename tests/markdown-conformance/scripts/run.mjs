@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { astToHtml } from '../lib/semantic/ast-semantics.mjs';
+import { parserOptionsArgv } from '../lib/parse-options.mjs';
 import { renderConformanceHtmlReport } from '../lib/reports/html-report.mjs';
 import {
   buildConformanceIssueMetadata,
@@ -81,8 +82,8 @@ const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_
 // config. Those divergences are legitimate GFM-vs-CommonMark differences,
 // not parser bugs; they are recorded in each baseline's failure lists with a
 // caveat rather than hidden by toggling the extension off here.
-function parserArgsFor() {
-  return ['-'];
+function parserArgsFor(testCase) {
+  return ['-', ...parserOptionsArgv(testCase)];
 }
 const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 // Gate mode decides what a non-zero exit means (see buildGate below).
