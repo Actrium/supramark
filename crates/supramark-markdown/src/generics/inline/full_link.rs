@@ -464,21 +464,29 @@ fn parse_link(state: &mut InlineState, pos: usize, enable_nested: bool) -> Optio
             }
 
             // [link](  <href>  "title"  )
-            //                ^^ skipping these spaces
+            //                ^^ skipping these spaces. CommonMark §6.3: a
+            // link title must be preceded by whitespace, so a title is only
+            // possible when this skip actually consumed something. Without
+            // this guard, `[a](<b>"c")` steals `"c"` as the title and the
+            // whole bracket run linkifies — micromark leaves it literal.
             let mut chars = state.src[pos..state.pos_max].chars();
+            let mut had_space = false;
             while let Some(' ' | '\t' | '\n') = chars.next() {
                 pos += 1;
+                had_space = true;
             }
 
-            if let Some(res) = parse_link_title(&state.src, pos, state.pos_max) {
-                title = Some(res.str);
-                pos = res.pos;
+            if had_space {
+                if let Some(res) = parse_link_title(&state.src, pos, state.pos_max) {
+                    title = Some(res.str);
+                    pos = res.pos;
 
-                // [link](  <href>  "title"  )
-                //                         ^^ skipping these spaces
-                let mut chars = state.src[pos..state.pos_max].chars();
-                while let Some(' ' | '\t' | '\n') = chars.next() {
-                    pos += 1;
+                    // [link](  <href>  "title"  )
+                    //                         ^^ skipping these spaces
+                    let mut chars = state.src[pos..state.pos_max].chars();
+                    while let Some(' ' | '\t' | '\n') = chars.next() {
+                        pos += 1;
+                    }
                 }
             }
         }
