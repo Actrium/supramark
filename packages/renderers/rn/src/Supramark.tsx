@@ -378,6 +378,15 @@ export const Supramark: React.FC<SupramarkProps> = ({
             collectCodeHighlightTasks(parsed.children, config, codeHighlightTheme),
             codeHighlighter
           );
+          // Dev-only deep freeze BEFORE the snapshot can be shared. The factory
+          // result is stored into the document cache by getOrCreate, so freezing
+          // here (rather than after the await) closes the microtask window in
+          // which a concurrent cache hit could observe an unfrozen shared AST
+          // and let a containerRenderer mutate it in place. Production skips it;
+          // the read-only contract still holds by convention. See deepFreezeAst.
+          if (isDevMode) {
+            deepFreezeAst(parsed);
+          }
           return {
             root: parsed,
             highlighted: highlightedMap,
@@ -402,12 +411,9 @@ export const Supramark: React.FC<SupramarkProps> = ({
               )
             : await buildParsedDocument();
         if (!cancelled) {
-          // Dev-only deep freeze enforces the read-only AST contract on the
-          // shared cached snapshot; see deepFreezeAst. containerRenderers that
-          // annotate in place would otherwise cross-contaminate sibling rows.
-          if (isDevMode) {
-            deepFreezeAst(nextDocument.root);
-          }
+          // The shared snapshot was frozen inside buildParsedDocument (dev) so
+          // every consumer — first mount, virtual-list remount, or a concurrent
+          // cache hit — sees the same read-only AST from the start.
           setParsedDocument(nextDocument);
           setParseError(null);
         }

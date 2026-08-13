@@ -256,3 +256,29 @@ describe('getRendererCache policy reconfiguration (#124 #3)', () => {
     expect(after).not.toBe(before); // new instance after clear
   });
 });
+
+describe('resolveRendererCachePolicy maxBytes resolution (#124 follow-up)', () => {
+  // Pre-fix, an explicit maxBytes: 0 fell through to the 8 MB default
+  // (indistinguishable from "unset"), so a host could not opt out of the byte
+  // cap. Now 0 (or any non-positive / non-finite value) means "no byte bound",
+  // matching ttl and LRUCache.reconfigure.
+  it('treats an explicit maxBytes: 0 as "no byte cap"', () => {
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: 0 }).maxBytes).toBeUndefined();
+  });
+
+  it('treats a negative / non-finite maxBytes as "no byte cap"', () => {
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: -1 }).maxBytes).toBeUndefined();
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: Infinity }).maxBytes).toBeUndefined();
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: Number.NaN }).maxBytes).toBeUndefined();
+  });
+
+  it('keeps an explicit positive maxBytes and applies the default when it is unset', () => {
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: 1024 }).maxBytes).toBe(1024);
+    // override wins over a fallback that does set it
+    expect(
+      resolveRendererCachePolicy({ enabled: true, maxBytes: 0 }, { maxBytes: 2048 }).maxBytes
+    ).toBeUndefined();
+    // unset → default
+    expect(resolveRendererCachePolicy({ enabled: true }).maxBytes).toBe(8_000_000);
+  });
+});

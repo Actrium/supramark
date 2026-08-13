@@ -8,7 +8,8 @@ export interface RendererCachePolicy {
   /**
    * Optional total-byte cap. When set, the cache evicts oldest entries until
    * the summed `sizeCalculator` output fits, in addition to the entry-count
-   * `maxSize` bound. `undefined` disables the byte bound.
+   * `maxSize` bound. `undefined` or `0` disables the byte bound (an explicit
+   * `0` is the documented opt-out; leaving it unset applies the 8 MB default).
    */
   maxBytes?: number;
 }
@@ -156,7 +157,12 @@ export function resolveRendererCachePolicy(
   const enabled = override?.enabled ?? fallback?.enabled ?? false;
   const configuredMaxSize = override?.maxSize ?? fallback?.maxSize ?? DEFAULT_CACHE_MAX_SIZE;
   const configuredTtl = override?.ttl ?? fallback?.ttl;
-  const configuredMaxBytes = override?.maxBytes ?? fallback?.maxBytes ?? DEFAULT_CACHE_MAX_BYTES;
+  // Distinguish "not configured" (→ default 8 MB cap) from an explicit zero or
+  // invalid value (→ undefined, no byte cap). This mirrors ttl resolution and
+  // LRUCache.reconfigure, so a host can disable the byte bound with maxBytes: 0
+  // instead of being silently bumped back to the default. Without this, the 0
+  // case was indistinguishable from "unset", which both fell through to 8 MB.
+  const rawMaxBytes = override?.maxBytes ?? fallback?.maxBytes;
 
   return {
     enabled,
@@ -168,11 +174,11 @@ export function resolveRendererCachePolicy(
         ? configuredTtl
         : undefined,
     maxBytes:
-      configuredMaxBytes !== undefined &&
-      Number.isFinite(configuredMaxBytes) &&
-      configuredMaxBytes > 0
-        ? configuredMaxBytes
-        : DEFAULT_CACHE_MAX_BYTES,
+      rawMaxBytes === undefined
+        ? DEFAULT_CACHE_MAX_BYTES
+        : Number.isFinite(rawMaxBytes) && rawMaxBytes > 0
+          ? rawMaxBytes
+          : undefined,
   };
 }
 
