@@ -219,7 +219,12 @@ impl BlockRule for ReferenceScanner {
     }
 
     fn run(state: &mut BlockState) -> Option<(Node, usize)> {
-        if state.line_indent(state.line) >= state.md.max_indent {
+        // micromark "subsequent indented definitions" deviation: when this line
+        // immediately follows another definition, accept it even when indented
+        // 4+ spaces (CommonMark would make it an indented code block).
+        let subsequent_def = state.md.subsequent_indented_definitions
+            && state.last_def_end_line == Some(state.line);
+        if !subsequent_def && state.line_indent(state.line) >= state.md.max_indent {
             return None;
         }
 
@@ -395,6 +400,14 @@ impl BlockRule for ReferenceScanner {
         if !references.insert(str[1..label_end].to_owned(), href.clone(), title.clone()) {
             return None;
         }
+
+        // Record where this definition ended so the next line can benefit from
+        // the "subsequent indented definitions" relaxation. The def consumes
+        // `lines + 1` lines starting at `start_line`, so the block scan resumes
+        // at `start_line + lines + 1` — which is `state.line` after the
+        // dispatcher advances. (`next_line` is only the lazy-continuation
+        // lookahead and may run past the consumed region.)
+        state.last_def_end_line = Some(start_line + lines + 1);
 
         Some((
             Node::new(Definition {

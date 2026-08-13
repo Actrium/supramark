@@ -327,6 +327,14 @@ pub struct ParseOptions {
     /// deferred until a conformance case requires it.
     #[serde(default = "default_dangerous_protocol")]
     pub allow_dangerous_protocol: bool,
+    /// micromark deviation: a link reference definition indented 4+ spaces (or a
+    /// tab) is still recognised when it immediately follows another link
+    /// reference definition (no blank line between). CommonMark §5.2 makes any
+    /// 4-space-indented line an indented code block; micromark relaxes this for
+    /// "subsequent" definitions. Off by default (strict CommonMark); the
+    /// conformance harness enables it for the micromark source only.
+    #[serde(default)]
+    pub subsequent_indented_definitions: bool,
 }
 
 fn default_true() -> bool {
@@ -348,6 +356,7 @@ impl Default for ParseOptions {
             disable: Vec::new(),
             allow_dangerous_html: true,
             allow_dangerous_protocol: true,
+            subsequent_indented_definitions: false,
         }
     }
 }
@@ -468,6 +477,7 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
         // GFM autolink extension: bare www./scheme-URL/email linkification.
         crate::plugins::extra::gfm_autolink::add(&mut md);
     }
+    md.subsequent_indented_definitions = options.subsequent_indented_definitions;
 
     apply_disabled(&mut md, &options.disable);
 

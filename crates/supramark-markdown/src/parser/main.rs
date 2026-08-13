@@ -47,6 +47,11 @@ pub struct MarkdownParser {
     pub disable_character_escape: bool,
     pub disable_label_end: bool,
 
+    /// micromark "subsequent indented definitions" deviation: recognise a link
+    /// reference definition indented 4+ spaces when it immediately follows
+    /// another definition. See `ParseOptions::subsequent_indented_definitions`.
+    pub subsequent_indented_definitions: bool,
+
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
@@ -96,6 +101,7 @@ impl Default for MarkdownParser {
             disable_hard_break_escape: false,
             disable_character_escape: false,
             disable_label_end: false,
+            subsequent_indented_definitions: false,
         };
         block::builtin::add(&mut md);
         inline::builtin::add(&mut md);
