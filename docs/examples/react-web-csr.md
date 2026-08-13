@@ -10,9 +10,9 @@ bun install
 bun run dev
 ```
 
-## Live Feature Preview
+## Live Playground
 
-This is the effect preview page hosted on this site's homepage. Run the command below to interactively pick a Feature; passing a Feature name opens that specific type directly, and you can still switch to other diagrams or examples via the dropdown menu in the browser.
+This is the unified playground hosted on this site's homepage. Run the command below to interactively pick a Feature; passing a Feature name opens its stable route directly, and you can still switch to other diagrams or examples via the dropdown menu in the browser.
 
 ```bash
 bun run feature:preview:web
@@ -47,70 +47,16 @@ bun run feature:preview:web diagram-vega-lite
 
 ## Source Code
 
-### App.tsx
-
-```tsx
-const INITIAL_MARKDOWN = `# Supramark Live Editor
-
-Welcome to the **Supramark** live Markdown editor!
-
-## Features
-
-### GFM extensions
-
-- **Bold text**
-- *Italic text*
-- \`Inline code\`
-- ~~Strikethrough~~
-
-### Task list
-
-- [x] GFM task list support
-- [x] Live preview
-- [x] Theme switching
-- [ ] More features in progress
-
-### Table example
-
-| Feature | Status | Notes |
-| --- | :---: | ---: |
-| Strikethrough | ✅ | Uses \`~~\` syntax |
-| Task list | ✅ | \`[ ]\` and \`[x]\` |
-| Table | ✅ | Standard GFM table |
-| Theme system | ✅ | Supports custom className |
-
-### Code block
-
-\`\`\`javascript
-function hello(name) {
-  console.log('Hello, ' + name);
-}
-
-hello('Supramark');
-\`\`\`
-
-### Links and images
-
-This is a [link example](https://github.com)
-
-### Weather card
-
-:::weather
-location: Shanghai
-condition: Cloudy
-tempC: 22
-:::
-```
-
 ### main.tsx
 
 ```tsx
-const params = new URLSearchParams(window.location.search);
-const featureParam = params.get('feature');
+const initialFeature =
+  featureFromPlaygroundPath(window.location.pathname, import.meta.env.BASE_URL) ??
+  DEFAULT_PLAYGROUND_FEATURE;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {featureParam ? <FeaturePreview initialFeature={featureParam} /> : <App />}
+    <FeaturePreview initialFeature={initialFeature} />
   </StrictMode>
 );
 

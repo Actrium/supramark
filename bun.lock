@@ -157,25 +157,6 @@
         "react-markdown": ">=9.0.0",
       },
     },
-    "examples/d2-playground": {
-      "name": "@supramark/example-d2-playground",
-      "version": "0.0.0",
-      "dependencies": {
-        "@actrium/d2-little-web": "workspace:*",
-        "@supramark/engines": "workspace:*",
-        "react": "19.1.0",
-        "react-dom": "19.1.0",
-      },
-      "devDependencies": {
-        "@types/react": "^18.2.79",
-        "@types/react-dom": "^18.2.25",
-        "@vitejs/plugin-react": "^5.1.2",
-        "typescript": "~5.9.3",
-        "vite": "^7.3.1",
-        "vite-plugin-top-level-await": "^1.6.0",
-        "vite-plugin-wasm": "^3.6.0",
-      },
-    },
     "examples/react-native": {
       "name": "@supramark/example-react-native",
       "version": "0.1.0",
@@ -1374,8 +1355,6 @@
     "@supramark/core": ["@supramark/core@workspace:packages/core"],
 
     "@supramark/engines": ["@supramark/engines@workspace:packages/engines"],
-
-    "@supramark/example-d2-playground": ["@supramark/example-d2-playground@workspace:examples/d2-playground"],
 
     "@supramark/example-react-native": ["@supramark/example-react-native@workspace:examples/react-native"],
 
@@ -3922,10 +3901,6 @@
     "@react-native/dev-middleware/open": ["open@7.4.2", "", { "dependencies": { "is-docker": "2.2.1", "is-wsl": "2.2.0" } }, "sha512-MVHddDVweXZF3awtlAS+6pgKLlm/JgxZ90+/NBurBoQctVOOB/zDdVjcyPzQ+0laDGbsWgrRkflI65sQeOgT9Q=="],
 
     "@react-native/virtualized-lists/@types/react": ["@types/react@18.2.79", "", { "dependencies": { "@types/prop-types": "15.7.15", "csstype": "3.2.3" } }, "sha512-RwGAGXPl9kSXwdNTafkOEuFrTBD5SA2B3iEB96xi8+xu5ddUa/cpvyVCSNn+asgLCTHkb5ZxN8gbuibYJi4s1w=="],
-
-    "@supramark/example-d2-playground/@types/react": ["@types/react@18.2.79", "", { "dependencies": { "@types/prop-types": "15.7.15", "csstype": "3.2.3" } }, "sha512-RwGAGXPl9kSXwdNTafkOEuFrTBD5SA2B3iEB96xi8+xu5ddUa/cpvyVCSNn+asgLCTHkb5ZxN8gbuibYJi4s1w=="],
-
-    "@supramark/example-d2-playground/@types/react-dom": ["@types/react-dom@18.3.7", "", { "peerDependencies": { "@types/react": "18.2.79" } }, "sha512-MEe3UeoENYVFXzoXEWsvcpg6ZvlrFNlOQ7EOsvhI3CfAXwzPfO8Qwuxd40nepsYKqyyVQnTdEfv68q91yLcKrQ=="],
 
     "@supramark/example-react-native/@types/react": ["@types/react@18.2.79", "", { "dependencies": { "@types/prop-types": "15.7.15", "csstype": "3.2.3" } }, "sha512-RwGAGXPl9kSXwdNTafkOEuFrTBD5SA2B3iEB96xi8+xu5ddUa/cpvyVCSNn+asgLCTHkb5ZxN8gbuibYJi4s1w=="],
 

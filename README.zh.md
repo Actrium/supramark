@@ -6,6 +6,8 @@
 
 一个面向 React Native / 小程序宿主的 Markdown 扩展与图表渲染**集成 / 封装库**。
 
+**[在线体验统一 Markdown 与图表 Playground](https://actrium.github.io/supramark/playground/)**：无需克隆仓库或安装依赖，即可在浏览器中编辑 Markdown，并切换 GFM、数学公式、Mermaid、D2、PlantUML、DOT、ECharts、Vega-Lite 与容器等 Feature。
+
 核心目标：
 
 - 把常见的 Markdown 扩展（GFM、数学公式、Mermaid 等）整合成统一的「解析 + 渲染」能力；

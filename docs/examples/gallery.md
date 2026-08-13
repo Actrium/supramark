@@ -2,7 +2,7 @@
 
 This page is automatically aggregated from each Feature package's `src/examples.ts`, currently covering **21 Features** and **33 examples**.
 
-These examples show the raw Markdown input; for the full live preview, open the [homepage preview](/preview/?feature=mermaid) or run `bun run feature:preview:web`.
+These examples show the raw Markdown input; for the full live playground, open [Mermaid](/playground/mermaid/) or run `bun run feature:preview:web`.
 
 ## Table of Contents
 

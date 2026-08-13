@@ -54,7 +54,7 @@ const selectedIds = caseIdsEnv.toLowerCase() === 'all'
       .map(s => s.trim())
       .filter(Boolean);
 const caseLimit = Number(process.env.CASE_LIMIT || 0);
-const targetBaseUrl = process.env.SUPRAMARK_URL || 'https://actrium.github.io/supramark/preview/';
+const targetBaseUrl = process.env.SUPRAMARK_URL || 'https://actrium.github.io/supramark/playground/';
 const chromePath = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const visualPassThreshold = parseRatioEnv('VISUAL_PASS_THRESHOLD', 0.16);
 const visualFailThreshold = parseRatioEnv('VISUAL_FAIL_THRESHOLD', 0.30);
@@ -323,7 +323,7 @@ async function runCase(page, browser, testCase) {
   page.on('pageerror', onPageError);
 
   try {
-    const url = buildPreviewUrl(feature);
+    const url = buildPlaygroundUrl(feature);
     await page.goto(url, { waitUntil: 'networkidle', timeout: 90000 });
     const preview = page;
     const selectedFeature = await selectFeature(preview, feature);
@@ -494,13 +494,21 @@ async function runCase(page, browser, testCase) {
 }
 
 function buildInitialUrl(feature) {
-  return feature ? buildPreviewUrl(feature) : targetBaseUrl;
+  return feature ? buildPlaygroundUrl(feature) : targetBaseUrl;
 }
 
-function buildPreviewUrl(feature) {
-  const url = new URL(targetBaseUrl);
-  url.searchParams.set('feature', feature);
-  return url.toString();
+function buildPlaygroundUrl(feature) {
+  const routeByFeature = {
+    'diagram-dot': 'dot',
+    'diagram-echarts': 'echarts',
+    'diagram-vega-lite': 'vega-lite',
+  };
+  const route = routeByFeature[feature] ?? feature;
+  return new URL(`${route}/`, ensureTrailingSlash(targetBaseUrl)).toString();
+}
+
+function ensureTrailingSlash(value) {
+  return value.endsWith('/') ? value : `${value}/`;
 }
 
 function caseSourceFields(testCase) {
@@ -1204,7 +1212,7 @@ function runSelfTests() {
         selectedFeature: 'Diagram (D2)',
         selectedExample: 'Labeled edges',
         docPath: 'cases/sample.md',
-        url: 'https://example.test/preview/?feature=d2',
+        url: 'https://example.test/playground/d2/',
         runEnvironment: {
           playwright: {
             headless: true,

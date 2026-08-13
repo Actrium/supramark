@@ -12,9 +12,9 @@ on:
         required: false
         default: "cases/official-diagram-rendering-cases.md"
       supramark_url:
-        description: "Supramark preview URL"
+        description: "Supramark playground URL"
         required: false
-        default: "https://actrium.github.io/supramark/preview/"
+        default: "https://actrium.github.io/supramark/playground/"
       issue_repo:
         description: "Repository to receive generated issues"
         required: false
@@ -66,7 +66,7 @@ jobs:
         env:
           CASE_IDS: ${{ github.event.inputs.case_ids || 'all' }}
           SOURCE_DOCS: ${{ github.event.inputs.source_docs || 'cases/official-diagram-rendering-cases.md' }}
-          SUPRAMARK_URL: ${{ github.event.inputs.supramark_url || 'https://actrium.github.io/supramark/preview/' }}
+          SUPRAMARK_URL: ${{ github.event.inputs.supramark_url || 'https://actrium.github.io/supramark/playground/' }}
           SUBMIT_GITHUB_ISSUES: ${{ github.event.inputs.submit_github_issues || '0' }}
           SUBMIT_REVIEW_ISSUES: ${{ github.event.inputs.submit_review_issues || '0' }}
           FAIL_ON_FAILURES: "1"

@@ -276,7 +276,7 @@ async function renderSupramark(browser, testCase) {
   });
   page.on('pageerror', error => errors.push(error.message));
 
-  await page.goto('https://actrium.github.io/supramark/preview/?feature=mermaid', {
+  await page.goto('https://actrium.github.io/supramark/playground/mermaid/', {
     waitUntil: 'networkidle',
     timeout: 90000,
   });
@@ -297,7 +297,7 @@ async function renderSupramark(browser, testCase) {
 
   return {
     renderer: 'Supramark deployed preview',
-    url: 'https://actrium.github.io/supramark/preview/?feature=mermaid',
+    url: 'https://actrium.github.io/supramark/playground/mermaid/',
     svgPath,
     pngPath,
     semantic: semanticCheck(svg, testCase.expectedTexts),
