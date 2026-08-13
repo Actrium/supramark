@@ -948,6 +948,45 @@ function mergeRawNodes(
         }
       }
     }
+    if (allowDangerous && node?.type === 'blockquote' && classNames) {
+      // A blockquote whose trailing child is a block raw opening an HTML
+      // construct the browser leaves unclosed (`<!--`, `<?`, `<![CDATA[`,
+      // `<!doctype…`, `<script>`, `<div`, …). cmark/micromark emit the raw
+      // verbatim, so the browser's root tree-construction absorbs the
+      // `</blockquote>` and following siblings into the open construct.
+      // React's per-block model renders the blockquote and its siblings
+      // independently, dropping the unclosed fragment — so fold the
+      // blockquote and its following siblings into one RawHtml fragment that
+      // a single browser parse owns. Only when there are following siblings
+      // to absorb and every one serializes to static HTML; otherwise fall
+      // through to per-block rendering.
+      const lastChild = node.children[node.children.length - 1];
+      if (
+        lastChild &&
+        lastChild.type === 'raw' &&
+        lastChild.block &&
+        unclosedBlockRawConstruct(lastChild.value ?? '')
+      ) {
+        const following = children.slice(i + 1);
+        if (following.length > 0) {
+          const inner = serializeBlocksToHtml(node.children, classNames, config, highlighted);
+          const tail = serializeBlocksToHtml(following, classNames, config, highlighted);
+          if (inner !== null && tail !== null) {
+            const cls = classNames.blockquote
+              ? ` class="${escapeHtmlAttr(classNames.blockquote)}"`
+              : '';
+            result.push(
+              React.createElement(RawHtml, {
+                key: i,
+                value: `<blockquote${cls}>\n${inner}</blockquote>\n${tail}`,
+              })
+            );
+            i = children.length;
+            continue;
+          }
+        }
+      }
+    }
     if (allowDangerous && node?.type === 'raw') {
       const rawNode = node;
       const value = rawNode.value ?? '';
@@ -2016,6 +2055,25 @@ function unclosedBlockContainerOpen(
   if (new RegExp('</' + escaped + '\\s*>', 'i').test(value)) return null;
   if (/\/\s*>\s*$/.test(value)) return null;
   return tag;
+}
+
+// A block raw whose value opens an HTML construct the browser would leave
+// unclosed — comment (`<!--`…`-->`), processing instruction (`<?`…`?>`),
+// CDATA (`<![CDATA[`…`]]>`), declaration (`<!X`…`>`), or an open tag with no
+// matching close (incl. `<script>`/`<pre>`/…). When such a raw sits at the
+// tail of a block container, the browser's root tree-construction absorbs
+// the container's close tag and following siblings into the open construct;
+// `mergeRawNodes` uses this to fold the container + following siblings into
+// one RawHtml fragment so a single browser parse owns the absorption.
+function unclosedBlockRawConstruct(value: string): boolean {
+  const v = value.trimStart();
+  if (v.startsWith('<!--') && !v.includes('-->')) return true;
+  if (v.startsWith('<?') && !v.includes('?>')) return true;
+  if (v.startsWith('<![CDATA[') && !v.includes(']]>')) return true;
+  // Declaration (`<![A-Za-z]…`) without a closing `>`. `<!--` and `<![CDATA[`
+  // are handled above, so `<!` + a letter here is a declaration.
+  if (/^<![A-Za-z]/.test(v) && !v.includes('>')) return true;
+  return unclosedBlockContainerOpen(value, true) !== null;
 }
 
 // HTML5 active formatting elements (HTML spec, "list of active formatting
