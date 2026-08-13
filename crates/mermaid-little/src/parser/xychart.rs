@@ -203,7 +203,7 @@ fn strip_colon_keyword<'a>(line: &'a str, keyword: &str) -> Option<&'a str> {
 
 // ── Frontmatter ──────────────────────────────────────────────────────
 
-fn strip_frontmatter(src: &str) -> (Option<String>, Option<serde_yml::Value>, String) {
+fn strip_frontmatter(src: &str) -> (Option<String>, Option<serde_norway::Value>, String) {
     if !src.starts_with("---") {
         return (None, None, src.to_string());
     }
@@ -231,10 +231,10 @@ fn strip_frontmatter(src: &str) -> (Option<String>, Option<serde_yml::Value>, St
         .map(|s| after_open[s..].to_string())
         .unwrap_or_default();
 
-    let parsed: Option<serde_yml::Value> = serde_yml::from_str(body).ok();
+    let parsed: Option<serde_norway::Value> = serde_norway::from_str(body).ok();
     let mut title: Option<String> = None;
-    if let Some(serde_yml::Value::Mapping(m)) = parsed.as_ref() {
-        if let Some(t) = m.get(serde_yml::Value::String("title".into())) {
+    if let Some(serde_norway::Value::Mapping(m)) = parsed.as_ref() {
+        if let Some(t) = m.get(serde_norway::Value::String("title".into())) {
             title = yaml_to_string(t);
         }
     }
@@ -243,7 +243,7 @@ fn strip_frontmatter(src: &str) -> (Option<String>, Option<serde_yml::Value>, St
 
 // ── %%{init:…}%% directive ───────────────────────────────────────────
 
-fn extract_init_directives(src: &str) -> (Vec<serde_yml::Value>, String) {
+fn extract_init_directives(src: &str) -> (Vec<serde_norway::Value>, String) {
     let mut values = Vec::new();
     let mut out = String::with_capacity(src.len());
     let bytes = src.as_bytes();
@@ -274,15 +274,15 @@ fn extract_init_directives(src: &str) -> (Vec<serde_yml::Value>, String) {
             }
             if let Some(end_pos) = end {
                 let directive_body = &src[i + 3..end_pos - 3]; // between `%%{` and `}%%`
-                                                               // Try parsing as JSON5-ish via serde_yml (which handles
+                                                               // Try parsing as JSON5-ish via serde_norway (which handles
                                                                // the `{"xyChart":{...}}` shape upstream uses). Prefix
                                                                // with `{` since directive body starts with e.g.
                                                                // `init: {...}` or `init:{...}`.
                 let wrapped = format!("{{{directive_body}}}");
-                if let Ok(serde_yml::Value::Mapping(m)) =
-                    serde_yml::from_str::<serde_yml::Value>(&wrapped)
+                if let Ok(serde_norway::Value::Mapping(m)) =
+                    serde_norway::from_str::<serde_norway::Value>(&wrapped)
                 {
-                    if let Some(init) = m.get(serde_yml::Value::String("init".into())) {
+                    if let Some(init) = m.get(serde_norway::Value::String("init".into())) {
                         values.push(init.clone());
                     }
                 }
@@ -305,18 +305,18 @@ fn extract_init_directives(src: &str) -> (Vec<serde_yml::Value>, String) {
 // ── Config/theme merge from YAML ────────────────────────────────────
 
 fn apply_top_level(
-    v: &serde_yml::Value,
+    v: &serde_norway::Value,
     cfg: &mut XychartConfig,
     theme: &mut XychartThemeOverride,
     theme_name: &mut Option<String>,
 ) {
-    let serde_yml::Value::Mapping(m) = v else {
+    let serde_norway::Value::Mapping(m) = v else {
         return;
     };
-    let get = |key: &str| m.get(serde_yml::Value::String(key.into()));
-    if let Some(serde_yml::Value::Mapping(inner)) = get("config") {
+    let get = |key: &str| m.get(serde_norway::Value::String(key.into()));
+    if let Some(serde_norway::Value::Mapping(inner)) = get("config") {
         apply_top_level(
-            &serde_yml::Value::Mapping(inner.clone()),
+            &serde_norway::Value::Mapping(inner.clone()),
             cfg,
             theme,
             theme_name,
@@ -333,11 +333,11 @@ fn apply_top_level(
     }
 }
 
-fn apply_xychart_config(v: &serde_yml::Value, cfg: &mut XychartConfig) {
-    let serde_yml::Value::Mapping(m) = v else {
+fn apply_xychart_config(v: &serde_norway::Value, cfg: &mut XychartConfig) {
+    let serde_norway::Value::Mapping(m) = v else {
         return;
     };
-    let get = |key: &str| m.get(serde_yml::Value::String(key.into()));
+    let get = |key: &str| m.get(serde_norway::Value::String(key.into()));
     if let Some(x) = get("width").and_then(yaml_to_f64) {
         cfg.width = x;
     }
@@ -377,11 +377,11 @@ fn apply_xychart_config(v: &serde_yml::Value, cfg: &mut XychartConfig) {
     }
 }
 
-fn apply_axis_config(v: &serde_yml::Value, ac: &mut XyAxisConfig) {
-    let serde_yml::Value::Mapping(m) = v else {
+fn apply_axis_config(v: &serde_norway::Value, ac: &mut XyAxisConfig) {
+    let serde_norway::Value::Mapping(m) = v else {
         return;
     };
-    let get = |key: &str| m.get(serde_yml::Value::String(key.into()));
+    let get = |key: &str| m.get(serde_norway::Value::String(key.into()));
     if let Some(x) = get("showLabel").and_then(yaml_to_bool) {
         ac.show_label = x;
     }
@@ -417,21 +417,21 @@ fn apply_axis_config(v: &serde_yml::Value, ac: &mut XyAxisConfig) {
     }
 }
 
-fn apply_theme_variables(v: &serde_yml::Value, theme: &mut XychartThemeOverride) {
-    let serde_yml::Value::Mapping(m) = v else {
+fn apply_theme_variables(v: &serde_norway::Value, theme: &mut XychartThemeOverride) {
+    let serde_norway::Value::Mapping(m) = v else {
         return;
     };
-    if let Some(xy) = m.get(serde_yml::Value::String("xyChart".into())) {
+    if let Some(xy) = m.get(serde_norway::Value::String("xyChart".into())) {
         apply_xychart_theme(xy, theme);
     }
 }
 
-fn apply_xychart_theme(v: &serde_yml::Value, theme: &mut XychartThemeOverride) {
-    let serde_yml::Value::Mapping(m) = v else {
+fn apply_xychart_theme(v: &serde_norway::Value, theme: &mut XychartThemeOverride) {
+    let serde_norway::Value::Mapping(m) = v else {
         return;
     };
     let get_str = |key: &str| {
-        m.get(serde_yml::Value::String(key.into()))
+        m.get(serde_norway::Value::String(key.into()))
             .and_then(yaml_to_string)
     };
     if let Some(s) = get_str("backgroundColor") {
@@ -472,27 +472,27 @@ fn apply_xychart_theme(v: &serde_yml::Value, theme: &mut XychartThemeOverride) {
     }
 }
 
-fn yaml_to_string(v: &serde_yml::Value) -> Option<String> {
+fn yaml_to_string(v: &serde_norway::Value) -> Option<String> {
     match v {
-        serde_yml::Value::String(s) => Some(s.clone()),
-        serde_yml::Value::Number(n) => Some(n.to_string()),
-        serde_yml::Value::Bool(b) => Some(b.to_string()),
+        serde_norway::Value::String(s) => Some(s.clone()),
+        serde_norway::Value::Number(n) => Some(n.to_string()),
+        serde_norway::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
 }
 
-fn yaml_to_f64(v: &serde_yml::Value) -> Option<f64> {
+fn yaml_to_f64(v: &serde_norway::Value) -> Option<f64> {
     match v {
-        serde_yml::Value::Number(n) => n.as_f64(),
-        serde_yml::Value::String(s) => s.parse().ok(),
+        serde_norway::Value::Number(n) => n.as_f64(),
+        serde_norway::Value::String(s) => s.parse().ok(),
         _ => None,
     }
 }
 
-fn yaml_to_bool(v: &serde_yml::Value) -> Option<bool> {
+fn yaml_to_bool(v: &serde_norway::Value) -> Option<bool> {
     match v {
-        serde_yml::Value::Bool(b) => Some(*b),
-        serde_yml::Value::String(s) => {
+        serde_norway::Value::Bool(b) => Some(*b),
+        serde_norway::Value::String(s) => {
             let s = s.trim().to_ascii_lowercase();
             if s == "true" {
                 Some(true)
@@ -908,5 +908,13 @@ xychart
 "#;
         let d = parse(src).unwrap();
         assert_eq!(d.config.width, 1000.0);
+    }
+
+    #[test]
+    fn parses_json5_style_init_directive() {
+        let src = "%%{init: {xyChart: {width: 1000, chartOrientation: 'horizontal',},}}%%\nxychart\n  bar [1,2,3]\n";
+        let d = parse(src).unwrap();
+        assert_eq!(d.config.width, 1000.0);
+        assert_eq!(d.config.chart_orientation, ChartOrientation::Horizontal);
     }
 }
