@@ -22,7 +22,7 @@ import {
   findFirstDifference,
   htmlToSemanticTree,
 } from '../lib/semantic/html-semantics.mjs';
-import { effectiveExpected } from '../lib/expected-overrides.mjs';
+import { effectiveExpected, intentionalDivergence } from '../lib/expected-overrides.mjs';
 // Display names for CommonMark spec sections. The section keys below already
 // match the spec's own English headings, so this map is effectively the
 // identity function today; it is kept as a lookup table (rather than
@@ -56,7 +56,6 @@ const SECTION_NAMES = {
   'Soft line breaks': 'Soft line breaks',
   'Textual content': 'Textual content',
 };
-
 
 const SUITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY_ROOT = path.resolve(SUITE_ROOT, '..', '..');
@@ -94,26 +93,32 @@ const gateMode = process.env.CONFORMANCE_GATE === 'absolute' ? 'absolute' : 'reg
 const visualEnabled = process.env.VISUAL_COMPARE === '1';
 const parserProfile = 'supramark-default';
 const filter = process.env.CASE_IDS
-  ? new Set(process.env.CASE_IDS.split(',').map(value => value.trim()).filter(Boolean))
+  ? new Set(
+      process.env.CASE_IDS.split(',')
+        .map(value => value.trim())
+        .filter(Boolean)
+    )
   : null;
-const fixtureDirectory = path.join(
-  REPOSITORY_ROOT,
-  'tests',
-  'cases',
-  '_fixtures',
-  sourceName
-);
+const fixtureDirectory = path.join(REPOSITORY_ROOT, 'tests', 'cases', '_fixtures', sourceName);
 const document = JSON.parse(await readFile(path.join(fixtureDirectory, 'cases.json'), 'utf8'));
 const version = JSON.parse(await readFile(path.join(fixtureDirectory, 'version.json'), 'utf8'));
 const sourceConfig = JSON.parse(
   await readFile(path.join(SUITE_ROOT, 'config', 'sources', `${sourceName}.json`), 'utf8')
 );
 const sourceDisplayName = sourceConfig.displayName ?? sourceConfig.name;
-if (sourceConfig.name !== sourceName || document.source !== sourceName || version.source !== sourceName) {
-  throw new Error(`Source mismatch: argument ${sourceName}, config ${sourceConfig.name}, cases ${document.source}, version ${version.source}`);
+if (
+  sourceConfig.name !== sourceName ||
+  document.source !== sourceName ||
+  version.source !== sourceName
+) {
+  throw new Error(
+    `Source mismatch: argument ${sourceName}, config ${sourceConfig.name}, cases ${document.source}, version ${version.source}`
+  );
 }
 if (document.profile !== sourceConfig.profile) {
-  throw new Error(`Case profile does not match source config: ${document.profile} != ${sourceConfig.profile}`);
+  throw new Error(
+    `Case profile does not match source config: ${document.profile} != ${sourceConfig.profile}`
+  );
 }
 const baselineDocument = await readOptionalJson(BASELINE_PATH);
 const selectedCases = filter
@@ -143,9 +148,8 @@ let visualExecution = {
 };
 if (visualEnabled) {
   try {
-    const { renderWithProductionWebRenderer } = await import(
-      '../lib/visual/production-web-renderer.mjs'
-    );
+    const { renderWithProductionWebRenderer } =
+      await import('../lib/visual/production-web-renderer.mjs');
     const { compareVisualCases } = await import('../lib/visual/visual-compare.mjs');
     const productionRenderer = await renderWithProductionWebRenderer({
       cases: selectedCases,
@@ -181,18 +185,21 @@ if (visualEnabled) {
       errors: selectedCases.length,
       notPassed: selectedCases.length,
       bySection: {},
-      failures: [{
-        id: `${sourceName}-visual-environment`,
-        section: 'Visual test environment',
-        status: 'error',
-        error: error.stack ?? error.message,
-      }],
+      failures: [
+        {
+          id: `${sourceName}-visual-environment`,
+          section: 'Visual test environment',
+          status: 'error',
+          error: error.stack ?? error.message,
+        },
+      ],
     };
   }
 }
 const failedCases = results.filter(result => result.status === 'fail');
 const errors = results.filter(result => result.status === 'error');
 const skippedCases = results.filter(result => result.status === 'skip' || result.skipped);
+const divergenceCases = results.filter(result => result.status === 'divergence');
 const notPassed = [...failedCases, ...errors];
 const typeMismatchCount = failedCases.filter(result => result.typeDifference).length;
 const sectionSummary = summarize(results, result => result.section);
@@ -243,10 +250,11 @@ const summary = {
   sourceCommit: version.commit,
   parserBinary,
   total: results.length,
-  passed: results.length - notPassed.length - skippedCases.length,
+  passed: results.length - notPassed.length - skippedCases.length - divergenceCases.length,
   failed: failedCases.length,
   errors: errors.length,
   skipped: skippedCases.length,
+  divergences: divergenceCases.length,
   notPassed: notPassed.length,
   typeMismatches: typeMismatchCount,
   overallNotPassedCases: overallNotPassedCases.size,
@@ -271,7 +279,10 @@ const visualFailureRecords = attachEvidence(visualFailures, evidenceById);
 const issuePath = path.join(artifactDirectory, 'issue.md');
 const issueMetadataPath = path.join(artifactDirectory, 'issue-metadata.json');
 await mkdir(artifactDirectory, { recursive: true });
-await writeFile(path.join(artifactDirectory, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+await writeFile(
+  path.join(artifactDirectory, 'summary.json'),
+  `${JSON.stringify(summary, null, 2)}\n`
+);
 await writeFile(
   path.join(artifactDirectory, 'failures.json'),
   `${JSON.stringify(semanticFailureRecords, null, 2)}\n`
@@ -312,22 +323,27 @@ if (summary.result === 'fail') {
     writeFile(issueMetadataPath, JSON.stringify(issueMetadata, null, 2) + '\n'),
   ]);
 } else {
-  await Promise.all([
-    rm(issuePath, { force: true }),
-    rm(issueMetadataPath, { force: true }),
-  ]);
+  await Promise.all([rm(issuePath, { force: true }), rm(issueMetadataPath, { force: true })]);
 }
 
-console.log(`${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, not passed ${summary.notPassed}`);
+console.log(
+  `${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, divergences ${summary.divergences}, not passed ${summary.notPassed}`
+);
 if (summary.visual.enabled) {
-  console.log(`${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, skipped ${summary.visual.skipped}, not passed ${summary.visual.notPassed}`);
+  console.log(
+    `${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, skipped ${summary.visual.skipped}, not passed ${summary.visual.notPassed}`
+  );
 } else {
-  console.log(`${sourceDisplayName} visual comparison: not run (enable with run-visual.mjs ${sourceName})`);
+  console.log(
+    `${sourceDisplayName} visual comparison: not run (enable with run-visual.mjs ${sourceName})`
+  );
 }
 console.log(`Summary: ${path.join(artifactDirectory, 'summary.md')}`);
 console.log(`HTML report: ${path.join(artifactDirectory, 'report.html')}`);
 if (summary.result === 'fail') console.log(`Issue body: ${issuePath}`);
-console.log(`gate[${summary.gate.mode}]: ${summary.gate.failed ? 'FAIL' : 'PASS'} - ${summary.gate.reason}`);
+console.log(
+  `gate[${summary.gate.mode}]: ${summary.gate.failed ? 'FAIL' : 'PASS'} - ${summary.gate.reason}`
+);
 if (summary.gate.failed && failOnFailures) process.exitCode = 1;
 
 // Decide whether this run should fail the workflow, and say why in one place.
@@ -381,9 +397,10 @@ function buildGate({ mode, baseline, notPassedCount, semanticErrorCount, visualE
     mode,
     failed: added.length > 0,
     kind: 'regression',
-    reason: added.length > 0
-      ? `${added.length} case(s) regressed against baseline: ${added.slice(0, 5).join(', ')}${added.length > 5 ? ', ...' : ''}`
-      : `no regression against baseline (${resolved.length} resolved, ${baseline.overall.persistent.length} still failing)`,
+    reason:
+      added.length > 0
+        ? `${added.length} case(s) regressed against baseline: ${added.slice(0, 5).join(', ')}${added.length > 5 ? ', ...' : ''}`
+        : `no regression against baseline (${resolved.length} resolved, ${baseline.overall.persistent.length} still failing)`,
     added,
     resolved,
     scope: baseline.scope,
@@ -472,6 +489,18 @@ function compareHtmlCase(testCase, ast, actualHtml) {
       skipped: 'ignore-sentinel',
     };
   }
+  const divergence = intentionalDivergence(testCase.id);
+  if (divergence) {
+    // A documented intentional divergence from the reference HTML (e.g. a
+    // security sanitization). Record it as `divergence` — visible, but not
+    // counted as a pass or a regression.
+    return {
+      id: testCase.id,
+      section: testCase.source.section,
+      status: 'divergence',
+      divergence: divergence.reason,
+    };
+  }
   const expectedTree = htmlToSemanticTree(expected.html);
   const actual = htmlToSemanticTree(actualHtml);
   const difference = findFirstDifference(expectedTree, actual);
@@ -508,6 +537,7 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
     `- Passed: ${summaryDocument.passed}`,
     `- Skipped (\`<IGNORE>\` without override): ${summaryDocument.skipped}`,
     `- Semantic differences: ${summaryDocument.failed}`,
+    `- Intentional divergences: ${summaryDocument.divergences}`,
     `- Execution errors: ${summaryDocument.errors}`,
     `- Render type mismatches: ${summaryDocument.typeMismatches}`,
     '',
@@ -535,7 +565,9 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
 
   lines.push('', '## Browser visual comparison results', '');
   if (!summaryDocument.visual.enabled) {
-    lines.push(`Visual comparison was not enabled for this run. Run \`node tests/markdown-conformance/scripts/run-visual.mjs ${sourceName}\` to enable it.`);
+    lines.push(
+      `Visual comparison was not enabled for this run. Run \`node tests/markdown-conformance/scripts/run-visual.mjs ${sourceName}\` to enable it.`
+    );
   } else {
     lines.push(
       `- Test result: **${summaryDocument.visual.result}**`,
@@ -563,7 +595,10 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
     if (visualFailures.length === 0) {
       lines.push('All visual cases passed.');
     } else {
-      lines.push('| Case | Section | Category | Diff pixels | Diff ratio | Images |', '| --- | --- | --- | ---: | ---: | --- |');
+      lines.push(
+        '| Case | Section | Category | Diff pixels | Diff ratio | Images |',
+        '| --- | --- | --- | ---: | ---: | --- |'
+      );
       for (const failure of visualFailures) {
         const images = failure.images
           ? `[expected](${failure.images.expected}) &middot; [actual](${failure.images.actual}) &middot; [diff](${failure.images.diff})`
@@ -595,7 +630,11 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
       }
     }
   }
-  lines.push('', 'See `summary.json`, `failures.json`, and `visual-failures.json` for the full machine-readable data.', '');
+  lines.push(
+    '',
+    'See `summary.json`, `failures.json`, and `visual-failures.json` for the full machine-readable data.',
+    ''
+  );
   return `${lines.join('\n')}\n`;
 }
 
