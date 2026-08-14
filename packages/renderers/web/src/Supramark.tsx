@@ -373,6 +373,17 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     return null;
   }
 
+  // Whether the document source ends with a trailing newline after its last
+  // block (the root's end offset exceeds the last child's). cmark emits this
+  // newline; the paragraph-fold in mergeRawNodes needs it to reproduce the
+  // adoption-agency phantom the reference tree expects for unclosed formatting
+  // elements.
+  const rootEnd = parsedDocument.root.position?.end?.byte_offset;
+  const lastBodyChild = bodyChildren[bodyChildren.length - 1];
+  const lastEnd = lastBodyChild?.position?.end?.byte_offset;
+  const trailingNewline =
+    typeof rootEnd === 'number' && typeof lastEnd === 'number' && rootEnd > lastEnd;
+
   return (
     <ErrorBoundary
       onError={onError}
@@ -396,7 +407,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
                 ),
               mergedClassNames,
               config,
-              parsedDocument.highlighted
+              parsedDocument.highlighted,
+              trailingNewline
             )}
             {footnoteMeta && footnoteMeta.defs.length > 0 && (
               <FootnoteSection
@@ -899,7 +911,16 @@ function mergeRawNodes(
   renderSingle: (node: SupramarkNode, key: number) => React.ReactNode,
   classNames?: SupramarkClassNames,
   config?: SupramarkConfig,
-  highlighted?: Map<string, SupramarkCodeHighlightResult>
+  highlighted?: Map<string, SupramarkCodeHighlightResult>,
+  // Whether the source has a trailing newline after these children (i.e. the
+  // container's end offset exceeds its last child's). Only meaningful at the
+  // document root; inner containers pass `false`. A trailing `\n` after `</p>`
+  // with an unclosed formatting element makes parse5's adoption-agency
+  // algorithm reconstruct that element around the whitespace, producing a
+  // phantom duplicate sibling. cmark emits the newline (so the phantom is part
+  // of the reference tree); micromark omits a final newline. Emitting it only
+  // when the source actually has one matches both references.
+  trailingNewline = false
 ): React.ReactNode[] {
   // Raw HTML is opt-in. When disabled, skip raw-merge entirely so raw nodes
   // fall through to their per-node renderer (which drops them) and no
@@ -933,13 +954,20 @@ function mergeRawNodes(
           const classAttr = classNames.paragraph
             ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
             : '';
-          // Only emit the `</p>\n…` separator when there is following content
-          // to separate. A trailing `\n` after `</p>` with an unclosed
-          // formatting element (`<a>`, `<em>`) makes parse5's adoption-agency
-          // algorithm reconstruct that element around the whitespace, producing
-          // a phantom duplicate sibling that fails the semantic tree compare.
-          // micromark omits the trailing newline on a final block.
-          const tail = serializedFollowing ? `\n${serializedFollowing}` : '';
+          // Emit the `</p>\n…` separator when there is following content to
+          // separate. With no following content, only emit a trailing `\n`
+          // when the source itself ends with a newline: a trailing `\n` after
+          // `</p>` with an unclosed formatting element (`<a>`, `<em>`) makes
+          // parse5's adoption-agency algorithm reconstruct that element around
+          // the whitespace, producing a phantom duplicate sibling. cmark emits
+          // the document's final newline (so the phantom is part of the
+          // reference tree); micromark omits it. Emitting it iff the source
+          // has one matches both references.
+          const tail = serializedFollowing
+            ? `\n${serializedFollowing}`
+            : trailingNewline
+              ? '\n'
+              : '';
           result.push(
             React.createElement(RawHtml, {
               key: i,
@@ -1053,7 +1081,14 @@ function mergeRawNodes(
           unclosedBlockContainerOpen(value, rawNode.block)
         ) {
           const following = children.slice(i + 1);
-          const serialized = serializeBlocksToHtml(following, classNames, config, highlighted);
+          // Only absorb when there are following siblings to fold in. With no
+          // following siblings, leave the raw verbatim so its trailing newline
+          // (present in cmark output) survives — stripping it would suppress
+          // the adoption-agency phantom the reference tree expects.
+          const serialized =
+            following.length > 0
+              ? serializeBlocksToHtml(following, classNames, config, highlighted)
+              : null;
           if (serialized !== null) {
             result.push(
               React.createElement(RawHtml, {
