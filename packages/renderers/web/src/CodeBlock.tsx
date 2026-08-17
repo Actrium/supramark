@@ -71,7 +71,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
 
   const handleClick = (): void => {
     if (onCopyCode) {
-      onCopyCode(node.value, node);
+      void onCopyCode(node.value, node);
     } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
       void navigator.clipboard.writeText(node.value);
     }
