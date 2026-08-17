@@ -53,7 +53,7 @@ export function renderConformanceIssue({
     '',
     '## **Problem description**',
     '',
-    `Supramark ran ${summary.total} CommonMark ${sourceVersion} spec case(s) using the main repository's default parser configuration.`,
+    `Supramark ran ${summary.total} CommonMark ${sourceVersion} spec case(s) using the \`${summary.profile ?? 'supramark-default'}\` parser configuration.`,
     `${summary.notPassed} case(s) not passed at the semantic layer; ${visualProblemDescription}; ${summary.overallNotPassedCases} case(s) have at least one kind of difference in total.`,
     '',
     '### Run summary',

@@ -71,18 +71,36 @@ const DEFAULT_BINARY = path.join(
   process.platform === 'win32' ? 'supramark-markdown.exe' : 'supramark-markdown'
 );
 const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_BINARY);
-// Issue #144's premise is that Supramark ships its DEFAULT parser config, and
-// the gate must measure exactly that — not a per-section toggle of the GFM
-// autolink extension. The default config has GFM bare-URL/email autolink ON
-// (crates/supramark-markdown/src/supramark.rs), so bare `https://`, `www.`
-// and `foo@bar` are linkified. CommonMark 0.31.2 has no such extension, and
-// cmark-gfm's CommonMark-core "Autolinks" section expects them literal — so
-// the small set of cases that contain bare URLs diverge under the default
-// config. Those divergences are legitimate GFM-vs-CommonMark differences,
-// not parser bugs; they are recorded in each baseline's failure lists with a
-// caveat rather than hidden by toggling the extension off here.
-function parserArgsFor() {
-  return ['-'];
+// Parser profile selection. CommonMark-core spec examples are normative
+// CommonMark: bare URLs/emails stay literal, so the GFM autolink extension
+// must be OFF for them. Supramark's shipped default keeps that extension ON
+// (the product's GFM profile). The commonmark source (0.31.2) is entirely
+// CommonMark-core, and cmark-gfm's spec.txt CommonMark-core sections (those
+// not suffixed `(extension)`) mirror cmark-gfm's own spec.txt run, which
+// executes those sections without the autolink extension. Both are parsed
+// with `--no-gfm-autolink`. GFM extension cases — cmark-gfm's `(extension)`
+// sections and the entire extensions.txt file — keep the default. Issue #202
+// resolved the commonmark-source cases (0602/0608/0611/0612); issue #203
+// extends the same treatment to the cmark-gfm source's CommonMark-core
+// Autolinks section (spec-0610/0616/0619/0620).
+const parserProfile = sourceName === 'commonmark' ? 'supramark-commonmark' : 'supramark-default';
+function parserArgsFor(testCase) {
+  return isCommonMarkCoreCase(testCase) ? ['--no-gfm-autolink', '-'] : ['-'];
+}
+// Whether a case is normative CommonMark (no GFM autolink extension). The
+// commonmark source is CommonMark-core throughout; cmark-gfm's spec.txt
+// mixes CommonMark-core sections with GFM `(extension)` sections, and only
+// the core sections qualify — `(extension)` sections and extensions.txt are
+// GFM and keep the autolink extension on.
+function isCommonMarkCoreCase(testCase) {
+  if (sourceName === 'commonmark') return true;
+  if (sourceName === 'cmark-gfm') {
+    return (
+      testCase.source.path === 'test/spec.txt' &&
+      !testCase.source.section.endsWith('(extension)')
+    );
+  }
+  return false;
 }
 const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 // Gate mode decides what a non-zero exit means (see buildGate below).
@@ -91,7 +109,6 @@ const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 // run did before a source with a standing failure set existed.
 const gateMode = process.env.CONFORMANCE_GATE === 'absolute' ? 'absolute' : 'regression';
 const visualEnabled = process.env.VISUAL_COMPARE === '1';
-const parserProfile = 'supramark-default';
 const filter = process.env.CASE_IDS
   ? new Set(process.env.CASE_IDS.split(',').map(value => value.trim()).filter(Boolean))
   : null;
