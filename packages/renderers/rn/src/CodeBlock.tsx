@@ -47,7 +47,13 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
     };
   }, []);
 
-  const showButton = copyButton !== false && typeof onCopyCode === 'function';
+  // Only fenced code blocks that declare a language (info string) get the
+  // button. The AST does not distinguish fenced from indented code (both are
+  // `type: 'code'`), so `node.lang` is the signal that the author marked a
+  // real code block; indented pre-formatted text and language-less fences
+  // stay a plain <View> without a "Copy" button.
+  const showButton =
+    copyButton !== false && typeof onCopyCode === 'function' && Boolean(node.lang);
 
   const handlePress = (): void => {
     if (!onCopyCode) {
