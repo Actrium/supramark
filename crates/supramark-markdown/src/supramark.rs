@@ -291,14 +291,60 @@ pub enum SupramarkNode {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Runtime parse options. Mirrors the subset of micromark's per-case options
+/// that the conformance harness needs to forward (`disable`, `allowDangerousHtml`,
+/// `allowDangerousProtocol`).
+///
+/// Defaults keep the parser's pre-option behaviour: raw HTML and dangerous
+/// protocols pass through (equivalent to micromark with both `allowDangerous*`
+/// enabled). The conformance harness selects the safe profile explicitly
+/// per case; callers that want micromark's safe-by-default can set
+/// `allow_dangerous_html: false` / `allow_dangerous_protocol: false`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseOptions {
+    #[serde(default = "default_true")]
     pub gfm_tables: bool,
+    #[serde(default = "default_true")]
     pub gfm_strikethrough: bool,
     /// GFM bare-URL/email autolink extension. On by default to match the
     /// product's GFM profile. Set this to `false` for strict CommonMark,
     /// where bare URLs stay literal.
+    #[serde(default = "default_true")]
     pub gfm_autolink: bool,
+    /// micromark construct names to disable, e.g. `"codeIndented"`, `"autolink"`.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    /// When false, raw HTML is emitted as `Text` (escaped by renderers) instead of
+    /// a verbatim `Raw { format: "html" }` node — mirroring micromark with
+    /// `allowDangerousHtml: false`. No effect on the parser's product default (true).
+    #[serde(default = "default_dangerous_html")]
+    pub allow_dangerous_html: bool,
+    /// Reserved for the conformance harness. The parser currently sanitizes
+    /// non-`http(s)`/relative URLs unconditionally (matching micromark's safe
+    /// default); setting this to `false` is accepted but has no additional effect.
+    /// Wiring `allowDangerousProtocol: true` (pass dangerous protocols through) is
+    /// deferred until a conformance case requires it.
+    #[serde(default = "default_dangerous_protocol")]
+    pub allow_dangerous_protocol: bool,
+    /// micromark deviation: a link reference definition indented 4+ spaces (or a
+    /// tab) is still recognised when it immediately follows another link
+    /// reference definition (no blank line between). CommonMark §5.2 makes any
+    /// 4-space-indented line an indented code block; micromark relaxes this for
+    /// "subsequent" definitions. Off by default (strict CommonMark); the
+    /// conformance harness enables it for the micromark source only.
+    #[serde(default)]
+    pub subsequent_indented_definitions: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_dangerous_html() -> bool {
+    true
+}
+fn default_dangerous_protocol() -> bool {
+    true
 }
 
 impl Default for ParseOptions {
@@ -307,6 +353,10 @@ impl Default for ParseOptions {
             gfm_tables: true,
             gfm_strikethrough: true,
             gfm_autolink: true,
+            disable: Vec::new(),
+            allow_dangerous_html: true,
+            allow_dangerous_protocol: true,
+            subsequent_indented_definitions: false,
         }
     }
 }
@@ -316,10 +366,16 @@ pub fn parse(source: &str) -> SupramarkNode {
 }
 
 pub fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode {
+    let allow_dangerous_html = options.allow_dangerous_html;
     let md = create_parser(options);
     let index = OffsetIndex::new(source);
     let (mut children, diagnostics) = map_document(source, &md, &index);
     assign_footnote_indices(&mut children);
+    if !allow_dangerous_html {
+        for child in &mut children {
+            sanitize_raw_html(child);
+        }
+    }
     SupramarkNode::Root {
         ast_version: 2,
         children,
@@ -329,6 +385,66 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> SupramarkNode 
             version: Some(env!("CARGO_PKG_VERSION").to_owned()),
         }),
         position: Some(root_position(source, &index)),
+    }
+}
+
+/// When `allow_dangerous_html` is off, raw HTML must reach the output as escaped
+/// text (mirroring micromark's safe-by-default HTML serialiser). The parser still
+/// recognises HTML blocks/inline so their source span is preserved; this pass
+/// rewrites each `Raw { format: "html" }` node into a `Text` node holding the
+/// verbatim source, which downstream renderers escape. Both the ast-projection
+/// target (`astToHtml`) and the production web renderer escape `text`, so this
+/// single pass fixes both comparison targets.
+fn sanitize_raw_html(node: &mut SupramarkNode) {
+    if let Some(children) = children_mut(node) {
+        for child in children {
+            sanitize_raw_html(child);
+        }
+    }
+    let owned = std::mem::replace(
+        node,
+        SupramarkNode::Text {
+            value: String::new(),
+            position: None,
+        },
+    );
+    *node = match owned {
+        SupramarkNode::Raw {
+            format,
+            value,
+            position,
+            ..
+        } if format == "html" => SupramarkNode::Text { value, position },
+        other => other,
+    };
+}
+
+/// Mutable access to a node's child list, if it has one. Lets the AST walkers
+/// recurse without enumerating every variant inline.
+fn children_mut(node: &mut SupramarkNode) -> Option<&mut Vec<SupramarkNode>> {
+    match node {
+        SupramarkNode::Root { children, .. }
+        | SupramarkNode::Paragraph { children, .. }
+        | SupramarkNode::Heading { children, .. }
+        | SupramarkNode::Strong { children, .. }
+        | SupramarkNode::Emphasis { children, .. }
+        | SupramarkNode::Link { children, .. }
+        | SupramarkNode::Delete { children, .. }
+        | SupramarkNode::List { children, .. }
+        | SupramarkNode::ListItem { children, .. }
+        | SupramarkNode::Blockquote { children, .. }
+        | SupramarkNode::Table { children, .. }
+        | SupramarkNode::TableRow { children, .. }
+        | SupramarkNode::TableCell { children, .. }
+        | SupramarkNode::DefinitionList { children, .. }
+        | SupramarkNode::DefinitionItem { children, .. }
+        | SupramarkNode::DefinitionTerm { children, .. }
+        | SupramarkNode::DefinitionDescription { children, .. }
+        | SupramarkNode::FootnoteDefinition { children, .. }
+        | SupramarkNode::Container { children, .. }
+        | SupramarkNode::Input { children, .. }
+        | SupramarkNode::Unsupported { children, .. } => Some(children),
+        _ => None,
     }
 }
 
@@ -361,8 +477,71 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
         // GFM autolink extension: bare www./scheme-URL/email linkification.
         crate::plugins::extra::gfm_autolink::add(&mut md);
     }
+    md.subsequent_indented_definitions = options.subsequent_indented_definitions;
+
+    apply_disabled(&mut md, &options.disable);
 
     md
+}
+
+/// Remove rules for constructs named in `disabled` (micromark construct names).
+/// Unknown names are ignored so future micromark constructs don't break us.
+fn apply_disabled(md: &mut MarkdownParser, disabled: &[String]) {
+    use crate::plugins::cmark::block::{
+        blockquote::BlockquoteScanner, code::CodeScanner, fence::FenceScanner,
+        heading::HeadingScanner, hr::HrScanner, lheading::LHeadingScanner, list::ListScanner,
+        reference::ReferenceScanner,
+    };
+    use crate::plugins::cmark::inline::{autolink::AutolinkScanner};
+    #[cfg(feature = "raw-html")]
+    use crate::plugins::html::{html_block::HtmlBlockScanner, html_inline::HtmlInlineScanner};
+    use crate::generics::inline::{
+        code_pair::CodePairScanner, emph_pair::EmphPairScanner,
+        full_link::{LinkPrefixScanner, LinkScanner},
+    };
+
+    for name in disabled {
+        match name.as_str() {
+            // --- block constructs ---
+            "codeIndented" => {
+                md.block.remove_rule::<CodeScanner>();
+                // `code::add` sets max_indent=4 as a side effect. With indented
+                // code disabled, restore the unconstrained indent so other block
+                // rules don't keep gating on 4-space indent.
+                md.max_indent = i32::MAX;
+            }
+            "codeFenced" => md.block.remove_rule::<FenceScanner>(),
+            "headingAtx" => md.block.remove_rule::<HeadingScanner>(),
+            "setextUnderline" => md.block.remove_rule::<LHeadingScanner>(),
+            "thematicBreak" => md.block.remove_rule::<HrScanner>(),
+            "blockQuote" => md.block.remove_rule::<BlockquoteScanner>(),
+            "list" => md.block.remove_rule::<ListScanner>(),
+            #[cfg(feature = "raw-html")]
+            "htmlFlow" => md.block.remove_rule::<HtmlBlockScanner>(),
+            "definition" => md.block.remove_rule::<ReferenceScanner>(),
+            // --- inline constructs ---
+            "autolink" => md.inline.remove_rule::<AutolinkScanner>(),
+            // `characterEscape`/`hardBreakEscape` share `EscapeScanner`; gate
+            // each branch at runtime so the two constructs disable independently.
+            "characterEscape" => md.disable_character_escape = true,
+            "codeText" => md.inline.remove_rule::<CodePairScanner<'`'>>(),
+            "attention" => {
+                md.inline.remove_rule::<EmphPairScanner<'*', true>>();
+                md.inline.remove_rule::<EmphPairScanner<'_', false>>();
+            }
+            "hardBreakEscape" => md.disable_hard_break_escape = true,
+            #[cfg(feature = "raw-html")]
+            "htmlText" => md.inline.remove_rule::<HtmlInlineScanner>(),
+            "labelStartLink" => md.inline.remove_rule::<LinkScanner<false>>(),
+            "labelStartImage" => md.inline.remove_rule::<LinkPrefixScanner<'!', true>>(),
+            // `labelEnd` can't be disabled by removing `LinkScannerEnd` —
+            // `parse_link_label` finds `]` by raw char match, so the sentinel's
+            // removal is a no-op for resolution. Gate the openers at runtime
+            // instead; with resolution refused, `[x]()` stays literal.
+            "labelEnd" => md.disable_label_end = true,
+            _ => {}
+        }
+    }
 }
 
 fn map_markdown_fragment(
@@ -1017,8 +1196,12 @@ fn push_text_slice(
 }
 
 fn replace_emoji_shortcodes(value: &str) -> String {
+    // CommonMark §2.3: U+0000 in the source becomes U+FFFD. Done here on the
+    // AST text value (not the source) so source-map byte offsets stay aligned
+    // with the original input — "\0".len() != "\u{FFFD}".len().
+    let value = value.replace('\0', "\u{FFFD}");
     if !value.contains(':') {
-        return value.to_owned();
+        return value;
     }
 
     let mut output = String::with_capacity(value.len());
@@ -1664,7 +1847,16 @@ fn map_document(
     md: &MarkdownParser,
     index: &OffsetIndex,
 ) -> (Vec<SupramarkNode>, Vec<Diagnostic>) {
-    let children = map_markdown_fragment(md, source, 0, source.len(), index);
+    // CommonMark: a single leading U+FEFF byte-order mark is ignored at the
+    // document start. Skip it from the slice fed to the parser; the base offset
+    // keeps source-map byte offsets aligned with the original input (the BOM's
+    // 3 UTF-8 bytes are accounted for, not erased).
+    let bom_len = if source.starts_with('\u{FEFF}') {
+        '\u{FEFF}'.len_utf8()
+    } else {
+        0
+    };
+    let children = map_markdown_fragment(md, source, bom_len, source.len(), index);
     let mut diagnostics = Vec::new();
     collect_diagnostics(&children, &mut diagnostics);
     (children, diagnostics)

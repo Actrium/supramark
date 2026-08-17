@@ -7,6 +7,7 @@ import {
   htmlToSemanticTree,
 } from '../lib/semantic/html-semantics.mjs';
 import { renderWithProductionWebRenderer } from '../lib/visual/production-web-renderer.mjs';
+import { parserOptionsArgv } from '../lib/parse-options.mjs';
 
 const SUITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY_ROOT = path.resolve(SUITE_ROOT, '..', '..');
@@ -32,7 +33,7 @@ const selectedCases = document.cases;
 
 const astById = new Map();
 for (const testCase of selectedCases) {
-  const parsed = spawnSync(parserBinary, ['-'], {
+  const parsed = spawnSync(parserBinary, ['-', ...parserOptionsArgv(testCase)], {
     input: testCase.input.markdown,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,

@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::common::sourcemap::SourcePos;
 use crate::common::TypeKey;
 use crate::parser::extset::NodeExtSet;
-use crate::parser::inline::Text;
+use crate::parser::inline::{Text, TextSpecial};
 use crate::parser::renderer::HTMLRenderer;
 use crate::plugins::cmark::inline::newline::Softbreak;
 use crate::Renderer;
@@ -200,6 +200,10 @@ impl Node {
         self.walk(|node, _| {
             if let Some(text) = node.cast::<Text>() {
                 result.push_str(text.content.as_str());
+            } else if let Some(special) = node.cast::<TextSpecial>() {
+                // Entities and backslash escapes inside a label (e.g. an image
+                // alt) contribute their decoded content, matching micromark.
+                result.push_str(special.content.as_str());
             } else if node.is::<Softbreak>() {
                 result.push('\n');
             }

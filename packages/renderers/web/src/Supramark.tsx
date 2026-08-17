@@ -47,11 +47,7 @@ import { DiagramEngineContext } from './DiagramEngineProvider.js';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary.js';
 import { MathBlockWeb, MathInlineWeb } from './MathBlockWeb.js';
 import { SourceStateContext } from './SourceStateContext.js';
-import {
-  getRendererCache,
-  resolveDiagramCachePolicy,
-  stableSerialize,
-} from './renderCache.js';
+import { getRendererCache, resolveDiagramCachePolicy, stableSerialize } from './renderCache.js';
 
 export interface ContainerRendererWeb {
   (args: {
@@ -345,7 +341,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   const footnoteStyle = isGfmFootnoteStyle(config);
   const footnoteMeta = useMemo(
     () => (footnoteStyle && parsedDocument ? buildFootnoteMeta(parsedDocument.root) : null),
-    [footnoteStyle, parsedDocument],
+    [footnoteStyle, parsedDocument]
   );
   // In GFM footnote-section mode, definitions are hoisted to a trailing
   // <section>; filter them out of the body so they don't also render in place
@@ -355,8 +351,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     () =>
       footnoteStyle && parsedDocument
         ? parsedDocument.root.children.filter(n => n.type !== 'footnote_definition')
-        : parsedDocument?.root.children ?? [],
-    [footnoteStyle, parsedDocument],
+        : (parsedDocument?.root.children ?? []),
+    [footnoteStyle, parsedDocument]
   );
 
   if (parseError) {
@@ -377,6 +373,17 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     return null;
   }
 
+  // Whether the document source ends with a trailing newline after its last
+  // block (the root's end offset exceeds the last child's). cmark emits this
+  // newline; the paragraph-fold in mergeRawNodes needs it to reproduce the
+  // adoption-agency phantom the reference tree expects for unclosed formatting
+  // elements.
+  const rootEnd = parsedDocument.root.position?.end?.byte_offset;
+  const lastBodyChild = bodyChildren[bodyChildren.length - 1];
+  const lastEnd = lastBodyChild?.position?.end?.byte_offset;
+  const trailingNewline =
+    typeof rootEnd === 'number' && typeof lastEnd === 'number' && rootEnd > lastEnd;
+
   return (
     <ErrorBoundary
       onError={onError}
@@ -396,11 +403,12 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
                   parsedDocument.rendered,
                   parsedDocument.highlighted,
                   config,
-                  mergedContainerRenderers,
+                  mergedContainerRenderers
                 ),
               mergedClassNames,
               config,
-              parsedDocument.highlighted
+              parsedDocument.highlighted,
+              trailingNewline
             )}
             {footnoteMeta && footnoteMeta.defs.length > 0 && (
               <FootnoteSection
@@ -449,10 +457,7 @@ function parseRawAttrs(attrPart: string): Record<string, string> {
 }
 
 function escapeHtmlText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -494,8 +499,10 @@ function isTagfilterEnabled(config?: SupramarkConfig): boolean {
 // Replace the leading `<` of every disallowed tag (open or close,
 // case-insensitive) with `&lt;`; allowed tags and non-tag `<` pass through.
 function tagfilterEscape(html: string): string {
-  return html.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/g, (match: string, slash: string, name: string) =>
-    TAGFILTER_DISALLOWED_TAGS.has(name.toLowerCase()) ? `&lt;${slash}${name}` : match
+  return html.replace(
+    /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/g,
+    (match: string, slash: string, name: string) =>
+      TAGFILTER_DISALLOWED_TAGS.has(name.toLowerCase()) ? `&lt;${slash}${name}` : match
   );
 }
 
@@ -605,10 +612,7 @@ function buildFootnoteMeta(root: SupramarkRootNode): FootnoteMeta {
 
   for (const def of defsById.values()) {
     if (referenced.has(def.identifier)) {
-      def.occurrences = Array.from(
-        { length: occCount.get(def.identifier) ?? 0 },
-        (_, i) => i + 1,
-      );
+      def.occurrences = Array.from({ length: occCount.get(def.identifier) ?? 0 }, (_, i) => i + 1);
     }
   }
   const defs = [...defsById.values()]
@@ -636,13 +640,7 @@ function FootnoteRef({ node }: { node: SupramarkFootnoteReferenceNode }) {
   );
 }
 
-function FootnoteBackref({
-  def,
-  occurrence,
-}: {
-  def: FootnoteDefMeta;
-  occurrence: number;
-}) {
+function FootnoteBackref({ def, occurrence }: { def: FootnoteDefMeta; occurrence: number }) {
   const suffix = occurrence === 1 ? '' : `-${occurrence}`;
   const id = footnoteHrefEscape(def.identifier);
   const idx = occurrence === 1 ? `${def.index}` : `${def.index}-${occurrence}`;
@@ -654,8 +652,7 @@ function FootnoteBackref({
       data-footnote-backref-idx={idx}
       aria-label={`Back to reference ${idx}`}
     >
-      ↩
-      {occurrence > 1 && <sup className="footnote-ref">{occurrence}</sup>}
+      ↩{occurrence > 1 && <sup className="footnote-ref">{occurrence}</sup>}
     </a>
   );
 }
@@ -693,21 +690,11 @@ function FootnoteDefLi({
       const para = child as { type: 'paragraph'; children: SupramarkNode[] };
       return (
         <p key={index} className={classNames.paragraph}>
-          {renderInlineNodes(para.children, classNames, rendered, highlighted, config)}
-          {' '}
-          {backrefs}
+          {renderInlineNodes(para.children, classNames, rendered, highlighted, config)} {backrefs}
         </p>
       );
     }
-    return renderNode(
-      child,
-      index,
-      classNames,
-      rendered,
-      highlighted,
-      config,
-      containerRenderers,
-    );
+    return renderNode(child, index, classNames, rendered, highlighted, config, containerRenderers);
   });
   return (
     <li id={`fn-${footnoteHrefEscape(def.identifier)}`}>
@@ -818,7 +805,23 @@ function renderRawNode(
 ): React.ReactNode {
   const value = maybeTagfilter(node.value ?? '', config);
   const tagMatch = value.match(/^<([a-zA-Z][\w-]*)/);
-  if (!tagMatch) return React.createElement(RawHtml, { key, value });
+  if (!tagMatch) {
+    // Chromium's template parser silently drops an unclosed markup
+    // declaration such as `<!d` (no `>`), while parse5 models it as a bogus
+    // comment. Normalize to a real comment so both parsers agree.
+    if (
+      value.startsWith('<!') &&
+      !value.startsWith('<!--') &&
+      !value.startsWith('<![') &&
+      !value.includes('>')
+    ) {
+      return React.createElement(RawHtml, {
+        key,
+        value: `<!--${value.slice(2)}-->`,
+      });
+    }
+    return React.createElement(RawHtml, { key, value });
+  }
   const tag = tagMatch[1].toLowerCase();
   const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const openRe = new RegExp('^<' + escaped + '\\b([^>]*)>', 'i');
@@ -908,7 +911,16 @@ function mergeRawNodes(
   renderSingle: (node: SupramarkNode, key: number) => React.ReactNode,
   classNames?: SupramarkClassNames,
   config?: SupramarkConfig,
-  highlighted?: Map<string, SupramarkCodeHighlightResult>
+  highlighted?: Map<string, SupramarkCodeHighlightResult>,
+  // Whether the source has a trailing newline after these children (i.e. the
+  // container's end offset exceeds its last child's). Only meaningful at the
+  // document root; inner containers pass `false`. A trailing `\n` after `</p>`
+  // with an unclosed formatting element makes parse5's adoption-agency
+  // algorithm reconstruct that element around the whitespace, producing a
+  // phantom duplicate sibling. cmark emits the newline (so the phantom is part
+  // of the reference tree); micromark omits a final newline. Emitting it only
+  // when the source actually has one matches both references.
+  trailingNewline = false
 ): React.ReactNode[] {
   // Raw HTML is opt-in. When disabled, skip raw-merge entirely so raw nodes
   // fall through to their per-node renderer (which drops them) and no
@@ -929,22 +941,85 @@ function mergeRawNodes(
     // following block can't be statically serialized.
     if (allowDangerous && node?.type === 'paragraph' && classNames) {
       const inlineHtml = inlineNodesToHtml(node.children, classNames, config);
-      if (inlineHtml !== null && unclosedInlineFormattingTags(inlineHtml).length > 0) {
+      if (
+        inlineHtml !== null &&
+        (unclosedInlineFormattingTags(inlineHtml).length > 0 || hasUnclosedRawTextTag(inlineHtml))
+      ) {
         const following = children.slice(i + 1);
         const serializedFollowing =
-          following.length > 0 ? serializeBlocksToHtml(following, classNames, config, highlighted) : '';
+          following.length > 0
+            ? serializeBlocksToHtml(following, classNames, config, highlighted)
+            : '';
         if (serializedFollowing !== null) {
           const classAttr = classNames.paragraph
             ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
             : '';
+          // Emit the `</p>\n…` separator when there is following content to
+          // separate. With no following content, only emit a trailing `\n`
+          // when the source itself ends with a newline: a trailing `\n` after
+          // `</p>` with an unclosed formatting element (`<a>`, `<em>`) makes
+          // parse5's adoption-agency algorithm reconstruct that element around
+          // the whitespace, producing a phantom duplicate sibling. cmark emits
+          // the document's final newline (so the phantom is part of the
+          // reference tree); micromark omits it. Emitting it iff the source
+          // has one matches both references.
+          const tail = serializedFollowing
+            ? `\n${serializedFollowing}`
+            : trailingNewline
+              ? '\n'
+              : '';
           result.push(
             React.createElement(RawHtml, {
               key: i,
-              value: `<p${classAttr}>${inlineHtml}</p>\n${serializedFollowing}`,
+              value: `<p${classAttr}>${inlineHtml}</p>${tail}`,
             })
           );
           i = children.length;
           continue;
+        }
+      }
+    }
+    if (allowDangerous && node?.type === 'blockquote' && classNames) {
+      // A blockquote whose trailing child is a block raw opening an HTML
+      // construct the browser leaves unclosed (`<!--`, `<?`, `<![CDATA[`,
+      // `<!doctype…`, `<script>`, `<div`, …). cmark/micromark emit the raw
+      // verbatim, so the browser's root tree-construction absorbs the
+      // `</blockquote>` and following siblings into the open construct.
+      // React's per-block model renders the blockquote and its siblings
+      // independently, dropping the unclosed fragment — so fold the
+      // blockquote and its following siblings into one RawHtml fragment that
+      // a single browser parse owns. Only when there are following siblings
+      // to absorb and every one serializes to static HTML; otherwise fall
+      // through to per-block rendering.
+      const lastChild = node.children[node.children.length - 1];
+      if (
+        lastChild &&
+        lastChild.type === 'raw' &&
+        lastChild.block &&
+        unclosedBlockRawConstruct(lastChild.value ?? '')
+      ) {
+        const following = children.slice(i + 1);
+        if (following.length > 0) {
+          const inner = serializeBlocksToHtml(node.children, classNames, config, highlighted);
+          const tail = serializeBlocksToHtml(following, classNames, config, highlighted);
+          if (inner !== null && tail !== null) {
+            const cls = classNames.blockquote
+              ? ` class="${escapeHtmlAttr(classNames.blockquote)}"`
+              : '';
+            result.push(
+              React.createElement(RawHtml, {
+                key: i,
+                // Trim the trailing block-separator newline. When the
+                // unclosed construct is a raw-text/comment element
+                // (`<script>`, `<!--`, `<?`, …) it absorbs following raw text
+                // verbatim, so a trailing `\n` lands inside its content and
+                // diverges from micromark (which omits a final newline).
+                value: `<blockquote${cls}>\n${inner}</blockquote>\n${tail}`.replace(/\n+$/, ''),
+              })
+            );
+            i = children.length;
+            continue;
+          }
         }
       }
     }
@@ -957,10 +1032,7 @@ function mergeRawNodes(
         let closeIdx = -1;
         for (let j = i + 1; j < children.length; j++) {
           const sib = children[j];
-          if (
-            sib.type === 'raw' &&
-            rawCloseTagName(sib.value ?? '') === tagLower
-          ) {
+          if (sib.type === 'raw' && rawCloseTagName(sib.value ?? '') === tagLower) {
             closeIdx = j;
             break;
           }
@@ -974,8 +1046,7 @@ function mergeRawNodes(
           // HTML relies on, and a React host element drops them.
           if (inner.some(hasBlockChild) && classNames) {
             const serialized = serializeBlocksToHtml(inner, classNames, config, highlighted);
-            const closeValue =
-              (children[closeIdx] as SupramarkRawNode).value ?? '';
+            const closeValue = (children[closeIdx] as SupramarkRawNode).value ?? '';
             if (serialized !== null) {
               result.push(
                 React.createElement(RawHtml, {
@@ -997,9 +1068,45 @@ function mergeRawNodes(
           i = closeIdx + 1;
           continue;
         }
-        // Bare open tag with no matching close sibling: fall through to the
-        // per-node renderer (RawHtml emits the literal fragment so the
-        // browser's HTML parser owns tree construction / auto-closing).
+        // Bare open tag with no matching close sibling. cmark leaves a
+        // block-level open tag unclosed so the reference HTML nests following
+        // blocks inside it; absorb them into one verbatim RawHtml so the
+        // browser's tree-construction owns the folding (mirrors the else
+        // branch below). Only when every following sibling serializes to
+        // static HTML.
+        if (
+          closeIdx < 0 &&
+          rawNode.block &&
+          classNames &&
+          unclosedBlockContainerOpen(value, rawNode.block)
+        ) {
+          const following = children.slice(i + 1);
+          // Only absorb when there are following siblings to fold in. With no
+          // following siblings, leave the raw verbatim so its trailing newline
+          // (present in cmark output) survives — stripping it would suppress
+          // the adoption-agency phantom the reference tree expects.
+          const serialized =
+            following.length > 0
+              ? serializeBlocksToHtml(following, classNames, config, highlighted)
+              : null;
+          if (serialized !== null) {
+            result.push(
+              React.createElement(RawHtml, {
+                key: i,
+                // Trim the trailing block-separator newline: micromark omits
+                // a newline after the final block, and for an unclosed
+                // container a trailing `\n` lands inside its content and
+                // diverges from the reference tree.
+                value: (value + serialized).replace(/\n+$/, ''),
+              })
+            );
+            i = children.length;
+            continue;
+          }
+        }
+        // Otherwise: fall through to the per-node renderer (RawHtml emits the
+        // literal fragment so the browser's HTML parser owns tree construction
+        // / auto-closing).
       } else {
         // Unclosed block-container open tag (e.g. `<div>\n*foo*\n` or
         // `  <div>\n`): cmark leaves it unclosed and the reference HTML
@@ -1009,16 +1116,9 @@ function mergeRawNodes(
         // every following sibling serializes to static HTML.
         if (unclosedBlockContainerOpen(value, rawNode.block) && classNames) {
           const following = children.slice(i + 1);
-          const serialized = serializeBlocksToHtml(
-            following,
-            classNames,
-            config,
-            highlighted
-          );
+          const serialized = serializeBlocksToHtml(following, classNames, config, highlighted);
           if (serialized !== null) {
-            result.push(
-              React.createElement(RawHtml, { key: i, value: value + serialized })
-            );
+            result.push(React.createElement(RawHtml, { key: i, value: value + serialized }));
             i = children.length;
             continue;
           }
@@ -1062,8 +1162,7 @@ function renderListItemChildren(
   children.forEach((child, index) => {
     if (index > 0) {
       const prev = children[index - 1];
-      const bothInline =
-        INLINE_NODE_TYPES.has(prev.type) && INLINE_NODE_TYPES.has(child.type);
+      const bothInline = INLINE_NODE_TYPES.has(prev.type) && INLINE_NODE_TYPES.has(child.type);
       if (!bothInline) result.push('\n');
     }
     result.push(
@@ -1101,13 +1200,7 @@ function renderNode(
       }
       return (
         <p key={key} className={classNames.paragraph}>
-          {renderInlineNodes(
-            node.children,
-            classNames,
-            rendered,
-            highlighted,
-            config
-          )}
+          {renderInlineNodes(node.children, classNames, rendered, highlighted, config)}
         </p>
       );
     }
@@ -1166,7 +1259,15 @@ function renderNode(
           {mergeRawNodes(
             quote.children,
             (child, index) =>
-              renderNode(child, index, classNames, rendered, highlighted, config, containerRenderers),
+              renderNode(
+                child,
+                index,
+                classNames,
+                rendered,
+                highlighted,
+                config,
+                containerRenderers
+              ),
             classNames,
             config,
             highlighted
@@ -1204,8 +1305,7 @@ function renderNode(
         renderNode(item, index, classNames, rendered, highlighted, config, containerRenderers)
       );
       if (list.ordered) {
-        const start =
-          list.start !== undefined && list.start !== 1 ? list.start : undefined;
+        const start = list.start !== undefined && list.start !== 1 ? list.start : undefined;
         return (
           <ol key={key} className={classNames.listOrdered} start={start}>
             {items}
@@ -1234,8 +1334,7 @@ function renderNode(
             />
             {/* cmark-gfm html_render emits `<input ... /> ` with a trailing
               space before the item text; the parser consumes the separator
-              whitespace, so emit the literal space here to keep DOM parity. */}
-            {' '}
+              whitespace, so emit the literal space here to keep DOM parity. */}{' '}
             {renderListItemChildren(
               item.children,
               classNames,
@@ -1268,12 +1367,7 @@ function renderNode(
       }
 
       return (
-        <WebDiagramNode
-          key={key}
-          node={diagram}
-          classNames={classNames}
-          rendered={rendered}
-        />
+        <WebDiagramNode key={key} node={diagram} classNames={classNames} rendered={rendered} />
       );
     }
     case 'container': {
@@ -1558,7 +1652,7 @@ function renderNode(
       const table = node;
       const rows = table.children;
       let firstBodyRow = rows.findIndex(
-        (row) => !(row as { children?: Array<{ header?: boolean }> }).children?.[0]?.header
+        row => !(row as { children?: Array<{ header?: boolean }> }).children?.[0]?.header
       );
       if (firstBodyRow < 0) firstBodyRow = rows.length;
       const headRows = rows.slice(0, firstBodyRow);
@@ -1568,14 +1662,30 @@ function renderNode(
           {headRows.length > 0 && (
             <thead className={classNames.tableHead}>
               {headRows.map((row, index) =>
-                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+                renderNode(
+                  row,
+                  index,
+                  classNames,
+                  rendered,
+                  highlighted,
+                  config,
+                  containerRenderers
+                )
               )}
             </thead>
           )}
           {bodyRows.length > 0 && (
             <tbody className={classNames.tableBody}>
               {bodyRows.map((row, index) =>
-                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+                renderNode(
+                  row,
+                  index,
+                  classNames,
+                  rendered,
+                  highlighted,
+                  config,
+                  containerRenderers
+                )
               )}
             </tbody>
           )}
@@ -1658,9 +1768,7 @@ function renderNode(
       // Flatten once: if children is a single paragraph, spread its inline content
       // directly; otherwise render as block-level nodes (allows multi-paragraph footnotes).
       const soleParagraph =
-        def.children.length === 1 && def.children[0]?.type === 'paragraph'
-          ? def.children[0]
-          : null;
+        def.children.length === 1 && def.children[0]?.type === 'paragraph' ? def.children[0] : null;
       const body = soleParagraph
         ? renderInlineNodes(soleParagraph.children, classNames, rendered, highlighted, config)
         : def.children.map((child, index) =>
@@ -1795,7 +1903,7 @@ function inlineNodesToHtml(
   config?: SupramarkConfig
 ): string | null {
   if (!isDangerousHtmlAllowed(config)) return null;
-  if (!nodes.some((n) => n.type === 'raw')) return null;
+  if (!nodes.some(n => n.type === 'raw')) return null;
   return serializeInlineList(nodes, classNames, config);
 }
 
@@ -1900,17 +2008,13 @@ function serializeBlockToHtml(
     case 'paragraph': {
       const inline = serializeInlineList(node.children, classNames, config);
       if (inline === null) return null;
-      const cls = classNames.paragraph
-        ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
-        : '';
+      const cls = classNames.paragraph ? ` class="${escapeHtmlAttr(classNames.paragraph)}"` : '';
       return `<p${cls}>${inline}</p>\n`;
     }
     case 'code': {
       const lang = node.lang ?? '';
       const languageClass = lang ? `language-${escapeHtmlAttr(lang)}` : '';
-      const codeClass = [classNames.code ?? '', languageClass]
-        .filter(Boolean)
-        .join(' ');
+      const codeClass = [classNames.code ?? '', languageClass].filter(Boolean).join(' ');
       const codeClassAttr = codeClass ? ` class="${escapeHtmlAttr(codeClass)}"` : '';
       const preClassAttr = classNames.codeBlock
         ? ` class="${escapeHtmlAttr(classNames.codeBlock)}"`
@@ -1928,6 +2032,11 @@ function serializeBlockToHtml(
       return maybeTagfilter(node.value ?? '', config);
     case 'thematic_break':
       return '<hr />\n';
+    case 'blockquote': {
+      const inner = serializeBlocksToHtml(node.children ?? [], classNames, config, highlighted);
+      if (inner === null) return null;
+      return `<blockquote>\n${inner}</blockquote>\n`;
+    }
     case 'heading': {
       const inline = serializeInlineList(node.children, classNames, config);
       if (inline === null) return null;
@@ -2003,10 +2112,7 @@ function codeTokenInlineCss(token: {
 // the value itself — e.g. `<div>\n*foo*\n` or `  <div>\n`. cmark leaves such a
 // container unclosed and the reference HTML relies on the final parser folding
 // following blocks into it. Used to absorb following siblings into one RawHtml.
-function unclosedBlockContainerOpen(
-  value: string,
-  isBlock: boolean | undefined
-): string | null {
+function unclosedBlockContainerOpen(value: string, isBlock: boolean | undefined): string | null {
   if (!isBlock) return null;
   const m = value.match(/^\s*<([a-zA-Z][\w-]*)\b/);
   if (!m) return null;
@@ -2016,6 +2122,25 @@ function unclosedBlockContainerOpen(
   if (new RegExp('</' + escaped + '\\s*>', 'i').test(value)) return null;
   if (/\/\s*>\s*$/.test(value)) return null;
   return tag;
+}
+
+// A block raw whose value opens an HTML construct the browser would leave
+// unclosed — comment (`<!--`…`-->`), processing instruction (`<?`…`?>`),
+// CDATA (`<![CDATA[`…`]]>`), declaration (`<!X`…`>`), or an open tag with no
+// matching close (incl. `<script>`/`<pre>`/…). When such a raw sits at the
+// tail of a block container, the browser's root tree-construction absorbs
+// the container's close tag and following siblings into the open construct;
+// `mergeRawNodes` uses this to fold the container + following siblings into
+// one RawHtml fragment so a single browser parse owns the absorption.
+function unclosedBlockRawConstruct(value: string): boolean {
+  const v = value.trimStart();
+  if (v.startsWith('<!--') && !v.includes('-->')) return true;
+  if (v.startsWith('<?') && !v.includes('?>')) return true;
+  if (v.startsWith('<![CDATA[') && !v.includes(']]>')) return true;
+  // Declaration (`<![A-Za-z]…`) without a closing `>`. `<!--` and `<![CDATA[`
+  // are handled above, so `<!` + a letter here is a declaration.
+  if (/^<![A-Za-z]/.test(v) && !v.includes('>')) return true;
+  return unclosedBlockContainerOpen(value, true) !== null;
 }
 
 // HTML5 active formatting elements (HTML spec, "list of active formatting
@@ -2028,8 +2153,20 @@ function unclosedBlockContainerOpen(
 // one RawHtml fragment so the browser's tree-construction reproduces cmark's
 // reconstruction in a single parse.
 const HTML_FORMATTING_TAGS = new Set([
-  'a', 'b', 'big', 'code', 'em', 'font', 'i', 'nobr', 's', 'small', 'strike',
-  'strong', 'tt', 'u',
+  'a',
+  'b',
+  'big',
+  'code',
+  'em',
+  'font',
+  'i',
+  'nobr',
+  's',
+  'small',
+  'strike',
+  'strong',
+  'tt',
+  'u',
 ]);
 function unclosedInlineFormattingTags(html: string): string[] {
   const counts: Record<string, number> = {};
@@ -2041,7 +2178,37 @@ function unclosedInlineFormattingTags(html: string): string[] {
     const closing = m[0].charCodeAt(1) === 47; // '</'
     counts[tag] = (counts[tag] ?? 0) + (closing ? -1 : 1);
   }
-  return Object.keys(counts).filter((t) => counts[t] > 0);
+  return Object.keys(counts).filter(t => counts[t] > 0);
+}
+
+// Raw-text / escapable raw-text elements (HTML spec). Unlike formatting
+// elements, the HTML parser never self-closes these (a trailing `/>` is
+// ignored) and their content is raw text until the matching close tag, so an
+// unclosed one absorbs following markup — including the `</p>` boundary
+// newline — into its text content, diverging from cmark's verbatim output.
+const HTML_RAWTEXT_TAGS = new Set([
+  'script',
+  'style',
+  'textarea',
+  'title',
+  'xmp',
+  'iframe',
+  'noembed',
+  'noframes',
+  'noscript',
+  'plaintext',
+]);
+function hasUnclosedRawTextTag(html: string): boolean {
+  const counts: Record<string, number> = {};
+  const re = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[1].toLowerCase();
+    if (!HTML_RAWTEXT_TAGS.has(tag)) continue;
+    const closing = m[0].charCodeAt(1) === 47; // '</'
+    counts[tag] = (counts[tag] ?? 0) + (closing ? -1 : 1);
+  }
+  return Object.values(counts).some(c => c > 0);
 }
 
 function renderInlineNode(
@@ -2069,13 +2236,27 @@ function renderInlineNode(
       if (parentType === 'strong' && isFlattenNestedStrongEnabled(config)) {
         return (
           <React.Fragment key={key}>
-            {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
+            {renderInlineNodes(
+              strongNode.children,
+              classNames,
+              rendered,
+              highlighted,
+              config,
+              'strong'
+            )}
           </React.Fragment>
         );
       }
       return (
         <strong key={key} className={classNames.strong}>
-          {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
+          {renderInlineNodes(
+            strongNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'strong'
+          )}
         </strong>
       );
     }
@@ -2083,7 +2264,14 @@ function renderInlineNode(
       const emphasisNode = node;
       return (
         <em key={key} className={classNames.emphasis}>
-          {renderInlineNodes(emphasisNode.children, classNames, rendered, highlighted, config, 'emphasis')}
+          {renderInlineNodes(
+            emphasisNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'emphasis'
+          )}
         </em>
       );
     }
@@ -2112,19 +2300,37 @@ function renderInlineNode(
     case 'link': {
       const linkNode = node;
       return (
-        <a key={key} href={linkNode.url} title={linkNode.title} className={classNames.link}>
+        <a
+          key={key}
+          href={linkNode.url}
+          title={linkNode.title || undefined}
+          className={classNames.link}
+        >
           {renderInlineNodes(linkNode.children, classNames, rendered, highlighted, config, 'link')}
         </a>
       );
     }
     case 'image': {
       const imageNode = node;
+      // React drops an empty-string `src` attribute, but CommonMark requires
+      // `src=""` for an image with an empty destination — force it back via a
+      // ref callback (runs during commit, before the host reads innerHTML).
+      // Empty `title` is omitted to match micromark, which only renders it
+      // when it carries a value.
+      const forceEmptySrc = imageNode.url === '';
       return (
         <img
           key={key}
-          src={imageNode.url}
+          ref={
+            forceEmptySrc
+              ? (el: HTMLImageElement | null) => {
+                  if (el) el.setAttribute('src', '');
+                }
+              : undefined
+          }
+          src={imageNode.url || undefined}
           alt={imageNode.alt}
-          title={imageNode.title}
+          title={imageNode.title || undefined}
           className={classNames.image}
         />
       );
@@ -2135,17 +2341,32 @@ function renderInlineNode(
       // so emit it explicitly to match the expected DOM.
       return (
         <React.Fragment key={key}>
-          <br />{'\n'}
+          <br />
+          {'\n'}
         </React.Fragment>
       );
     case 'delete': {
       const deleteNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-gfm'])) {
-        return renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete');
+        return renderInlineNodes(
+          deleteNode.children,
+          classNames,
+          rendered,
+          highlighted,
+          config,
+          'delete'
+        );
       }
       return (
         <del key={key} className={classNames.delete}>
-          {renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete')}
+          {renderInlineNodes(
+            deleteNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'delete'
+          )}
         </del>
       );
     }

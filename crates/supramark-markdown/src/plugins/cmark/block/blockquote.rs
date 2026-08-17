@@ -135,7 +135,19 @@ impl BlockRule for BlockquoteScanner {
             // Case 3: another tag found.
             state.line = next_line;
 
-            if state.test_rules_at_line() {
+            // This line carries no `>` marker, so if it is not a new block
+            // construct it becomes a lazy continuation of the blockquote's
+            // paragraph. micromark gates type-7 (complete-tag) HTML blocks on
+            // exactly that lazy condition (CommonMark 0.30 §4.6: type 7 may
+            // not interrupt a paragraph at the top level, but on a lazy
+            // continuation line it exits the container). Set the lazy flag for
+            // the duration of the interrupt test so `HtmlBlockScanner::check`
+            // can let type 7 through here while refusing it on non-lazy lines.
+            state.in_lazy_continuation = true;
+            let interrupted = state.test_rules_at_line();
+            state.in_lazy_continuation = false;
+
+            if interrupted {
                 // Quirk to enforce "hard termination mode" for paragraphs;
                 // normally if you call `nodeize(state, startLine, nextLine)`,
                 // paragraphs will look below nextLine for paragraph continuation,

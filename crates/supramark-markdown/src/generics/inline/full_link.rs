@@ -56,6 +56,9 @@ impl<const ENABLE_NESTED: bool> InlineRule for LinkScanner<ENABLE_NESTED> {
     const MARKER: char = '[';
 
     fn check(state: &mut InlineState) -> Option<usize> {
+        if state.md.disable_label_end {
+            return None;
+        }
         let mut chars = state.src[state.pos..state.pos_max].chars();
         if chars.next().unwrap() != '[' {
             return None;
@@ -64,6 +67,9 @@ impl<const ENABLE_NESTED: bool> InlineRule for LinkScanner<ENABLE_NESTED> {
     }
 
     fn run(state: &mut InlineState) -> Option<(Node, usize)> {
+        if state.md.disable_label_end {
+            return None;
+        }
         let mut chars = state.src[state.pos..state.pos_max].chars();
         if chars.next().unwrap() != '[' {
             return None;
@@ -81,6 +87,9 @@ impl<const PREFIX: char, const ENABLE_NESTED: bool> InlineRule
     const MARKER: char = PREFIX;
 
     fn check(state: &mut InlineState) -> Option<usize> {
+        if state.md.disable_label_end {
+            return None;
+        }
         let mut chars = state.src[state.pos..state.pos_max].chars();
         if chars.next() != Some(PREFIX) {
             return None;
@@ -92,6 +101,9 @@ impl<const PREFIX: char, const ENABLE_NESTED: bool> InlineRule
     }
 
     fn run(state: &mut InlineState) -> Option<(Node, usize)> {
+        if state.md.disable_label_end {
+            return None;
+        }
         let mut chars = state.src[state.pos..state.pos_max].chars();
         if chars.next() != Some(PREFIX) {
             return None;
@@ -212,6 +224,16 @@ fn parse_link_label(state: &mut InlineState, start: usize, enable_nested: bool) 
     }
 
     if found {
+        // CommonMark §5.3: a link label can have at most 999 characters
+        // inside the square brackets. A longer run is not a valid label, so
+        // the bracket pair falls back to literal text.
+        let label_len = state.src[start + 1..state.pos].chars().count();
+        if label_len > 999 {
+            found = false;
+        }
+    }
+
+    if found {
         label_end = Some(state.pos);
     }
 
@@ -254,7 +276,7 @@ pub fn parse_link_destination(
                     return Some(ParseLinkFragmentResult {
                         pos: pos + 1,
                         lines: 0,
-                        str: unescape_all(&str[start + 1..pos]).into_owned(),
+                        str: nul_to_replacement(unescape_all(&str[start + 1..pos])),
                     });
                 }
                 Some('\\') => match chars.next() {
@@ -270,8 +292,11 @@ pub fn parse_link_destination(
         let mut level: u32 = 0;
         loop {
             match chars.next() {
-                // space + ascii control characters
-                Some('\0'..=' ' | '\x7f') | None => break,
+                // CommonMark §2.3: NUL becomes U+FFFD, so it is part of the
+                // destination rather than a terminator. Other ASCII control
+                // characters and whitespace still end the bare-URL form.
+                Some('\0') => pos += 1,
+                Some('\x01'..=' ' | '\x7f') | None => break,
                 Some('\\') => match chars.next() {
                     Some(' ') | None => break,
                     Some(x) => pos += 1 + x.len_utf8(),
@@ -303,12 +328,47 @@ pub fn parse_link_destination(
         Some(ParseLinkFragmentResult {
             pos,
             lines: 0,
-            str: unescape_all(&str[start..pos]).into_owned(),
+            str: nul_to_replacement(unescape_all(&str[start..pos])),
         })
     }
 }
 
-/// Helper function used to parse `"title"` part of the links (with `'title'` or `(title)` alternative syntax).
+/// CommonMark §2.3: every NUL in a link destination is replaced with U+FFFD
+/// before the URL is normalized/percent-encoded (so `\u{0}` → `%EF%BF%BD`, not
+/// `%00`). NUL survives `unescape_all` because it is not an escape sequence.
+fn nul_to_replacement(cow: std::borrow::Cow<'_, str>) -> String {
+    match cow {
+        std::borrow::Cow::Borrowed(s) => s.replace('\0', "\u{FFFD}"),
+        std::borrow::Cow::Owned(mut s) => {
+            if s.contains('\0') {
+                s = s.replace('\0', "\u{FFFD}");
+            }
+            s
+        }
+    }
+}
+
+/// CommonMark §5.5 / micromark `factory-title`: a title can span multiple
+/// lines, and each continuation line's leading spaces and tabs are consumed
+/// as `linePrefix` (with no size limit) and dropped from the value, while the
+/// line ending itself is kept. The first line is not prefixed. So
+/// `"\n c"` becomes `"\nc"`.
+fn strip_title_line_prefixes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut first = true;
+    for line in s.split('\n') {
+        if !first {
+            out.push('\n');
+            out.push_str(line.trim_start_matches([' ', '\t']));
+        } else {
+            out.push_str(line);
+            first = false;
+        }
+    }
+    out
+}
+
+
 pub fn parse_link_title(str: &str, start: usize, max: usize) -> Option<ParseLinkFragmentResult> {
     let mut chars = str[start..max].chars();
     let mut pos = start + 1;
@@ -327,7 +387,7 @@ pub fn parse_link_title(str: &str, start: usize, max: usize) -> Option<ParseLink
                 return Some(ParseLinkFragmentResult {
                     pos: pos + 1,
                     lines,
-                    str: unescape_all(&str[start + 1..pos]).into_owned(),
+                    str: strip_title_line_prefixes(unescape_all(&str[start + 1..pos]).as_ref()),
                 });
             }
             Some('(') if marker == ')' => {
@@ -387,32 +447,46 @@ fn parse_link(state: &mut InlineState, pos: usize, enable_nested: bool) -> Optio
         //          ^^^^^^ parsing link destination
         if let Some(res) = parse_link_destination(&state.src, pos, state.pos_max) {
             let href_candidate = state.md.link_formatter.normalize_link(&res.str);
+            // Always advance past the destination so the closing ")" and an
+            // optional title can still be matched. micromark's "safe by
+            // default" keeps the link/image but empties the destination for an
+            // unsafe protocol, rather than failing the whole construct.
+            pos = res.pos;
             if state
                 .md
                 .link_formatter
                 .validate_link(&href_candidate)
                 .is_some()
             {
-                pos = res.pos;
                 href = Some(href_candidate);
+            } else {
+                href = Some(String::new());
             }
 
             // [link](  <href>  "title"  )
-            //                ^^ skipping these spaces
+            //                ^^ skipping these spaces. CommonMark §6.3: a
+            // link title must be preceded by whitespace, so a title is only
+            // possible when this skip actually consumed something. Without
+            // this guard, `[a](<b>"c")` steals `"c"` as the title and the
+            // whole bracket run linkifies — micromark leaves it literal.
             let mut chars = state.src[pos..state.pos_max].chars();
+            let mut had_space = false;
             while let Some(' ' | '\t' | '\n') = chars.next() {
                 pos += 1;
+                had_space = true;
             }
 
-            if let Some(res) = parse_link_title(&state.src, pos, state.pos_max) {
-                title = Some(res.str);
-                pos = res.pos;
+            if had_space {
+                if let Some(res) = parse_link_title(&state.src, pos, state.pos_max) {
+                    title = Some(res.str);
+                    pos = res.pos;
 
-                // [link](  <href>  "title"  )
-                //                         ^^ skipping these spaces
-                let mut chars = state.src[pos..state.pos_max].chars();
-                while let Some(' ' | '\t' | '\n') = chars.next() {
-                    pos += 1;
+                    // [link](  <href>  "title"  )
+                    //                         ^^ skipping these spaces
+                    let mut chars = state.src[pos..state.pos_max].chars();
+                    while let Some(' ' | '\t' | '\n') = chars.next() {
+                        pos += 1;
+                    }
                 }
             }
         }

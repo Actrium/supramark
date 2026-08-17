@@ -43,14 +43,41 @@ struct HTMLSequence {
     open: Regex,
     close: Regex,
     can_terminate_paragraph: bool,
+    /// Whether a blank line ends the block. CommonMark §4.6: types 1–5 end
+    /// only at their specific close condition (running through blank lines);
+    /// types 6–7 end at a blank line.
+    ends_at_blank: bool,
+    /// Whether this sequence may only interrupt a paragraph on a lazy
+    /// continuation line (inside a container whose marker the line lacks).
+    /// True for type 7 only: CommonMark 0.30 §4.6 forbids type 7 from
+    /// interrupting a paragraph at the top level (non-lazy), but micromark
+    /// lets it exit the enclosing container on a lazy line.
+    only_interrupts_lazy: bool,
 }
 
 impl HTMLSequence {
-    pub fn new(open: Regex, close: Regex, can_terminate_paragraph: bool) -> Self {
+    pub fn new(open: Regex, close: Regex, can_terminate_paragraph: bool, ends_at_blank: bool) -> Self {
         Self {
             open,
             close,
             can_terminate_paragraph,
+            ends_at_blank,
+            only_interrupts_lazy: false,
+        }
+    }
+
+    pub fn new_lazy_only(
+        open: Regex,
+        close: Regex,
+        can_terminate_paragraph: bool,
+        ends_at_blank: bool,
+    ) -> Self {
+        Self {
+            open,
+            close,
+            can_terminate_paragraph,
+            ends_at_blank,
+            only_interrupts_lazy: true,
         }
     }
 }
@@ -67,36 +94,43 @@ static HTML_SEQUENCES: Lazy<[HTMLSequence; 7]> = Lazy::new(|| {
             Regex::new(r#"(?i)^<(script|pre|style|textarea)(\s|>|$)"#).unwrap(),
             Regex::new(r#"(?i)</(script|pre|style|textarea)>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<!--"#).unwrap(),
             Regex::new(r#"-->"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<\?"#).unwrap(),
             Regex::new(r#"\?>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
-            Regex::new(r#"^<![A-Z]"#).unwrap(),
+            Regex::new(r#"^<![A-Za-z]"#).unwrap(),
             Regex::new(r#">"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<!\[CDATA\["#).unwrap(),
             Regex::new(r#"\]\]>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(&format!("(?i)^</?({block_names})(\\s|/?>|$)")).unwrap(),
             Regex::new(r#"^$"#).unwrap(),
             true,
+            true,
         ),
-        HTMLSequence::new(
+        HTMLSequence::new_lazy_only(
             Regex::new(&format!("{open_close_tag_re}\\s*$")).unwrap(),
             Regex::new(r#"^$"#).unwrap(),
-            false,
+            true,
+            true,
         ),
     ]
 });
@@ -133,6 +167,14 @@ impl BlockRule for HtmlBlockScanner {
         if !sequence.can_terminate_paragraph {
             return None;
         }
+        // Type 7 (`only_interrupts_lazy`) may only interrupt on a lazy
+        // continuation line; on a non-lazy paragraph line it stays inline
+        // (CommonMark 0.30 §4.6). `state.in_lazy_continuation` is set by the
+        // enclosing container (blockquote / list) while testing a markerless
+        // continuation line.
+        if sequence.only_interrupts_lazy && !state.in_lazy_continuation {
+            return None;
+        }
         // `get_sequence` only matches type 1–6 start conditions. Type 1 names
         // (script/pre/style/textarea) are absent from the type 6 name list, so
         // a closing tag like `</pre>` matches no sequence and never interrupts
@@ -152,7 +194,18 @@ impl BlockRule for HtmlBlockScanner {
         // Let's roll down till block end.
         if !sequence.close.is_match(line_text) {
             while next_line < state.line_max {
-                if state.line_indent(next_line) < 0 {
+                // HTML blocks never allow lazy continuation. A non-blank line
+                // that has dropped out of the enclosing container (e.g. lost
+                // the blockquote `>` marker) ends the block for every type.
+                // `line_indent < 0` catches this (the line's content sits
+                // before `blk_indent`); `is_empty` excludes genuine blank
+                // lines, whose effect is governed by the next guard.
+                if !state.is_empty(next_line) && state.line_indent(next_line) < 0 {
+                    break;
+                }
+                // Types 6–7 end at a blank line; types 1–5 run through blank
+                // lines until their specific close condition.
+                if sequence.ends_at_blank && state.line_indent(next_line) < 0 {
                     break;
                 }
 
@@ -169,7 +222,15 @@ impl BlockRule for HtmlBlockScanner {
             }
         }
 
-        let (content, _) = state.get_lines(start_line, next_line, state.blk_indent, true);
+        // micromark includes a trailing line ending in an HTML block's raw
+        // content only when one is actually present in the source — i.e. when
+        // the block's last line is followed by more input, not when it sits at
+        // document EOF. `line_end` points at the line's newline byte (or at
+        // `src.len()` for the final, newline-less line), so `line_end < src.len()`
+        // distinguishes "newline present" from "EOF".
+        let last_line = next_line - 1;
+        let keep_last_lf = state.line_offsets[last_line].line_end < state.src.len();
+        let (content, _) = state.get_lines(start_line, next_line, state.blk_indent, keep_last_lf);
         let node = Node::new(HtmlBlock { content });
         Some((node, next_line - state.line))
     }
