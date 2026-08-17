@@ -23,6 +23,12 @@ export interface SupramarkClassNames {
   // Code blocks
   codeBlock?: string; // pre element
   code?: string; // code element
+  /** Relative wrapper around a code block and its copy button. */
+  codeBlockContainer?: string;
+  /** Copy button overlay on a code block. */
+  codeButton?: string;
+  /** Label text inside the copy button. */
+  codeButtonText?: string;
 
   // Lists
   listOrdered?: string; // ol element
@@ -95,6 +101,10 @@ export const tailwindClassNames: SupramarkClassNames = {
   thematicBreak: 'border-t border-gray-300 dark:border-gray-700 my-4',
   codeBlock: 'bg-gray-100 dark:bg-gray-800 rounded-md p-4 mb-4 overflow-x-auto',
   code: 'font-mono text-sm',
+  codeBlockContainer: 'relative',
+  codeButton:
+    'absolute top-2 right-2 bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500',
+  codeButtonText: '',
   listOrdered: 'list-decimal ml-6 mb-4',
   listUnordered: 'list-disc ml-6 mb-4',
   listItem: 'mb-1',
@@ -134,6 +144,9 @@ export const minimalClassNames: SupramarkClassNames = {
   thematicBreak: 'sm-hr',
   codeBlock: 'sm-code-block',
   code: 'sm-code',
+  codeBlockContainer: 'sm-code-block-container',
+  codeButton: 'sm-code-btn',
+  codeButtonText: 'sm-code-btn-text',
   listOrdered: 'sm-ol',
   listUnordered: 'sm-ul',
   listItem: 'sm-li',

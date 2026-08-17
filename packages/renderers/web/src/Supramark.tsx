@@ -8,6 +8,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { CodeBlock, CodeCopyContext } from './CodeBlock.js';
 import type {
   SupramarkRootNode,
   SupramarkNode,
@@ -47,11 +48,7 @@ import { DiagramEngineContext } from './DiagramEngineProvider.js';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary.js';
 import { MathBlockWeb, MathInlineWeb } from './MathBlockWeb.js';
 import { SourceStateContext } from './SourceStateContext.js';
-import {
-  getRendererCache,
-  resolveDiagramCachePolicy,
-  stableSerialize,
-} from './renderCache.js';
+import { getRendererCache, resolveDiagramCachePolicy, stableSerialize } from './renderCache.js';
 
 export interface ContainerRendererWeb {
   (args: {
@@ -79,6 +76,13 @@ export interface SupramarkWebProps {
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
   onRenderStateChange?: (state: SupramarkRenderState) => void;
+  /**
+   * Copy handler for fenced code blocks. When provided, the copy button
+   * calls it instead of the default `navigator.clipboard.writeText`.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /** Whether to show the code-block copy button (default: true). */
+  copyButton?: boolean;
 }
 
 export interface SupramarkRenderState {
@@ -210,6 +214,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   codeHighlighter,
   codeHighlightTheme,
   onRenderStateChange,
+  onCopyCode,
+  copyButton,
 }) => {
   const diagramEngine = useContext(DiagramEngineContext) ?? defaultDiagramEngine;
   // Parsing, engine output, highlighting, and source state form one renderable source version.
@@ -345,7 +351,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   const footnoteStyle = isGfmFootnoteStyle(config);
   const footnoteMeta = useMemo(
     () => (footnoteStyle && parsedDocument ? buildFootnoteMeta(parsedDocument.root) : null),
-    [footnoteStyle, parsedDocument],
+    [footnoteStyle, parsedDocument]
   );
   // In GFM footnote-section mode, definitions are hoisted to a trailing
   // <section>; filter them out of the body so they don't also render in place
@@ -355,8 +361,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     () =>
       footnoteStyle && parsedDocument
         ? parsedDocument.root.children.filter(n => n.type !== 'footnote_definition')
-        : parsedDocument?.root.children ?? [],
-    [footnoteStyle, parsedDocument],
+        : (parsedDocument?.root.children ?? []),
+    [footnoteStyle, parsedDocument]
   );
 
   if (parseError) {
@@ -385,34 +391,36 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     >
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <FootnoteMetaContext.Provider value={footnoteMeta}>
-          <div className={mergedClassNames.root}>
-            {mergeRawNodes(
-              bodyChildren,
-              (node, index) =>
-                renderNode(
-                  node,
-                  index,
-                  mergedClassNames,
-                  parsedDocument.rendered,
-                  parsedDocument.highlighted,
-                  config,
-                  mergedContainerRenderers,
-                ),
-              mergedClassNames,
-              config,
-              parsedDocument.highlighted
-            )}
-            {footnoteMeta && footnoteMeta.defs.length > 0 && (
-              <FootnoteSection
-                defs={footnoteMeta.defs}
-                classNames={mergedClassNames}
-                rendered={parsedDocument.rendered}
-                highlighted={parsedDocument.highlighted}
-                config={config}
-                containerRenderers={mergedContainerRenderers}
-              />
-            )}
-          </div>
+          <CodeCopyContext.Provider value={{ onCopyCode, copyButton }}>
+            <div className={mergedClassNames.root}>
+              {mergeRawNodes(
+                bodyChildren,
+                (node, index) =>
+                  renderNode(
+                    node,
+                    index,
+                    mergedClassNames,
+                    parsedDocument.rendered,
+                    parsedDocument.highlighted,
+                    config,
+                    mergedContainerRenderers
+                  ),
+                mergedClassNames,
+                config,
+                parsedDocument.highlighted
+              )}
+              {footnoteMeta && footnoteMeta.defs.length > 0 && (
+                <FootnoteSection
+                  defs={footnoteMeta.defs}
+                  classNames={mergedClassNames}
+                  rendered={parsedDocument.rendered}
+                  highlighted={parsedDocument.highlighted}
+                  config={config}
+                  containerRenderers={mergedContainerRenderers}
+                />
+              )}
+            </div>
+          </CodeCopyContext.Provider>
         </FootnoteMetaContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -449,10 +457,7 @@ function parseRawAttrs(attrPart: string): Record<string, string> {
 }
 
 function escapeHtmlText(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -494,8 +499,10 @@ function isTagfilterEnabled(config?: SupramarkConfig): boolean {
 // Replace the leading `<` of every disallowed tag (open or close,
 // case-insensitive) with `&lt;`; allowed tags and non-tag `<` pass through.
 function tagfilterEscape(html: string): string {
-  return html.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/g, (match: string, slash: string, name: string) =>
-    TAGFILTER_DISALLOWED_TAGS.has(name.toLowerCase()) ? `&lt;${slash}${name}` : match
+  return html.replace(
+    /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/g,
+    (match: string, slash: string, name: string) =>
+      TAGFILTER_DISALLOWED_TAGS.has(name.toLowerCase()) ? `&lt;${slash}${name}` : match
   );
 }
 
@@ -605,10 +612,7 @@ function buildFootnoteMeta(root: SupramarkRootNode): FootnoteMeta {
 
   for (const def of defsById.values()) {
     if (referenced.has(def.identifier)) {
-      def.occurrences = Array.from(
-        { length: occCount.get(def.identifier) ?? 0 },
-        (_, i) => i + 1,
-      );
+      def.occurrences = Array.from({ length: occCount.get(def.identifier) ?? 0 }, (_, i) => i + 1);
     }
   }
   const defs = [...defsById.values()]
@@ -636,13 +640,7 @@ function FootnoteRef({ node }: { node: SupramarkFootnoteReferenceNode }) {
   );
 }
 
-function FootnoteBackref({
-  def,
-  occurrence,
-}: {
-  def: FootnoteDefMeta;
-  occurrence: number;
-}) {
+function FootnoteBackref({ def, occurrence }: { def: FootnoteDefMeta; occurrence: number }) {
   const suffix = occurrence === 1 ? '' : `-${occurrence}`;
   const id = footnoteHrefEscape(def.identifier);
   const idx = occurrence === 1 ? `${def.index}` : `${def.index}-${occurrence}`;
@@ -654,8 +652,7 @@ function FootnoteBackref({
       data-footnote-backref-idx={idx}
       aria-label={`Back to reference ${idx}`}
     >
-      ↩
-      {occurrence > 1 && <sup className="footnote-ref">{occurrence}</sup>}
+      ↩{occurrence > 1 && <sup className="footnote-ref">{occurrence}</sup>}
     </a>
   );
 }
@@ -693,21 +690,11 @@ function FootnoteDefLi({
       const para = child as { type: 'paragraph'; children: SupramarkNode[] };
       return (
         <p key={index} className={classNames.paragraph}>
-          {renderInlineNodes(para.children, classNames, rendered, highlighted, config)}
-          {' '}
-          {backrefs}
+          {renderInlineNodes(para.children, classNames, rendered, highlighted, config)} {backrefs}
         </p>
       );
     }
-    return renderNode(
-      child,
-      index,
-      classNames,
-      rendered,
-      highlighted,
-      config,
-      containerRenderers,
-    );
+    return renderNode(child, index, classNames, rendered, highlighted, config, containerRenderers);
   });
   return (
     <li id={`fn-${footnoteHrefEscape(def.identifier)}`}>
@@ -932,7 +919,9 @@ function mergeRawNodes(
       if (inlineHtml !== null && unclosedInlineFormattingTags(inlineHtml).length > 0) {
         const following = children.slice(i + 1);
         const serializedFollowing =
-          following.length > 0 ? serializeBlocksToHtml(following, classNames, config, highlighted) : '';
+          following.length > 0
+            ? serializeBlocksToHtml(following, classNames, config, highlighted)
+            : '';
         if (serializedFollowing !== null) {
           const classAttr = classNames.paragraph
             ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
@@ -957,10 +946,7 @@ function mergeRawNodes(
         let closeIdx = -1;
         for (let j = i + 1; j < children.length; j++) {
           const sib = children[j];
-          if (
-            sib.type === 'raw' &&
-            rawCloseTagName(sib.value ?? '') === tagLower
-          ) {
+          if (sib.type === 'raw' && rawCloseTagName(sib.value ?? '') === tagLower) {
             closeIdx = j;
             break;
           }
@@ -974,8 +960,7 @@ function mergeRawNodes(
           // HTML relies on, and a React host element drops them.
           if (inner.some(hasBlockChild) && classNames) {
             const serialized = serializeBlocksToHtml(inner, classNames, config, highlighted);
-            const closeValue =
-              (children[closeIdx] as SupramarkRawNode).value ?? '';
+            const closeValue = (children[closeIdx] as SupramarkRawNode).value ?? '';
             if (serialized !== null) {
               result.push(
                 React.createElement(RawHtml, {
@@ -1009,16 +994,9 @@ function mergeRawNodes(
         // every following sibling serializes to static HTML.
         if (unclosedBlockContainerOpen(value, rawNode.block) && classNames) {
           const following = children.slice(i + 1);
-          const serialized = serializeBlocksToHtml(
-            following,
-            classNames,
-            config,
-            highlighted
-          );
+          const serialized = serializeBlocksToHtml(following, classNames, config, highlighted);
           if (serialized !== null) {
-            result.push(
-              React.createElement(RawHtml, { key: i, value: value + serialized })
-            );
+            result.push(React.createElement(RawHtml, { key: i, value: value + serialized }));
             i = children.length;
             continue;
           }
@@ -1062,8 +1040,7 @@ function renderListItemChildren(
   children.forEach((child, index) => {
     if (index > 0) {
       const prev = children[index - 1];
-      const bothInline =
-        INLINE_NODE_TYPES.has(prev.type) && INLINE_NODE_TYPES.has(child.type);
+      const bothInline = INLINE_NODE_TYPES.has(prev.type) && INLINE_NODE_TYPES.has(child.type);
       if (!bothInline) result.push('\n');
     }
     result.push(
@@ -1101,13 +1078,7 @@ function renderNode(
       }
       return (
         <p key={key} className={classNames.paragraph}>
-          {renderInlineNodes(
-            node.children,
-            classNames,
-            rendered,
-            highlighted,
-            config
-          )}
+          {renderInlineNodes(node.children, classNames, rendered, highlighted, config)}
         </p>
       );
     }
@@ -1166,7 +1137,15 @@ function renderNode(
           {mergeRawNodes(
             quote.children,
             (child, index) =>
-              renderNode(child, index, classNames, rendered, highlighted, config, containerRenderers),
+              renderNode(
+                child,
+                index,
+                classNames,
+                rendered,
+                highlighted,
+                config,
+                containerRenderers
+              ),
             classNames,
             config,
             highlighted
@@ -1178,7 +1157,11 @@ function renderNode(
       return <hr key={key} className={classNames.thematicBreak} />;
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, classNames, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} classNames={classNames}>
+          {renderCodeContent(codeBlock, classNames, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -1204,8 +1187,7 @@ function renderNode(
         renderNode(item, index, classNames, rendered, highlighted, config, containerRenderers)
       );
       if (list.ordered) {
-        const start =
-          list.start !== undefined && list.start !== 1 ? list.start : undefined;
+        const start = list.start !== undefined && list.start !== 1 ? list.start : undefined;
         return (
           <ol key={key} className={classNames.listOrdered} start={start}>
             {items}
@@ -1234,8 +1216,7 @@ function renderNode(
             />
             {/* cmark-gfm html_render emits `<input ... /> ` with a trailing
               space before the item text; the parser consumes the separator
-              whitespace, so emit the literal space here to keep DOM parity. */}
-            {' '}
+              whitespace, so emit the literal space here to keep DOM parity. */}{' '}
             {renderListItemChildren(
               item.children,
               classNames,
@@ -1268,12 +1249,7 @@ function renderNode(
       }
 
       return (
-        <WebDiagramNode
-          key={key}
-          node={diagram}
-          classNames={classNames}
-          rendered={rendered}
-        />
+        <WebDiagramNode key={key} node={diagram} classNames={classNames} rendered={rendered} />
       );
     }
     case 'container': {
@@ -1558,7 +1534,7 @@ function renderNode(
       const table = node;
       const rows = table.children;
       let firstBodyRow = rows.findIndex(
-        (row) => !(row as { children?: Array<{ header?: boolean }> }).children?.[0]?.header
+        row => !(row as { children?: Array<{ header?: boolean }> }).children?.[0]?.header
       );
       if (firstBodyRow < 0) firstBodyRow = rows.length;
       const headRows = rows.slice(0, firstBodyRow);
@@ -1568,14 +1544,30 @@ function renderNode(
           {headRows.length > 0 && (
             <thead className={classNames.tableHead}>
               {headRows.map((row, index) =>
-                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+                renderNode(
+                  row,
+                  index,
+                  classNames,
+                  rendered,
+                  highlighted,
+                  config,
+                  containerRenderers
+                )
               )}
             </thead>
           )}
           {bodyRows.length > 0 && (
             <tbody className={classNames.tableBody}>
               {bodyRows.map((row, index) =>
-                renderNode(row, index, classNames, rendered, highlighted, config, containerRenderers)
+                renderNode(
+                  row,
+                  index,
+                  classNames,
+                  rendered,
+                  highlighted,
+                  config,
+                  containerRenderers
+                )
               )}
             </tbody>
           )}
@@ -1658,9 +1650,7 @@ function renderNode(
       // Flatten once: if children is a single paragraph, spread its inline content
       // directly; otherwise render as block-level nodes (allows multi-paragraph footnotes).
       const soleParagraph =
-        def.children.length === 1 && def.children[0]?.type === 'paragraph'
-          ? def.children[0]
-          : null;
+        def.children.length === 1 && def.children[0]?.type === 'paragraph' ? def.children[0] : null;
       const body = soleParagraph
         ? renderInlineNodes(soleParagraph.children, classNames, rendered, highlighted, config)
         : def.children.map((child, index) =>
@@ -1715,9 +1705,8 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   classNames: SupramarkClassNames,
   highlighted: Map<string, SupramarkCodeHighlightResult>
 ): React.ReactNode {
@@ -1728,28 +1717,22 @@ function renderCodeBlock(
   const codeClassName = [classNames.code, languageClass].filter(Boolean).join(' ') || undefined;
 
   if (!highlight) {
-    return (
-      <pre key={key} className={classNames.codeBlock}>
-        <code className={codeClassName}>{codeBlock.value}</code>
-      </pre>
-    );
+    return <code className={codeClassName}>{codeBlock.value}</code>;
   }
 
   return (
-    <pre key={key} className={classNames.codeBlock}>
-      <code className={codeClassName} data-language={highlight.language ?? codeBlock.lang}>
-        {highlight.lines.map((line, lineIndex) => (
-          <React.Fragment key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <span key={tokenIndex} style={codeTokenStyle(token)}>
-                {token.text}
-              </span>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </React.Fragment>
-        ))}
-      </code>
-    </pre>
+    <code className={codeClassName} data-language={highlight.language ?? codeBlock.lang}>
+      {highlight.lines.map((line, lineIndex) => (
+        <React.Fragment key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <span key={tokenIndex} style={codeTokenStyle(token)}>
+              {token.text}
+            </span>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </React.Fragment>
+      ))}
+    </code>
   );
 }
 
@@ -1795,7 +1778,7 @@ function inlineNodesToHtml(
   config?: SupramarkConfig
 ): string | null {
   if (!isDangerousHtmlAllowed(config)) return null;
-  if (!nodes.some((n) => n.type === 'raw')) return null;
+  if (!nodes.some(n => n.type === 'raw')) return null;
   return serializeInlineList(nodes, classNames, config);
 }
 
@@ -1900,17 +1883,13 @@ function serializeBlockToHtml(
     case 'paragraph': {
       const inline = serializeInlineList(node.children, classNames, config);
       if (inline === null) return null;
-      const cls = classNames.paragraph
-        ? ` class="${escapeHtmlAttr(classNames.paragraph)}"`
-        : '';
+      const cls = classNames.paragraph ? ` class="${escapeHtmlAttr(classNames.paragraph)}"` : '';
       return `<p${cls}>${inline}</p>\n`;
     }
     case 'code': {
       const lang = node.lang ?? '';
       const languageClass = lang ? `language-${escapeHtmlAttr(lang)}` : '';
-      const codeClass = [classNames.code ?? '', languageClass]
-        .filter(Boolean)
-        .join(' ');
+      const codeClass = [classNames.code ?? '', languageClass].filter(Boolean).join(' ');
       const codeClassAttr = codeClass ? ` class="${escapeHtmlAttr(codeClass)}"` : '';
       const preClassAttr = classNames.codeBlock
         ? ` class="${escapeHtmlAttr(classNames.codeBlock)}"`
@@ -2003,10 +1982,7 @@ function codeTokenInlineCss(token: {
 // the value itself — e.g. `<div>\n*foo*\n` or `  <div>\n`. cmark leaves such a
 // container unclosed and the reference HTML relies on the final parser folding
 // following blocks into it. Used to absorb following siblings into one RawHtml.
-function unclosedBlockContainerOpen(
-  value: string,
-  isBlock: boolean | undefined
-): string | null {
+function unclosedBlockContainerOpen(value: string, isBlock: boolean | undefined): string | null {
   if (!isBlock) return null;
   const m = value.match(/^\s*<([a-zA-Z][\w-]*)\b/);
   if (!m) return null;
@@ -2028,8 +2004,20 @@ function unclosedBlockContainerOpen(
 // one RawHtml fragment so the browser's tree-construction reproduces cmark's
 // reconstruction in a single parse.
 const HTML_FORMATTING_TAGS = new Set([
-  'a', 'b', 'big', 'code', 'em', 'font', 'i', 'nobr', 's', 'small', 'strike',
-  'strong', 'tt', 'u',
+  'a',
+  'b',
+  'big',
+  'code',
+  'em',
+  'font',
+  'i',
+  'nobr',
+  's',
+  'small',
+  'strike',
+  'strong',
+  'tt',
+  'u',
 ]);
 function unclosedInlineFormattingTags(html: string): string[] {
   const counts: Record<string, number> = {};
@@ -2041,7 +2029,7 @@ function unclosedInlineFormattingTags(html: string): string[] {
     const closing = m[0].charCodeAt(1) === 47; // '</'
     counts[tag] = (counts[tag] ?? 0) + (closing ? -1 : 1);
   }
-  return Object.keys(counts).filter((t) => counts[t] > 0);
+  return Object.keys(counts).filter(t => counts[t] > 0);
 }
 
 function renderInlineNode(
@@ -2069,13 +2057,27 @@ function renderInlineNode(
       if (parentType === 'strong' && isFlattenNestedStrongEnabled(config)) {
         return (
           <React.Fragment key={key}>
-            {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
+            {renderInlineNodes(
+              strongNode.children,
+              classNames,
+              rendered,
+              highlighted,
+              config,
+              'strong'
+            )}
           </React.Fragment>
         );
       }
       return (
         <strong key={key} className={classNames.strong}>
-          {renderInlineNodes(strongNode.children, classNames, rendered, highlighted, config, 'strong')}
+          {renderInlineNodes(
+            strongNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'strong'
+          )}
         </strong>
       );
     }
@@ -2083,7 +2085,14 @@ function renderInlineNode(
       const emphasisNode = node;
       return (
         <em key={key} className={classNames.emphasis}>
-          {renderInlineNodes(emphasisNode.children, classNames, rendered, highlighted, config, 'emphasis')}
+          {renderInlineNodes(
+            emphasisNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'emphasis'
+          )}
         </em>
       );
     }
@@ -2135,17 +2144,32 @@ function renderInlineNode(
       // so emit it explicitly to match the expected DOM.
       return (
         <React.Fragment key={key}>
-          <br />{'\n'}
+          <br />
+          {'\n'}
         </React.Fragment>
       );
     case 'delete': {
       const deleteNode = node;
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-gfm'])) {
-        return renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete');
+        return renderInlineNodes(
+          deleteNode.children,
+          classNames,
+          rendered,
+          highlighted,
+          config,
+          'delete'
+        );
       }
       return (
         <del key={key} className={classNames.delete}>
-          {renderInlineNodes(deleteNode.children, classNames, rendered, highlighted, config, 'delete')}
+          {renderInlineNodes(
+            deleteNode.children,
+            classNames,
+            rendered,
+            highlighted,
+            config,
+            'delete'
+          )}
         </del>
       );
     }
