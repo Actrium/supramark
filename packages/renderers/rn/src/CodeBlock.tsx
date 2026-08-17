@@ -59,7 +59,7 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
     if (!onCopyCode) {
       return;
     }
-    onCopyCode(node.value, node);
+    void onCopyCode(node.value, node);
     setCopied(true);
     if (timerRef.current) {
       clearTimeout(timerRef.current);
