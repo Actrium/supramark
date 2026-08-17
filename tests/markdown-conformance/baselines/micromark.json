@@ -6,9 +6,6 @@
   "caseCount": 1151,
   "parserProfile": "supramark-default",
   "comparisonTarget": "production-web-renderer-dom",
-  "semanticFailureIds": [
-    "micromark-4.0.2-flow-code-indented-0026",
-    "micromark-4.0.2-flow-html-0148"
-  ],
+  "semanticFailureIds": [],
   "visualFailureIds": []
 }

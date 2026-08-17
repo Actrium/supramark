@@ -47,6 +47,12 @@ struct HTMLSequence {
     /// only at their specific close condition (running through blank lines);
     /// types 6–7 end at a blank line.
     ends_at_blank: bool,
+    /// Whether this sequence may only interrupt a paragraph on a lazy
+    /// continuation line (inside a container whose marker the line lacks).
+    /// True for type 7 only: CommonMark 0.30 §4.6 forbids type 7 from
+    /// interrupting a paragraph at the top level (non-lazy), but micromark
+    /// lets it exit the enclosing container on a lazy line.
+    only_interrupts_lazy: bool,
 }
 
 impl HTMLSequence {
@@ -56,6 +62,22 @@ impl HTMLSequence {
             close,
             can_terminate_paragraph,
             ends_at_blank,
+            only_interrupts_lazy: false,
+        }
+    }
+
+    pub fn new_lazy_only(
+        open: Regex,
+        close: Regex,
+        can_terminate_paragraph: bool,
+        ends_at_blank: bool,
+    ) -> Self {
+        Self {
+            open,
+            close,
+            can_terminate_paragraph,
+            ends_at_blank,
+            only_interrupts_lazy: true,
         }
     }
 }
@@ -104,10 +126,10 @@ static HTML_SEQUENCES: Lazy<[HTMLSequence; 7]> = Lazy::new(|| {
             true,
             true,
         ),
-        HTMLSequence::new(
+        HTMLSequence::new_lazy_only(
             Regex::new(&format!("{open_close_tag_re}\\s*$")).unwrap(),
             Regex::new(r#"^$"#).unwrap(),
-            false,
+            true,
             true,
         ),
     ]
@@ -143,6 +165,14 @@ impl BlockRule for HtmlBlockScanner {
     fn check(state: &mut BlockState) -> Option<()> {
         let sequence = Self::get_sequence(state)?;
         if !sequence.can_terminate_paragraph {
+            return None;
+        }
+        // Type 7 (`only_interrupts_lazy`) may only interrupt on a lazy
+        // continuation line; on a non-lazy paragraph line it stays inline
+        // (CommonMark 0.30 §4.6). `state.in_lazy_continuation` is set by the
+        // enclosing container (blockquote / list) while testing a markerless
+        // continuation line.
+        if sequence.only_interrupts_lazy && !state.in_lazy_continuation {
             return None;
         }
         // `get_sequence` only matches type 1–6 start conditions. Type 1 names
