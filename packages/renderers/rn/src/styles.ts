@@ -24,6 +24,10 @@ export interface SupramarkStyles {
   // Code blocks
   codeBlock?: ViewStyle;
   code?: TextStyle;
+  /** Copy button overlay on a code block (shown only when onCopyCode is provided). */
+  codeButton?: ViewStyle;
+  /** Label text inside the copy button. */
+  codeButtonText?: TextStyle;
 
   // Lists
   list?: ViewStyle;
@@ -124,6 +128,19 @@ export const defaultStyles = StyleSheet.create({
   },
   code: {
     fontFamily: 'Menlo',
+    fontSize: 12,
+  },
+  codeButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  codeButtonText: {
+    color: '#ffffff',
     fontSize: 12,
   },
   list: {
@@ -358,6 +375,9 @@ export function mergeStyles(customStyles?: SupramarkStyles): typeof defaultStyle
   return merged as typeof defaultStyles;
 }
 
+/** The fully-merged style shape consumed by renderer components. */
+export type MergedStyles = ReturnType<typeof mergeStyles>;
+
 /**
  * Dark theme styles
  */
@@ -388,6 +408,9 @@ export const darkThemeStyles: SupramarkStyles = {
   },
   codeBlock: {
     backgroundColor: '#2d2d2d',
+  },
+  codeButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
   },
   inlineCode: {
     backgroundColor: '#2d2d2d',
