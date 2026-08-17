@@ -109,4 +109,10 @@ describe('code block copy button (web)', () => {
     expect(writeText).not.toHaveBeenCalled();
     expect(button.textContent).toContain('Copied');
   });
+
+  test('omits the button when the code block has no language (indented / language-less fence)', async () => {
+    const container = await renderCode('foo\n', undefined);
+    expect(findButton(container)).toBeNull();
+    expect(container.innerHTML).toContain('foo');
+  });
 });

@@ -89,4 +89,13 @@ describe('code block copy button (RN)', () => {
     const labelAfter = renderer.root.findByType('TouchableOpacity').children[0];
     expect(labelAfter.props.children).toBe('Copied');
   });
+
+  it('omits the button when the code block has no language even if onCopyCode is provided', async () => {
+    const onCopyCode = mock(() => undefined);
+    const renderer = await renderAst(codeAst('foo\n'), { onCopyCode });
+    expect(renderer.root.findAllByType('TouchableOpacity')).toHaveLength(0);
+    // code content still renders
+    const text = renderer.root.findByType('Text');
+    expect(text.props.children).toBe('foo\n');
+  });
 });
