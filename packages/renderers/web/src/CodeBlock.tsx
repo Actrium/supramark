@@ -39,6 +39,7 @@ const INLINE_BUTTON_STYLE: React.CSSProperties = {
   padding: '4px 8px',
   fontSize: 12,
   cursor: 'pointer',
+  userSelect: 'none',
 };
 
 /**
@@ -69,17 +70,32 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
   // stay a plain <pre> without a "Copy" button.
   const showButton = copyButton !== false && Boolean(node.lang);
 
+  // Wait for the clipboard write to resolve before flipping the label: a
+  // rejected writeText (non-secure context, denied permission, locked-down
+  // iframe) or a rejected onCopyCode must leave "Copy" in place so the user
+  // does not see a fake success. The handler stays void (not async) to satisfy
+  // the onClick contract; the async IIFE carries its own catch so rejections
+  // never surface as unhandledrejection. Hosts that want to observe failures
+  // do so inside their own onCopyCode handler.
   const handleClick = (): void => {
-    if (onCopyCode) {
-      void onCopyCode(node.value, node);
-    } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(node.value);
-    }
-    setCopied(true);
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
+    void (async () => {
+      try {
+        if (onCopyCode) {
+          await onCopyCode(node.value, node);
+        } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(node.value);
+        } else {
+          return;
+        }
+        setCopied(true);
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
+        timerRef.current = setTimeout(() => setCopied(false), 1500);
+      } catch {
+        // Clipboard write or host handler rejected: keep "Copy".
+      }
+    })();
   };
 
   // No button: render the pre as before (no wrapper div).
@@ -98,7 +114,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
         className={classNames.codeButton}
         style={buttonStyle}
         onClick={handleClick}
-        aria-label="Copy code"
+        aria-label={copied ? 'Copied code' : 'Copy code'}
       >
         <span className={classNames.codeButtonText}>{copied ? 'Copied' : 'Copy'}</span>
       </button>
