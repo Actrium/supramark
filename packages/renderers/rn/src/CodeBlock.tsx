@@ -55,16 +55,26 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
   const showButton =
     copyButton !== false && typeof onCopyCode === 'function' && Boolean(node.lang);
 
+  // Wait for the host handler to resolve before flipping the label: a
+  // rejected onCopyCode must leave "Copy" in place so the user does not see a
+  // fake success. The handler stays void (not async) to satisfy the onPress
+  // contract; the async IIFE carries its own catch.
   const handlePress = (): void => {
     if (!onCopyCode) {
       return;
     }
-    void onCopyCode(node.value, node);
-    setCopied(true);
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
+    void (async () => {
+      try {
+        await onCopyCode(node.value, node);
+        setCopied(true);
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
+        timerRef.current = setTimeout(() => setCopied(false), 1500);
+      } catch {
+        // Host handler rejected: keep "Copy".
+      }
+    })();
   };
 
   if (!showButton) {
@@ -77,7 +87,7 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
       <TouchableOpacity
         style={styles.codeButton}
         onPress={handlePress}
-        accessibilityLabel="Copy code"
+        accessibilityLabel={copied ? 'Copied code' : 'Copy code'}
       >
         <Text style={styles.codeButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
       </TouchableOpacity>

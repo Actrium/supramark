@@ -103,7 +103,7 @@ export const tailwindClassNames: SupramarkClassNames = {
   code: 'font-mono text-sm',
   codeBlockContainer: 'relative',
   codeButton:
-    'absolute top-2 right-2 bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500',
+    'absolute top-2 right-2 bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500 select-none',
   codeButtonText: '',
   listOrdered: 'list-decimal ml-6 mb-4',
   listUnordered: 'list-disc ml-6 mb-4',
