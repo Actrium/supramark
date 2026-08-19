@@ -24,7 +24,13 @@ export interface SupramarkStyles {
   // Code blocks
   codeBlock?: ViewStyle;
   code?: TextStyle;
-  /** Copy button overlay on a code block (shown only when onCopyCode is provided). */
+  /** Wrapper around a code block header (lang + button) and the code body. */
+  codeBlockContainer?: ViewStyle;
+  /** Header row: language label on the left, copy button on the right. */
+  codeBlockHeader?: ViewStyle;
+  /** Language label in the header (the fenced info string). */
+  codeBlockLang?: TextStyle;
+  /** Copy button in the header (shown only when onCopyCode is provided). */
   codeButton?: ViewStyle;
   /** Label text inside the copy button. */
   codeButtonText?: TextStyle;
@@ -143,10 +149,25 @@ export const defaultStyles = StyleSheet.create({
     fontFamily: 'Menlo',
     fontSize: 12,
   },
+  codeBlockContainer: {
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  codeBlockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+  },
+  codeBlockLang: {
+    fontSize: 12,
+    color: 'rgba(0, 0, 0, 0.55)',
+    fontFamily: 'Menlo',
+  },
   codeButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 4,
     paddingHorizontal: 8,
@@ -465,6 +486,12 @@ export const darkThemeStyles: SupramarkStyles = {
   },
   codeBlock: {
     backgroundColor: '#2d2d2d',
+  },
+  codeBlockHeader: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  codeBlockLang: {
+    color: 'rgba(255, 255, 255, 0.6)',
   },
   codeButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.25)',

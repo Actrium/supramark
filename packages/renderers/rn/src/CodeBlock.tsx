@@ -26,7 +26,9 @@ interface CodeBlockProps {
 }
 
 /**
- * Renders the code-block shell with an optional top-right copy button.
+ * Renders the code-block shell with an optional header row carrying the
+ * language label (left) and a copy button (right), so the button never
+ * overlays a code line.
  *
  * React Native stays clipboard-free: the button is rendered only when the host
  * provides `onCopyCode` (and has not disabled it via `copyButton: false`).
@@ -82,15 +84,18 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
   }
 
   return (
-    <View style={[styles.codeBlock, { position: 'relative' }]}>
-      {children}
-      <TouchableOpacity
-        style={styles.codeButton}
-        onPress={handlePress}
-        accessibilityLabel={copied ? 'Copied code' : 'Copy code'}
-      >
-        <Text style={styles.codeButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
-      </TouchableOpacity>
+    <View style={styles.codeBlockContainer}>
+      <View style={styles.codeBlockHeader}>
+        <Text style={styles.codeBlockLang}>{node.lang}</Text>
+        <TouchableOpacity
+          style={styles.codeButton}
+          onPress={handlePress}
+          accessibilityLabel={copied ? 'Copied code' : 'Copy code'}
+        >
+          <Text style={styles.codeButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.codeBlock}>{children}</View>
     </View>
   );
 }

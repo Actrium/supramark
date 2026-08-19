@@ -82,6 +82,17 @@ describe('code block copy button (web)', () => {
     expect(container.innerHTML).toContain('language-ts');
   });
 
+  test('shows the language label in a header row beside the button', async () => {
+    const container = await renderCode('const x = 1\n', 'ts');
+    // The header carries the language text and the button as siblings, so the
+    // button never overlays a code line.
+    expect(container.innerHTML).toContain('>ts<');
+    const button = findButton(container)!;
+    const header = button.parentElement;
+    expect(header?.textContent).toContain('ts');
+    expect(header?.textContent).toContain('Copy');
+  });
+
   test('omits the button when copyButton is false', async () => {
     const container = await renderCode('const x = 1\n', 'ts', { copyButton: false });
     expect(findButton(container)).toBeNull();

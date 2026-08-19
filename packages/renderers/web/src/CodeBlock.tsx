@@ -26,12 +26,25 @@ interface CodeBlockProps {
 
 // Inline fallback styles so the button works out of the box even when the host
 // uses the empty defaultClassNames. When the host supplies a className for the
-// button or container, the inline style is dropped so the className owns it.
+// header / lang / button / container, the inline style is dropped so the
+// className owns it. The button lives in a header row (lang left, button
+// right) instead of an absolute overlay, so it never covers a code line.
 const INLINE_CONTAINER_STYLE: React.CSSProperties = { position: 'relative' };
+const INLINE_HEADER_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '4px 8px',
+  backgroundColor: 'rgba(0, 0, 0, 0.08)',
+  borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+  userSelect: 'none',
+};
+const INLINE_LANG_STYLE: React.CSSProperties = {
+  fontSize: 12,
+  color: 'rgba(0, 0, 0, 0.55)',
+  fontFamily: 'monospace',
+};
 const INLINE_BUTTON_STYLE: React.CSSProperties = {
-  position: 'absolute',
-  top: 8,
-  right: 8,
   backgroundColor: 'rgba(0, 0, 0, 0.5)',
   color: '#ffffff',
   border: 'none',
@@ -43,7 +56,9 @@ const INLINE_BUTTON_STYLE: React.CSSProperties = {
 };
 
 /**
- * Renders the code-block shell with an optional top-right copy button.
+ * Renders the code-block shell with an optional header row carrying the
+ * language label (left) and a copy button (right), so the button never
+ * overlays a code line.
  *
  * Web defaults to `navigator.clipboard.writeText` (zero dependency); the host
  * can override the action via `onCopyCode`. Disable the button with
@@ -104,20 +119,27 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
   }
 
   const containerStyle = classNames.codeBlockContainer ? undefined : INLINE_CONTAINER_STYLE;
+  const headerStyle = classNames.codeBlockHeader ? undefined : INLINE_HEADER_STYLE;
+  const langStyle = classNames.codeBlockLang ? undefined : INLINE_LANG_STYLE;
   const buttonStyle = classNames.codeButton ? undefined : INLINE_BUTTON_STYLE;
 
   return (
     <div className={classNames.codeBlockContainer} style={containerStyle}>
+      <div className={classNames.codeBlockHeader} style={headerStyle}>
+        <span className={classNames.codeBlockLang} style={langStyle}>
+          {node.lang}
+        </span>
+        <button
+          type="button"
+          className={classNames.codeButton}
+          style={buttonStyle}
+          onClick={handleClick}
+          aria-label={copied ? 'Copied code' : 'Copy code'}
+        >
+          <span className={classNames.codeButtonText}>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
       <pre className={classNames.codeBlock}>{children}</pre>
-      <button
-        type="button"
-        className={classNames.codeButton}
-        style={buttonStyle}
-        onClick={handleClick}
-        aria-label={copied ? 'Copied code' : 'Copy code'}
-      >
-        <span className={classNames.codeButtonText}>{copied ? 'Copied' : 'Copy'}</span>
-      </button>
     </div>
   );
 }
