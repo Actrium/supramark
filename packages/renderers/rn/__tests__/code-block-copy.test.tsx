@@ -66,6 +66,14 @@ describe('code block copy button (RN)', () => {
     expect(onCopyCode.mock.calls[0][1]).toMatchObject({ type: 'code' });
   });
 
+  it('shows the language label in a header row beside the button', async () => {
+    const onCopyCode = mock(() => undefined);
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+    // The header carries the language Text and the button as siblings.
+    const texts = renderer.root.findAllByType('Text');
+    expect(texts.some(t => t.props.children === 'ts')).toBe(true);
+  });
+
   it('omits the button when copyButton is false even if onCopyCode is provided', async () => {
     const onCopyCode = mock(() => undefined);
     const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), {
