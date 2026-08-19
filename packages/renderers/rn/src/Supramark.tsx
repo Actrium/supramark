@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Text, View, Linking, TouchableOpacity, Dimensions } from 'react-native';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { Text, View, Image, Linking, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import type {
   SupramarkRootNode,
   SupramarkNode,
+  SupramarkImageNode,
   SupramarkHeadingNode,
   SupramarkCodeNode,
   SupramarkMathBlockNode,
@@ -220,6 +221,46 @@ export interface ContainerRendererRN {
   }): RenderedNode;
 }
 
+/** A reference to an image within a gallery group. */
+export interface SupramarkImageRef {
+  url: string;
+  alt?: string;
+  title?: string;
+}
+
+/**
+ * Image tap event delivered to a host-supplied {@link SupramarkImagePressHandler}.
+ *
+ * `galleryImages`/`galleryIndex` carry the adjacent images merged into the same
+ * gallery as the tapped image, so the host can open a swipeable preview covering
+ * the whole group. A single image still receives a one-element array.
+ */
+export interface SupramarkImagePressEvent {
+  /** The image's own URL. */
+  url: string;
+  /** Alt text, if present. */
+  alt?: string;
+  /** Title, if present. */
+  title?: string;
+  /** Outer link URL when the image is wrapped in a link. */
+  linkUrl?: string;
+  /** All images in the tapped image's gallery group (adjacent merged images). */
+  galleryImages: SupramarkImageRef[];
+  /** Index of the tapped image within {@link galleryImages}. */
+  galleryIndex: number;
+}
+
+/** Host handler invoked when the user taps a block image. */
+export type SupramarkImagePressHandler = (event: SupramarkImagePressEvent) => void;
+
+/**
+ * Context pipe for the image-press handler. Carries the host callback from the
+ * root <Supramark> down to <MarkdownImage> without threading it through every
+ * renderNode/renderRootNodes signature (image taps are an internal concern;
+ * unlike onOpenHtmlPage they never reach a custom container renderer).
+ */
+const ImagePressContext = createContext<SupramarkImagePressHandler | undefined>(undefined);
+
 export interface SupramarkProps {
   /** Markdown source text */
   markdown: string;
@@ -281,6 +322,17 @@ export interface SupramarkProps {
    * - the host may open a new page / modal / external browser from the callback.
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
+
+  /**
+   * Callback invoked when the user taps a block image.
+   *
+   * - When supplied, image taps are delegated to the host (e.g. to open a
+   *   full-screen gallery); the host fully owns the tap behavior.
+   * - When omitted: a standalone image is not tappable; an image link still
+   *   opens its URL via Linking.
+   * - `linkUrl` is set when the image is wrapped in a link.
+   */
+  onImagePress?: SupramarkImagePressHandler;
 }
 
 export const Supramark: React.FC<SupramarkProps> = ({
@@ -293,6 +345,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   onError,
   errorFallback,
   onOpenHtmlPage,
+  onImagePress,
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
@@ -477,19 +530,18 @@ export const Supramark: React.FC<SupramarkProps> = ({
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
-        <View style={mergedStyles.root}>
-          {parsedDocument.root.children.map((node, index) =>
-            renderNode(
-              node,
-              index,
+        <ImagePressContext.Provider value={onImagePress}>
+          <View style={mergedStyles.root}>
+            {renderRootNodes(
+              parsedDocument.root.children,
               mergedStyles,
               parsedDocument.highlighted,
               config,
               onOpenHtmlPage,
               mergedContainerRenderers
-            )
-          )}
-        </View>
+            )}
+          </View>
+        </ImagePressContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
   );
@@ -527,6 +579,257 @@ function containsCacheableDiagramNode(
   return false;
 }
 
+interface BlockImageItem {
+  image: SupramarkImageNode;
+  linkUrl?: string;
+}
+
+/** Whether an image URL has a scheme RN can load (http/data/file/blob). Relative paths and empty strings are not loadable as remote sources. */
+function hasLoadableImageUrl(url: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url);
+}
+
+/**
+ * Collects images from a sequence containing only images, image links, and
+ * layout separators (whitespace text, hard breaks). Returns null as soon as
+ * any non-image inline content appears, so mixed content keeps its inline
+ * layout. Shared by paragraph rendering and tight/loose list items so a
+ * standalone image in a list is not squeezed to 20×20.
+ */
+function collectImageItems(children: SupramarkNode[]): BlockImageItem[] | null {
+  const items: BlockImageItem[] = [];
+  for (const child of children) {
+    // Parser-produced whitespace between images is a layout separator, not mixed content.
+    if (child.type === 'text' && child.value.trim().length === 0) {
+      continue;
+    }
+    // Hard breaks between images are layout separators too, so `![a](u)\n![b](u)`
+    // (image + break + image) lands in the same gallery as the soft-newline form
+    // instead of degrading to 20×20 inlines.
+    if (child.type === 'break') {
+      continue;
+    }
+    // A direct image participates in the wrapping block-image flow.
+    if (child.type === 'image') {
+      items.push({ image: child });
+      continue;
+    }
+    // An image-only link participates while retaining its navigation target.
+    if (
+      child.type === 'link' &&
+      child.children.length === 1 &&
+      child.children[0].type === 'image'
+    ) {
+      items.push({ image: child.children[0], linkUrl: child.url });
+      continue;
+    }
+    return null;
+  }
+
+  return items.length > 0 ? items : null;
+}
+
+/** Extracts block-image items from an image-only paragraph. */
+function getBlockImageItems(node: SupramarkNode): BlockImageItem[] | null {
+  // Only paragraphs participate; other block types retain their existing layout.
+  if (node.type !== 'paragraph') {
+    return null;
+  }
+  return collectImageItems(node.children);
+}
+
+/** Renders one horizontally scrollable row of stable block-image containers. */
+function renderImageGallery(
+  items: BlockImageItem[],
+  key: number,
+  styles: ReturnType<typeof mergeStyles>
+): RenderedNode {
+  // Shared gallery context: every image in this adjacent group, so the host
+  // can open a swipeable preview covering the whole group.
+  const galleryImages: SupramarkImageRef[] = items.map(item => ({
+    url: item.image.url,
+    alt: item.image.alt || undefined,
+    title: item.image.title || undefined,
+  }));
+
+  // One image needs no horizontal gesture surface, so outer scrolling stays completely direct.
+  if (items.length === 1) {
+    const item = items[0];
+    return (
+      <MarkdownImage
+        key={key}
+        image={item.image}
+        linkUrl={item.linkUrl}
+        styles={styles}
+        galleryImages={galleryImages}
+        galleryIndex={0}
+      />
+    );
+  }
+
+  // Match the viewport to the reserved image height so a flex parent cannot
+  // create blank space — unless the host explicitly set a viewport height.
+  // The cast is needed because mergeStyles returns the narrow defaultStyles
+  // literal type, which does not declare height on imageGalleryViewport.
+  const viewportHeight =
+    (styles.imageGalleryViewport as { height?: number }).height ?? styles.imageContainer.height;
+  const galleryViewportStyle = {
+    ...styles.imageGalleryViewport,
+    height: viewportHeight,
+  };
+  return (
+    <ScrollView
+      key={key}
+      horizontal
+      directionalLockEnabled
+      nestedScrollEnabled
+      style={galleryViewportStyle}
+      contentContainerStyle={styles.imageGallery}
+    >
+      {items.map((item, index) => (
+        <MarkdownImage
+          key={index}
+          image={item.image}
+          linkUrl={item.linkUrl}
+          styles={styles}
+          galleryImages={galleryImages}
+          galleryIndex={index}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+/** Groups consecutive top-level image-only paragraphs into one horizontal image flow. */
+function renderRootNodes(
+  nodes: SupramarkNode[],
+  styles: ReturnType<typeof mergeStyles>,
+  highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
+  config?: SupramarkConfig,
+  onOpenHtmlPage?: (node: SupramarkContainerNode) => void,
+  containerRenderers?: Record<string, ContainerRendererRN>
+): RenderedNode[] {
+  const rendered: RenderedNode[] = [];
+  let index = 0;
+  while (index < nodes.length) {
+    const firstItems = getBlockImageItems(nodes[index]);
+    if (!firstItems) {
+      rendered.push(
+        renderNode(
+          nodes[index],
+          index,
+          styles,
+          highlighted,
+          config,
+          onOpenHtmlPage,
+          containerRenderers
+        )
+      );
+      index += 1;
+      continue;
+    }
+
+    // Consume only the contiguous image-only run so ordinary blocks remain untouched.
+    const galleryItems = [...firstItems];
+    const galleryKey = index;
+    index += 1;
+    while (index < nodes.length) {
+      const nextItems = getBlockImageItems(nodes[index]);
+      if (!nextItems) break;
+      galleryItems.push(...nextItems);
+      index += 1;
+    }
+    rendered.push(renderImageGallery(galleryItems, galleryKey, styles));
+  }
+  return rendered;
+}
+
+/** Renders a block image without changing its measured size when the bitmap finishes loading. */
+function MarkdownImage({
+  image,
+  linkUrl,
+  styles,
+  galleryImages,
+  galleryIndex,
+}: {
+  image: SupramarkImageNode;
+  linkUrl?: string;
+  styles: ReturnType<typeof mergeStyles>;
+  galleryImages: SupramarkImageRef[];
+  galleryIndex: number;
+}): RenderedNode {
+  const onImagePress = useContext(ImagePressContext);
+  // An empty or relative URL cannot be loaded as a remote source; show the
+  // placeholder up front instead of a blank 200×200 hole.
+  const loadable = hasLoadableImageUrl(image.url);
+  const [failed, setFailed] = useState(false);
+
+  // Empty alt + no title marks the image as decorative for screen readers.
+  const isDecorative = !image.alt && !image.title;
+  const accessibilityLabel = image.alt || image.title || undefined;
+
+  const imageContent = (
+    <View style={styles.imageContainer}>
+      {loadable && !failed ? (
+        <Image
+          source={{ uri: image.url }}
+          accessibilityLabel={accessibilityLabel}
+          accessibilityElementsHidden={isDecorative}
+          importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
+          style={styles.image}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <View
+          style={styles.imagePlaceholder}
+          accessibilityLabel={accessibilityLabel}
+          accessibilityElementsHidden={isDecorative}
+          importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
+        >
+          <Text style={styles.imagePlaceholderText}>
+            {image.alt || image.title || '[image]'}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
+  const handlePress = () =>
+    onImagePress?.({
+      url: image.url,
+      alt: image.alt || undefined,
+      title: image.title || undefined,
+      linkUrl,
+      galleryImages,
+      galleryIndex,
+    });
+
+  // An image link delegates to the host when it supplied a press handler;
+  // otherwise it opens the URL via Linking (preserves existing behavior).
+  if (linkUrl) {
+    return (
+      <TouchableOpacity
+        onPress={() => {
+          if (onImagePress) {
+            handlePress();
+            return;
+          }
+          Linking.openURL(linkUrl).catch(err => console.error('Failed to open URL:', err));
+        }}
+      >
+        {imageContent}
+      </TouchableOpacity>
+    );
+  }
+
+  // A standalone image is tappable only when the host supplied a press handler.
+  if (onImagePress) {
+    return <TouchableOpacity onPress={handlePress}>{imageContent}</TouchableOpacity>;
+  }
+
+  return imageContent;
+}
+
 function renderNode(
   node: SupramarkNode,
   key: number,
@@ -538,12 +841,19 @@ function renderNode(
   listMarker?: string
 ): RenderedNode {
   switch (node.type) {
-    case 'paragraph':
+    case 'paragraph': {
+      const blockImages = getBlockImageItems(node);
+      // Image-only paragraphs (including nested ones reached via renderNode) render
+      // as a stable block gallery instead of 20×20 inlines.
+      if (blockImages) {
+        return renderImageGallery(blockImages, key, styles);
+      }
       return (
         <Text key={key} style={styles.paragraph}>
           {renderInlineNodes(node.children, styles, highlighted, config)}
         </Text>
       );
+    }
     case 'heading': {
       const heading = node;
       return (
@@ -590,8 +900,21 @@ function renderNode(
       const checkSymbol = item.checked === true ? '☑' : '☐';
       const marker = `${listMarker ?? '•'} ${isTaskList ? `${checkSymbol} ` : ''}`;
 
-      // Tight list (inline-only children): plain <Text>, width-safe (see #101).
+      // Tight list (inline-only children). Width-safe column layout (see #101).
+      // An image-only tight item gets the same stable block container as a
+      // standalone image paragraph, instead of degrading to 20×20 inlines.
       if (item.children.every(isInlineNode)) {
+        const blockImages = collectImageItems(item.children);
+        if (blockImages) {
+          return (
+            <View key={key} style={styles.listItemBlock}>
+              <Text style={styles.paragraph}>{marker}</Text>
+              <View style={styles.listItemIndent}>
+                {renderImageGallery(blockImages, 0, styles)}
+              </View>
+            </View>
+          );
+        }
         return (
           <Text key={key} style={styles.paragraph}>
             {marker}
@@ -882,10 +1205,12 @@ function renderNode(
         );
       // Phase one: simply append as "[n] content" at the end of the text
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-footnote'])) {
-        // When the footnote feature is disabled, render as a plain paragraph
+        // When the footnote feature is disabled, render footnote content without
+        // the [n] bullet. Use the same View/gap wrapper as the enabled branch so
+        // an image-only paragraph does not place a View under <Text> (RN invariant).
         return (
           <View key={key} style={styles.listItem}>
-            <Text style={styles.listItemText}>{renderFootnoteContent()}</Text>
+            <View style={[styles.listItemText, { gap: 8 }]}>{renderFootnoteContent()}</View>
           </View>
         );
       }
@@ -1093,12 +1418,24 @@ function renderListItemBody(
     // Prefix the marker onto the first paragraph's inline content (loose lists).
     if (child.type === 'paragraph' && markerPending) {
       flushInline();
-      out.push(
-        <Text key={`li-${seq}`} style={styles.paragraph}>
-          {marker}
-          {renderInlineNodes(child.children, styles, highlighted, config)}
-        </Text>
-      );
+      // An image-only first paragraph gets the stable block container too, so
+      // a loose item's leading image is not squeezed to 20×20 beside the marker.
+      const blockImages = getBlockImageItems(child);
+      if (blockImages) {
+        out.push(
+          <View key={`li-${seq}`} style={styles.listItemBlock}>
+            <Text style={styles.paragraph}>{marker}</Text>
+            <View style={styles.listItemIndent}>{renderImageGallery(blockImages, 0, styles)}</View>
+          </View>
+        );
+      } else {
+        out.push(
+          <Text key={`li-${seq}`} style={styles.paragraph}>
+            {marker}
+            {renderInlineNodes(child.children, styles, highlighted, config)}
+          </Text>
+        );
+      }
       seq += 1;
       markerPending = false;
       continue;
@@ -1212,11 +1549,17 @@ function renderInlineNode(
     }
     case 'image': {
       const imageNode = node;
-      // Show images as text for now in RN (could use the Image component in the future)
+      // Empty alt + no title marks the image as decorative for screen readers.
+      const isDecorative = !imageNode.alt && !imageNode.title;
       return (
-        <Text key={key} style={styles.imageText}>
-          [Image: {imageNode.alt || imageNode.url}]
-        </Text>
+        <Image
+          key={key}
+          source={{ uri: imageNode.url }}
+          accessibilityLabel={imageNode.alt || imageNode.title || undefined}
+          accessibilityElementsHidden={isDecorative}
+          importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
+          style={styles.inlineImage}
+        />
       );
     }
     case 'break': {
