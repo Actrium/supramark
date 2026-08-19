@@ -31,6 +31,7 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { CodeBlock, CodeCopyContext } from './CodeBlock';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -273,6 +274,17 @@ export interface SupramarkProps {
   containerRenderers?: Record<string, ContainerRendererRN>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  /**
+   * Copy handler for fenced code blocks. When provided, each code block
+   * renders a top-right copy button that calls this with the raw source.
+   *
+   * RN stays clipboard-free: the host owns the clipboard API
+   * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
+   * inside this callback. Without it, no copy button is shown on RN.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /** Whether to show the code-block copy button (default: shown when onCopyCode is set). */
+  copyButton?: boolean;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -296,6 +308,8 @@ export const Supramark: React.FC<SupramarkProps> = ({
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
+  onCopyCode,
+  copyButton,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -477,19 +491,21 @@ export const Supramark: React.FC<SupramarkProps> = ({
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
-        <View style={mergedStyles.root}>
-          {parsedDocument.root.children.map((node, index) =>
-            renderNode(
-              node,
-              index,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              mergedContainerRenderers
-            )
-          )}
-        </View>
+        <CodeCopyContext.Provider value={{ onCopyCode, copyButton }}>
+          <View style={mergedStyles.root}>
+            {parsedDocument.root.children.map((node, index) =>
+              renderNode(
+                node,
+                index,
+                mergedStyles,
+                parsedDocument.highlighted,
+                config,
+                onOpenHtmlPage,
+                mergedContainerRenderers
+              )
+            )}
+          </View>
+        </CodeCopyContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
   );
@@ -554,7 +570,11 @@ function renderNode(
     }
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, styles, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} styles={styles}>
+          {renderCodeContent(codeBlock, styles, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -748,9 +768,7 @@ function renderNode(
 
         return (
           <View key={key} style={admonitionContainerStyle}>
-            {title ? (
-              <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text>
-            ) : null}
+            {title ? <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text> : null}
             {renderAdmonitionContent()}
           </View>
         );
@@ -959,9 +977,8 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>
 ): RenderedNode {
@@ -970,28 +987,22 @@ function renderCodeBlock(
   );
 
   if (!highlight) {
-    return (
-      <View key={key} style={styles.codeBlock}>
-        <Text style={styles.code}>{codeBlock.value}</Text>
-      </View>
-    );
+    return <Text style={styles.code}>{codeBlock.value}</Text>;
   }
 
   return (
-    <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>
-        {highlight.lines.map((line, lineIndex) => (
-          <Text key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
-                {token.text}
-              </Text>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </Text>
-        ))}
-      </Text>
-    </View>
+    <Text style={styles.code}>
+      {highlight.lines.map((line, lineIndex) => (
+        <Text key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
+              {token.text}
+            </Text>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </Text>
+      ))}
+    </Text>
   );
 }
 
@@ -1152,13 +1163,7 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(
-          strongNode.children,
-          styles,
-          highlighted,
-          config,
-          'strong'
-        );
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
       }
       return (
         <Text key={key} style={styles.strong}>
