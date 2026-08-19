@@ -43,6 +43,7 @@ const INLINE_LANG_STYLE: React.CSSProperties = {
   fontSize: 12,
   color: 'rgba(0, 0, 0, 0.55)',
   fontFamily: 'monospace',
+  userSelect: 'none',
 };
 const INLINE_BUTTON_STYLE: React.CSSProperties = {
   backgroundColor: 'rgba(0, 0, 0, 0.5)',
