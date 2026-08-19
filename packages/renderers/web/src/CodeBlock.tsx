@@ -40,7 +40,6 @@ const INLINE_HEADER_STYLE: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '4px 8px',
-  borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
   userSelect: 'none',
 };
 const INLINE_LANG_STYLE: React.CSSProperties = {
