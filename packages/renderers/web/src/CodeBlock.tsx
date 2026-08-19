@@ -29,13 +29,17 @@ interface CodeBlockProps {
 // header / lang / button / container, the inline style is dropped so the
 // className owns it. The button lives in a header row (lang left, button
 // right) instead of an absolute overlay, so it never covers a code line.
-const INLINE_CONTAINER_STYLE: React.CSSProperties = { position: 'relative' };
+const INLINE_CONTAINER_STYLE: React.CSSProperties = {
+  backgroundColor: '#f5f5f5',
+  borderRadius: 4,
+  marginBottom: 16,
+  overflow: 'hidden',
+};
 const INLINE_HEADER_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '4px 8px',
-  backgroundColor: 'rgba(0, 0, 0, 0.08)',
   borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
   userSelect: 'none',
 };
@@ -44,6 +48,11 @@ const INLINE_LANG_STYLE: React.CSSProperties = {
   color: 'rgba(0, 0, 0, 0.55)',
   fontFamily: 'monospace',
   userSelect: 'none',
+};
+const INLINE_CODEBLOCK_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: 16,
+  overflowX: 'auto',
 };
 const INLINE_BUTTON_STYLE: React.CSSProperties = {
   backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -114,15 +123,16 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
     })();
   };
 
-  // No button: render the pre as before (no wrapper div).
-  if (!showButton) {
-    return <pre className={classNames.codeBlock}>{children}</pre>;
-  }
-
   const containerStyle = classNames.codeBlockContainer ? undefined : INLINE_CONTAINER_STYLE;
   const headerStyle = classNames.codeBlockHeader ? undefined : INLINE_HEADER_STYLE;
   const langStyle = classNames.codeBlockLang ? undefined : INLINE_LANG_STYLE;
   const buttonStyle = classNames.codeButton ? undefined : INLINE_BUTTON_STYLE;
+  const codeBlockStyle = classNames.codeBlock ? undefined : INLINE_CODEBLOCK_STYLE;
+
+  // No button: render the pre as before (no wrapper div).
+  if (!showButton) {
+    return <pre className={classNames.codeBlock} style={codeBlockStyle}>{children}</pre>;
+  }
 
   return (
     <div className={classNames.codeBlockContainer} style={containerStyle}>
@@ -140,7 +150,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
           <span className={classNames.codeButtonText}>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
-      <pre className={classNames.codeBlock}>{children}</pre>
+      <pre className={classNames.codeBlock} style={codeBlockStyle}>{children}</pre>
     </div>
   );
 }
