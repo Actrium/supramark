@@ -93,6 +93,14 @@ describe('code block copy button (web)', () => {
     expect(header?.textContent).toContain('Copy');
   });
 
+  test('marks the header and language label as non-selectable', async () => {
+    const container = await renderCode('const x = 1\n', 'ts');
+    // A select-all on the block must not sweep the language label or button
+    // text into the clipboard. The default (empty classNames) path uses inline
+    // user-select: none on the header, the language label, and the button.
+    expect(container.innerHTML).toMatch(/user-select: none/);
+  });
+
   test('omits the button when copyButton is false', async () => {
     const container = await renderCode('const x = 1\n', 'ts', { copyButton: false });
     expect(findButton(container)).toBeNull();

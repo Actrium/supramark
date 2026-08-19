@@ -108,7 +108,7 @@ export const tailwindClassNames: SupramarkClassNames = {
   codeBlockContainer: 'rounded-md mb-4 overflow-hidden',
   codeBlockHeader:
     'flex items-center justify-between px-2 py-1 bg-gray-200 dark:bg-gray-700 select-none',
-  codeBlockLang: 'text-xs text-gray-600 dark:text-gray-300 font-mono',
+  codeBlockLang: 'text-xs text-gray-600 dark:text-gray-300 font-mono select-none',
   codeButton:
     'bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500 select-none',
   codeButtonText: '',
