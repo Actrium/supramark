@@ -128,9 +128,10 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
   const buttonStyle = classNames.codeButton ? undefined : INLINE_BUTTON_STYLE;
   const codeBlockStyle = classNames.codeBlock ? undefined : INLINE_CODEBLOCK_STYLE;
 
-  // No button: render the pre as before (no wrapper div).
+  // No button: render the pre as before (no wrapper div, no inline style) so
+  // conformance (copyButton false) measures the spec <pre><code> DOM.
   if (!showButton) {
-    return <pre className={classNames.codeBlock} style={codeBlockStyle}>{children}</pre>;
+    return <pre className={classNames.codeBlock}>{children}</pre>;
   }
 
   return (
