@@ -1,7 +1,7 @@
 {
   "name": "@actrium/supramark-d2-native-rn",
   "version": "0.1.0",
-  "description": "React Native native FFI wrapper for d2-little — D2 diagrams to SVG on iOS, macOS, and Android.",
+  "description": "React Native native FFI wrapper for d2-little — D2 diagrams to SVG on iOS, macOS, Android, and Windows.",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
   "types": "lib/typescript/index.d.ts",
@@ -21,6 +21,7 @@
     "ios",
     "macos",
     "android",
+    "windows",
     "scripts",
     "!android/.cxx",
     "!android/build",
@@ -47,7 +48,13 @@
   "peerDependencies": {
     "@supramark/engines": "workspace:*",
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-windows": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native-windows": {
+      "optional": true
+    }
   },
   "devDependencies": {},
   "codegenConfig": {
