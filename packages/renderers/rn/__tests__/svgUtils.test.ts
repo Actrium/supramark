@@ -1,5 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { normalizeSvg, normalizeSvgLight, stripRootSvgSize } from '../src/svgUtils';
+import {
+  normalizeSvg,
+  normalizeSvgLight,
+  stripRootSvgSize,
+  fixD2NestedViewBox,
+  D2_NESTED_VIEWBOX_RATIO_THRESHOLD,
+} from '../src/svgUtils';
 
 // ============================================================================
 // normalizeSvgLight — lightweight cleanup (for already style-inlined SVG such as MathJax)
@@ -485,5 +491,180 @@ describe('stripRootSvgSize', () => {
     expect(result).toContain('data-token="$&amp;bar"');
     expect(result).not.toContain('width=');
     expect(result).not.toContain('height=');
+  });
+});
+
+// ============================================================================
+// fixD2NestedViewBox — d2 v0.7.1 nested-svg outer-viewBox bug
+// ============================================================================
+
+describe('fixD2NestedViewBox', () => {
+  // ----- d2 v0.7.1 nested case (the actual bug) -----
+
+  test('d2 v0.7.1: replaces the outer viewBox with the inner content dimensions', () => {
+    // Outer viewBox is "0 0 10 10" but the inner d2-svg is actually 280x250.
+    // Real-world ratio is ~28x, well above the 2x threshold.
+    const svg =
+      '<svg class="d2-wrapper" viewBox="0 0 10 10">' +
+      '<svg class="d2-svg" viewBox="-1 -1 280 250">' +
+      '<g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    expect(result.applied).toBe(true);
+    expect(result.intrinsicWidth).toBe(280);
+    expect(result.intrinsicHeight).toBe(250);
+    // Outer viewBox is the FIRST match → it's the one replaced.
+    expect(result.svg).toMatch(/<svg class="d2-wrapper" viewBox="0 0 280 250">/);
+    // The inner d2-svg is preserved.
+    expect(result.svg).toContain(
+      '<svg class="d2-svg" viewBox="-1 -1 280 250">'
+    );
+  });
+
+  test('d2 v0.7.1: handles the case where only the width ratio exceeds the threshold', () => {
+    // Width ratio 5x, height ratio 1x — fix should still trigger.
+    const svg =
+      '<svg viewBox="0 0 10 100">' +
+      '<svg viewBox="0 0 50 100"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 100);
+    expect(result.applied).toBe(true);
+    expect(result.svg).toContain('viewBox="0 0 50 100"');
+  });
+
+  test('d2 v0.7.1: handles the case where only the height ratio exceeds the threshold', () => {
+    // Width ratio 1x, height ratio 5x — fix should still trigger.
+    const svg =
+      '<svg viewBox="0 0 100 10">' +
+      '<svg viewBox="0 0 100 50"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 10);
+    expect(result.applied).toBe(true);
+    expect(result.svg).toContain('viewBox="0 0 100 50"');
+  });
+
+  // ----- no-op cases (the fix should NOT trigger) -----
+
+  test('mermaid: single svg with viewBox → not modified', () => {
+    const svg = '<svg id="m1" viewBox="0 0 100 50"><g/></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 50);
+    expect(result.applied).toBe(false);
+    expect(result.svg).toBe(svg);
+  });
+
+  test('d2 v0.6: nested svg with matching dimensions → not modified', () => {
+    // Outer and inner have the same viewBox — no bug to fix.
+    const svg =
+      '<svg viewBox="0 0 100 100">' +
+      '<svg class="d2-svg" viewBox="-1 -1 100 100"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 100);
+    expect(result.applied).toBe(false);
+    expect(result.svg).toBe(svg);
+  });
+
+  test('nested svg with small (within-threshold) dimension difference → not modified', () => {
+    // 1.5x ratio, below the 2x threshold.
+    const svg =
+      '<svg viewBox="0 0 100 100">' +
+      '<svg viewBox="0 0 150 150"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 100);
+    expect(result.applied).toBe(false);
+    expect(result.svg).toBe(svg);
+  });
+
+  // ----- threshold boundary cases -----
+
+  test('ratio exactly at the threshold (2.0x) → not modified (boundary is exclusive)', () => {
+    const svg =
+      '<svg viewBox="0 0 100 100">' +
+      '<svg viewBox="0 0 200 200"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 100);
+    // The check is strict `>`, so an exact 2x ratio does NOT trigger.
+    expect(result.applied).toBe(false);
+  });
+
+  test('ratio just above the threshold (2.01x) → modified', () => {
+    const svg =
+      '<svg viewBox="0 0 100 100">' +
+      '<svg viewBox="0 0 201 100"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 100);
+    expect(result.applied).toBe(true);
+    expect(result.intrinsicWidth).toBe(201);
+  });
+
+  test('the constant is exported and equals 2', () => {
+    expect(D2_NESTED_VIEWBOX_RATIO_THRESHOLD).toBe(2);
+  });
+
+  // ----- malformed input handling -----
+
+  test('viewBox with fewer than 4 components → not modified', () => {
+    const svg =
+      '<svg viewBox="0 0 10 10">' +
+      '<svg viewBox="0 0 100"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    expect(result.applied).toBe(false);
+  });
+
+  test('viewBox with non-numeric width/height → not modified', () => {
+    // Width/height (parts[2]/[3]) are non-numeric → parseFloat yields NaN.
+    const svg =
+      '<svg viewBox="0 0 10 10">' +
+      '<svg viewBox="0 0 abc xyz"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    expect(result.applied).toBe(false);
+  });
+
+  test('outer dimensions are zero → not modified (avoids division-by-zero)', () => {
+    const svg =
+      '<svg viewBox="0 0 0 0">' +
+      '<svg viewBox="0 0 280 250"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 0, 0);
+    expect(result.applied).toBe(false);
+  });
+
+  test('inner dimensions are zero → not modified', () => {
+    const svg =
+      '<svg viewBox="0 0 10 10">' +
+      '<svg viewBox="0 0 0 0"><g/></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    expect(result.applied).toBe(false);
+  });
+
+  test('only one svg with viewBox → not modified', () => {
+    const svg = '<svg viewBox="0 0 100 100"><g/></svg>';
+    const result = fixD2NestedViewBox(svg, 100, 100);
+    expect(result.applied).toBe(false);
+  });
+
+  test('three nested svgs: uses the second match (the first inner) as the inner', () => {
+    // outer → middle → inner. We only fix the outer; the middle stays
+    // untouched. This documents the current behavior (limited to 2 levels).
+    const svg =
+      '<svg viewBox="0 0 10 10">' +
+      '<svg viewBox="0 0 20 20">' +
+      '<svg viewBox="0 0 280 250"><g/></svg></svg></svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    // Second match's viewBox is "0 0 20 20" — 2x ratio exactly, not above
+    // threshold, so no fix.
+    expect(result.applied).toBe(false);
+  });
+
+  // ----- replacement anchoring (regression guard) -----
+
+  test('replaces the outer svg viewBox, not a preceding pattern viewBox', () => {
+    // The root svg carries no viewBox, so viewBoxMatches[0] (the "outer" the
+    // function fixes) is the first nested svg. The <pattern> before it holds
+    // the first viewBox attribute in the whole string — the replacement must
+    // still target the outer svg tag and leave the pattern untouched.
+    const svg =
+      '<svg width="10" height="10">' +
+      '<defs><pattern id="p" viewBox="0 0 10 10"/></defs>' +
+      '<svg id="outer" viewBox="0 0 10 10"><g/></svg>' +
+      '<svg id="inner" viewBox="0 0 280 250"><g/></svg>' +
+      '</svg>';
+    const result = fixD2NestedViewBox(svg, 10, 10);
+    expect(result.applied).toBe(true);
+    // The pattern's viewBox is untouched.
+    expect(result.svg).toContain('<pattern id="p" viewBox="0 0 10 10"/>');
+    // The outer svg got the inner content dimensions.
+    expect(result.svg).toContain('<svg id="outer" viewBox="0 0 280 250">');
   });
 });

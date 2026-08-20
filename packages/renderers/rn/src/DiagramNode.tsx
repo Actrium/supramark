@@ -12,7 +12,7 @@ import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/co
 import { shouldDeferDiagramRender } from '@supramark/core';
 import { type DiagramRenderResult, type DiagramRenderService } from '@supramark/engines';
 import { createReactNativeDiagramEngine } from '@supramark/engines/rn';
-import { normalizeSvg, normalizeSvgLight, stripRootSvgSize } from './svgUtils';
+import { normalizeSvg, normalizeSvgLight, stripRootSvgSize, fixD2NestedViewBox } from './svgUtils';
 import { SourceStateContext } from './SourceStateContext';
 import { getRendererCache, resolveDiagramCachePolicy, stableSerialize } from './renderCache';
 
@@ -242,7 +242,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
     const intrinsicWidth = svgWidth > 0
       ? svgWidth
       : (measuredWidth > 0 ? measuredWidth : maxChartWidth);
-    const chartWidth = Math.max(minChartWidth, Math.min(maxChartWidth, intrinsicWidth));
+    let chartWidth = Math.max(minChartWidth, Math.min(maxChartWidth, intrinsicWidth));
 
     let height = 300;
     if (svgWidth > 0 && svgHeight > 0) {
@@ -256,6 +256,17 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
         /<svg([^>]*)>/,
         `<svg$1 viewBox="0 0 ${svgWidth} ${svgHeight}">`
       );
+    }
+
+    // d2 v0.7.1 outputs a nested svg whose outer viewBox is far smaller than
+    // the inner content (frame renders, text doesn't). Delegate to the tested
+    // helper; when it applies, recompute width/height from the inner
+    // dimensions so the whole diagram fits the viewport.
+    const d2Fix = fixD2NestedViewBox(scalableSvg, svgWidth, svgHeight);
+    if (d2Fix.applied) {
+      scalableSvg = d2Fix.svg;
+      chartWidth = Math.max(minChartWidth, Math.min(maxChartWidth, d2Fix.intrinsicWidth));
+      height = Math.min((d2Fix.intrinsicHeight / d2Fix.intrinsicWidth) * chartWidth, 500);
     }
 
     scalableSvg = stripRootSvgSize(scalableSvg);
