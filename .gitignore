@@ -65,3 +65,6 @@ docs/.vitepress/cache
 docs/public/typedoc
 docs/public/preview
 docs/public/playground
+
+# Windows native build artifacts (scripts/build-windows.sh output)
+crates/*/output/
