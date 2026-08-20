@@ -205,6 +205,15 @@ export interface SupramarkDiagramConfig {
   /** Default timeout (milliseconds), used for engines without their own config */
   defaultTimeoutMs?: number;
 
+  /**
+   * Host-provided cap on diagram display width (dp). Diagrams clamp their
+   * display width to min(windowWidth × 0.9, maxWidth). Hosts whose container
+   * is narrower than the window (e.g. a desktop chat bubble with a fixed
+   * maxWidth) pass their own cap so the diagram doesn't overflow the
+   * container. Unset means the screen-derived cap applies alone.
+   */
+  maxWidth?: number;
+
   /** Default cache configuration */
   defaultCache?: {
     enabled?: boolean;

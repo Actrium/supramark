@@ -215,7 +215,15 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
     // Diagram width cap: 90% of the screen width, leaving room for the
     // bubble's padding so the diagram doesn't touch the edge.
     // Uses a percentage rather than a fixed pixel value to adapt to different hosts' padding.
-    const maxChartWidth = screenWidth * 0.9;
+    // diagram.maxWidth (host config) caps it further for containers narrower
+    // than the window (e.g. a desktop chat bubble with a fixed maxWidth);
+    // unset keeps the screen-derived cap alone.
+    const maxChartWidth = Math.min(
+      screenWidth * 0.9,
+      typeof diagramConfig?.maxWidth === 'number' && diagramConfig.maxWidth > 0
+        ? diagramConfig.maxWidth
+        : Number.POSITIVE_INFINITY
+    );
     let svgWidth = 0;
     let svgHeight = 0;
 
