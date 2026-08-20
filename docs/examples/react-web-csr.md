@@ -43,6 +43,7 @@ bun run feature:preview:web diagram-vega-lite
 - `@supramark/feature-mermaid` - workspace:*
 - `@supramark/feature-plantuml` - workspace:*
 - `@supramark/feature-weather` - workspace:*
+- `@supramark/feature-wikilink` - workspace:*
 - `@supramark/web` - workspace:*
 
 ## Source Code

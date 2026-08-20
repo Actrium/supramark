@@ -19,6 +19,7 @@ import type {
   SupramarkDefinitionDescriptionNode,
   SupramarkRawNode,
   SupramarkFootnoteReferenceNode,
+  SupramarkWikiLinkNode,
   SupramarkDiagramConfig,
   SupramarkConfig,
   SupramarkCodeHighlightResult,
@@ -1042,7 +1043,18 @@ const INLINE_NODE_TYPES = new Set<SupramarkNode['type']>([
   'image',
   'break',
   'footnote_reference',
+  'wiki_link',
 ]);
+
+// Rebuild the literal `[[target#section|label]]` source form for a wiki_link
+// node. Used when the feature is disabled in config: the parser was told to
+// produce wiki_link nodes, but the renderer falls back to the source text.
+function rebuildWikiLinkSource(
+  node: SupramarkWikiLinkNode
+): string {
+  const target = node.section != null ? `${node.target}#${node.section}` : node.target;
+  return `[[${target}${node.label != null ? `|${node.label}` : ''}]]`;
+}
 
 // CommonMark separates a list item's children with a newline at every block
 // boundary (inline→block, block→inline, block→block). Between two inline
@@ -1698,6 +1710,7 @@ function renderNode(
     case 'image':
     case 'break':
     case 'footnote_reference':
+    case 'wiki_link':
       // In cases like list_item.children, the Rust parser spreads inline nodes flat
       // (not wrapped in a paragraph). When renderNode walks into these types it
       // delegates to renderInlineNode, avoiding the default branch that would return
@@ -1864,6 +1877,27 @@ function serializeInlineNode(
     }
     case 'math_inline':
     case 'footnote_reference':
+      return null;
+    case 'wiki_link': {
+      if (!isFeatureGroupEnabled(config, ['@supramark/feature-wikilink'])) {
+        return escapeHtmlText(rebuildWikiLinkSource(node));
+      }
+      const options =
+        getFeatureOptionsAs<{
+          resolveWikiLink?: (node: {
+            target: string;
+            section?: string;
+            label?: string;
+          }) => string | null | undefined;
+        }>(config, '@supramark/feature-wikilink') ?? {};
+      const href = options.resolveWikiLink?.(node);
+      // No resolver (or a null result) renders styled-but-non-navigable, which
+      // the component model expresses; fall back to it for this paragraph.
+      if (href == null) return null;
+      const display =
+        node.label ?? (node.section != null ? `${node.target} > ${node.section}` : node.target);
+      return `<a href="${escapeHtmlAttr(href)}"${cls(classNames.link)}>${escapeHtmlText(display)}</a>`;
+    }
     default:
       return null;
   }
@@ -2160,6 +2194,33 @@ function renderInlineNode(
             [{ref.index}]
           </a>
         </sup>
+      );
+    }
+    case 'wiki_link': {
+      const wikiLinkNode = node;
+      if (!isFeatureGroupEnabled(config, ['@supramark/feature-wikilink'])) {
+        return <React.Fragment key={key}>{rebuildWikiLinkSource(wikiLinkNode)}</React.Fragment>;
+      }
+      const display =
+        wikiLinkNode.label ??
+        (wikiLinkNode.section != null
+          ? `${wikiLinkNode.target} > ${wikiLinkNode.section}`
+          : wikiLinkNode.target);
+      const options =
+        getFeatureOptionsAs<{
+          resolveWikiLink?: (node: {
+            target: string;
+            section?: string;
+            label?: string;
+          }) => string | null | undefined;
+        }>(config, '@supramark/feature-wikilink') ?? {};
+      const href = options.resolveWikiLink?.(wikiLinkNode);
+      // A missing/null resolver renders styled but non-navigable — an <a>
+      // without href is not focusable and exposes no fake href="#" target.
+      return (
+        <a key={key} href={href ?? undefined} className={classNames.link}>
+          {display}
+        </a>
       );
     }
     case 'raw':

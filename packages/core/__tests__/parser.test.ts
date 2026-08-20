@@ -9,6 +9,7 @@ import type {
   SupramarkListNode,
   SupramarkListItemNode,
   SupramarkDiagramNode,
+  SupramarkWikiLinkNode,
 } from '../src/ast';
 
 describe('parse', () => {
@@ -197,6 +198,56 @@ describe('parse', () => {
       const ast = await parse(markdown);
 
       expect(ast.children.some((node: SupramarkNode) => node.type === 'math_block')).toBe(true);
+    });
+  });
+
+  describe('WikiLink nodes', () => {
+    it('leaves [[...]] as text by default', async () => {
+      const ast = await parse('See [[Project Plan]] here.');
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'wiki_link')).toBe(false);
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'text')).toBe(true);
+    });
+
+    it('parses all wikilink forms with the wikilink option', async () => {
+      const cases: Array<[string, string, string | undefined, string | undefined]> = [
+        ['[[Project Plan]]', 'Project Plan', undefined, undefined],
+        ['[[Project Plan|the plan]]', 'Project Plan', undefined, 'the plan'],
+        ['[[Project Plan#Roadmap]]', 'Project Plan', 'Roadmap', undefined],
+        ['[[Project Plan#Roadmap|the plan]]', 'Project Plan', 'Roadmap', 'the plan'],
+        ['[[#Roadmap]]', '', 'Roadmap', undefined],
+      ];
+      for (const [input, target, section, label] of cases) {
+        const ast = await parse(input, { wikilink: true });
+        const paragraph = ast.children[0] as SupramarkParentNode;
+        expect(paragraph.children).toHaveLength(1);
+        const wikilink = paragraph.children[0] as SupramarkWikiLinkNode;
+        expect(wikilink.type).toBe('wiki_link');
+        expect(wikilink.target).toBe(target);
+        expect(wikilink.section).toBe(section);
+        expect(wikilink.label).toBe(label);
+        expect(wikilink.position?.start.byte_offset).toBe(0);
+      }
+    });
+
+    it('keeps escaped, code-span and malformed forms literal with the option on', async () => {
+      const ast = await parse('`[[code]]` and \\[[escaped]] and [[unclosed', { wikilink: true });
+      const paragraph = ast.children[0] as SupramarkParentNode;
+      const types = paragraph.children.map((node: SupramarkNode) => node.type);
+      expect(types).not.toContain('wiki_link');
+      expect(types).toContain('inline_code');
+      const inlineCode = paragraph.children.find(
+        (node: SupramarkNode) => node.type === 'inline_code'
+      ) as { value: string };
+      expect(inlineCode.value).toBe('[[code]]');
+    });
+
+    it('expands wikilinks inside transparent container bodies', async () => {
+      const ast = await parse(':::note\nSee [[Project Plan]].\n:::', { wikilink: true });
+      const container = ast.children[0] as SupramarkParentNode;
+      expect(container.type).toBe('container');
+      const paragraph = container.children[0] as SupramarkParentNode;
+      expect(paragraph.children.some((node: SupramarkNode) => node.type === 'wiki_link')).toBe(true);
     });
   });
 

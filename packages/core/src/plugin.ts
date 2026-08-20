@@ -1,5 +1,5 @@
 import type { SupramarkNode, SupramarkParentNode, SupramarkRootNode } from './ast.js';
-import { type SupramarkConfig } from './feature.js';
+import { type SupramarkConfig, isFeatureEnabled } from './feature.js';
 import { loadRustMarkdownModule } from './plugin-loader.js';
 
 /**
@@ -50,6 +50,22 @@ export interface SupramarkParseOptions {
    * through.
    */
   config?: SupramarkConfig;
+
+  /**
+   * Enable WikiLink parsing (`[[target]]`, `[[target|label]]`, `[[target#section]]`).
+   *
+   * Off by default: `[[...]]` is not CommonMark/GFM syntax, so the default parse
+   * is byte-identical to the CommonMark/GFM profiles. The flag turns on when
+   * `@supramark/feature-wikilink` is explicitly present and enabled in
+   * `config.features` (so enabling the feature is enough); an explicit
+   * `wikilink` value always wins.
+   */
+  wikilink?: boolean;
+}
+
+/** Parser flags forwarded to the Rust `parse_with_options` entry point. */
+export interface RustMarkdownParserOptions {
+  wikilink?: boolean;
 }
 
 /**
@@ -59,8 +75,14 @@ export async function parse(
   source: string,
   options: SupramarkParseOptions = {}
 ): Promise<SupramarkRootNode> {
-  const root = await parseWithRustMarkdown(source);
-  await expandOpaqueContainers(root);
+  const wikilink =
+    options.wikilink ??
+    (options.config ? isFeatureEnabled(options.config, '@supramark/feature-wikilink') : false);
+  const parserOptions: RustMarkdownParserOptions | undefined = wikilink
+    ? { wikilink: true }
+    : undefined;
+  const root = await parseWithRustMarkdown(source, parserOptions);
+  await expandOpaqueContainers(root, parserOptions);
   await applyPlugins(root, source, options.plugins ?? []);
   return root;
 }
@@ -88,7 +110,10 @@ export async function parse(
  * second pass only walks the tree without re-parsing. This single entry point
  * lives in `parse()` so Web / RN / Node share it and renderers need no copy.
  */
-export async function expandOpaqueContainers(node: SupramarkNode): Promise<void> {
+export async function expandOpaqueContainers(
+  node: SupramarkNode,
+  parserOptions?: RustMarkdownParserOptions
+): Promise<void> {
   const children = (node as Partial<SupramarkParentNode>).children;
   if (!Array.isArray(children)) {
     return;
@@ -101,24 +126,44 @@ export async function expandOpaqueContainers(node: SupramarkNode): Promise<void>
       typeof child.value === 'string' &&
       child.value.length > 0
     ) {
-      const sub = await parseWithRustMarkdown(child.value);
+      const sub = await parseWithRustMarkdown(child.value, parserOptions);
       child.children = sub.children;
       child.value = undefined;
     }
-    await expandOpaqueContainers(child);
+    await expandOpaqueContainers(child, parserOptions);
   }
 }
 
-async function parseWithRustMarkdown(source: string): Promise<SupramarkRootNode> {
+async function parseWithRustMarkdown(
+  source: string,
+  parserOptions?: RustMarkdownParserOptions
+): Promise<SupramarkRootNode> {
   const mod = await loadRustMarkdownModule();
-  if (typeof mod.parse === 'function') {
-    return mod.parse(source) as SupramarkRootNode;
-  }
-  if (typeof mod.parseJson === 'function') {
-    return JSON.parse(await mod.parseJson(source)) as SupramarkRootNode;
+  if (parserOptions === undefined) {
+    if (typeof mod.parse === 'function') {
+      return mod.parse(source) as SupramarkRootNode;
+    }
+    if (typeof mod.parseJson === 'function') {
+      return JSON.parse(await mod.parseJson(source)) as SupramarkRootNode;
+    }
+    throw new Error('supramark-markdown module does not expose parse(source) or parseJson(source).');
   }
 
-  throw new Error('supramark-markdown module does not expose parse(source) or parseJson(source).');
+  if (typeof mod.parseWithOptions === 'function') {
+    return mod.parseWithOptions(source, parserOptions) as SupramarkRootNode;
+  }
+  if (typeof mod.parseJsonWithOptions === 'function') {
+    return JSON.parse(await mod.parseJsonWithOptions(source, parserOptions)) as SupramarkRootNode;
+  }
+
+  // Not silently falling back: the caller asked for parser flags (e.g.
+  // wikilink) that the loaded parser module cannot honor, and a default
+  // parse would quietly drop the syntax.
+  throw new Error(
+    'supramark-markdown module does not expose parseWithOptions/parseJsonWithOptions; ' +
+      'parser options such as wikilink require a newer @supramark/markdown-web build ' +
+      '(or, on React Native, a native adapter with parseJsonWithOptions).'
+  );
 }
 
 async function applyPlugins(

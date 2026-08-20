@@ -13,6 +13,7 @@ import type {
   SupramarkDefinitionDescriptionNode,
   SupramarkDiagramConfig,
   SupramarkConfig,
+  SupramarkWikiLinkNode,
   SupramarkCodeHighlightResult,
   SupramarkCodeHighlighter,
   SupramarkSourceState,
@@ -1046,11 +1047,20 @@ export const INLINE_NODE_TYPES: ReadonlySet<string> = new Set([
   'break',
   'delete',
   'footnote_reference',
+  'wiki_link',
   'raw',
 ]);
 
 function isInlineNode(node: SupramarkNode): boolean {
   return INLINE_NODE_TYPES.has(node.type);
+}
+
+// Rebuild the literal `[[target#section|label]]` source form for a wiki_link
+// node when the feature is disabled in config (parser produced wiki_link
+// nodes, renderer falls back to the source text).
+function rebuildWikiLinkSource(node: SupramarkWikiLinkNode): string {
+  const target = node.section != null ? `${node.target}#${node.section}` : node.target;
+  return `[[${target}${node.label != null ? `|${node.label}` : ''}]]`;
 }
 
 // Render list_item children that mix inline and block nodes (loose / nested
@@ -1239,6 +1249,46 @@ function renderInlineNode(
       return (
         <Text key={key} style={styles.inlineCode}>
           [{label}]
+        </Text>
+      );
+    }
+    case 'wiki_link': {
+      const wikiLinkNode = node;
+      if (!isFeatureGroupEnabled(config, ['@supramark/feature-wikilink'])) {
+        return rebuildWikiLinkSource(wikiLinkNode);
+      }
+      const display =
+        wikiLinkNode.label ??
+        (wikiLinkNode.section != null
+          ? `${wikiLinkNode.target} > ${wikiLinkNode.section}`
+          : wikiLinkNode.target);
+      const options =
+        getFeatureOptionsAs<{
+          resolveWikiLink?: (node: {
+            target: string;
+            section?: string;
+            label?: string;
+          }) => string | null | undefined;
+        }>(config, '@supramark/feature-wikilink') ?? {};
+      const href = options.resolveWikiLink?.(wikiLinkNode);
+      // A missing/null resolver renders styled but non-navigable (no onPress),
+      // mirroring the web <a> without href.
+      if (href == null) {
+        return (
+          <Text key={key} style={styles.link}>
+            {display}
+          </Text>
+        );
+      }
+      return (
+        <Text
+          key={key}
+          style={styles.link}
+          onPress={() => {
+            Linking.openURL(href).catch(err => console.error('Failed to open URL:', err));
+          }}
+        >
+          {display}
         </Text>
       );
     }

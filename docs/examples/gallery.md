@@ -1,6 +1,6 @@
 # Feature Example Gallery
 
-This page is automatically aggregated from each Feature package's `src/examples.ts`, currently covering **21 Features** and **33 examples**.
+This page is automatically aggregated from each Feature package's `src/examples.ts`, currently covering **22 Features** and **34 examples**.
 
 These examples show the raw Markdown input; for the full live preview, open the [homepage preview](/preview/?feature=mermaid) or run `bun run feature:preview:web`.
 
@@ -27,6 +27,7 @@ These examples show the raw Markdown input; for the full live preview, open the 
 - [Mermaid](#mermaid) (1)
 - [Plantuml](#plantuml) (3)
 - [Weather](#weather) (4)
+- [Wikilink](#wikilink) (1)
 
 ## Admonition
 
@@ -752,6 +753,30 @@ units: metric
 location: Sydney
 units: metric
 :::
+```
+
+## Wikilink
+
+Package: `@supramark/feature-wikilink`  
+Path: `packages/features/main/wikilink`
+
+### WikiLink
+
+Shows the [[target]], [[target|label]] and [[target#section]] syntax.
+
+```markdown
+# WikiLink Example
+
+A plain wikilink: [[Project Plan]].
+
+With a display label: [[Project Plan|the plan]].
+
+With a heading fragment: [[Project Plan#Roadmap]], and both together:
+[[Project Plan#Roadmap|the roadmap]].
+
+Same-page fragment: [[#Q2-goals]].
+
+Malformed forms degrade to literal text: [[]] and [[unclosed stay as-is.
 ```
 
 ---
