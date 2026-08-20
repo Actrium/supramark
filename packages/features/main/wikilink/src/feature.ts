@@ -165,18 +165,11 @@ export const wikilinkFeature: SupramarkFeature<SupramarkWikiLinkNode> = {
             ignoreFields: ['position', 'data'],
           },
         },
-        {
-          name: 'leaves malformed wikilinks as literal text',
-          input: '[[]]',
-          expected: {
-            type: 'text',
-            value: '[[]]',
-          },
-          options: {
-            typeOnly: false,
-            ignoreFields: ['position', 'data'],
-          },
-        },
+        // Malformed forms ([[]], unclosed [[foo, etc.) degrade to literal
+        // text — a different node type, so they are not asserted here.
+        // Degradation is covered by the Rust parser tests and core's
+        // parser.test.ts (wikilink_degrades_malformed_forms /
+        // "degrades malformed forms to literal text with the option on").
       ],
     },
 
