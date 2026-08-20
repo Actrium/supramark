@@ -719,6 +719,52 @@ fn public_api_maps_inline_math() {
 }
 
 #[test]
+fn public_api_inline_math_widehat_escaped_braces_207() {
+    // Regression for #207: inline math whose TeX source contains cmark
+    // backslash-escaped punctuation (`\{`, `\}`) must still parse as a
+    // math_inline node — not collapse to literal text — and its value must
+    // preserve the raw escapes so the TeX engine receives `\{0, ?, 1\}` (a
+    // literal set), not `{0, ?, 1}`. Covers both `\widehat{\rho}` and
+    // `\widehat\rho` spellings, and both inline `$…$` and block `$$…$$`.
+    let inline_cases: &[(&str, &str)] = &[
+        ("$\\widehat{\\rho}=1$", "\\widehat{\\rho}=1"),
+        ("$\\widehat\\rho=1$", "\\widehat\\rho=1"),
+        (
+            "text $\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}$ text",
+            "\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}",
+        ),
+    ];
+    for (input, expected) in inline_cases {
+        let ast = parse(input);
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root for {input}");
+        };
+        let SupramarkNode::Paragraph { children: paragraph, .. } = &children[0] else {
+            panic!("expected paragraph for {input}");
+        };
+        let value = paragraph
+            .iter()
+            .find_map(|n| match n {
+                SupramarkNode::MathInline { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a math_inline node for {input}"));
+        assert_eq!(value, *expected, "inline math value for {input}");
+    }
+
+    // Block form: escaped braces inside `$$…$$` already worked, but assert the
+    // value preserves them so a future change cannot silently strip `\{`.
+    let ast = parse("$$\n\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}\n$$");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::MathBlock { value, .. } = &children[0] else {
+        panic!("expected math_block");
+    };
+    assert_eq!(value, "\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}");
+}
+
+#[test]
 fn public_api_maps_footnotes() {
     let ast = parse("Text[^a].\n\n[^a]: Footnote.");
     let SupramarkNode::Root { children, .. } = ast else {

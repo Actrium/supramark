@@ -205,6 +205,31 @@ export const mathFeature: SupramarkFeature<SupramarkMathInlineNode | SupramarkMa
             typeOnly: false,
           },
         },
+        {
+          // Regression for #207: escaped braces (`\{`, `\}`) inside inline
+          // math must not break delimiter scanning, and the value must keep
+          // the raw escapes for the TeX engine.
+          name: 'parses inline math with escaped braces and widehat (#207)',
+          input: 'text $\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}$ text',
+          expected: {
+            type: 'math_inline',
+            value: '\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}',
+          } as SupramarkMathInlineNode,
+          options: {
+            typeOnly: false,
+          },
+        },
+        {
+          name: 'parses block math with escaped braces and widehat (#207)',
+          input: '$$\n\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}\n$$',
+          expected: {
+            type: 'math_block',
+            value: '\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}',
+          } as SupramarkMathBlockNode,
+          options: {
+            typeOnly: false,
+          },
+        },
       ],
     },
 

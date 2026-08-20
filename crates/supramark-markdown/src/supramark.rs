@@ -1,4 +1,5 @@
 use crate::plugins::cmark::block::fence::CodeFence;
+use crate::plugins::cmark::inline::escape::is_escapable_punct;
 use crate::plugins::extra::tables::{ColumnAlignment, TableBody, TableCell, TableHead, TableRow};
 use crate::{MarkdownParser, Node};
 use serde::{Deserialize, Serialize};
@@ -377,17 +378,24 @@ fn map_markdown_fragment(
     }
 
     let root = md.parse(&source[start..end]);
-    map_children(&root.children, index, start)
+    map_children(&root.children, index, start, source)
 }
 
 /// Context threaded through in-rule AST v2 construction.
 ///
-/// Holds the immutable offset index and document base offset so a node's
-/// `to_ast_v2` impl can compute positions and recurse into children without
-/// re-plumbing those arguments by hand.
+/// Holds the immutable offset index, document base offset, and the raw
+/// document source so a node's `to_ast_v2` impl can compute positions and
+/// recurse into children without re-plumbing those arguments by hand.
+///
+/// `source` is needed by [`map_inline_text`]: when a text run was decoded by
+/// cmark (backslash escapes like `\{` → `{`), the decoded `value` no longer
+/// matches the source byte-for-byte, so math/footnote delimiter scanning must
+/// run against the raw source slice instead, where `is_escaped` and `$`
+/// delimiters keep their TeX semantics.
 pub(crate) struct AstV2Ctx<'a> {
     index: &'a OffsetIndex,
     base_offset: usize,
+    source: &'a str,
 }
 
 impl<'a> AstV2Ctx<'a> {
@@ -396,11 +404,11 @@ impl<'a> AstV2Ctx<'a> {
     }
 
     pub(crate) fn map_children(&self, children: &[Node]) -> Vec<SupramarkNode> {
-        map_children(children, self.index, self.base_offset)
+        map_children(children, self.index, self.base_offset, self.source)
     }
 
     pub(crate) fn map_inline_text(&self, value: &str, node: &Node) -> Vec<SupramarkNode> {
-        map_inline_text(value, self.position(node), self.index)
+        map_inline_text(value, self.position(node), self.index, self.source)
     }
 
     pub(crate) fn map_fence(&self, fence: &CodeFence, node: &Node) -> SupramarkNode {
@@ -411,7 +419,7 @@ impl<'a> AstV2Ctx<'a> {
         &self,
         children: &[Node],
     ) -> (Option<bool>, Vec<SupramarkNode>) {
-        map_list_item_children(children, self.index, self.base_offset)
+        map_list_item_children(children, self.index, self.base_offset, self.source)
     }
 
     pub(crate) fn map_table_sections(
@@ -419,17 +427,22 @@ impl<'a> AstV2Ctx<'a> {
         sections: &[Node],
         alignments: &[ColumnAlignment],
     ) -> Vec<SupramarkNode> {
-        map_table_sections(sections, alignments, self.index, self.base_offset)
+        map_table_sections(sections, alignments, self.index, self.base_offset, self.source)
     }
 }
 
-fn map_children(children: &[Node], index: &OffsetIndex, base_offset: usize) -> Vec<SupramarkNode> {
+fn map_children(
+    children: &[Node],
+    index: &OffsetIndex,
+    base_offset: usize,
+    source: &str,
+) -> Vec<SupramarkNode> {
     let mapped = children
         .iter()
-        .flat_map(|child| map_node(child, index, base_offset))
+        .flat_map(|child| map_node(child, index, base_offset, source))
         .collect();
     let mapped = reassemble_split_footnote_refs(mapped, index);
-    rescan_adjacent_text_runs(mapped, index)
+    rescan_adjacent_text_runs(mapped, index, source)
 }
 
 /// Normalize a footnote label into an mdast-style identifier used to match
@@ -575,21 +588,27 @@ where
     }
 }
 
-fn map_node(node: &Node, index: &OffsetIndex, base_offset: usize) -> Vec<SupramarkNode> {
-    let ctx = AstV2Ctx { index, base_offset };
+fn map_node(
+    node: &Node,
+    index: &OffsetIndex,
+    base_offset: usize,
+    source: &str,
+) -> Vec<SupramarkNode> {
+    let ctx = AstV2Ctx { index, base_offset, source };
     if let Some(v2) = node.to_ast_v2(&ctx) {
         return v2;
     }
 
-    map_children(&node.children, index, base_offset)
+    map_children(&node.children, index, base_offset, source)
 }
 
 fn map_list_item_children(
     children: &[Node],
     index: &OffsetIndex,
     base_offset: usize,
+    source: &str,
 ) -> (Option<bool>, Vec<SupramarkNode>) {
-    let mut mapped = map_children(children, index, base_offset);
+    let mut mapped = map_children(children, index, base_offset, source);
     let checked = strip_task_marker(&mut mapped);
     (checked, mapped)
 }
@@ -598,6 +617,7 @@ fn map_inline_text(
     value: &str,
     position: Option<SourcePosition>,
     index: &OffsetIndex,
+    source: &str,
 ) -> Vec<SupramarkNode> {
     let Some(position) = position else {
         return vec![SupramarkNode::Text {
@@ -607,28 +627,84 @@ fn map_inline_text(
     };
 
     let source_start = position.start.byte_offset;
-    if position.end.byte_offset.saturating_sub(source_start) != value.len() {
+    let source_end = position.end.byte_offset;
+    let span = source_end.saturating_sub(source_start);
+
+    // Fast path: the value's byte length matches the source span, so cmark
+    // decoded nothing inside this run — value IS the raw source slice, and
+    // `$` delimiters / `is_escaped` have correct TeX semantics on it.
+    if span == value.len() {
+        return scan_inline_extensions(value, value, position, index, &IdentityMap);
+    }
+
+    // Slow path: cmark decoded backslash escapes / entities, so value no
+    // longer matches the source byte-for-byte. Delimiter scanning MUST run
+    // against the raw source slice: on the decoded value, `\$` collapses to
+    // a bare `$` (false delimiter) and `\{` vanishes (so `\{0\}$` no longer
+    // terminates on a real `$`). Scan raw, map offsets back to value for
+    // text/footnote content.
+    let raw = source.get(source_start..source_end).unwrap_or("");
+    let Some(map) = RawValueMap::new(raw, value) else {
+        // The raw↔value correspondence cannot be modeled (e.g. HTML entities
+        // decode variable-width). Fall back to a plain text node — the
+        // pre-fix behaviour, so no regression.
         return vec![SupramarkNode::Text {
             value: replace_emoji_shortcodes(value),
             position: Some(position),
         }];
-    }
+    };
+    scan_inline_extensions(value, raw, position, index, &map)
+}
 
+/// Walk the scan string (the decoded `value` on the aligned fast path, the
+/// raw source slice on the slow path) for inline math/footnote extensions,
+/// emitting `Text` / `MathInline` / `FootnoteReference` nodes with correct
+/// positions. `map` converts scan-string offsets into `value` offsets so
+/// text and footnote-label content can be sliced from the decoded value.
+fn scan_inline_extensions<M: RawMap>(
+    value: &str,
+    scan: &str,
+    position: SourcePosition,
+    index: &OffsetIndex,
+    map: &M,
+) -> Vec<SupramarkNode> {
+    let source_start = position.start.byte_offset;
     let mut nodes = Vec::new();
     let mut cursor = 0;
 
-    while cursor < value.len() {
-        let Some(next) = find_next_inline_extension(value, cursor) else {
-            push_text_slice(&mut nodes, value, cursor, value.len(), source_start, index);
+    while cursor < scan.len() {
+        let Some(next) = find_next_inline_extension(scan, cursor) else {
+            push_text_slice(
+                &mut nodes,
+                value,
+                map.to_value(cursor),
+                map.to_value(scan.len()),
+                source_start,
+                cursor,
+                scan.len(),
+                index,
+            );
             break;
         };
 
-        push_text_slice(&mut nodes, value, cursor, next.start, source_start, index);
+        push_text_slice(
+            &mut nodes,
+            value,
+            map.to_value(cursor),
+            map.to_value(next.start),
+            source_start,
+            cursor,
+            next.start,
+            index,
+        );
 
         match next.kind {
             InlineExtensionKind::Math { content_start, end } => {
+                // Take math content from the scan string: on the slow path
+                // that is the raw source, preserving `\{` / `\}` so the TeX
+                // engine receives exactly what the author wrote.
                 nodes.push(SupramarkNode::MathInline {
-                    value: value[content_start..end].to_owned(),
+                    value: scan[content_start..end].to_owned(),
                     position: Some(position_from_abs(
                         index,
                         source_start + next.start,
@@ -638,7 +714,9 @@ fn map_inline_text(
                 cursor = end + 1;
             }
             InlineExtensionKind::Footnote { label_start, end } => {
-                let label = value[label_start..end].to_owned();
+                // Footnote labels match definitions by decoded form, so slice
+                // the label from `value`.
+                let label = value[map.to_value(label_start)..map.to_value(end)].to_owned();
                 nodes.push(SupramarkNode::FootnoteReference {
                     index: 0,
                     identifier: normalize_footnote_identifier(&label),
@@ -851,7 +929,11 @@ fn find_unclosed_footnote_open(value: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn rescan_adjacent_text_runs(nodes: Vec<SupramarkNode>, index: &OffsetIndex) -> Vec<SupramarkNode> {
+fn rescan_adjacent_text_runs(
+    nodes: Vec<SupramarkNode>,
+    index: &OffsetIndex,
+    source: &str,
+) -> Vec<SupramarkNode> {
     let mut out = Vec::with_capacity(nodes.len());
     let mut run_value = String::new();
     let mut run_position: Option<SourcePosition> = None;
@@ -868,18 +950,18 @@ fn rescan_adjacent_text_runs(nodes: Vec<SupramarkNode>, index: &OffsetIndex) -> 
                         continue;
                     }
                 }
-                flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+                flush_text_run(&mut out, &mut run_value, &mut run_position, index, source);
                 run_value = value;
                 run_position = position;
             }
             node => {
-                flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+                flush_text_run(&mut out, &mut run_value, &mut run_position, index, source);
                 out.push(node);
             }
         }
     }
 
-    flush_text_run(&mut out, &mut run_value, &mut run_position, index);
+    flush_text_run(&mut out, &mut run_value, &mut run_position, index, source);
     out
 }
 
@@ -888,6 +970,7 @@ fn flush_text_run(
     value: &mut String,
     position: &mut Option<SourcePosition>,
     index: &OffsetIndex,
+    source: &str,
 ) {
     if value.is_empty() {
         *position = None;
@@ -897,7 +980,7 @@ fn flush_text_run(
     let value_out = std::mem::take(value);
     let position_out = position.take();
     if inline_extension_scan_needed(&value_out) {
-        out.extend(map_inline_text(&value_out, position_out, index));
+        out.extend(map_inline_text(&value_out, position_out, index, source));
     } else {
         out.push(SupramarkNode::Text {
             value: value_out,
@@ -994,24 +1077,103 @@ fn is_escaped(value: &str, byte_index: usize) -> bool {
     count % 2 == 1
 }
 
+/// Maps byte offsets between the raw source slice and the cmark-decoded
+/// `value` string, so delimiter scanning can run on raw while text/footnote
+/// content is sliced from the decoded value.
+trait RawMap {
+    /// Convert a byte offset into the scan string (`raw`) into the
+    /// corresponding byte offset into `value`.
+    fn to_value(&self, raw_offset: usize) -> usize;
+}
+
+/// Identity map for the aligned fast path (value == raw).
+struct IdentityMap;
+impl RawMap for IdentityMap {
+    fn to_value(&self, raw_offset: usize) -> usize {
+        raw_offset
+    }
+}
+
+/// Offset map for the slow path, built by lock-stepping the raw source bytes
+/// against the decoded value bytes. A backslash escape `\X` (where `X` is a
+/// cmark-escapable punctuation byte) consumes 2 raw bytes → 1 value byte;
+/// every other byte is 1:1. Any mismatch (e.g. an HTML entity `&amp;` → `&`,
+/// whose decoded width does not align byte-for-byte) returns `None` so the
+/// caller falls back to a plain text node.
+struct RawValueMap {
+    /// `points[raw_offset] = value_offset`, for `raw_offset` in `0..=raw.len()`.
+    points: Vec<usize>,
+}
+
+impl RawValueMap {
+    fn new(raw: &str, value: &str) -> Option<Self> {
+        let raw_b = raw.as_bytes();
+        let val_b = value.as_bytes();
+        // `points[raw_offset] = value_offset` for every raw byte offset in
+        // `0..=raw.len()`. A `\X` escape occupies 2 raw bytes but decodes to 1
+        // value byte, so the intermediate raw offset (pointing at the `\`)
+        // maps to the same value offset as the byte after it.
+        let mut points = vec![0usize; raw_b.len() + 1];
+        let mut ri = 0usize;
+        let mut vi = 0usize;
+        while ri < raw_b.len() {
+            points[ri] = vi;
+            if raw_b[ri] == b'\\' && ri + 1 < raw_b.len() && is_escapable_punct(raw_b[ri + 1] as char) {
+                // cmark backslash escape: raw `\X` (2 bytes) → value `X` (1 byte).
+                if vi >= val_b.len() || val_b[vi] != raw_b[ri + 1] {
+                    return None;
+                }
+                // The backslash byte and the escaped byte both precede value
+                // offset vi+1, so points[ri] and points[ri+1] are both vi.
+                points[ri + 1] = vi;
+                ri += 2;
+                vi += 1;
+            } else {
+                // 1:1. A variable-width decoding (HTML entity, numeric char
+                // ref) diverges here or on the next byte and bails to None.
+                if vi >= val_b.len() || raw_b[ri] != val_b[vi] {
+                    return None;
+                }
+                ri += 1;
+                vi += 1;
+            }
+        }
+        points[raw_b.len()] = vi;
+        if vi != val_b.len() {
+            return None;
+        }
+        Some(Self { points })
+    }
+}
+
+impl RawMap for RawValueMap {
+    fn to_value(&self, raw_offset: usize) -> usize {
+        // `points` covers `0..=raw.len()`; `raw_offset` comes from scanning
+        // `raw`, so it is always in range.
+        self.points[raw_offset]
+    }
+}
+
 fn push_text_slice(
     nodes: &mut Vec<SupramarkNode>,
     value: &str,
-    start: usize,
-    end: usize,
+    value_lo: usize,
+    value_hi: usize,
     source_start: usize,
+    raw_lo: usize,
+    raw_hi: usize,
     index: &OffsetIndex,
 ) {
-    if start >= end {
+    if value_lo >= value_hi {
         return;
     }
 
     nodes.push(SupramarkNode::Text {
-        value: replace_emoji_shortcodes(&value[start..end]),
+        value: replace_emoji_shortcodes(&value[value_lo..value_hi]),
         position: Some(position_from_abs(
             index,
-            source_start + start,
-            source_start + end,
+            source_start + raw_lo,
+            source_start + raw_hi,
         )),
     });
 }
@@ -1199,6 +1361,7 @@ fn map_table_sections(
     alignments: &[ColumnAlignment],
     index: &OffsetIndex,
     base_offset: usize,
+    source: &str,
 ) -> Vec<SupramarkNode> {
     let mut rows = Vec::new();
     for section in sections {
@@ -1210,9 +1373,10 @@ fn map_table_sections(
                 header,
                 index,
                 base_offset,
+                source,
             ));
         } else {
-            rows.extend(map_node(section, index, base_offset));
+            rows.extend(map_node(section, index, base_offset, source));
         }
     }
     rows
@@ -1224,6 +1388,7 @@ fn map_table_rows(
     header: bool,
     index: &OffsetIndex,
     base_offset: usize,
+    source: &str,
 ) -> Vec<SupramarkNode> {
     rows.iter()
         .flat_map(|row| {
@@ -1235,11 +1400,12 @@ fn map_table_rows(
                         header,
                         index,
                         base_offset,
+                        source,
                     ),
                     position: position_for(row, index, base_offset),
                 }]
             } else {
-                map_node(row, index, base_offset)
+                map_node(row, index, base_offset, source)
             }
         })
         .collect()
@@ -1251,6 +1417,7 @@ fn map_table_cells(
     header: bool,
     index: &OffsetIndex,
     base_offset: usize,
+    source: &str,
 ) -> Vec<SupramarkNode> {
     cells
         .iter()
@@ -1260,11 +1427,11 @@ fn map_table_cells(
                 vec![SupramarkNode::TableCell {
                     align: alignments.get(column).and_then(map_alignment),
                     header,
-                    children: map_children(&cell.children, index, base_offset),
+                    children: map_children(&cell.children, index, base_offset, source),
                     position: position_for(cell, index, base_offset),
                 }]
             } else {
-                map_node(cell, index, base_offset)
+                map_node(cell, index, base_offset, source)
             }
         })
         .collect()
