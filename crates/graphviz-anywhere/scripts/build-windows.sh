@@ -126,10 +126,23 @@ prepare_graphviz_source "${GV_PATCHED}"
 # htmllex.c fails with "Cannot open include file: 'expat.h'".)
 log_info "Configuring Graphviz..."
 mkdir -p "${BUILD_DIR}/graphviz"
+# MSVC source encoding: on Chinese Windows (code page 936/GBK), MSVC parses
+# source files with the local code page by default. UTF-8 bytes in graphviz
+# sources/headers trigger C4819 and cascade into syntax errors (e.g. the
+# bogus "undeclared i" in htmltable.c — a misread multibyte sequence swallows
+# quotes/semicolons). Force /utf-8 parsing.
+# Applied to the Windows generator invocation only; keep common.sh's shared
+# cross-platform flags untouched.
+# MSYS2_ARG_CONV_EXCL: Git Bash converts the /utf-8 value as a Unix path into
+# C:/Program Files/Git/utf-8 (see CMakeCache pollution), so exclude exactly
+# these two flags from path conversion.
+MSYS2_ARG_CONV_EXCL='-DCMAKE_C_FLAGS;-DCMAKE_CXX_FLAGS' \
 cmake -S "${GV_PATCHED}" -B "${BUILD_DIR}/graphviz" \
     -G "${VS_GENERATOR}" -A "${CMAKE_PLATFORM}" \
     "${GV_CMAKE_COMMON_ARGS[@]}" \
     "${WINDOWS_ARCH_CMAKE_ARGS[@]}" \
+    -DCMAKE_C_FLAGS="/utf-8" \
+    -DCMAKE_CXX_FLAGS="/utf-8" \
     -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/graphviz-install"
 
 log_info "Building Graphviz library targets..."
@@ -176,12 +189,15 @@ install(TARGETS graphviz_api
 )
 CMAKE_EOF
 
+MSYS2_ARG_CONV_EXCL='-DCMAKE_C_FLAGS;-DCMAKE_CXX_FLAGS' \
 cmake -S "${BUILD_DIR}/wrapper" -B "${BUILD_DIR}/wrapper/build" \
     -G "${VS_GENERATOR}" -A "${CMAKE_PLATFORM}" \
     -DSRC_DIR="${WRAPPER_SRC}" \
     -DGV_BUILD_DIR="${BUILD_DIR}/graphviz" \
     -DGV_INSTALL_DIR="${GV_INSTALL}" \
     -DGV_VERSION="${GRAPHVIZ_VERSION}" \
+    -DCMAKE_C_FLAGS="/utf-8" \
+    -DCMAKE_CXX_FLAGS="/utf-8" \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}"
 
 cmake --build "${BUILD_DIR}/wrapper/build" --config Release
