@@ -5,6 +5,7 @@ fn main() {
     let mut input = "-".to_owned();
     let mut output = "-".to_owned();
     let mut no_gfm_autolink = false;
+    let mut wikilink = false;
 
     {
         let mut cli = argparse::ArgumentParser::new();
@@ -27,6 +28,12 @@ fn main() {
             "Disable the GFM bare-URL/email autolink extension (CommonMark profile)",
         );
 
+        cli.refer(&mut wikilink).add_option(
+            &["--wikilink"],
+            argparse::StoreTrue,
+            "Enable the WikiLink extension ([[target]], [[target|label]], [[target#section]])",
+        );
+
         cli.parse_args_or_exit();
     }
 
@@ -42,6 +49,9 @@ fn main() {
     let mut options = supramark_markdown::ParseOptions::default();
     if no_gfm_autolink {
         options.gfm_autolink = false;
+    }
+    if wikilink {
+        options.wikilink = true;
     }
     let ast = supramark_markdown::parse_with_options(&source, options);
     let result = serde_json::to_string_pretty(&ast).unwrap();

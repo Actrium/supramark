@@ -11,6 +11,7 @@ Supramark provides a rich set of Feature extensions for enhancing Markdown synta
 - [@supramark/feature-definition-list](./definition-list)
 - [@supramark/feature-emoji](./emoji)
 - [@supramark/feature-footnote](./footnote)
+- [@supramark/feature-wikilink](./wikilink)
 
 ## Usage
 

@@ -186,7 +186,7 @@ AST v2 节点分为四类：
 
 - Core Markdown：CommonMark 基础语义。
 - GFM：表格、删除线、任务列表。
-- Supramark 扩展：diagram、math、footnote、definition list、container、input。
+- Supramark 扩展：diagram、math、footnote、definition list、container、input、wikilink（运行时选项门控）。
 - Recovery：raw、unsupported。
 
 ### 6.1 Core Markdown 节点
@@ -583,6 +583,41 @@ interface UnsupportedNode extends SupramarkParentNode {
 - 如果能解析出安全的子结构，放入 `children`。
 - 如果不能解析，保留 `value`。
 - renderer 默认渲染 `children`；没有 children 时以纯文本/code fallback 渲染。
+
+### 6.11 WikiLink
+
+`wiki_link` 表示知识库 Markdown（Obsidian/Logseq）的 `[[target]]` / `[[target|label]]` / `[[target#section]]` 内联链接。**由解析器运行时选项 `wikilink` 门控，默认关闭**——关闭时 `[[...]]` 保持 CommonMark/GFM 字节级行为不变；开启后 wiki 语义优先于 CommonMark 快捷引用定义（存在 `[target]: url` 时 `[[target]]` 仍是 wiki_link）。
+
+```ts
+interface WikiLinkNode extends SupramarkBaseNode {
+  type: 'wiki_link';
+  target: string;
+  section?: string;
+  label?: string;
+}
+```
+
+字段：
+
+- `target`：首个 `|` / `#` 之前的原始目标文本，不 trim；空字符串表示同页锚点（`[[#section]]`）。
+- `section`：目标部分内首个 `#` 之后的标题片段；块引用形式 `[[note#^abc]]` 的 `^abc` 原样保留。缺省时不序列化。
+- `label`：首个 `|` 之后的显示文本，纯文本、无 children（同 `footnote_reference` 先例）。缺省时不序列化。
+- 无 children；`position` 覆盖整个 `[[…]]` 区间（含双括号），UTF-8 / UTF-16 双坐标。
+
+解析规则：
+
+- `[[` 起始，首个 `]]` 闭合；目标部分内首个 `|` 分割 label、首个 `#` 分割 section；label 内后续 `|` / `#` 字面保留。
+- 内容含 `[`、换行、或未紧跟 `]` 的单个 `]` → 整体降级，走 CommonMark 括号语义。
+- `[[]]`、`[[|x]]`、`[[#]]`、`[[target|]]`（空 label）→ 降级为字面文本。
+
+降级契约（无诊断）：
+
+- 未闭合（`[[foo`）与上述非法形态一律降级为字面文本，**parser 不发 diagnostic**。理由：普通散文可能合法包含 `[[`，告警会误报；降级后输出与 CommonMark 一致，安全可预期。
+- 转义 `\[[foo]]` 与 code span / fence 内的 wikilink 形态保持字面（由内联规则的链序天然保证）。
+
+解析（resolution）职责：
+
+- `target` 是工作区相对名，不是 URL。到文件路径/URL 的映射由宿主在渲染层完成（feature 包的 `resolveWikiLink` 回调）。
 
 ## 7. 子节点约束
 

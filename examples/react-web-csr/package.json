@@ -33,6 +33,7 @@
     "@supramark/feature-mermaid": "workspace:*",
     "@supramark/feature-plantuml": "workspace:*",
     "@supramark/feature-weather": "workspace:*",
+    "@supramark/feature-wikilink": "workspace:*",
     "@supramark/web": "workspace:*",
     "echarts": "^5.5.0",
     "react": "19.1.0",
