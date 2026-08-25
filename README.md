@@ -6,6 +6,8 @@
 
 An integration library for Markdown extensions and diagram rendering, aimed at React Native and mini-program hosts.
 
+**[Try the unified Markdown and diagram playground](https://actrium.github.io/supramark/playground/)** — edit Markdown and switch between GFM, math, Mermaid, D2, PlantUML, DOT, ECharts, Vega-Lite, and container features directly in the browser, without cloning or installing the repository.
+
 A Chinese version of this document is available at [README.zh.md](README.zh.md).
 
 What it sets out to do:

@@ -57,8 +57,8 @@ function generateExampleIndex(): string {
   let doc = `# Example Projects\n\n`;
   doc += `Supramark's examples fall into two categories: a Feature example gallery you can browse directly on the docs site, and full host projects that need to run locally.\n\n`;
   doc += `## In-Site Examples\n\n`;
-  doc += `### [Live Feature Preview](/preview/?feature=mermaid)\n\n`;
-  doc += `The homepage hosts this same interactive preview page: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples right on the page.\n\n`;
+  doc += `### [Live Playground](/playground/)\n\n`;
+  doc += `The homepage hosts this same interactive playground: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples. Stable deep links such as [Mermaid](/playground/mermaid/) and [D2](/playground/d2/) open a Feature directly.\n\n`;
   doc += `To open it locally for debugging, run:\n\n`;
   doc += codeFence('bash', FEATURE_PREVIEW_COMMANDS.join('\n'));
   doc += `\n\n`;
@@ -163,8 +163,8 @@ function generateExampleDoc(data: ExampleData, example: ExampleInfo): string {
   doc += `\`\`\`\n\n`;
 
   if (example.name === 'react-web-csr') {
-    doc += `## Live Feature Preview\n\n`;
-    doc += `This is the effect preview page hosted on this site's homepage. Run the command below to interactively pick a Feature; passing a Feature name opens that specific type directly, and you can still switch to other diagrams or examples via the dropdown menu in the browser.\n\n`;
+    doc += `## Live Playground\n\n`;
+    doc += `This is the unified playground hosted on this site's homepage. Run the command below to interactively pick a Feature; passing a Feature name opens its stable route directly, and you can still switch to other diagrams or examples via the dropdown menu in the browser.\n\n`;
     doc += codeFence('bash', FEATURE_PREVIEW_COMMANDS.join('\n'));
     doc += `\n\n`;
   }
@@ -292,7 +292,7 @@ function generateFeatureGallery(groups: FeatureGalleryGroup[]): string {
   const totalExamples = groups.reduce((sum, group) => sum + group.examples.length, 0);
   let doc = `# Feature Example Gallery\n\n`;
   doc += `This page is automatically aggregated from each Feature package's \`src/examples.ts\`, currently covering **${groups.length} Features** and **${totalExamples} examples**.\n\n`;
-  doc += `These examples show the raw Markdown input; for the full live preview, open the [homepage preview](/preview/?feature=mermaid) or run \`bun run feature:preview:web\`.\n\n`;
+  doc += `These examples show the raw Markdown input; for the full live playground, open [Mermaid](/playground/mermaid/) or run \`bun run feature:preview:web\`.\n\n`;
 
   doc += `## Table of Contents\n\n`;
   for (const group of groups) {

@@ -38,6 +38,7 @@ import { weatherFeature } from '@supramark/feature-weather';
 import { weatherExamples, renderWeatherContainerWeb } from '@supramark/feature-weather';
 import { htmlPageFeature, htmlPageExamples } from '@supramark/feature-html-page';
 import { mapFeature, mapExamples } from '@supramark/feature-map';
+import { routeSlugForFeature } from './playground-routes';
 
 // Register container feature parsers (must run before parsing).
 // html-page and map register their container hooks via module side effect
@@ -118,6 +119,8 @@ export interface FeatureEntry {
   displayName: string;
   /** Semver version */
   version: string;
+  /** Stable public route under /playground/. */
+  routeSlug: string;
   /** Examples */
   examples: ExampleDefinition[];
 }
@@ -127,7 +130,7 @@ function shortName(id: string): string {
   return id.replace(/^@supramark\/feature-/, '');
 }
 
-export const featureRegistry: FeatureEntry[] = [
+const registeredFeatures = [
   { shortName: shortName(admonitionFeature.id), displayName: admonitionFeature.name, version: admonitionFeature.version, examples: admonitionExamples },
   { shortName: shortName(coreMarkdownFeature.metadata.id), displayName: coreMarkdownFeature.metadata.name, version: coreMarkdownFeature.metadata.version, examples: coreMarkdownExamples },
   { shortName: shortName(d2Feature.metadata.id), displayName: d2Feature.metadata.name, version: d2Feature.metadata.version, examples: d2Examples },
@@ -144,8 +147,20 @@ export const featureRegistry: FeatureEntry[] = [
   { shortName: shortName(weatherFeature.id), displayName: weatherFeature.name, version: weatherFeature.version, examples: weatherExamples },
   { shortName: shortName(htmlPageFeature.metadata.id), displayName: htmlPageFeature.metadata.name, version: htmlPageFeature.metadata.version, examples: htmlPageExamples },
   { shortName: shortName(mapFeature.metadata.id), displayName: mapFeature.metadata.name, version: mapFeature.metadata.version, examples: mapExamples },
-].sort((a, b) => a.displayName.localeCompare(b.displayName));
+];
+
+export const featureRegistry: FeatureEntry[] = registeredFeatures
+  .map(feature => ({
+    ...feature,
+    routeSlug: routeSlugForFeature(feature.shortName),
+  }))
+  .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
 export function findFeature(name: string): FeatureEntry | undefined {
-  return featureRegistry.find(f => f.shortName === name || f.displayName.toLowerCase() === name.toLowerCase());
+  return featureRegistry.find(
+    feature =>
+      feature.shortName === name ||
+      feature.routeSlug === name ||
+      feature.displayName.toLowerCase() === name.toLowerCase()
+  );
 }

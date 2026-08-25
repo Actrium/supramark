@@ -20,6 +20,7 @@ import {
   log,
   colors,
 } from './lib-feature-layout';
+import { playgroundPathForFeature } from '../examples/react-web-csr/src/playground-routes';
 
 const CSR_DIR = path.resolve(__dirname, '..', 'examples/react-web-csr');
 
@@ -68,7 +69,7 @@ ${colors.blue}Examples:${colors.reset}
 
   const child = spawn(
     process.execPath,
-    ['x', 'vite', '--host', '--open', `/?feature=${selected.shortName}`],
+    ['x', 'vite', '--host', '--open', playgroundPathForFeature(selected.shortName, '/')],
     { cwd: CSR_DIR, stdio: 'inherit' }
   );
 

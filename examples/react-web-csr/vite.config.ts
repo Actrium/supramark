@@ -4,6 +4,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { dirname, resolve } from 'path';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { PLAYGROUND_ROUTES } from './src/playground-routes';
 
 // TS NodeNext source style: `import from './foo.js'` actually points to `foo.ts`.
 // Vite's default resolver doesn't fall back from .js → .ts, so we do it here.
@@ -37,6 +38,24 @@ const graphvizWasmSibling = {
     }
 
     await downloadGraphvizWasm(target);
+  },
+};
+
+const staticPlaygroundRoutes = {
+  name: 'static-playground-routes',
+  apply: 'build' as const,
+  writeBundle(options: { dir?: string }) {
+    if (!options.dir) return;
+    const entry = resolve(options.dir, 'index.html');
+    if (!existsSync(entry)) {
+      throw new Error(`Playground entry was not emitted: ${entry}`);
+    }
+
+    for (const route of PLAYGROUND_ROUTES) {
+      const routeDir = resolve(options.dir, route.slug);
+      mkdirSync(routeDir, { recursive: true });
+      copyFileSync(entry, resolve(routeDir, 'index.html'));
+    }
   },
 };
 
@@ -84,7 +103,14 @@ export default defineConfig({
   // `vite-plugin-wasm` + `vite-plugin-top-level-await` let us consume
   // plantuml-little-web's default wasm-bindgen shape (`import * as wasm from
   // "./plantuml_little_web_bg.wasm"`) without a custom loader.
-  plugins: [jsToTsResolver, react(), wasm(), topLevelAwait(), graphvizWasmSibling],
+  plugins: [
+    jsToTsResolver,
+    react(),
+    wasm(),
+    topLevelAwait(),
+    graphvizWasmSibling,
+    staticPlaygroundRoutes,
+  ],
   worker: {
     format: 'es',
   },
