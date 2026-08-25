@@ -177,7 +177,7 @@ fn find_frontmatter_end(body: &str) -> Option<(&str, &str)> {
 
 /// Walk the YAML body line-by-line looking for `config:` → `sankey:`
 /// and pull out the handful of keys we care about. We deliberately
-/// avoid `serde_yml` here to sidestep the dependency on the Wave-0
+/// avoid reparsing YAML here to sidestep the Wave-0
 /// frontmatter module — it already consumed the top-level `title` and
 /// `config` but produced only a generic `Config` value.
 fn apply_sankey_config(body: &str, cfg: &mut SankeyConfig) {

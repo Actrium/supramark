@@ -163,20 +163,22 @@ fn strip_frontmatter(source: &str) -> (Option<String>, Option<PacketConfig>, Str
         .map(|s| after_open[s..].to_owned())
         .unwrap_or_default();
 
-    // Parse the body. We rely on serde_yml to handle nesting / quotes
+    // Parse the body. We rely on serde_norway to handle nesting / quotes
     // / booleans / bare strings. Match the same tolerant-on-failure
     // stance as the shared frontmatter parser.
     let mut title: Option<String> = None;
     let mut packet_config: Option<PacketConfig> = None;
 
-    if let Ok(serde_yml::Value::Mapping(map)) = serde_yml::from_str::<serde_yml::Value>(body) {
-        if let Some(t) = map.get(serde_yml::Value::String("title".into())) {
+    if let Ok(serde_norway::Value::Mapping(map)) =
+        serde_norway::from_str::<serde_norway::Value>(body)
+    {
+        if let Some(t) = map.get(serde_norway::Value::String("title".into())) {
             title = yaml_to_string(t);
         }
-        if let Some(serde_yml::Value::Mapping(cfg_map)) =
-            map.get(serde_yml::Value::String("config".into()))
+        if let Some(serde_norway::Value::Mapping(cfg_map)) =
+            map.get(serde_norway::Value::String("config".into()))
         {
-            if let Some(pkt) = cfg_map.get(serde_yml::Value::String("packet".into())) {
+            if let Some(pkt) = cfg_map.get(serde_norway::Value::String("packet".into())) {
                 packet_config = Some(extract_packet_config(pkt));
             }
         }
@@ -185,21 +187,21 @@ fn strip_frontmatter(source: &str) -> (Option<String>, Option<PacketConfig>, Str
     (title, packet_config, rest)
 }
 
-fn yaml_to_string(v: &serde_yml::Value) -> Option<String> {
+fn yaml_to_string(v: &serde_norway::Value) -> Option<String> {
     match v {
-        serde_yml::Value::String(s) => Some(s.clone()),
-        serde_yml::Value::Number(n) => Some(n.to_string()),
-        serde_yml::Value::Bool(b) => Some(b.to_string()),
+        serde_norway::Value::String(s) => Some(s.clone()),
+        serde_norway::Value::Number(n) => Some(n.to_string()),
+        serde_norway::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
 }
 
-fn extract_packet_config(v: &serde_yml::Value) -> PacketConfig {
+fn extract_packet_config(v: &serde_norway::Value) -> PacketConfig {
     let mut cfg = PacketConfig::default();
-    let serde_yml::Value::Mapping(map) = v else {
+    let serde_norway::Value::Mapping(map) = v else {
         return cfg;
     };
-    let get = |key: &str| map.get(serde_yml::Value::String(key.into()));
+    let get = |key: &str| map.get(serde_norway::Value::String(key.into()));
 
     if let Some(n) = get("rowHeight").and_then(yaml_to_f64) {
         cfg.row_height = n;
@@ -222,25 +224,25 @@ fn extract_packet_config(v: &serde_yml::Value) -> PacketConfig {
     cfg
 }
 
-fn yaml_to_f64(v: &serde_yml::Value) -> Option<f64> {
+fn yaml_to_f64(v: &serde_norway::Value) -> Option<f64> {
     match v {
-        serde_yml::Value::Number(n) => n.as_f64(),
-        serde_yml::Value::String(s) => s.parse().ok(),
+        serde_norway::Value::Number(n) => n.as_f64(),
+        serde_norway::Value::String(s) => s.parse().ok(),
         _ => None,
     }
 }
 
-fn yaml_to_u32(v: &serde_yml::Value) -> Option<u32> {
+fn yaml_to_u32(v: &serde_norway::Value) -> Option<u32> {
     match v {
-        serde_yml::Value::Number(n) => n.as_u64().and_then(|x| u32::try_from(x).ok()),
-        serde_yml::Value::String(s) => s.parse().ok(),
+        serde_norway::Value::Number(n) => n.as_u64().and_then(|x| u32::try_from(x).ok()),
+        serde_norway::Value::String(s) => s.parse().ok(),
         _ => None,
     }
 }
 
-fn yaml_to_bool(v: &serde_yml::Value) -> Option<bool> {
+fn yaml_to_bool(v: &serde_norway::Value) -> Option<bool> {
     match v {
-        serde_yml::Value::Bool(b) => Some(*b),
+        serde_norway::Value::Bool(b) => Some(*b),
         _ => None,
     }
 }
