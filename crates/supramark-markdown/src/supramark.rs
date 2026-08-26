@@ -1688,15 +1688,15 @@ fn parse_weather_data(params: Option<&str>, value: &str) -> serde_json::Value {
 
     match parsed {
         Ok(config) => {
-            copy_weather_field(&mut object, &config, "location", &["location"]);
-            copy_weather_field(&mut object, &config, "units", &["units"]);
-            copy_weather_field(
+            copy_config_field(&mut object, &config, "location", &["location"]);
+            copy_config_field(&mut object, &config, "units", &["units"]);
+            copy_config_field(
                 &mut object,
                 &config,
                 "showForecast",
                 &["showForecast", "show_forecast"],
             );
-            copy_weather_field(&mut object, &config, "days", &["days"]);
+            copy_config_field(&mut object, &config, "days", &["days"]);
         }
         Err(error) => {
             object.insert("parseError".to_owned(), serde_json::Value::String(error));
@@ -1788,7 +1788,7 @@ fn parse_weather_scalar_value(raw: &str) -> Option<serde_json::Value> {
     Some(serde_json::Value::String(unquoted.to_owned()))
 }
 
-fn copy_weather_field(
+fn copy_config_field(
     target: &mut serde_json::Map<String, serde_json::Value>,
     source: &serde_json::Map<String, serde_json::Value>,
     output_key: &str,
@@ -1799,6 +1799,43 @@ fn copy_weather_field(
             target.insert(output_key.to_owned(), value.clone());
         }
     }
+}
+
+/// Parses a `:::video` container body (a JSON object) into structured data.
+///
+/// Recognized fields: src / poster / title / autoplay / loop / muted /
+/// controls / width. Unknown fields are dropped. Invalid JSON or a non-object
+/// body yields `parseError` + `rawConfig` instead of failing the parse.
+fn parse_video_data(value: &str) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+
+    let parsed = match serde_json::from_str::<serde_json::Value>(value.trim()) {
+        Ok(serde_json::Value::Object(object)) => Ok(object),
+        Ok(_) => Err("video JSON config must be an object".to_owned()),
+        Err(error) => Err(error.to_string()),
+    };
+
+    match parsed {
+        Ok(config) => {
+            copy_config_field(&mut object, &config, "src", &["src"]);
+            copy_config_field(&mut object, &config, "poster", &["poster"]);
+            copy_config_field(&mut object, &config, "title", &["title"]);
+            copy_config_field(&mut object, &config, "autoplay", &["autoplay"]);
+            copy_config_field(&mut object, &config, "loop", &["loop"]);
+            copy_config_field(&mut object, &config, "muted", &["muted"]);
+            copy_config_field(&mut object, &config, "controls", &["controls"]);
+            copy_config_field(&mut object, &config, "width", &["width"]);
+        }
+        Err(error) => {
+            object.insert("parseError".to_owned(), serde_json::Value::String(error));
+            object.insert(
+                "rawConfig".to_owned(),
+                serde_json::Value::String(value.to_owned()),
+            );
+        }
+    }
+
+    serde_json::Value::Object(object)
 }
 
 fn parse_map_data(value: &str) -> Option<serde_json::Value> {
@@ -1980,6 +2017,7 @@ pub(crate) fn build_extension_node(
                 "vison" => Some(parse_vison_data(&value)),
                 "html" => Some(serde_json::json!({ "html": value.clone() })),
                 "weather" => Some(parse_weather_data(open.params.as_deref(), &value)),
+                "video" => Some(parse_video_data(&value)),
                 _ => None,
             };
             SupramarkNode::Container {

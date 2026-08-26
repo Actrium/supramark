@@ -1,0 +1,104 @@
+/**
+ * Video web renderer
+ *
+ * Implements the ContainerWebRenderer interface
+ *
+ * @packageDocumentation
+ */
+
+import React from 'react';
+import type { ContainerWebRenderArgs } from '@supramark/core';
+import type { VideoData } from './feature.js';
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    width: '100%',
+    margin: '12px 0',
+  },
+  video: {
+    display: 'block',
+    width: '100%',
+    borderRadius: '8px',
+    backgroundColor: '#000',
+  },
+  caption: {
+    marginTop: '6px',
+    fontSize: '14px',
+    color: '#555',
+    textAlign: 'center',
+  },
+  error: {
+    border: '1px solid #f5c6cb',
+    backgroundColor: '#f8d7da',
+    color: '#721c24',
+    borderRadius: '8px',
+    padding: '12px 16px',
+    margin: '12px 0',
+  },
+  errorTitle: {
+    fontWeight: 'bold',
+    marginBottom: '4px',
+  },
+  errorCode: {
+    marginTop: '6px',
+    fontFamily: 'monospace',
+    fontSize: '12px',
+    whiteSpace: 'pre-wrap' as const,
+  },
+};
+
+/**
+ * Clamp the configured width (percent) to a safe CSS value.
+ */
+function playerWidth(width: number | undefined): string {
+  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+    return '100%';
+  }
+  return `${Math.min(width, 100)}%`;
+}
+
+/**
+ * Web renderer for :::video
+ */
+export function renderVideoContainerWeb({ node, key }: ContainerWebRenderArgs): React.ReactNode {
+  const data = (node?.data ?? {}) as unknown as VideoData;
+  const { parseError, rawConfig, src, poster, title, autoplay, loop, muted, controls, width } =
+    data;
+
+  // Show an error message when parsing failed
+  if (parseError) {
+    return (
+      <div key={key} style={styles.error}>
+        <div style={styles.errorTitle}>⚠️ Video config error</div>
+        <div>{parseError}</div>
+        {rawConfig && <pre style={styles.errorCode}>{rawConfig}</pre>}
+      </div>
+    );
+  }
+
+  // Missing required config
+  if (!src) {
+    return (
+      <div key={key} style={styles.error}>
+        <div style={styles.errorTitle}>⚠️ Missing src config</div>
+        <div>Please specify the src field with the video URL</div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={key} style={{ ...styles.container, width: playerWidth(width) }}>
+      <video
+        style={styles.video}
+        src={src}
+        poster={poster}
+        controls={controls ?? true}
+        autoPlay={autoplay ?? false}
+        loop={loop ?? false}
+        muted={muted ?? false}
+        aria-label={title}
+      />
+      {title && <div style={styles.caption}>{title}</div>}
+    </div>
+  );
+}

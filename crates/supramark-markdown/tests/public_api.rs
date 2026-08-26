@@ -585,6 +585,95 @@ fn public_api_maps_weather_container_data() {
 }
 
 #[test]
+fn public_api_maps_video_container_data() {
+    let ast = parse(
+        ":::video\n{\n  \"src\": \"https://example.com/demo.mp4\",\n  \"poster\": \"https://example.com/cover.jpg\",\n  \"title\": \"Product demo\",\n  \"autoplay\": true,\n  \"muted\": true,\n  \"loop\": false,\n  \"controls\": true,\n  \"width\": 80\n}\n:::\n",
+    );
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container {
+        name, params, data, ..
+    } = &children[0]
+    else {
+        panic!("expected container");
+    };
+
+    assert_eq!(name, "video");
+    assert_eq!(params, &None);
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/src")),
+        Some(&serde_json::json!("https://example.com/demo.mp4"))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/poster")),
+        Some(&serde_json::json!("https://example.com/cover.jpg"))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/title")),
+        Some(&serde_json::json!("Product demo"))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/autoplay")),
+        Some(&serde_json::json!(true))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/muted")),
+        Some(&serde_json::json!(true))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/loop")),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/controls")),
+        Some(&serde_json::json!(true))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/width")),
+        Some(&serde_json::json!(80))
+    );
+}
+
+#[test]
+fn public_api_maps_video_container_parse_error() {
+    let ast = parse(":::video\n{invalid json}\n:::\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { name, data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    assert_eq!(name, "video");
+    let error = data
+        .as_ref()
+        .and_then(|data| data.pointer("/parseError"))
+        .and_then(|value| value.as_str());
+    assert!(error.is_some(), "expected parseError in video data");
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/rawConfig")),
+        Some(&serde_json::json!("{invalid json}"))
+    );
+}
+
+#[test]
+fn public_api_maps_video_container_non_object_error() {
+    let ast = parse(":::video\n[\"not\", \"an\", \"object\"]\n:::\n");
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/parseError")),
+        Some(&serde_json::json!("video JSON config must be an object"))
+    );
+}
+
+#[test]
 fn public_api_preserves_raw_html_blocks() {
     let ast = parse("<div>Hello</div>\n");
     let SupramarkNode::Root { children, .. } = ast else {

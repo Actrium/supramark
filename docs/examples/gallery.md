@@ -1,6 +1,6 @@
 # Feature Example Gallery
 
-This page is automatically aggregated from each Feature package's `src/examples.ts`, currently covering **21 Features** and **33 examples**.
+This page is automatically aggregated from each Feature package's `src/examples.ts`, currently covering **22 Features** and **38 examples**.
 
 These examples show the raw Markdown input; for the full live preview, open the [homepage preview](/preview/?feature=mermaid) or run `bun run feature:preview:web`.
 
@@ -26,6 +26,7 @@ These examples show the raw Markdown input; for the full live preview, open the 
 - [Math](#math) (1)
 - [Mermaid](#mermaid) (1)
 - [Plantuml](#plantuml) (3)
+- [Video](#video) (5)
 - [Weather](#weather) (4)
 
 ## Admonition
@@ -692,6 +693,76 @@ stop
 @enduml
 ```
 ````
+
+## Video
+
+Package: `@supramark/feature-video`  
+Path: `packages/features/containers/video`
+
+### Video embed - basic
+
+Embed a video with the minimal JSON config
+
+```markdown
+:::video
+{
+  "src": "https://example.com/demo.mp4"
+}
+:::
+```
+
+### Video embed - poster and title
+
+Show a thumbnail before playback and a caption below the player
+
+```markdown
+:::video
+{
+  "src": "https://example.com/demo.mp4",
+  "poster": "https://example.com/cover.jpg",
+  "title": "Product demo"
+}
+:::
+```
+
+### Video embed - autoplay muted loop
+
+Configure autoplay with muted and loop for an ambient clip (browsers require muted for autoplay)
+
+```markdown
+:::video
+{
+  "src": "https://example.com/ambient.mp4",
+  "autoplay": true,
+  "muted": true,
+  "loop": true,
+  "controls": false
+}
+:::
+```
+
+### Video embed - narrow width
+
+Constrain the player to a percentage of the container width
+
+```markdown
+:::video
+{
+  "src": "https://example.com/demo.mp4",
+  "width": 60
+}
+:::
+```
+
+### Video embed - invalid JSON shows an error card
+
+An unparsable body renders an inline error instead of failing the document
+
+```markdown
+:::video
+{invalid json}
+:::
+```
 
 ## Weather
 

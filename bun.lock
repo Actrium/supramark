@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "supramark",
@@ -31,7 +30,11 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/d2-little/packages/web": {
       "name": "@actrium/d2-little-web",
@@ -83,7 +86,11 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/mermaid-little/packages/web": {
       "name": "@actrium/mermaid-little-web",
@@ -121,7 +128,11 @@
         "@supramark/core": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/supramark-markdown/packages/web": {
       "name": "@supramark/markdown-web",
@@ -370,6 +381,17 @@
         "@types/jest": "^29.5.0",
         "jest": "^29.5.0",
         "ts-jest": "^29.1.0",
+        "typescript": "^5.5.0",
+      },
+      "peerDependencies": {
+        "@supramark/core": "*",
+      },
+    },
+    "packages/features/containers/video": {
+      "name": "@supramark/feature-video",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/jest": "^29.5.0",
         "typescript": "^5.5.0",
       },
       "peerDependencies": {
@@ -1420,6 +1442,8 @@
     "@supramark/feature-mermaid": ["@supramark/feature-mermaid@workspace:packages/features/diagrams/mermaid"],
 
     "@supramark/feature-plantuml": ["@supramark/feature-plantuml@workspace:packages/features/diagrams/plantuml"],
+
+    "@supramark/feature-video": ["@supramark/feature-video@workspace:packages/features/containers/video"],
 
     "@supramark/feature-weather": ["@supramark/feature-weather@workspace:packages/features/containers/weather"],
 
