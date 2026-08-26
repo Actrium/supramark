@@ -72,6 +72,10 @@ const INLINE_BUTTON_STYLE: React.CSSProperties = {
  * Web defaults to `navigator.clipboard.writeText` (zero dependency); the host
  * can override the action via `onCopyCode`. Disable the button with
  * `copyButton: false`.
+ *
+ * Mouse clicks do not focus the button (mousedown default is prevented) so
+ * Safari/Firefox do not draw a focus outline after copying; keyboard Tab
+ * focus still shows the browser focus ring.
  */
 export function CodeBlock({ node, classNames, children }: CodeBlockProps): React.ReactElement {
   const { onCopyCode, copyButton } = useContext(CodeCopyContext);
@@ -144,6 +148,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
           type="button"
           className={classNames.codeButton}
           style={buttonStyle}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={handleClick}
           aria-label={copied ? 'Copied code' : 'Copy code'}
         >
