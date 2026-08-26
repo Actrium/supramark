@@ -148,7 +148,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
           type="button"
           className={classNames.codeButton}
           style={buttonStyle}
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={event => event.preventDefault()}
           onClick={handleClick}
           aria-label={copied ? 'Copied code' : 'Copy code'}
         >
