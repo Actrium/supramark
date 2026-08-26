@@ -39,8 +39,9 @@ function createContainer(): TestContainer {
 }
 
 interface RenderOpts {
-  onCopyCode?: (code: string, node: { type: 'code' }) => void;
+  onCopyCode?: (code: string, node: { type: 'code' }) => void | Promise<void>;
   copyButton?: boolean;
+  theme?: 'tailwind' | 'minimal';
 }
 
 async function renderCode(
@@ -133,5 +134,55 @@ describe('code block copy button (web)', () => {
     const container = await renderCode('foo\n', undefined);
     expect(findButton(container)).toBeNull();
     expect(container.innerHTML).toContain('foo');
+  });
+
+  test('a rejected writeText leaves the label as Copy (no fake success)', async () => {
+    writeText.mockImplementationOnce(() => Promise.reject(new Error('denied')));
+    const container = await renderCode('const x = 1\n', 'ts');
+    const button = findButton(container);
+    if (!button) {
+      throw new Error('copy button not rendered');
+    }
+    await click(button);
+    // Flush the rejected promise so the catch path settles before asserting.
+    await act(async () => {});
+    expect(button.textContent).toBe('Copy');
+  });
+
+  test('a rejected onCopyCode leaves the label as Copy', async () => {
+    const onCopyCode = () => Promise.reject(new Error('host denied'));
+    const container = await renderCode('const x = 1\n', 'ts', { onCopyCode });
+    const button = findButton(container);
+    if (!button) {
+      throw new Error('copy button not rendered');
+    }
+    await click(button);
+    await act(async () => {});
+    expect(button.textContent).toBe('Copy');
+  });
+
+  test('copyButton false with a fenced language yields one bare pre without style', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', { copyButton: false });
+    const pres = container.getElementsByTagName('pre');
+    expect(pres.length).toBe(1);
+    expect(pres[0].getAttribute('style')).toBeNull();
+    expect(findButton(container)).toBeNull();
+  });
+
+  test('tailwind theme keeps the standalone chrome on the bare pre (copyButton false)', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', {
+      copyButton: false,
+      theme: 'tailwind',
+    });
+    const pre = container.getElementsByTagName('pre')[0] as unknown as HTMLElement;
+    expect(pre.className).toBe('bg-gray-100 dark:bg-gray-800 rounded-md p-4 mb-4 overflow-x-auto');
+  });
+
+  test('tailwind theme moves the chrome to the container and zeroes the headered body', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', { theme: 'tailwind' });
+    const pre = container.getElementsByTagName('pre')[0] as unknown as HTMLElement;
+    expect(pre.className).toBe('m-0 p-4 overflow-x-auto');
+    const wrapper = pre.parentElement as unknown as HTMLElement | null;
+    expect(wrapper?.className).toBe('bg-gray-100 dark:bg-gray-800 rounded-md mb-4 overflow-hidden');
   });
 });

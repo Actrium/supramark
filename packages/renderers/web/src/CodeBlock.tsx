@@ -26,7 +26,7 @@ interface CodeBlockProps {
 
 // Inline fallback styles so the button works out of the box even when the host
 // uses the empty defaultClassNames. When the host supplies a className for the
-// header / lang / button / container, the inline style is dropped so the
+// container / header / lang / button / body, the inline style is dropped so
 // className owns it. The button lives in a header row (lang left, button
 // right) instead of an absolute overlay, so it never covers a code line.
 const INLINE_CONTAINER_STYLE: React.CSSProperties = {
@@ -48,7 +48,7 @@ const INLINE_LANG_STYLE: React.CSSProperties = {
   fontFamily: 'monospace',
   userSelect: 'none',
 };
-const INLINE_CODEBLOCK_STYLE: React.CSSProperties = {
+const INLINE_CODEBLOCK_BODY_STYLE: React.CSSProperties = {
   margin: 0,
   padding: 16,
   overflowX: 'auto',
@@ -126,7 +126,7 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
   const headerStyle = classNames.codeBlockHeader ? undefined : INLINE_HEADER_STYLE;
   const langStyle = classNames.codeBlockLang ? undefined : INLINE_LANG_STYLE;
   const buttonStyle = classNames.codeButton ? undefined : INLINE_BUTTON_STYLE;
-  const codeBlockStyle = classNames.codeBlock ? undefined : INLINE_CODEBLOCK_STYLE;
+  const codeBlockBodyStyle = classNames.codeBlockBody ? undefined : INLINE_CODEBLOCK_BODY_STYLE;
 
   // No button: render the pre as before (no wrapper div, no inline style) so
   // conformance (copyButton false) measures the spec <pre><code> DOM.
@@ -150,7 +150,9 @@ export function CodeBlock({ node, classNames, children }: CodeBlockProps): React
           <span className={classNames.codeButtonText}>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
-      <pre className={classNames.codeBlock} style={codeBlockStyle}>{children}</pre>
+      <pre className={classNames.codeBlockBody} style={codeBlockBodyStyle}>
+        {children}
+      </pre>
     </div>
   );
 }

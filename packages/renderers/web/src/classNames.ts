@@ -21,7 +21,9 @@ export interface SupramarkClassNames {
   thematicBreak?: string; // hr element
 
   // Code blocks
-  codeBlock?: string; // pre element
+  codeBlock?: string; // standalone pre element (no header): owns the full chrome
+  /** Body pre inside the headered code block container (container owns the chrome). */
+  codeBlockBody?: string;
   code?: string; // code element
   /** Wrapper around a code block header (lang + button) and the pre. */
   codeBlockContainer?: string;
@@ -103,7 +105,8 @@ export const tailwindClassNames: SupramarkClassNames = {
   h6: 'text-base font-medium mb-2 mt-2',
   blockquote: 'border-l-4 border-gray-300 dark:border-gray-600 pl-4 mb-4',
   thematicBreak: 'border-t border-gray-300 dark:border-gray-700 my-4',
-  codeBlock: 'm-0 p-4 overflow-x-auto',
+  codeBlock: 'bg-gray-100 dark:bg-gray-800 rounded-md p-4 mb-4 overflow-x-auto',
+  codeBlockBody: 'm-0 p-4 overflow-x-auto',
   code: 'font-mono text-sm',
   codeBlockContainer: 'bg-gray-100 dark:bg-gray-800 rounded-md mb-4 overflow-hidden',
   codeBlockHeader: 'flex items-center justify-between px-2 py-1 select-none',
@@ -149,6 +152,7 @@ export const minimalClassNames: SupramarkClassNames = {
   blockquote: 'sm-blockquote',
   thematicBreak: 'sm-hr',
   codeBlock: 'sm-code-block',
+  codeBlockBody: 'sm-code-block-body',
   code: 'sm-code',
   codeBlockContainer: 'sm-code-block-container',
   codeBlockHeader: 'sm-code-block-header',
