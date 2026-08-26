@@ -328,6 +328,93 @@ fn gfm_autolink_option_disables_bare_url_linkification() {
     assert_eq!(value, "https://example.com");
 }
 
+#[test]
+fn wikilink_option_enables_wikilink_parsing() {
+    // Inverted mirror of the gfm_autolink gate above: WikiLink is OFF by
+    // default (`[[...]]` is not CommonMark/GFM syntax), and the option turns
+    // it on. Default parsing must stay byte-identical to the CommonMark/GFM
+    // profiles.
+    let default_ast = parse("[[Project Plan]]\n");
+    let SupramarkNode::Root { children, .. } = default_ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    assert!(
+        matches!(&children[0], SupramarkNode::Text { value, .. } if value == "[[Project Plan]]"),
+        "default options must leave [[...]] as text, got {:?}",
+        children[0]
+    );
+
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let ast = parse_with_options("[[Project Plan]]\n", options);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    assert!(
+        matches!(
+            &children[0],
+            SupramarkNode::WikiLink { target, section: None, label: None, .. }
+                if target == "Project Plan"
+        ),
+        "option on should produce a wiki_link, got {:?}",
+        children[0]
+    );
+}
+
+#[test]
+fn wikilink_serializes_tagged_node_omitting_absent_fields() {
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let json = serde_json::to_string(&parse_with_options("[[a|b]]\n", options)).unwrap();
+    assert!(json.contains(r#""type":"wiki_link""#), "{json}");
+    assert!(json.contains(r#""target":"a""#), "{json}");
+    assert!(json.contains(r#""label":"b""#), "{json}");
+    assert!(!json.contains("section"), "absent section must not serialize: {json}");
+
+    let json = serde_json::to_string(&parse_with_options("[[a]]\n", options)).unwrap();
+    assert!(json.contains(r#""type":"wiki_link""#), "{json}");
+    assert!(
+        !json.contains("label") && !json.contains("section"),
+        "absent label/section must not serialize: {json}"
+    );
+}
+
+#[test]
+fn wikilink_option_defers_to_inline_math() {
+    // Regression for the PR-208 review: with the wikilink option on, `$[[foo]]$`
+    // must stay one math_inline — the WikiLink scanner declines a `[[` that
+    // sits inside an open math span so the text post-pass still claims `$…$`.
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let ast = parse_with_options("pre $[[foo]]$ post\n", options);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    let math = children
+        .iter()
+        .find_map(|n| match n {
+            SupramarkNode::MathInline { value, .. } => Some(value.clone()),
+            _ => None,
+        })
+        .expect("math_inline must survive the wikilink option");
+    assert_eq!(math, "[[foo]]");
+    assert!(
+        children
+            .iter()
+            .all(|n| !matches!(n, SupramarkNode::WikiLink { .. })),
+        "no wiki_link inside a math span: {children:?}"
+    );
+}
+
 // GFM strikethrough (cmark-gfm 0.29 conformance, extensions-0018). Both `~x~`
 // and `~~x~~` produce a single <del>; runs of 3+ tildes and mismatched lengths
 // stay literal. See issue #144.

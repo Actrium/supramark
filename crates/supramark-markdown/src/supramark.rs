@@ -246,6 +246,15 @@ pub enum SupramarkNode {
         #[serde(skip_serializing_if = "Option::is_none")]
         position: Option<SourcePosition>,
     },
+    WikiLink {
+        target: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        section: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        position: Option<SourcePosition>,
+    },
     Container {
         name: String,
         mode: ExtensionMode,
@@ -300,6 +309,11 @@ pub struct ParseOptions {
     /// product's GFM profile. Set this to `false` for strict CommonMark,
     /// where bare URLs stay literal.
     pub gfm_autolink: bool,
+    /// WikiLink extension (`[[target]]`, `[[target|label]]`, `[[target#section]]`).
+    /// Off by default: `[[...]]` is not CommonMark/GFM syntax, so when this is
+    /// `false` (the default) parsing is byte-identical to the CommonMark/GFM
+    /// profiles. Hosts that use knowledge-base Markdown opt in.
+    pub wikilink: bool,
 }
 
 impl Default for ParseOptions {
@@ -308,6 +322,7 @@ impl Default for ParseOptions {
             gfm_tables: true,
             gfm_strikethrough: true,
             gfm_autolink: true,
+            wikilink: false,
         }
     }
 }
@@ -361,6 +376,10 @@ fn create_parser(options: ParseOptions) -> MarkdownParser {
     if options.gfm_autolink {
         // GFM autolink extension: bare www./scheme-URL/email linkification.
         crate::plugins::extra::gfm_autolink::add(&mut md);
+    }
+    if options.wikilink {
+        // WikiLink extension: [[target]] / [[target|label]] / [[target#section]].
+        crate::plugins::extra::wikilink::add(&mut md);
     }
 
     md
@@ -2456,5 +2475,300 @@ mod tests {
         };
         assert!(checked.is_none(), "no-separator should not be a task item");
         assert_eq!(first_text(children), "[ ]foo");
+    }
+
+    fn parse_with_wikilink(source: &str) -> SupramarkNode {
+        parse_with_options(
+            source,
+            ParseOptions {
+                wikilink: true,
+                ..ParseOptions::default()
+            },
+        )
+    }
+
+    fn first_paragraph(ast: &SupramarkNode) -> &Vec<SupramarkNode> {
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::Paragraph { children: p, .. } = &children[0] else {
+            panic!("expected paragraph, got {:?}", children[0]);
+        };
+        p
+    }
+
+    fn flatten_text(nodes: &[SupramarkNode]) -> String {
+        let mut out = String::new();
+        for node in nodes {
+            match node {
+                SupramarkNode::Text { value, .. } => out.push_str(value),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn maps_wikilink_forms() {
+        for (input, target, section, label) in [
+            ("[[Project Plan]]", "Project Plan", None, None),
+            ("[[Project Plan|plan]]", "Project Plan", None, Some("plan")),
+            ("[[Project Plan#Roadmap]]", "Project Plan", Some("Roadmap"), None),
+            (
+                "[[Project Plan#Roadmap|the plan]]",
+                "Project Plan",
+                Some("Roadmap"),
+                Some("the plan"),
+            ),
+            // Same-page fragment link: empty target, section set.
+            ("[[#Roadmap]]", "", Some("Roadmap"), None),
+            // Obsidian block reference: `^abc` stays verbatim in the section.
+            ("[[note#^abc]]", "note", Some("^abc"), None),
+            // A `#` inside the label is literal, not a fragment.
+            ("[[plan|C# sharp]]", "plan", None, Some("C# sharp")),
+            // cjk-allow: CJK target verifies byte-level delimiter scanning over multi-byte glyphs
+            ("[[中文 页面]]", "中文 页面", None, None),
+        ] {
+            let ast = parse_with_wikilink(input);
+            let paragraph = first_paragraph(&ast);
+            assert_eq!(paragraph.len(), 1, "one node for {input}: {paragraph:?}");
+            match &paragraph[0] {
+                SupramarkNode::WikiLink {
+                    target: t,
+                    section: s,
+                    label: l,
+                    ..
+                } => {
+                    assert_eq!(t, target, "target for {input}");
+                    assert_eq!(s.as_deref(), section, "section for {input}");
+                    assert_eq!(l.as_deref(), label, "label for {input}");
+                }
+                other => panic!("expected wiki_link for {input}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn wikilink_carries_full_span_position() {
+        let source = "See [[Project Plan]] here.";
+        let ast = parse_with_wikilink(source);
+        let paragraph = first_paragraph(&ast);
+        let span = paragraph
+            .iter()
+            .find_map(|n| match n {
+                SupramarkNode::WikiLink { position, .. } => byte_span(position),
+                _ => None,
+            })
+            .expect("wiki_link node");
+        assert_eq!(span, (4, 20));
+        assert_eq!(&source[4..20], "[[Project Plan]]");
+
+        // Multi-byte content: byte offsets must advance past whole codepoints.
+        // cjk-allow: CJK source needed to verify byte/UTF-16 offset math across multi-byte glyphs
+        let source = "看 [[中文]] 好";
+        let ast = parse_with_wikilink(source);
+        let paragraph = first_paragraph(&ast);
+        let span = paragraph
+            .iter()
+            .find_map(|n| match n {
+                SupramarkNode::WikiLink { position, .. } => byte_span(position),
+                _ => None,
+            })
+            .expect("wiki_link node");
+        assert_eq!(span, (4, 14));
+        let utf16_start = paragraph
+            .iter()
+            .find_map(|n| match n {
+                SupramarkNode::WikiLink { position, .. } => {
+                    position.as_ref().map(|p| p.start.utf16_offset)
+                }
+                _ => None,
+            })
+            .expect("positioned wiki_link");
+        // cjk-allow: assert message names the CJK glyph being counted
+        assert_eq!(utf16_start, 2, "看 + space = 2 UTF-16 units");
+    }
+
+    #[test]
+    fn wikilink_off_by_default_leaves_text() {
+        let ast = parse("[[Project Plan]]");
+        let paragraph = first_paragraph(&ast);
+        assert!(
+            paragraph
+                .iter()
+                .all(|n| matches!(n, SupramarkNode::Text { .. })),
+            "default options must not produce wiki_link: {paragraph:?}"
+        );
+        assert_eq!(flatten_text(paragraph), "[[Project Plan]]");
+    }
+
+    #[test]
+    fn wikilink_degrades_malformed_forms() {
+        for input in [
+            "[[]]",
+            "[[target|]]",
+            "[[target#]]",
+            "[[#]]",
+            "[[|label]]",
+            "[[a[b]]",
+            "[[a]b]]",
+            "[[unclosed",
+        ] {
+            let ast = parse_with_wikilink(input);
+            let paragraph = first_paragraph(&ast);
+            assert!(
+                paragraph
+                    .iter()
+                    .all(|n| matches!(n, SupramarkNode::Text { .. })),
+                "malformed {input} must degrade to text, got {paragraph:?}"
+            );
+            assert_eq!(flatten_text(paragraph), input, "content preserved for {input}");
+        }
+    }
+
+    #[test]
+    fn wikilink_wins_over_reference_definition() {
+        let source = "[[target]]\n\n[target]: /url\n";
+        // Option on: wiki semantics win — still a wiki_link, not a CommonMark
+        // shortcut reference link, even though a matching definition exists.
+        let ast = parse_with_wikilink(source);
+        let paragraph = first_paragraph(&ast);
+        assert!(matches!(
+            &paragraph[0],
+            SupramarkNode::WikiLink { target, .. } if target == "target"
+        ));
+
+        // Option off: CommonMark semantics — the inner `[target]` is a shortcut
+        // reference link, so the AST is Text("[") + Link + Text("]").
+        let ast = parse(source);
+        let paragraph = first_paragraph(&ast);
+        assert!(matches!(&paragraph[0], SupramarkNode::Text { value, .. } if value == "["));
+        assert!(matches!(&paragraph[1], SupramarkNode::Link { url, .. } if url == "/url"));
+    }
+
+    #[test]
+    fn wikilink_inside_link_label_stays_commonmark_link() {
+        // WikiLinkScanner::check returns None so parse_link_label's bracket
+        // counting (single-char skips) is untouched: the outer construct is
+        // still a CommonMark link, and the label's inline content contains the
+        // WikiLink. If check ever returns the token length, this degrades to
+        // plain text — that is the regression this test locks out.
+        let ast = parse_with_wikilink("[text [[x]] text](url)");
+        let paragraph = first_paragraph(&ast);
+        let SupramarkNode::Link { url, children, .. } = &paragraph[0] else {
+            panic!("expected link, got {:?}", &paragraph[0]);
+        };
+        assert_eq!(url, "url");
+        assert!(
+            children
+                .iter()
+                .any(|c| matches!(c, SupramarkNode::WikiLink { target, .. } if target == "x")),
+            "label inline content should contain the wiki_link: {children:?}"
+        );
+    }
+
+    #[test]
+    fn wikilink_escaped_and_code_forms_stay_literal() {
+        // Escaped opener: the escape rule consumes `\[` before the scanner.
+        let ast = parse_with_wikilink("\\[[foo]]");
+        let paragraph = first_paragraph(&ast);
+        assert!(flatten_text(paragraph).starts_with("[[foo]]"));
+
+        // Code span: the backtick rule consumes the whole span first.
+        let ast = parse_with_wikilink("`[[foo]]`");
+        let paragraph = first_paragraph(&ast);
+        assert!(matches!(
+            &paragraph[0],
+            SupramarkNode::InlineCode { value, .. } if value == "[[foo]]"
+        ));
+
+        // Fenced code is block-level and never reaches the inline scanner.
+        let ast = parse_with_wikilink("```\n[[foo]]\n```");
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        assert!(matches!(
+            &children[0],
+            SupramarkNode::Code { value, .. } if value.contains("[[foo]]")
+        ));
+    }
+
+    #[test]
+    fn wikilink_defers_to_inline_math() {
+        // The math post-pass claims `$…$` per text node; WikiLinkScanner must
+        // not split the run when the `[[` sits inside a math span.
+        for input in [
+            "$[[foo]]$",
+            "pre $[[foo]]$ post",
+            "$a$ then $[[foo]]$",
+            // Dangling `$$`: the post-pass skips the adjacent pair and the
+            // second `$` opens the span containing the wikilink.
+            "$$[[foo]]$",
+        ] {
+            let ast = parse_with_wikilink(input);
+            let paragraph = first_paragraph(&ast);
+            assert!(
+                paragraph
+                    .iter()
+                    .any(|n| matches!(n, SupramarkNode::MathInline { .. })),
+                "math_inline must survive for {input}: {paragraph:?}"
+            );
+            assert!(
+                !paragraph
+                    .iter()
+                    .any(|n| matches!(n, SupramarkNode::WikiLink { .. })),
+                "no wiki_link inside a math span for {input}: {paragraph:?}"
+            );
+        }
+
+        // No closing `$` after the `]]`: no math span, so the wikilink wins.
+        let ast = parse_with_wikilink("$a [[foo]]");
+        let paragraph = first_paragraph(&ast);
+        assert!(
+            paragraph
+                .iter()
+                .any(|n| matches!(n, SupramarkNode::WikiLink { target, .. } if target == "foo")),
+            "unclosed math span must not eat the wikilink: {paragraph:?}"
+        );
+
+        // The closer must be on the same line as the opener: a `$` before a
+        // line break cannot open, so the next line's wikilink is claimed.
+        let ast = parse_with_wikilink("broken $\n[[foo]]");
+        let paragraph = first_paragraph(&ast);
+        assert!(
+            paragraph
+                .iter()
+                .any(|n| matches!(n, SupramarkNode::WikiLink { target, .. } if target == "foo")),
+            "line-crossing math span is not math: {paragraph:?}"
+        );
+
+        // Math spans do not nest across inline tokens: an intervening strong
+        // splits the text run, so the math post-pass would not claim the span
+        // either — the scanner declines and the brackets stay literal (the
+        // documented conservative degradation).
+        let ast = parse_with_wikilink("$[[foo]]**b**$");
+        let paragraph = first_paragraph(&ast);
+        assert!(
+            !paragraph
+                .iter()
+                .any(|n| matches!(n, SupramarkNode::WikiLink { .. })),
+            "intervening token keeps the span unclaimed: {paragraph:?}"
+        );
+    }
+
+    #[test]
+    fn wikilink_after_escaped_dollar_still_wins() {
+        // `\$` becomes a separate TextSpecial (its decoded value diverges from
+        // the raw slice, so the math post-pass never scans it as a delimiter);
+        // the following text run has no dangling opener and the wikilink is
+        // claimed.
+        let ast = parse_with_wikilink("\\$[[foo]]");
+        let paragraph = first_paragraph(&ast);
+        assert!(
+            paragraph
+                .iter()
+                .any(|n| matches!(n, SupramarkNode::WikiLink { target, .. } if target == "foo")),
+            "escaped dollar is not a math opener: {paragraph:?}"
+        );
     }
 }

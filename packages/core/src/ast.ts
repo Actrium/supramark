@@ -46,7 +46,8 @@ export type SupramarkNodeType =
   | 'image'
   | 'break'
   | 'delete' // GFM strikethrough
-  | 'footnote_reference';
+  | 'footnote_reference'
+  | 'wiki_link'; // [[target]] / [[target|label]] / [[target#section]] (parser option, off by default)
 
 export type DiagnosticSeverity = 'info' | 'warning' | 'error';
 
@@ -385,6 +386,24 @@ export interface SupramarkFootnoteReferenceNode extends SupramarkBaseNode {
 }
 
 /**
+ * WikiLink node for knowledge-base syntax (`[[target]]`, `[[target|label]]`,
+ * `[[target#section]]`), emitted only when the `wikilink` parser option is on.
+ *
+ * - target: the raw link target; empty for same-page fragment links (`[[#section]]`)
+ * - section: the heading fragment after the first `#` in the target part
+ * - label: the display text after the first `|`
+ *
+ * Resolution to a file path or URL is a downstream concern: hosts resolve
+ * `target`/`section` against their own workspace rules.
+ */
+export interface SupramarkWikiLinkNode extends SupramarkBaseNode {
+  type: 'wiki_link';
+  target: string;
+  section?: string;
+  label?: string;
+}
+
+/**
  * Footnote definition node, matching a form like:
  *
  * ```markdown
@@ -553,6 +572,7 @@ export type SupramarkInlineNode =
   | SupramarkInlineCodeNode
   | SupramarkMathInlineNode
   | SupramarkFootnoteReferenceNode
+  | SupramarkWikiLinkNode
   | SupramarkLinkNode
   | SupramarkImageNode
   | SupramarkBreakNode

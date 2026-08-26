@@ -30,6 +30,7 @@ import { emojiFeature } from '@supramark/feature-emoji';
 import { emojiExamples } from '@supramark/feature-emoji';
 import { footnoteFeature } from '@supramark/feature-footnote';
 import { footnoteExamples } from '@supramark/feature-footnote';
+import { wikilinkFeature, wikilinkExamples } from '@supramark/feature-wikilink';
 import { gfmFeature } from '@supramark/feature-gfm';
 import { gfmExamples } from '@supramark/feature-gfm';
 import { mathFeature } from '@supramark/feature-math';
@@ -139,6 +140,7 @@ export const featureRegistry: FeatureEntry[] = [
   { shortName: shortName(plantumlFeature.metadata.id), displayName: plantumlFeature.metadata.name, version: plantumlFeature.metadata.version, examples: plantumlExamples },
   { shortName: shortName(emojiFeature.metadata.id), displayName: emojiFeature.metadata.name, version: emojiFeature.metadata.version, examples: emojiExamples },
   { shortName: shortName(footnoteFeature.metadata.id), displayName: footnoteFeature.metadata.name, version: footnoteFeature.metadata.version, examples: footnoteExamples },
+  { shortName: shortName(wikilinkFeature.metadata.id), displayName: wikilinkFeature.metadata.name, version: wikilinkFeature.metadata.version, examples: wikilinkExamples },
   { shortName: shortName(gfmFeature.metadata.id), displayName: gfmFeature.metadata.name, version: gfmFeature.metadata.version, examples: gfmExamples },
   { shortName: shortName(mathFeature.metadata.id), displayName: mathFeature.metadata.name, version: mathFeature.metadata.version, examples: mathExamples },
   { shortName: shortName(weatherFeature.id), displayName: weatherFeature.name, version: weatherFeature.version, examples: weatherExamples },
