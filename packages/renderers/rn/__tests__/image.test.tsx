@@ -433,4 +433,139 @@ describe('image rendering', () => {
       { url: 'https://example.com/b.jpg', alt: 'b' },
     ]);
   });
+
+  // --- #217: mixed-content inline images reuse the block path's loadability rule ---
+  it('shows alt text instead of a blank 20x20 inline image for a relative URL in mixed content', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'icon: ' },
+        { type: 'image', url: './icon.png', alt: 'local icon' },
+      ])
+    );
+
+    expect(renderer.root.findAllByType('Image')).toHaveLength(0);
+    const texts = renderer.root.findAllByType('Text');
+    expect(texts.some(t => t.props.children === 'local icon')).toBe(true);
+  });
+
+  it('shows placeholder text for an empty URL in a heading image', async () => {
+    const renderer = await renderAst(
+      documentAst([
+        {
+          type: 'heading',
+          depth: 2,
+          children: [
+            { type: 'text', value: 'H ' },
+            { type: 'image', url: '', alt: 'missing icon' },
+          ],
+        },
+      ]) as SupramarkRootNode
+    );
+
+    expect(renderer.root.findAllByType('Image')).toHaveLength(0);
+    expect(renderer.root.findAllByType('Text').some(t => t.props.children === 'missing icon')).toBe(
+      true
+    );
+  });
+
+  // --- #217: the accessible element is the TouchableOpacity wrapper, not the inner image ---
+  it('carries the accessibility label on the link wrapper and not on the inner image', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [{ type: 'image', url: 'https://example.com/photo.jpg', alt: 'linked photo' }],
+        },
+      ])
+    );
+
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityLabel).toBe('linked photo');
+    expect(touchable.props.accessibilityElementsHidden).toBe(false);
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessible).toBe(false);
+    expect(image.props.accessibilityLabel).toBeUndefined();
+  });
+
+  it('carries the accessibility label on the onImagePress wrapper for standalone images', async () => {
+    const renderer = await renderAst(
+      imageAst([{ type: 'image', url: 'https://example.com/a.jpg', alt: 'solo' }]),
+      undefined,
+      undefined,
+      () => {}
+    );
+
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityLabel).toBe('solo');
+    expect(renderer.root.findByType('Image').props.accessible).toBe(false);
+  });
+
+  // The link wrapper is the actionable control (opens the article), so it
+  // must stay in the accessibility tree even for a decorative image —
+  // hiding it would make the link unreachable. The link URL becomes the
+  // fallback accessible name.
+  it('keeps a decorative linked image wrapper reachable, labeled by the link URL', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [{ type: 'image', url: 'https://example.com/photo.jpg', alt: '' }],
+        },
+      ])
+    );
+
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityElementsHidden).toBe(false);
+    expect(touchable.props.importantForAccessibility).toBe('yes');
+    expect(touchable.props.accessibilityLabel).toBe('https://example.com/article');
+    // The inner image is still not individually focusable.
+    expect(renderer.root.findByType('Image').props.accessible).toBe(false);
+  });
+
+  it('hides an unwrapped decorative image from screen readers', async () => {
+    const renderer = await renderAst(
+      imageAst([{ type: 'image', url: 'https://example.com/photo.jpg', alt: '' }])
+    );
+
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessibilityElementsHidden).toBe(true);
+    expect(image.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+
+  // --- #217: gallery images are keyed by index, so a URL change at the same
+  // index must not inherit the previous URL's failure state ---
+  it('resets the failure state when the image URL changes at the same gallery index', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'image', url: 'https://example.com/a.jpg', alt: 'a' },
+        { type: 'image', url: 'https://example.com/broken.jpg', alt: 'broken' },
+      ])
+    );
+
+    const secondImage = renderer.root.findAllByType('Image')[1];
+    await act(async () => {
+      secondImage.props.onError();
+    });
+    expect(renderer.root.findAllByType('Image')).toHaveLength(1);
+
+    await act(async () => {
+      renderer.update(
+        React.createElement(Supramark, {
+          ast: imageAst([
+            { type: 'image', url: 'https://example.com/a.jpg', alt: 'a' },
+            { type: 'image', url: 'https://example.com/fresh.jpg', alt: 'fresh' },
+          ]),
+          markdown: '',
+        })
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const images = renderer.root.findAllByType('Image');
+    expect(images).toHaveLength(2);
+    expect(images[1].props.source).toEqual({ uri: 'https://example.com/fresh.jpg' });
+  });
 });

@@ -10,6 +10,11 @@ export interface RendererCachePolicy {
    * the summed `sizeCalculator` output fits, in addition to the entry-count
    * `maxSize` bound. `undefined` or `0` disables the byte bound (an explicit
    * `0` is the documented opt-out; leaving it unset applies the 8 MB default).
+   *
+   * Warning: `maxBytes: 0` means NO byte cap — it is not "cache disabled" and
+   * not a memory limit. The byte bound only trims how much can be retained;
+   * it never stops entries from being stored. To disable caching entirely,
+   * set `maxSize: 0` (zero capacity) or `enabled: false`.
    */
   maxBytes?: number;
 }

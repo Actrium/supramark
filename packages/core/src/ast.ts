@@ -206,11 +206,14 @@ export interface SupramarkDiagramConfig {
   defaultTimeoutMs?: number;
 
   /**
-   * Host-provided cap on diagram display width (dp). Diagrams clamp their
-   * display width to min(windowWidth × 0.9, maxWidth). Hosts whose container
-   * is narrower than the window (e.g. a desktop chat bubble with a fixed
-   * maxWidth) pass their own cap so the diagram doesn't overflow the
-   * container. Unset means the screen-derived cap applies alone.
+   * Host-provided cap on diagram display width. React Native only —
+   * @supramark/web currently ignores this option and lays diagrams out with
+   * CSS. Units are RN dp, and the value is a cap, not a target: display width
+   * is clamped to [0.6 × cap, cap] where cap = min(windowWidth × 0.9,
+   * maxWidth), so small diagrams still get the 0.6× floor. Wrapping
+   * `<Supramark>` in a narrower container is NOT enough — the cap is derived
+   * from the window, so hosts with a bubble narrower than the window must pass
+   * the number explicitly or the diagram overflows the container.
    */
   maxWidth?: number;
 
