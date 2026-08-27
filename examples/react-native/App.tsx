@@ -39,6 +39,7 @@ import { admonitionFeature } from '@supramark/feature-admonition';
 import { definitionListFeature } from '@supramark/feature-definition-list';
 import { htmlPageFeature } from '@supramark/feature-html-page';
 import { mapFeature } from '@supramark/feature-map';
+import { videoFeature, renderVideoContainerRN } from '@supramark/feature-video';
 import { diagramVegaLiteFeature } from '@supramark/feature-diagram-vega-lite';
 import { diagramEchartsFeature } from '@supramark/feature-diagram-echarts';
 import { diagramDotFeature } from '@supramark/feature-diagram-dot';
@@ -61,6 +62,7 @@ import SelectionDemo from './SelectionDemo';
 // explicitly. html-page / map register theirs via side-effect import in their
 // own index.ts.
 admonitionFeature.registerParser();
+videoFeature.registerParser();
 
 const BASE_CONFIG: SupramarkConfig = {
   features: [
@@ -82,6 +84,7 @@ const BASE_CONFIG: SupramarkConfig = {
     },
     { id: htmlPageFeature.metadata.id, enabled: true },
     { id: mapFeature.metadata.id, enabled: true, options: { provider: 'custom' } },
+    { id: videoFeature.id, enabled: true },
     { id: diagramVegaLiteFeature.metadata.id, enabled: true },
     { id: diagramEchartsFeature.metadata.id, enabled: true },
     { id: diagramDotFeature.metadata.id, enabled: true },
@@ -280,6 +283,7 @@ export default function App() {
             markdown={activeDemo.markdown}
             theme={theme}
             config={BASE_CONFIG}
+            containerRenderers={{ video: renderVideoContainerRN }}
             onOpenHtmlPage={(node) => {
               Alert.alert(
                 node.params || 'HTML Page',

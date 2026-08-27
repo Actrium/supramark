@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Supramark } from '@supramark/web/client';
 
-// Register weather container hook (must be imported before using)
+// Register container hooks (must be imported before using)
 import { renderWeatherContainerWeb } from '@supramark/feature-weather';
+import { renderVideoContainerWeb } from '@supramark/feature-video';
 
 import './App.css';
 
@@ -55,6 +56,15 @@ This is a [link example](https://github.com)
 location: Shanghai
 condition: Cloudy
 tempC: 22
+:::
+
+### Video embed
+
+:::video
+{
+  "src": "https://interactive-examples.mdn.mozilla.net/cc0-videos/flower.mp4",
+  "title": "CC0 flower video"
+}
 :::
 
 ### Mermaid diagram
@@ -111,7 +121,7 @@ function App() {
             <Supramark
               markdown={markdown}
               theme={theme === 'none' ? undefined : theme}
-              containerRenderers={{ weather: renderWeatherContainerWeb }}
+              containerRenderers={{ weather: renderWeatherContainerWeb, video: renderVideoContainerWeb }}
             />
           </div>
         </div>
