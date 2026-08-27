@@ -3,7 +3,7 @@
  *
  * Registers the SupramarkMermaidModule with the React Native Windows runtime.
  *
- * Licensed under the Apache License, Version 2.0
+ * SPDX-License-Identifier: MPL-2.0
  */
 
 #include "ReactPackageProvider.h"

@@ -136,13 +136,16 @@ mkdir -p "${BUILD_DIR}/graphviz"
 # MSYS2_ARG_CONV_EXCL: Git Bash converts the /utf-8 value as a Unix path into
 # C:/Program Files/Git/utf-8 (see CMakeCache pollution), so exclude exactly
 # these two flags from path conversion.
+# Append (not replace): -D on the command line overwrites any CMAKE_C_FLAGS
+# cache variable, so a caller exporting CMAKE_C_FLAGS keeps those flags by
+# folding them in ahead of /utf-8.
 MSYS2_ARG_CONV_EXCL='-DCMAKE_C_FLAGS;-DCMAKE_CXX_FLAGS' \
 cmake -S "${GV_PATCHED}" -B "${BUILD_DIR}/graphviz" \
     -G "${VS_GENERATOR}" -A "${CMAKE_PLATFORM}" \
     "${GV_CMAKE_COMMON_ARGS[@]}" \
     "${WINDOWS_ARCH_CMAKE_ARGS[@]}" \
-    -DCMAKE_C_FLAGS="/utf-8" \
-    -DCMAKE_CXX_FLAGS="/utf-8" \
+    -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS:-} /utf-8" \
+    -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS:-} /utf-8" \
     -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/graphviz-install"
 
 log_info "Building Graphviz library targets..."
@@ -196,8 +199,8 @@ cmake -S "${BUILD_DIR}/wrapper" -B "${BUILD_DIR}/wrapper/build" \
     -DGV_BUILD_DIR="${BUILD_DIR}/graphviz" \
     -DGV_INSTALL_DIR="${GV_INSTALL}" \
     -DGV_VERSION="${GRAPHVIZ_VERSION}" \
-    -DCMAKE_C_FLAGS="/utf-8" \
-    -DCMAKE_CXX_FLAGS="/utf-8" \
+    -DCMAKE_C_FLAGS="${CMAKE_C_FLAGS:-} /utf-8" \
+    -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS:-} /utf-8" \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}"
 
 cmake --build "${BUILD_DIR}/wrapper/build" --config Release

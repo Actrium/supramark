@@ -10,7 +10,7 @@
  *   void    supramark_mermaid_free(uint8_t *buf, size_t len);
  *   const char *supramark_mermaid_version(void);
  *
- * Licensed under the Apache License, Version 2.0
+ * SPDX-License-Identifier: MPL-2.0
  */
 
 #pragma once
