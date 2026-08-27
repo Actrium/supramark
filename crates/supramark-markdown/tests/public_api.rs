@@ -247,15 +247,18 @@ fn gfm_autolink_does_not_linkify_inside_link() {
     let SupramarkNode::Paragraph { children, .. } = &children[0] else {
         panic!("expected paragraph");
     };
-    let SupramarkNode::Link { children: link_children, .. } = &children[0] else {
+    let SupramarkNode::Link {
+        children: link_children,
+        ..
+    } = &children[0]
+    else {
         panic!("expected link, got {:?}", children[0]);
     };
     // The link text is the single literal `click www.example.com` — no nested
     // autolink child.
-    assert!(link_children.iter().all(|c| !matches!(
-        c,
-        SupramarkNode::Link { .. }
-    )));
+    assert!(link_children
+        .iter()
+        .all(|c| !matches!(c, SupramarkNode::Link { .. })));
 }
 
 #[test]
@@ -363,7 +366,9 @@ fn gfm_strikethrough_double_tilde_single_del() {
         SupramarkNode::Text { value, .. } if value == "two"
     ));
     // No nested Delete.
-    assert!(children.iter().all(|c| !matches!(c, SupramarkNode::Delete { .. })));
+    assert!(children
+        .iter()
+        .all(|c| !matches!(c, SupramarkNode::Delete { .. })));
 }
 
 #[test]
@@ -372,7 +377,9 @@ fn gfm_strikethrough_three_tildes_literal() {
     // (Wrapped in a paragraph so the leading `~~~` isn't read as a code fence.)
     let para = paragraph_children(parse("x ~~~three~~~ y\n"));
     // No Delete node formed; the tildes survive as text.
-    assert!(para.iter().all(|c| !matches!(c, SupramarkNode::Delete { .. })));
+    assert!(para
+        .iter()
+        .all(|c| !matches!(c, SupramarkNode::Delete { .. })));
     let joined: String = para
         .iter()
         .filter_map(|c| match c {
@@ -739,7 +746,11 @@ fn public_api_inline_math_widehat_escaped_braces_207() {
         let SupramarkNode::Root { children, .. } = ast else {
             panic!("expected root for {input}");
         };
-        let SupramarkNode::Paragraph { children: paragraph, .. } = &children[0] else {
+        let SupramarkNode::Paragraph {
+            children: paragraph,
+            ..
+        } = &children[0]
+        else {
             panic!("expected paragraph for {input}");
         };
         let value = paragraph
@@ -761,7 +772,191 @@ fn public_api_inline_math_widehat_escaped_braces_207() {
     let SupramarkNode::MathBlock { value, .. } = &children[0] else {
         panic!("expected math_block");
     };
-    assert_eq!(value, "\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}");
+    assert_eq!(
+        value,
+        "\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}"
+    );
+}
+
+/// Collect a paragraph's inline-math values in document order.
+fn math_values(children: &[SupramarkNode]) -> Vec<&str> {
+    children
+        .iter()
+        .filter_map(|n| match n {
+            SupramarkNode::MathInline { value, .. } => Some(value.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn public_api_inline_math_after_adjacent_text_reassembly_219() {
+    // Regression for #219: the TextScanner splits an escaped-punctuation run
+    // into several fragments (`see $`, `\{`, `0`, `\}`, `$ and $x$`). The old
+    // first-pass scan ran per fragment, so a length-aligned trailing fragment
+    // paired its `$` with the opening `$` of a *different* span (or collapsed
+    // everything to text). Scanning must happen once, after adjacent fragments
+    // are reassembled into a single run.
+    let paragraph = paragraph_children(parse("see $\\{0\\}$ and $x$"));
+    assert_eq!(
+        math_values(&paragraph),
+        vec!["\\{0\\}", "x"],
+        "math values for the escaped-brace run"
+    );
+    assert!(
+        !paragraph
+            .iter()
+            .any(|n| matches!(n, SupramarkNode::Text { value, .. } if value.contains('$'))),
+        "no stray `$` may leak into text: {paragraph:?}"
+    );
+
+    // Two escaped-brace spans in one paragraph — the case where the old scan
+    // produced fake math from the ` and ` fragment between the spans.
+    let paragraph = paragraph_children(parse("$\\{1\\}$ and $\\{2\\}$"));
+    assert_eq!(math_values(&paragraph), vec!["\\{1\\}", "\\{2\\}"]);
+    assert!(matches!(
+        &paragraph[1],
+        SupramarkNode::Text { value, .. } if value == " and "
+    ));
+}
+
+#[test]
+fn public_api_inline_math_after_emoji_expansion_219() {
+    // Emoji expansion used to happen before the adjacent-run rescan, so the
+    // reassembled value (`😄 $\{0\}$`) no longer aligned with the raw source
+    // (`:smile: $\{0\}$`) and the RawValueMap fallback collapsed the run to
+    // plain text. Emoji must expand after the math scan, on the emitted text
+    // slices only.
+    let paragraph = paragraph_children(parse(":smile: $\\{0\\}$"));
+    assert!(matches!(
+        &paragraph[0],
+        SupramarkNode::Text { value, .. } if value.contains('\u{1F604}') && !value.contains('$')
+    ));
+    assert!(matches!(
+        &paragraph[1],
+        SupramarkNode::MathInline { value, .. } if value == "\\{0\\}"
+    ));
+}
+
+#[test]
+fn public_api_inline_math_lazy_continuation_219() {
+    // A text run reassembled across a (lazy) line continuation must scan as
+    // one unit: text on line 1 joins the math span sitting on line 2, and the
+    // leading indentation must not desynchronize the raw↔value alignment.
+    // (`$…$` itself may not contain a newline, so the math stays on one line.)
+    let paragraph = paragraph_children(parse("hello\n  $\\{0\\}$"));
+    assert!(matches!(
+        &paragraph[1],
+        SupramarkNode::MathInline { value, .. } if value == "\\{0\\}"
+    ));
+    assert!(
+        !paragraph
+            .iter()
+            .any(|n| matches!(n, SupramarkNode::Text { value, .. } if value.contains('$'))),
+        "no stray `$` may leak into text: {paragraph:?}"
+    );
+}
+
+#[test]
+fn public_api_inline_math_escaped_dollar_stays_text_219() {
+    // Negative control: `\$` is an escaped dollar, never a math delimiter,
+    // even when other `$`s appear later in the reassembled run.
+    let paragraph = paragraph_children(parse("\\$not math here"));
+    assert!(
+        !paragraph
+            .iter()
+            .any(|n| matches!(n, SupramarkNode::MathInline { .. })),
+        "escaped `$` must not open math: {paragraph:?}"
+    );
+    assert!(matches!(
+        &paragraph[0],
+        SupramarkNode::Text { value, .. } if value == "$not math here"
+    ));
+}
+
+#[test]
+fn public_api_inline_math_after_entity_decoding_219() {
+    // An HTML entity in the run must not sink the whole run to plain text:
+    // RawValueMap models `&name;` / `&#NN;` / `&#xHH;` → decoded-width. A
+    // literal `&` with no decodable entity stays 1:1.
+    for (input, expected_text, expected_math) in [
+        ("a &amp; b $x$", "a & b ", "x"),
+        ("&copy; $\\{0\\}$", "© ", "\\{0\\}"),
+        ("&#65;$x$", "A", "x"),
+        ("&unknown; $x$", "&unknown; ", "x"),
+    ] {
+        let paragraph = paragraph_children(parse(input));
+        assert!(
+            matches!(
+                paragraph.first(),
+                Some(SupramarkNode::Text { value, .. }) if value == expected_text
+            ),
+            "leading text for {input}: {paragraph:?}"
+        );
+        assert!(
+            matches!(
+                paragraph.get(1),
+                Some(SupramarkNode::MathInline { value, .. }) if value == expected_math
+            ),
+            "math for {input}: {paragraph:?}"
+        );
+    }
+}
+
+#[test]
+fn public_api_inline_math_with_invalid_numeric_char_refs_219() {
+    // The parser decodes an invalid charcode to U+FFFD (entity.rs), so the
+    // lockstep must model `&#0;` → 3-byte U+FFFD rather than treating the
+    // `&` as literal — a mismatch there sinks the WHOLE reassembled run to
+    // plain text and loses the math the per-fragment scan used to find.
+    for (input, math) in [
+        ("&#0; costs $x$", "x"),
+        ("&#xD800; then $y$", "y"),
+        ("&#x110000; and $z$", "z"),
+    ] {
+        let paragraph = paragraph_children(parse(input));
+        assert_eq!(
+            math_values(&paragraph),
+            vec![math],
+            "math must survive an invalid charcode for {input}: {paragraph:?}"
+        );
+    }
+
+    // Numeric refs beyond the entity scanner's grammar (hex {1,6} / decimal
+    // {1,7}) stay literal in the value; the lockstep must walk them 1:1
+    // instead of mistaking them for decoded entities.
+    let paragraph = paragraph_children(parse("&#x0012345; then $w$"));
+    assert_eq!(math_values(&paragraph), vec!["w"]);
+    assert!(matches!(
+        &paragraph[0],
+        SupramarkNode::Text { value, .. } if value == "&#x0012345; then "
+    ));
+}
+
+#[test]
+fn public_api_inline_math_decodes_entities_in_math_content_219() {
+    // Entities inside the math span decode for the TeX engine too — `$&lt;$`
+    // carries the math `<`, not the literal bytes `&lt;` — while backslash
+    // escapes stay raw (`$\{` stays `\{`). The delimiter scan runs on the
+    // raw slice; the carved content decodes entities exactly once.
+    let paragraph = paragraph_children(parse("$a &lt; b$ and $\\{0\\}$"));
+    assert_eq!(math_values(&paragraph), vec!["a < b", "\\{0\\}"]);
+}
+
+#[test]
+fn public_api_inline_math_with_crlf_line_endings_219() {
+    // CRLF sources: the `\r` bytes are raw-only (value normalizes to `\n`),
+    // including the run's trailing CRLF after the value is exhausted. Math
+    // must still parse — as it did before the scan was deferred to whole runs.
+    let paragraph = paragraph_children(parse("a $x$\r\nb $y$\r\n"));
+    assert_eq!(math_values(&paragraph), vec!["x", "y"]);
+
+    // CRLF + stripped continuation-line indentation + escaped braces.
+    let paragraph = paragraph_children(parse("hello\r\n  $\\{0\\}$"));
+    assert!(matches!(
+        &paragraph[1],
+        SupramarkNode::MathInline { value, .. } if value == "\\{0\\}"
+    ));
 }
 
 #[test]
@@ -1005,7 +1200,10 @@ fn footnote_definition_absorbs_indented_continuation() {
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
     };
-    let SupramarkNode::FootnoteDefinition { children, label, .. } = &children[0] else {
+    let SupramarkNode::FootnoteDefinition {
+        children, label, ..
+    } = &children[0]
+    else {
         panic!("expected footnote definition, got {:?}", &children[0]);
     };
     assert_eq!(label, "a");
@@ -1031,12 +1229,20 @@ fn footnote_definition_continuation_ends_at_new_block() {
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
     };
-    let SupramarkNode::FootnoteDefinition { label: a, children: a_children, .. } = &children[0]
+    let SupramarkNode::FootnoteDefinition {
+        label: a,
+        children: a_children,
+        ..
+    } = &children[0]
     else {
         panic!("expected first definition, got {:?}", &children[0]);
     };
     assert_eq!(a, "a");
-    assert_eq!(a_children.len(), 1, "first def should have one paragraph child");
+    assert_eq!(
+        a_children.len(),
+        1,
+        "first def should have one paragraph child"
+    );
     let SupramarkNode::FootnoteDefinition { label: b, .. } = &children[1] else {
         panic!("expected second definition, got {:?}", &children[1]);
     };

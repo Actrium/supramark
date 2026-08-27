@@ -99,6 +99,71 @@ fn replace_entity_pattern(str: &str) -> Option<String> {
     }
 }
 
+/// Anchored copies of the inline entity scanner's grammar
+/// (`plugins/cmark/inline/entity.rs` `DIGITAL_RE` / `NAMED_RE`). `RawValueMap`
+/// must recognize EXACTLY the spans the scanner consumed — a grammar that
+/// accepts more (e.g. 8-digit numeric refs, which the scanner leaves literal)
+/// mis-models a literal `&…;` as decoded and sinks the whole run to plain
+/// text; a grammar that accepts less misses a real decode the same way.
+static PARSER_DIGITAL_ENTITY_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^&#((?:x[a-f0-9]{1,6}|[0-9]{1,7}));").unwrap());
+static PARSER_NAMED_ENTITY_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^&([a-z][a-z0-9]{1,31});").unwrap());
+
+/// Decode the entity / numeric character reference that starts at the
+/// beginning of `raw`, mirroring what the inline entity scanner actually
+/// emitted into the value: `&amp;` -> `&`, `&#65;` -> `A`, and an invalid
+/// charcode (`&#0;`, `&#xD800;`, `&#x110000;`, ...) -> `U+FFFD` (the
+/// scanner's replacement, see `entity.rs::parse_digital_entity`). Returns
+/// the decoded replacement plus the raw byte length consumed, or `None`
+/// when `raw` does not start with an entity the scanner would consume
+/// (the `&` then stays literal and maps 1:1).
+pub(crate) fn decode_entity_at_start(raw: &str) -> Option<(String, usize)> {
+    if let Some(captures) = PARSER_NAMED_ENTITY_RE.captures(raw) {
+        let matched = captures.get(0).unwrap();
+        let decoded = get_entity_from_str(matched.as_str())?;
+        return Some((decoded.to_owned(), matched.as_str().len()));
+    }
+    let captures = PARSER_DIGITAL_ENTITY_RE.captures(raw)?;
+    let matched = captures.get(0).unwrap();
+    let digits = captures.get(1).unwrap().as_str();
+    #[allow(clippy::from_str_radix_10)]
+    let code = if digits.starts_with('x') || digits.starts_with('X') {
+        u32::from_str_radix(&digits[1..], 16).unwrap()
+    } else {
+        u32::from_str_radix(digits, 10).unwrap()
+    };
+    let decoded = if is_valid_entity_code(code) {
+        char::from_u32(code).unwrap()
+    } else {
+        '\u{FFFD}'
+    };
+    Some((decoded.to_string(), matched.as_str().len()))
+}
+
+/// Decode every entity in `raw` that the inline entity scanner would have
+/// consumed (one level, matching the parser). Used for inline-math content
+/// carved from the raw source: backslash escapes must stay raw for TeX, but
+/// an entity the parser already decoded in surrounding text should reach the
+/// math engine decoded too (`$&lt;$` is the math `<`, not the four bytes
+/// `&lt;`).
+pub(crate) fn decode_entities(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(amp) = rest.find('&') {
+        if let Some((decoded, len)) = decode_entity_at_start(&rest[amp..]) {
+            out.push_str(&rest[..amp]);
+            out.push_str(&decoded);
+            rest = &rest[amp + len..];
+        } else {
+            out.push_str(&rest[..=amp]);
+            rest = &rest[amp + 1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Unescape both entities (`&quot; -> "`) and backslash escapes (`\" -> "`).
 /// ```
 /// # use supramark_markdown::common::utils::unescape_all;

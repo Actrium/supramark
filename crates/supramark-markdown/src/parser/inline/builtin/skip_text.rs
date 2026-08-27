@@ -18,7 +18,7 @@ impl NodeValue for Text {
         node: &Node,
         ctx: &crate::supramark::AstV2Ctx<'_>,
     ) -> Option<Vec<crate::supramark::SupramarkNode>> {
-        Some(ctx.map_inline_text(&self.content, node))
+        Some(ctx.map_text_fragment(&self.content, node))
     }
 
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
@@ -40,7 +40,7 @@ impl NodeValue for TextSpecial {
         node: &Node,
         ctx: &crate::supramark::AstV2Ctx<'_>,
     ) -> Option<Vec<crate::supramark::SupramarkNode>> {
-        Some(ctx.map_inline_text(&self.content, node))
+        Some(ctx.map_text_fragment(&self.content, node))
     }
 
     fn render(&self, _: &Node, fmt: &mut dyn Renderer) {
