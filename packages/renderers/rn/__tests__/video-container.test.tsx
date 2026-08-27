@@ -87,12 +87,16 @@ describe(':::video container rendering (RN)', () => {
     const text = flattenText(renderer.toJSON());
     const hostTypes = collectHostTypes(renderer.toJSON());
 
-    // The caption is rendered instead of the raw JSON body.
-    expect(text).toContain('Product demo');
+    // The raw JSON body is never rendered; the title survives only as the
+    // tappable region's accessibility label (no visible caption).
     expect(text).not.toContain('"src"');
+    expect(text).not.toContain('Product demo');
+    const pressable = renderer.root.findByProps({ accessibilityRole: 'button' });
+    expect(pressable.props.accessibilityLabel).toBe('Product demo');
 
-    // The poster image is rendered as a host Image.
+    // The poster image is rendered as a host Image with a centered play badge.
     expect(hostTypes.has('Image')).toBe(true);
+    expect(text).toContain('▶');
   });
 
   test('onVideoPress prop reaches the container renderer and fires on tap', async () => {

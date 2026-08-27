@@ -21,12 +21,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     backgroundColor: '#000',
   },
-  caption: {
-    marginTop: '6px',
-    fontSize: '14px',
-    color: '#555',
-    textAlign: 'center',
-  },
   error: {
     border: '1px solid #f5c6cb',
     backgroundColor: '#f8d7da',
@@ -92,13 +86,15 @@ export function renderVideoContainerWeb({ node, key }: ContainerWebRenderArgs): 
         style={styles.video}
         src={src}
         poster={poster}
+        // Without a poster, preload metadata so the browser renders the first
+        // frame instead of an empty black rectangle.
+        preload={poster ? undefined : 'metadata'}
         controls={controls ?? true}
         autoPlay={autoplay ?? false}
         loop={loop ?? false}
         muted={muted ?? false}
         aria-label={title}
       />
-      {title && <div style={styles.caption}>{title}</div>}
     </div>
   );
 }

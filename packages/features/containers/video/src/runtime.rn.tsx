@@ -32,11 +32,15 @@ const localStyles = StyleSheet.create({
     marginVertical: 12,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: '#000',
   },
   poster: {
     width: '100%',
     aspectRatio: 16 / 9,
+  },
+  playBadge: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   placeholder: {
     width: '100%',
@@ -47,14 +51,6 @@ const localStyles = StyleSheet.create({
   placeholderMeta: {
     marginTop: 6,
     fontSize: 13,
-  },
-  caption: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: '#555',
-    textAlign: 'center',
-    backgroundColor: '#ffffff',
   },
   error: {
     borderWidth: 1,
@@ -166,17 +162,28 @@ export function renderVideoContainerRN({
         }}
       >
         {poster ? (
-          <Image source={{ uri: poster }} style={localStyles.poster} resizeMode="cover" />
+          <View>
+            <Image
+              source={{ uri: poster }}
+              // Neutral underlay so a loading/failed poster shows the placeholder
+              // tone instead of a black band.
+              style={{ ...localStyles.poster, backgroundColor: palette.background }}
+              resizeMode="cover"
+            />
+            {/* Centered play affordance on the poster, matching the placeholder card. */}
+            <View style={localStyles.playBadge} pointerEvents="none">
+              <Text style={{ fontSize: 40, color: '#ffffff' }}>▶</Text>
+            </View>
+          </View>
         ) : (
           <View style={{ ...localStyles.placeholder, backgroundColor: palette.background }}>
             <Text style={{ fontSize: 40, color: palette.icon }}>▶</Text>
             <Text style={{ ...localStyles.placeholderMeta, color: palette.meta }}>
-              {title ?? videoFileName(src)}
+              {videoFileName(src)}
             </Text>
           </View>
         )}
       </Pressable>
-      {title && <Text style={localStyles.caption}>{title}</Text>}
     </View>
   );
 }

@@ -674,6 +674,25 @@ fn public_api_maps_video_container_non_object_error() {
 }
 
 #[test]
+fn public_api_maps_video_container_drops_unknown_fields() {
+    let ast = parse(
+        ":::video\n{\"src\": \"https://example.com/a.mp4\", \"unknown\": \"dropped\"}\n:::\n",
+    );
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/src")),
+        Some(&serde_json::json!("https://example.com/a.mp4"))
+    );
+    assert_eq!(data.as_ref().and_then(|data| data.pointer("/unknown")), None);
+}
+
+#[test]
 fn public_api_preserves_raw_html_blocks() {
     let ast = parse("<div>Hello</div>\n");
     let SupramarkNode::Root { children, .. } = ast else {

@@ -26,6 +26,7 @@ export const NativeModules = {};
 export const PermissionsAndroid = { request: () => Promise.resolve('granted') };
 export const BackHandler = { addEventListener: () => ({}), removeEventListener: () => {} };
 export const Linking = { openURL: () => Promise.resolve() };
+export const Appearance = { getColorScheme: () => 'light' };
 export default {
   StyleSheet,
   View,
@@ -45,4 +46,5 @@ export default {
   PermissionsAndroid,
   BackHandler,
   Linking,
+  Appearance,
 };
