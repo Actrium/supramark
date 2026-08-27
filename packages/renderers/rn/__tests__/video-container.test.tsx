@@ -142,3 +142,37 @@ describe(':::video container rendering (RN)', () => {
     expect(text).toBe('');
   });
 });
+
+describe(':::video hostile config (RN)', () => {
+  test('non-string src degrades to the missing-src card instead of crashing', async () => {
+    const hostileAst = {
+      type: 'root',
+      children: [
+        {
+          type: 'container',
+          name: 'video',
+          mode: 'opaque',
+          // Rust copies JSON fields verbatim; a numeric src must not crash
+          // videoFileName's string handling and take the whole document down.
+          data: { src: 123, width: '120%' },
+          value: '{}',
+          children: [],
+        },
+      ],
+    } as unknown as SupramarkRootNode;
+    let renderer: ReactTestRenderer | null = null;
+    await act(async () => {
+      renderer = create(
+        React.createElement(Supramark, {
+          ast: hostileAst,
+          containerRenderers: { video: renderVideoContainerRN as never },
+        })
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const text = flattenText(renderer!.toJSON());
+    expect(text).toContain('Missing src config');
+  });
+});

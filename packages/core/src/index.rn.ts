@@ -35,7 +35,22 @@ export {
   type ContainerHookContext,
   type ContainerHook,
   registerContainerHook,
+  extractContainerInnerText,
 } from './syntax/container.js';
+
+// ContainerFeature contract (ContainerRNRenderArgs.onVideoPress etc.) —
+// the RN entry re-exports the same container-feature surface as the web
+// entry so RN hosts resolve identical types under the metro mapping.
+export {
+  validateContainerFeature,
+  type ContainerFeature,
+  type ContainerWebRenderArgs,
+  type ContainerWebRenderer,
+  type ContainerRNRenderArgs,
+  type ContainerRNRenderer,
+  type SupramarkVideoPressEvent,
+  type ExampleDefinition,
+} from './container-feature.js';
 
 // Native parser adapter registry —— for RN native wrapper packages
 // (e.g. `@supramark/markdown-native-rn`) to register via a side effect.
