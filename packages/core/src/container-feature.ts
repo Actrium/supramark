@@ -161,6 +161,21 @@ export interface ContainerWebRenderArgs {
 export type ContainerWebRenderer = (args: ContainerWebRenderArgs) => unknown;
 
 /**
+ * Video tap event delivered to a host-supplied onVideoPress handler.
+ *
+ * Mirrors {@link SupramarkImagePressEvent} in shape but without gallery
+ * merging — videos render as standalone cards.
+ */
+export interface SupramarkVideoPressEvent {
+  /** The video source URL. */
+  src: string;
+  /** Poster image URL, if configured. */
+  poster?: string;
+  /** Title, if configured. */
+  title?: string;
+}
+
+/**
  * Arguments for a Container RN render function.
  */
 export interface ContainerRNRenderArgs {
@@ -172,6 +187,11 @@ export interface ContainerRNRenderArgs {
   styles: Record<string, unknown>;
   /** Supramark configuration */
   config?: SupramarkConfig;
+  /**
+   * Host handler for video card taps, threaded from the root
+   * `<Supramark onVideoPress={...}>` prop through the renderNode chain.
+   */
+  onVideoPress?: (event: SupramarkVideoPressEvent) => void;
   /** Function for rendering child nodes */
   renderChildren: (children: SupramarkNode[]) => unknown;
 }

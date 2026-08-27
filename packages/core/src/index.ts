@@ -44,6 +44,7 @@ export {
   type ContainerWebRenderArgs,
   type ContainerWebRenderer,
   type ContainerRNRenderArgs,
+  type SupramarkVideoPressEvent,
   type ContainerRNRenderer,
   validateContainerFeature,
 } from './container-feature.js';

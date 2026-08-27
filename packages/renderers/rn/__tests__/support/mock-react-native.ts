@@ -16,9 +16,11 @@ mock.module('react-native', () => ({
   Image: 'Image',
   ScrollView: 'ScrollView',
   TouchableOpacity: 'TouchableOpacity',
+  Pressable: 'Pressable',
   ActivityIndicator: 'ActivityIndicator',
   Dimensions: { get: () => ({ width: 375, height: 812 }) },
   Linking: { openURL: async () => undefined },
+  Appearance: { getColorScheme: () => 'light' },
   StyleSheet: { create: (s: unknown) => s },
 }));
 

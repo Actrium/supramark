@@ -14,6 +14,7 @@
 
 import React from 'react';
 import {
+  Appearance,
   View,
   Text,
   Image,
@@ -42,11 +43,10 @@ const localStyles = StyleSheet.create({
     aspectRatio: 16 / 9,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1c1c1e',
   },
-  playIcon: {
-    fontSize: 40,
-    color: '#ffffff',
+  placeholderMeta: {
+    marginTop: 6,
+    fontSize: 13,
   },
   caption: {
     paddingVertical: 6,
@@ -97,10 +97,31 @@ function openVideo(src: string): void {
   });
 }
 
+/** Last path segment of the source URL, shown on the no-poster placeholder. */
+function videoFileName(src: string): string {
+  const segment = src.split('?')[0].split('/').filter(Boolean).pop() ?? src;
+  return segment.length > 40 ? `${segment.slice(0, 37)}...` : segment;
+}
+
+/**
+ * Neutral (light/dark aware) placeholder palette. Commanded imperatively via
+ * Appearance because container renderers are plain render functions invoked
+ * inside renderNode — not React components, so hooks are unavailable.
+ */
+function placeholderPalette(): { background: string; icon: string; meta: string } {
+  return Appearance.getColorScheme() === 'dark'
+    ? { background: '#2c2c2e', icon: '#98989d', meta: '#8e8e93' }
+    : { background: '#f2f2f7', icon: '#8e8e93', meta: '#8e8e93' };
+}
+
 /**
  * RN renderer for :::video (poster + play fallback; see module docs)
  */
-export function renderVideoContainerRN({ node, key }: ContainerRNRenderArgs): React.ReactNode {
+export function renderVideoContainerRN({
+  node,
+  key,
+  onVideoPress,
+}: ContainerRNRenderArgs): React.ReactNode {
   const data = (node?.data ?? {}) as unknown as VideoData;
   const { parseError, rawConfig, src, poster, title, width } = data;
 
@@ -125,6 +146,7 @@ export function renderVideoContainerRN({ node, key }: ContainerRNRenderArgs): Re
     );
   }
 
+  const palette = placeholderPalette();
   const widthStyle = playerWidth(width);
 
   return (
@@ -135,13 +157,22 @@ export function renderVideoContainerRN({ node, key }: ContainerRNRenderArgs): Re
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={title ?? `Play video: ${src}`}
-        onPress={() => openVideo(src)}
+        onPress={() => {
+          if (onVideoPress) {
+            onVideoPress({ src, poster, title });
+            return;
+          }
+          openVideo(src);
+        }}
       >
         {poster ? (
           <Image source={{ uri: poster }} style={localStyles.poster} resizeMode="cover" />
         ) : (
-          <View style={localStyles.placeholder}>
-            <Text style={localStyles.playIcon}>▶</Text>
+          <View style={{ ...localStyles.placeholder, backgroundColor: palette.background }}>
+            <Text style={{ fontSize: 40, color: palette.icon }}>▶</Text>
+            <Text style={{ ...localStyles.placeholderMeta, color: palette.meta }}>
+              {title ?? videoFileName(src)}
+            </Text>
           </View>
         )}
       </Pressable>
