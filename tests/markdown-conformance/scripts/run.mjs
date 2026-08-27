@@ -83,7 +83,14 @@ const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_
 // resolved the commonmark-source cases (0602/0608/0611/0612); issue #203
 // extends the same treatment to the cmark-gfm source's CommonMark-core
 // Autolinks section (spec-0610/0616/0619/0620).
-const parserProfile = sourceName === 'commonmark' ? 'supramark-commonmark' : 'supramark-default';
+// cmark-gfm runs a split config (core sections off, extension sections on),
+// so it gets its own profile label instead of hiding under the default name.
+const parserProfile =
+  sourceName === 'commonmark'
+    ? 'supramark-commonmark'
+    : sourceName === 'cmark-gfm'
+      ? 'supramark-cmark-gfm'
+      : 'supramark-default';
 function parserArgsFor(testCase) {
   return isCommonMarkCoreCase(testCase) ? ['--no-gfm-autolink', '-'] : ['-'];
 }
