@@ -37,6 +37,12 @@ async function validate(name) {
   assert(Array.isArray(document.cases), 'cases.json must contain a cases array');
   assert(document.cases.length === version.caseCount, 'case count does not match version.json');
   assert(document.cases.length > 0, 'no cases were imported');
+  if (sourceConfig.expectedCaseCount !== undefined) {
+    assert(
+      document.cases.length === sourceConfig.expectedCaseCount,
+      `expected ${sourceConfig.expectedCaseCount} cases, found ${document.cases.length}`
+    );
+  }
   assert(version.repository === sourceConfig.repository, 'source repository mismatch');
   assert(version.version === sourceConfig.version, 'source version mismatch');
   assert(version.commit === sourceConfig.revision, 'configured source commit mismatch');
@@ -156,6 +162,29 @@ async function validate(name) {
 
   for (const fixture of versionFixtures) {
     assert((fixtureCounts.get(fixture.path) ?? 0) === fixture.caseCount, `${fixture.path}: case count mismatch`);
+  }
+
+  for (const integrityCheck of sourceConfig.integrityChecks ?? []) {
+    const matches = document.cases.filter(testCase =>
+      testCase.source.upstreamId === integrityCheck.upstreamId &&
+      (integrityCheck.path === undefined || testCase.source.path === integrityCheck.path)
+    );
+    assert(
+      matches.length === 1,
+      `integrity check must identify exactly one case: ${integrityCheck.path ?? '*'}#${integrityCheck.upstreamId}`
+    );
+    if (integrityCheck.inputContains !== undefined) {
+      assert(
+        matches[0].input.markdown.includes(integrityCheck.inputContains),
+        `${matches[0].id}: Markdown input is missing the configured integrity sequence`
+      );
+    }
+    if (integrityCheck.inputEquals !== undefined) {
+      assert(
+        matches[0].input.markdown === integrityCheck.inputEquals,
+        `${matches[0].id}: Markdown input does not match the configured integrity value`
+      );
+    }
   }
 
   const actualSections = Object.fromEntries(

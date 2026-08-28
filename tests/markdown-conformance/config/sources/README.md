@@ -14,6 +14,12 @@ Core configuration fields:
 - `license`: SPDX license identifier for the imported content.
 - `profile`: unified case profile (`commonmark`, `gfm`, or `supramark`).
 - `importer`: adapter module basename under `tests/markdown-conformance/importers/`.
+- `expectedKind`: optional unified expectation kind (`normative` by default or `implementation`).
+- `expectedCaseCount`: optional pinned count checked during import and validation.
+- `lineEndings`: optional fixture text mode (`normalize` by default or `preserve`).
+- `sectionCoverage`: section-to-coverage mapping used by the generic `spec-fixture` adapter.
+- `integrityChecks`: optional case selectors with `inputContains` or `inputEquals` assertions,
+  useful for byte-sensitive fixtures such as unusual line endings.
 
 Fixture selection uses one or more of the following fields:
 
@@ -42,5 +48,7 @@ node tests/markdown-conformance/scripts/validate.mjs <source-name>
 ```
 
 Use `--source-dir <repository>` to import from an existing checkout. Its `origin` and resolved
-commit must match the pinned configuration. Keep generated cases in `tests/cases`; keep all
+commit must match the pinned configuration. The reusable `spec-fixture` adapter imports
+CommonMark-style fenced examples and can preserve source line endings when configured. Keep
+generated cases in `tests/cases`; keep all
 configuration, adapters, runners, dependencies, and reports in `tests/markdown-conformance`.

@@ -19,6 +19,7 @@ tests/cases/
 当前数据源：
 
 - `commonmark`：CommonMark 0.31.2，共 652 条规范用例。
+- `cmark-regression`：cmark `7042d997` 的 27 条实现回归用例，保留源文件换行。
 - `cmark-gfm`：GitHub cmark-gfm 0.29.0.gfm.13，共 702 条规范及扩展用例。
 - `micromark`：micromark 4.0.2，共 1151 条核心 Markdown→HTML 实现回归用例。
 

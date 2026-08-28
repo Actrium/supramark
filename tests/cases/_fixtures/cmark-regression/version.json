@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "source": "cmark-regression",
+  "repository": "https://github.com/commonmark/cmark",
+  "version": "master-7042d997",
+  "commit": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+  "fixture": "test/regression.txt",
+  "license": "BSD-2-Clause",
+  "sourceSha256": "a4396b092687c25a1c07d0a5c97cc30a9612898de3c111dc22b00012583bffdd",
+  "caseCount": 27,
+  "sections": {
+    "Regression tests": 27
+  }
+}

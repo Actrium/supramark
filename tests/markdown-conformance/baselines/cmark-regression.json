@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "source": "cmark-regression",
+  "sourceVersion": "master-7042d997",
+  "sourceCommit": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+  "caseCount": 27,
+  "parserProfile": "supramark-default",
+  "comparisonTarget": "production-web-renderer-dom",
+  "semanticFailureIds": [
+    "cmark-regression-master-7042d997-0003",
+    "cmark-regression-master-7042d997-0006",
+    "cmark-regression-master-7042d997-0008",
+    "cmark-regression-master-7042d997-0013",
+    "cmark-regression-master-7042d997-0014",
+    "cmark-regression-master-7042d997-0017",
+    "cmark-regression-master-7042d997-0018",
+    "cmark-regression-master-7042d997-0019",
+    "cmark-regression-master-7042d997-0020",
+    "cmark-regression-master-7042d997-0021",
+    "cmark-regression-master-7042d997-0023",
+    "cmark-regression-master-7042d997-0025",
+    "cmark-regression-master-7042d997-0026"
+  ],
+  "visualFailureIds": [
+    "cmark-regression-master-7042d997-0003",
+    "cmark-regression-master-7042d997-0013",
+    "cmark-regression-master-7042d997-0014",
+    "cmark-regression-master-7042d997-0017",
+    "cmark-regression-master-7042d997-0018",
+    "cmark-regression-master-7042d997-0019",
+    "cmark-regression-master-7042d997-0021",
+    "cmark-regression-master-7042d997-0023",
+    "cmark-regression-master-7042d997-0025",
+    "cmark-regression-master-7042d997-0026"
+  ]
+}

@@ -19,6 +19,7 @@ tests/cases/
 Current sources:
 
 - `commonmark`: CommonMark 0.31.2, with 652 normative cases.
+- `cmark-regression`: cmark implementation regressions at `7042d997`, with 27 cases and preserved source line endings.
 - `cmark-gfm`: GitHub cmark-gfm 0.29.0.gfm.13, with 702 normative and extension cases.
 - `micromark`: micromark 4.0.2, with 1,151 core Markdown-to-HTML implementation regression cases.
 
