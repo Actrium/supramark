@@ -197,6 +197,59 @@
   overflow-x: auto;
 }
 
+/* Code-block card with header (language label + copy button): the container
+   owns the chrome so the header and body read as one continuous block. */
+.sm-code-block-container {
+  background-color: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.sm-code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem;
+  user-select: none;
+}
+
+.sm-code-block-lang {
+  font-size: 0.75rem;
+  color: #6a737d;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  user-select: none;
+}
+
+.sm-code-block-container > .sm-code-block-body {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.sm-code-btn {
+  background-color: #586069;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sm-code-btn:hover {
+  background-color: #444d56;
+}
+
+.sm-code-btn-text {
+  user-select: none;
+}
+
 .sm-code {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 0.9em;

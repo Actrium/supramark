@@ -21,8 +21,20 @@ export interface SupramarkClassNames {
   thematicBreak?: string; // hr element
 
   // Code blocks
-  codeBlock?: string; // pre element
+  codeBlock?: string; // standalone pre element (no header): owns the full chrome
+  /** Body pre inside the headered code block container (container owns the chrome). */
+  codeBlockBody?: string;
   code?: string; // code element
+  /** Wrapper around a code block header (lang + button) and the pre. */
+  codeBlockContainer?: string;
+  /** Header row: language label on the left, copy button on the right. */
+  codeBlockHeader?: string;
+  /** Language label in the header (the fenced info string). */
+  codeBlockLang?: string;
+  /** Copy button in the header. */
+  codeButton?: string;
+  /** Label text inside the copy button. */
+  codeButtonText?: string;
 
   // Lists
   listOrdered?: string; // ol element
@@ -94,7 +106,13 @@ export const tailwindClassNames: SupramarkClassNames = {
   blockquote: 'border-l-4 border-gray-300 dark:border-gray-600 pl-4 mb-4',
   thematicBreak: 'border-t border-gray-300 dark:border-gray-700 my-4',
   codeBlock: 'bg-gray-100 dark:bg-gray-800 rounded-md p-4 mb-4 overflow-x-auto',
+  codeBlockBody: 'm-0 p-4 overflow-x-auto',
   code: 'font-mono text-sm',
+  codeBlockContainer: 'bg-gray-100 dark:bg-gray-800 rounded-md mb-4 overflow-hidden',
+  codeBlockHeader: 'flex items-center justify-between px-2 py-1 select-none',
+  codeBlockLang: 'text-xs text-gray-600 dark:text-gray-300 font-mono select-none',
+  codeButton:
+    'bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500 select-none',
   listOrdered: 'list-decimal ml-6 mb-4',
   listUnordered: 'list-disc ml-6 mb-4',
   listItem: 'mb-1',
@@ -133,7 +151,13 @@ export const minimalClassNames: SupramarkClassNames = {
   blockquote: 'sm-blockquote',
   thematicBreak: 'sm-hr',
   codeBlock: 'sm-code-block',
+  codeBlockBody: 'sm-code-block-body',
   code: 'sm-code',
+  codeBlockContainer: 'sm-code-block-container',
+  codeBlockHeader: 'sm-code-block-header',
+  codeBlockLang: 'sm-code-block-lang',
+  codeButton: 'sm-code-btn',
+  codeButtonText: 'sm-code-btn-text',
   listOrdered: 'sm-ol',
   listUnordered: 'sm-ul',
   listItem: 'sm-li',

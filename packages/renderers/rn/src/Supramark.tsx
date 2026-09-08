@@ -32,6 +32,7 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { CodeBlock, CodeCopyContext } from './CodeBlock';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -314,6 +315,22 @@ export interface SupramarkProps {
   containerRenderers?: Record<string, ContainerRendererRN>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  /**
+   * Copy handler for code blocks with a language info string. When provided,
+   * the header renders a copy button that calls this with the raw source.
+   *
+   * RN stays clipboard-free: the host owns the clipboard API
+   * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
+   * inside this callback. Without it, no copy button is shown on RN.
+   * Language-less fences and indented code have no distinct AST flag and do
+   * not render a copy button.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /**
+   * Whether to show the code-block copy button (requires onCopyCode;
+   * default: enabled).
+   */
+  copyButton?: boolean;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -349,6 +366,8 @@ export const Supramark: React.FC<SupramarkProps> = ({
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
+  onCopyCode,
+  copyButton,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -513,6 +532,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return containerRenderers ?? {};
   }, [containerRenderers]);
 
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton],
+  );
+
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
     if (errorFallback) {
@@ -537,16 +562,18 @@ export const Supramark: React.FC<SupramarkProps> = ({
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <ImagePressContext.Provider value={onImagePress}>
-          <View style={mergedStyles.root}>
-            {renderRootNodes(
-              parsedDocument.root.children,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              mergedContainerRenderers
-            )}
-          </View>
+          <CodeCopyContext.Provider value={codeCopyContextValue}>
+            <View style={mergedStyles.root}>
+              {renderRootNodes(
+                parsedDocument.root.children,
+                mergedStyles,
+                parsedDocument.highlighted,
+                config,
+                onOpenHtmlPage,
+                mergedContainerRenderers
+              )}
+            </View>
+          </CodeCopyContext.Provider>
         </ImagePressContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -901,7 +928,11 @@ function renderNode(
     }
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, styles, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} styles={styles}>
+          {renderCodeContent(codeBlock, styles, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -1321,9 +1352,8 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>
 ): RenderedNode {
@@ -1332,28 +1362,22 @@ function renderCodeBlock(
   );
 
   if (!highlight) {
-    return (
-      <View key={key} style={styles.codeBlock}>
-        <Text style={styles.code}>{codeBlock.value}</Text>
-      </View>
-    );
+    return <Text style={styles.code}>{codeBlock.value}</Text>;
   }
 
   return (
-    <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>
-        {highlight.lines.map((line, lineIndex) => (
-          <Text key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
-                {token.text}
-              </Text>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </Text>
-        ))}
-      </Text>
-    </View>
+    <Text style={styles.code}>
+      {highlight.lines.map((line, lineIndex) => (
+        <Text key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
+              {token.text}
+            </Text>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </Text>
+      ))}
+    </Text>
   );
 }
 
