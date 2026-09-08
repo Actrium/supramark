@@ -58,6 +58,39 @@ function App() {
 }
 ```
 
+## 代码块复制
+
+Web 渲染器默认对带语言信息字符串的代码块显示复制按钮，并使用
+`navigator.clipboard.writeText`。宿主也可以通过 `onCopyCode` 接管复制行为：
+
+```tsx
+<Supramark
+  markdown={markdown}
+  onCopyCode={async code => {
+    await copyWithHostApi(code);
+  }}
+/>
+```
+
+React Native 渲染器不依赖任何剪贴板库，只有提供 `onCopyCode` 时才显示按钮。
+两端都可以通过 `copyButton={false}` 关闭复制 UI；Web 此时恢复独立的
+`<pre><code>` 结构。
+
+当前 AST 不区分无语言的 fenced code block 与 indented code block，因此只有
+`node.lang` 非空时才显示复制按钮。无语言代码块仍使用相同的代码卡片样式，但不显示
+header 和按钮；如需让它们也可复制，需要先在 parser AST 中增加 fenced 标记。
+
+Web 默认样式的颜色可以由宿主 CSS 覆盖，适合暗色容器：
+
+```css
+.dark-markdown {
+  --sm-code-bg: #2d2d2d;
+  --sm-code-lang-color: rgba(255, 255, 255, 0.6);
+  --sm-code-btn-bg: rgba(255, 255, 255, 0.25);
+  --sm-code-btn-color: #fff;
+}
+```
+
 ## 启用 Features
 
 ```typescript

@@ -22,7 +22,7 @@ function codeAst(value: string, lang?: string): SupramarkRootNode {
 }
 
 interface RenderOptions {
-  onCopyCode?: (code: string, node: SupramarkCodeNodeLike) => void;
+  onCopyCode?: (code: string, node: SupramarkCodeNodeLike) => void | Promise<void>;
   copyButton?: boolean;
 }
 
@@ -96,6 +96,53 @@ describe('code block copy button (RN)', () => {
 
     const labelAfter = renderer.root.findByType('TouchableOpacity').children[0];
     expect(labelAfter.props.children).toBe('Copied');
+    expect(renderer.root.findByType('TouchableOpacity').props.accessibilityLabel).toBe(
+      'Copied code'
+    );
+  });
+
+  it('waits for the host callback before reporting success', async () => {
+    let resolveCopy: (() => void) | undefined;
+    const onCopyCode = () =>
+      new Promise<void>(resolve => {
+        resolveCopy = resolve;
+      });
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+    const btn = renderer.root.findByType('TouchableOpacity');
+
+    await act(async () => btn.props.onPress());
+    expect(renderer.root.findByType('TouchableOpacity').children[0].props.children).toBe('Copy');
+    expect(renderer.root.findByType('TouchableOpacity').props.accessibilityLabel).toBe('Copy code');
+
+    await act(async () => resolveCopy?.());
+    expect(renderer.root.findByType('TouchableOpacity').children[0].props.children).toBe('Copied');
+    expect(renderer.root.findByType('TouchableOpacity').props.accessibilityLabel).toBe(
+      'Copied code'
+    );
+  });
+
+  it('does not schedule feedback after an in-flight copy unmounts', async () => {
+    let resolveCopy: (() => void) | undefined;
+    const onCopyCode = () =>
+      new Promise<void>(resolve => {
+        resolveCopy = resolve;
+      });
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+    await act(async () => renderer.root.findByType('TouchableOpacity').props.onPress());
+    await act(async () => renderer.unmount());
+
+    // Resolving after cleanup must not create the 1.5-second label timer.
+    const originalSetTimeout = globalThis.setTimeout;
+    const feedbackTimer = mock(() => 0 as unknown as ReturnType<typeof setTimeout>);
+    globalThis.setTimeout = feedbackTimer as unknown as typeof setTimeout;
+    try {
+      resolveCopy?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(feedbackTimer).not.toHaveBeenCalled();
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
   });
 
   it('omits the button when the code block has no language even if onCopyCode is provided', async () => {
@@ -105,5 +152,67 @@ describe('code block copy button (RN)', () => {
     // code content still renders
     const text = renderer.root.findByType('Text');
     expect(text.props.children).toBe('foo\n');
+  });
+
+  it('a rejected onCopyCode leaves the label as Copy and raises no unhandledRejection', async () => {
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const onCopyCode = () => Promise.reject(new Error('host denied'));
+      const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+      const btn = renderer.root.findByType('TouchableOpacity');
+
+      await act(async () => {
+        btn.props.onPress();
+      });
+      // Flush the rejected promise so the internal catch path settles.
+      await act(async () => {});
+
+      const label = renderer.root.findByType('TouchableOpacity').children[0];
+      expect(label.props.children).toBe('Copy');
+      expect(renderer.root.findByType('TouchableOpacity').props.accessibilityLabel).toBe(
+        'Copy code'
+      );
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(rejections).toHaveLength(0);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('exposes accessibilityRole="button" so screen readers announce the control', async () => {
+    const onCopyCode = mock(() => undefined);
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+    const btn = renderer.root.findByType('TouchableOpacity');
+    expect(btn.props.accessibilityRole).toBe('button');
+    expect(btn.props.accessibilityLabel).toBe('Copy code');
+  });
+
+  it('keeps the card chrome on the container and off the body (no seam)', async () => {
+    const onCopyCode = mock(() => undefined);
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { onCopyCode });
+    const { defaultStyles } = await import('../src/styles');
+    // Container owns background + radius; header and body stay transparent so
+    // no tint seam shows between header and code body.
+    expect(defaultStyles.codeBlockContainer.backgroundColor).toBe('#f5f5f5');
+    expect(defaultStyles.codeBlockHeader).not.toHaveProperty('backgroundColor');
+    expect(defaultStyles.codeBlockBody).not.toHaveProperty('backgroundColor');
+    expect(defaultStyles.codeBlockBody).not.toHaveProperty('borderRadius');
+    expect(defaultStyles.codeBlockContainer).not.toHaveProperty('marginBottom');
+    expect(renderer.root.findByType('TouchableOpacity')).toBeTruthy();
+  });
+
+  it('puts the dark background on the shared container instead of the header', async () => {
+    const { darkThemeStyles } = await import('../src/styles');
+    expect(darkThemeStyles.codeBlockContainer?.backgroundColor).toBe('#2d2d2d');
+    expect(darkThemeStyles.codeBlockHeader).toBeUndefined();
+  });
+
+  it('keeps RN clipboard-free when copyButton is explicitly true without a handler', async () => {
+    const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { copyButton: true });
+    expect(renderer.root.findAllByType('TouchableOpacity')).toHaveLength(0);
   });
 });

@@ -316,15 +316,20 @@ export interface SupramarkProps {
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
   /**
-   * Copy handler for fenced code blocks. When provided, each code block
-   * renders a top-right copy button that calls this with the raw source.
+   * Copy handler for code blocks with a language info string. When provided,
+   * the header renders a copy button that calls this with the raw source.
    *
    * RN stays clipboard-free: the host owns the clipboard API
    * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
    * inside this callback. Without it, no copy button is shown on RN.
+   * Language-less fences and indented code have no distinct AST flag and do
+   * not render a copy button.
    */
   onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
-  /** Whether to show the code-block copy button (default: shown when onCopyCode is set). */
+  /**
+   * Whether to show the code-block copy button (requires onCopyCode;
+   * default: enabled).
+   */
   copyButton?: boolean;
 
   /**
@@ -527,6 +532,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return containerRenderers ?? {};
   }, [containerRenderers]);
 
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton],
+  );
+
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
     if (errorFallback) {
@@ -551,7 +562,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <ImagePressContext.Provider value={onImagePress}>
-          <CodeCopyContext.Provider value={{ onCopyCode, copyButton }}>
+          <CodeCopyContext.Provider value={codeCopyContextValue}>
             <View style={mergedStyles.root}>
               {renderRootNodes(
                 parsedDocument.root.children,
@@ -1128,7 +1139,9 @@ function renderNode(
 
         return (
           <View key={key} style={admonitionContainerStyle}>
-            {title ? <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text> : null}
+            {title ? (
+              <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text>
+            ) : null}
             {renderAdmonitionContent()}
           </View>
         );
@@ -1537,7 +1550,13 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
+        return renderInlineNodes(
+          strongNode.children,
+          styles,
+          highlighted,
+          config,
+          'strong'
+        );
       }
       return (
         <Text key={key} style={styles.strong}>

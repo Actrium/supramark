@@ -38,11 +38,17 @@ interface CodeBlockProps {
 export function CodeBlock({ node, styles, children }: CodeBlockProps): React.ReactElement {
   const { onCopyCode, copyButton } = useContext(CodeCopyContext);
   const [copied, setCopied] = useState(false);
+  // Prevent a host Promise that settles after unmount from updating state or
+  // creating a feedback timer that no mounted block can consume.
+  const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Clear the "Copied" reset timer if the block unmounts mid-feedback.
   useEffect(() => {
+    // StrictMode replays effect setup, so mark the live setup as mounted too.
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -54,8 +60,7 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
   // `type: 'code'`), so `node.lang` is the signal that the author marked a
   // real code block; indented pre-formatted text and language-less fences
   // stay a plain <View> without a "Copy" button.
-  const showButton =
-    copyButton !== false && typeof onCopyCode === 'function' && Boolean(node.lang);
+  const showButton = copyButton !== false && typeof onCopyCode === 'function' && Boolean(node.lang);
 
   // Wait for the host handler to resolve before flipping the label: a
   // rejected onCopyCode must leave "Copy" in place so the user does not see a
@@ -68,6 +73,10 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
     void (async () => {
       try {
         await onCopyCode(node.value, node);
+        // The host callback may resolve after navigation removed this block.
+        if (!mountedRef.current) {
+          return;
+        }
         setCopied(true);
         if (timerRef.current) {
           clearTimeout(timerRef.current);
@@ -90,12 +99,13 @@ export function CodeBlock({ node, styles, children }: CodeBlockProps): React.Rea
         <TouchableOpacity
           style={styles.codeButton}
           onPress={handlePress}
+          accessibilityRole="button"
           accessibilityLabel={copied ? 'Copied code' : 'Copy code'}
         >
           <Text style={styles.codeButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.codeBlock}>{children}</View>
+      <View style={styles.codeBlockBody}>{children}</View>
     </View>
   );
 }
