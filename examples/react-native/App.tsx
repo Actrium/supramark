@@ -279,11 +279,18 @@ export default function App() {
         </View>
         <Text style={demoSectionTitleStyle}>Rendered output:</Text>
         <View style={styles.renderBlock}>
+          {/* The callback demonstrates that video playback belongs to the host app. */}
           <Supramark
             markdown={activeDemo.markdown}
             theme={theme}
             config={BASE_CONFIG}
             containerRenderers={{ video: renderVideoContainerRN }}
+            onVideoPress={(event) => {
+              Alert.alert(
+                event.title || 'Video',
+                `The host received the video URL:\n${event.src}`,
+              );
+            }}
             onOpenHtmlPage={(node) => {
               Alert.alert(
                 node.params || 'HTML Page',

@@ -115,6 +115,14 @@
       "tsPackages": ["@supramark/feature-card-vison"],
       "containerNames": ["vison"]
     },
+    "container.video": {
+      "kind": "supramark",
+      "description": "Host-rendered :::video container with a JSON config body.",
+      "dependsOn": ["container"],
+      "cargoFeatures": ["container-video"],
+      "tsPackages": ["@supramark/feature-video"],
+      "containerNames": ["video"]
+    },
     "code_highlight": {
       "kind": "supramark",
       "description": "Renderer-side code highlighting metadata and optional engines.",

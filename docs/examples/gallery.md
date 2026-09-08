@@ -696,7 +696,7 @@ stop
 
 ## Video
 
-Package: `@supramark/feature-video`  
+Package: `@supramark/feature-video`
 Path: `packages/features/containers/video`
 
 ### Video embed - basic
@@ -713,7 +713,7 @@ Embed a video with the minimal JSON config
 
 ### Video embed - poster and title
 
-Show a thumbnail before playback and a caption below the player
+Show a thumbnail before playback and expose the title to assistive technology
 
 ```markdown
 :::video

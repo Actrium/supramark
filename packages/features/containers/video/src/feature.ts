@@ -84,29 +84,56 @@ const VIDEO_CONFIG_FIELDS = [
   'width',
 ] as const;
 
+/** Returns whether a supported config field has its declared public type. */
+function isValidVideoConfigValue(
+  field: (typeof VIDEO_CONFIG_FIELDS)[number],
+  value: unknown
+): boolean {
+  // URL and accessible-label fields accept strings only.
+  if (field === 'src' || field === 'poster' || field === 'title') {
+    return typeof value === 'string';
+  }
+  // Width must stay finite because JSON.parse accepts exponent overflow as Infinity.
+  if (field === 'width') {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+  return typeof value === 'boolean';
+}
+
+/** Caps invalid config retained by the legacy TypeScript hook. */
+function truncateRawConfig(content: string): string {
+  const characters = Array.from(content);
+  // Preserve short error input verbatim and mark only truncated values.
+  if (characters.length <= 1024) return content;
+  return `${characters.slice(0, 1024).join('')}…`;
+}
+
 /**
  * Parse a JSON config body into VideoData
  *
- * Mirrors the Rust `parse_video_data` mapping: unknown fields are dropped,
- * and invalid JSON yields parseError + rawConfig instead of throwing.
+ * Matches the Rust `parse_video_data` supported-field filtering and failure
+ * shape. Exact parser error messages remain implementation-specific.
  */
 function parseVideoConfig(content: string): Partial<VideoData> {
   try {
     const parsed: unknown = JSON.parse(content.trim());
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return { parseError: 'video JSON config must be an object', rawConfig: content };
+      return {
+        parseError: 'video JSON config must be an object',
+        rawConfig: truncateRawConfig(content),
+      };
     }
     const source = parsed as Record<string, unknown>;
     const result: Record<string, unknown> = {};
     for (const field of VIDEO_CONFIG_FIELDS) {
       const value = source[field];
-      if (value !== undefined && value !== null) {
+      if (value !== undefined && value !== null && isValidVideoConfigValue(field, value)) {
         result[field] = value;
       }
     }
     return result as Partial<VideoData>;
   } catch (e) {
-    return { parseError: `JSON parse error: ${(e as Error).message}`, rawConfig: content };
+    return { parseError: (e as Error).message, rawConfig: truncateRawConfig(content) };
   }
 }
 
@@ -127,8 +154,10 @@ function createVideoContainerHook(name: string): ContainerHook {
       const node: SupramarkContainerNode = {
         type: 'container' as const,
         name: 'video',
+        mode: 'opaque',
         params: token.info ? String(token.info) : undefined,
         data: { ...data },
+        value: innerText,
         children: [],
       };
 

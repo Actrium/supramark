@@ -84,6 +84,15 @@ describe('Video Feature', () => {
       expect(video.data).not.toHaveProperty('unknown');
     });
 
+    it('drops config fields whose JSON types do not match the public contract', async () => {
+      const root: SupramarkRootNode = await parse(
+        ':::video\n{"src": 123, "poster": false, "title": {}, "autoplay": "false", "loop": 1, "muted": 0, "controls": "true", "width": "80"}\n:::\n'
+      );
+      const [video] = findContainers(root);
+
+      expect(video.data).toEqual({});
+    });
+
     it('does not require src at parse time', async () => {
       const root: SupramarkRootNode = await parse(':::video\n{"title": "No src yet"}\n:::\n');
       const [video] = findContainers(root);

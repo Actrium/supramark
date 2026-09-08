@@ -31,6 +31,25 @@ async function renderMarkdown(markdown: string): Promise<string> {
   return renderToStaticMarkup(element);
 }
 
+/** Renders a hand-built container to exercise renderer-boundary validation. */
+function renderContainerData(data: Record<string, unknown>): string {
+  const node = {
+    type: 'container',
+    name: 'video',
+    mode: 'opaque',
+    data,
+    value: '{}',
+    children: [],
+  } as unknown as SupramarkContainerNode;
+  const element = renderVideoContainerWeb({
+    node,
+    key: 0,
+    classNames: {},
+    renderChildren: () => null,
+  }) as React.ReactElement;
+  return renderToStaticMarkup(element);
+}
+
 describe('renderVideoContainerWeb', () => {
   test('renders a native <video> with poster, controls and aria-label', async () => {
     const html = await renderMarkdown(
@@ -64,7 +83,9 @@ describe('renderVideoContainerWeb', () => {
   });
 
   test('clamps width to a percentage of the container', async () => {
-    const html = await renderMarkdown(':::video\n{"src": "https://example.com/a.mp4", "width": 60}\n:::\n');
+    const html = await renderMarkdown(
+      ':::video\n{"src": "https://example.com/a.mp4", "width": 60}\n:::\n'
+    );
 
     expect(html).toContain('width:60%');
   });
@@ -80,5 +101,45 @@ describe('renderVideoContainerWeb', () => {
     const html = await renderMarkdown(':::video\n{"title": "No src"}\n:::\n');
 
     expect(html).toContain('Missing src config');
+  });
+
+  test('wrong-typed boolean flags never become truthy HTML attributes', async () => {
+    const html = await renderMarkdown(
+      ':::video\n{"src": "https://example.com/a.mp4", "autoplay": "false", "loop": 1, "muted": 0, "controls": "false"}\n:::\n'
+    );
+
+    expect(html).not.toContain('autoPlay');
+    expect(html).not.toContain('loop=""');
+    expect(html).not.toContain('muted=""');
+    expect(html).toContain('controls=""');
+  });
+
+  test('drops a poster URL with a script-capable scheme', async () => {
+    const html = await renderMarkdown(
+      ':::video\n{"src": "https://example.com/a.mp4", "poster": "javascript:alert(1)"}\n:::\n'
+    );
+
+    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('poster=');
+    expect(html).toContain('preload="metadata"');
+  });
+
+  test('keeps a relative poster URL', async () => {
+    const html = await renderMarkdown(
+      ':::video\n{"src": "video.mp4", "poster": "./cover.jpg"}\n:::\n'
+    );
+
+    expect(html).toContain('poster="./cover.jpg"');
+  });
+
+  test('ignores wrong-typed parser error fields in a hand-built AST', () => {
+    const html = renderContainerData({
+      src: 'https://example.com/a.mp4',
+      parseError: { message: 'hostile' },
+      rawConfig: ['hostile'],
+    });
+
+    expect(html).toContain('<video');
+    expect(html).not.toContain('hostile');
   });
 });

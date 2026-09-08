@@ -1,5 +1,8 @@
 import { mock } from 'bun:test';
 
+/** Shared spy for assertions about the renderer's Linking fallback. */
+export const openUrlMock = mock(async (_url: string) => undefined);
+
 // react-native's JS entry contains Flow syntax (import typeof) that bun cannot load,
 // so tests always run against a mock. bun's mock.module registry is process-wide:
 // when multiple test files each register their own mock, a later narrow surface
@@ -19,9 +22,12 @@ mock.module('react-native', () => ({
   Pressable: 'Pressable',
   ActivityIndicator: 'ActivityIndicator',
   Dimensions: { get: () => ({ width: 375, height: 812 }) },
-  Linking: { openURL: async () => undefined },
-  Appearance: { getColorScheme: () => 'light' },
-  StyleSheet: { create: (s: unknown) => s },
+  Linking: { openURL: openUrlMock },
+  StyleSheet: {
+    create: (s: unknown) => s,
+    // Match React Native's production overlay primitive so tests verify layout.
+    absoluteFillObject: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  },
 }));
 
 // react-native-svg is a native module under bun's test runtime; register its

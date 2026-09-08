@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "supramark",
@@ -30,11 +31,7 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
-        "react-native-windows": "*",
       },
-      "optionalPeers": [
-        "react-native-windows",
-      ],
     },
     "crates/d2-little/packages/web": {
       "name": "@actrium/d2-little-web",
@@ -86,11 +83,7 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
-        "react-native-windows": "*",
       },
-      "optionalPeers": [
-        "react-native-windows",
-      ],
     },
     "crates/mermaid-little/packages/web": {
       "name": "@actrium/mermaid-little-web",
@@ -128,11 +121,7 @@
         "@supramark/core": "workspace:*",
         "react": "*",
         "react-native": "*",
-        "react-native-windows": "*",
       },
-      "optionalPeers": [
-        "react-native-windows",
-      ],
     },
     "crates/supramark-markdown/packages/web": {
       "name": "@supramark/markdown-web",
@@ -208,6 +197,7 @@
         "@supramark/feature-html-page": "workspace:*",
         "@supramark/feature-map": "workspace:*",
         "@supramark/feature-math": "workspace:*",
+        "@supramark/feature-video": "workspace:*",
         "@supramark/markdown-native-rn": "workspace:*",
         "@supramark/rn": "workspace:*",
         "@supramark/rn-selection": "workspace:*",
@@ -251,6 +241,7 @@
         "@supramark/feature-math": "workspace:*",
         "@supramark/feature-mermaid": "workspace:*",
         "@supramark/feature-plantuml": "workspace:*",
+        "@supramark/feature-video": "workspace:*",
         "@supramark/feature-weather": "workspace:*",
         "@supramark/web": "workspace:*",
         "echarts": "^5.5.0",
@@ -391,12 +382,22 @@
       "name": "@supramark/feature-video",
       "version": "0.1.0",
       "devDependencies": {
+        "@supramark/rn": "workspace:*",
         "@types/jest": "^29.5.0",
+        "react": "19.1.0",
+        "react-dom": "19.1.0",
         "typescript": "^5.5.0",
       },
       "peerDependencies": {
         "@supramark/core": "*",
+        "@supramark/rn": "*",
+        "react": ">=18.0.0",
+        "react-native": ">=0.72.0",
       },
+      "optionalPeers": [
+        "@supramark/rn",
+        "react-native",
+      ],
     },
     "packages/features/containers/weather": {
       "name": "@supramark/feature-weather",

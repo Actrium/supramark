@@ -20,7 +20,7 @@ export const videoExamples: ExampleDefinition[] = [
   },
   {
     name: 'Video embed - poster and title',
-    description: 'Show a thumbnail before playback and a caption below the player',
+    description: 'Show a thumbnail before playback and expose the title to assistive technology',
     markdown: `
 :::video
 {

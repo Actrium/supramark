@@ -689,7 +689,85 @@ fn public_api_maps_video_container_drops_unknown_fields() {
         data.as_ref().and_then(|data| data.pointer("/src")),
         Some(&serde_json::json!("https://example.com/a.mp4"))
     );
-    assert_eq!(data.as_ref().and_then(|data| data.pointer("/unknown")), None);
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/unknown")),
+        None
+    );
+}
+
+#[test]
+fn public_api_maps_video_container_drops_wrong_typed_fields() {
+    let ast = parse(
+        ":::video\n{\n  \"src\": 123,\n  \"poster\": false,\n  \"title\": {\"x\": 1},\n  \"autoplay\": \"false\",\n  \"loop\": 1,\n  \"muted\": 0,\n  \"controls\": \"true\",\n  \"width\": \"80\"\n}\n:::\n",
+    );
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { name, data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    assert_eq!(name, "video");
+    for key in [
+        "src", "poster", "title", "autoplay", "loop", "muted", "controls", "width",
+    ] {
+        assert_eq!(
+            data.as_ref()
+                .and_then(|data| data.pointer(&format!("/{key}"))),
+            None,
+            "wrong-typed field {key} must be dropped"
+        );
+    }
+}
+
+#[test]
+fn public_api_maps_video_container_preserves_valid_false_and_numeric_values() {
+    let ast = parse(
+        ":::video\n{\"src\": \"https://example.com/a.mp4\", \"controls\": false, \"autoplay\": false, \"width\": 60}\n:::\n",
+    );
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/src")),
+        Some(&serde_json::json!("https://example.com/a.mp4"))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/controls")),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/autoplay")),
+        Some(&serde_json::json!(false))
+    );
+    assert_eq!(
+        data.as_ref().and_then(|data| data.pointer("/width")),
+        Some(&serde_json::json!(60))
+    );
+}
+
+#[test]
+fn public_api_maps_video_container_caps_invalid_raw_config() {
+    let long_body = format!("{{invalid json {}}}", "x".repeat(4096));
+    let ast = parse(&format!(":::video\n{long_body}\n:::\n"));
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Container { data, .. } = &children[0] else {
+        panic!("expected container");
+    };
+
+    let raw = data
+        .as_ref()
+        .and_then(|data| data.pointer("/rawConfig"))
+        .and_then(|value| value.as_str())
+        .expect("expected rawConfig in video data");
+    assert_eq!(raw.chars().count(), 1025);
+    assert!(raw.ends_with('…'));
 }
 
 #[test]

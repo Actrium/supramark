@@ -17,7 +17,6 @@ import type {
   SupramarkCodeHighlightResult,
   SupramarkCodeHighlighter,
   SupramarkSourceState,
-  SupramarkVideoPressEvent,
 } from '@supramark/core';
 import {
   parse,
@@ -33,6 +32,7 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -217,7 +217,6 @@ export interface ContainerRendererRN {
     styles: ReturnType<typeof mergeStyles>;
     config?: SupramarkConfig;
     onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
-    onVideoPress?: SupramarkVideoPressHandler;
     renderNode: (node: SupramarkNode, key: number) => RenderedNode;
     renderChildren: (children: SupramarkNode[]) => RenderedNode;
   }): RenderedNode;
@@ -254,9 +253,6 @@ export interface SupramarkImagePressEvent {
 
 /** Host handler invoked when the user taps a block image. */
 export type SupramarkImagePressHandler = (event: SupramarkImagePressEvent) => void;
-
-/** Host handler invoked when the user taps a :::video card. */
-export type SupramarkVideoPressHandler = (event: SupramarkVideoPressEvent) => void;
 
 /**
  * Context pipe for the image-press handler. Carries the host callback from the
@@ -327,6 +323,13 @@ export interface SupramarkProps {
    * - the host may open a new page / modal / external browser from the callback.
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
+
+  /**
+   * Callback invoked when the user taps a :::video card.
+   *
+   * The host owns playback when supplied. Otherwise the default video
+   * renderer opens http(s) sources through React Native Linking.
+   */
   onVideoPress?: SupramarkVideoPressHandler;
 
   /**
@@ -544,17 +547,18 @@ export const Supramark: React.FC<SupramarkProps> = ({
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <ImagePressContext.Provider value={onImagePress}>
-          <View style={mergedStyles.root}>
-            {renderRootNodes(
-              parsedDocument.root.children,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              onVideoPress,
-              mergedContainerRenderers
-            )}
-          </View>
+          <VideoPressContext.Provider value={onVideoPress}>
+            <View style={mergedStyles.root}>
+              {renderRootNodes(
+                parsedDocument.root.children,
+                mergedStyles,
+                parsedDocument.highlighted,
+                config,
+                onOpenHtmlPage,
+                mergedContainerRenderers
+              )}
+            </View>
+          </VideoPressContext.Provider>
         </ImagePressContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -730,7 +734,6 @@ function renderRootNodes(
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
   config?: SupramarkConfig,
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void,
-  onVideoPress?: SupramarkVideoPressHandler,
   containerRenderers?: Record<string, ContainerRendererRN>
 ): RenderedNode[] {
   const rendered: RenderedNode[] = [];
@@ -746,7 +749,6 @@ function renderRootNodes(
           highlighted,
           config,
           onOpenHtmlPage,
-          onVideoPress,
           containerRenderers
         )
       );
@@ -884,7 +886,6 @@ function renderNode(
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
   config?: SupramarkConfig,
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void,
-  onVideoPress?: SupramarkVideoPressHandler,
   containerRenderers?: Record<string, ContainerRendererRN>,
   listMarker?: string
 ): RenderedNode {
@@ -935,7 +936,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers,
               list.ordered ? `${startIndex + index}.` : '•'
             )
@@ -984,7 +984,6 @@ function renderNode(
             highlighted,
             config,
             onOpenHtmlPage,
-            onVideoPress,
             containerRenderers
           )}
         </View>
@@ -1023,7 +1022,6 @@ function renderNode(
           styles,
           config,
           onOpenHtmlPage,
-          onVideoPress,
           renderNode: (n, k) =>
             renderNode(
               n,
@@ -1032,7 +1030,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             ),
           renderChildren: children =>
@@ -1044,7 +1041,6 @@ function renderNode(
                 highlighted,
                 config,
                 onOpenHtmlPage,
-                onVideoPress,
                 containerRenderers
               )
             ),
@@ -1104,7 +1100,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             )
           );
@@ -1155,7 +1150,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             )
           )}
@@ -1201,7 +1195,6 @@ function renderNode(
                           highlighted,
                           config,
                           onOpenHtmlPage,
-                          onVideoPress,
                           containerRenderers
                         )
                       )}
@@ -1236,7 +1229,6 @@ function renderNode(
                         highlighted,
                         config,
                         onOpenHtmlPage,
-                        onVideoPress,
                         containerRenderers
                       )
                     )}
@@ -1263,7 +1255,6 @@ function renderNode(
             highlighted,
             config,
             onOpenHtmlPage,
-            onVideoPress,
             containerRenderers
           )
         );
@@ -1298,7 +1289,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             )
           )}
@@ -1317,7 +1307,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             )
           )}
@@ -1354,7 +1343,6 @@ function renderNode(
               highlighted,
               config,
               onOpenHtmlPage,
-              onVideoPress,
               containerRenderers
             )
           )}
@@ -1480,7 +1468,6 @@ function renderListItemBody(
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
   config: SupramarkConfig | undefined,
   onOpenHtmlPage: ((node: SupramarkContainerNode) => void) | undefined,
-  onVideoPress: SupramarkVideoPressHandler | undefined,
   containerRenderers: Record<string, ContainerRendererRN> | undefined
 ): RenderedNode[] {
   const out: RenderedNode[] = [];
@@ -1544,7 +1531,6 @@ function renderListItemBody(
           highlighted,
           config,
           onOpenHtmlPage,
-          onVideoPress,
           containerRenderers
         )}
       </View>

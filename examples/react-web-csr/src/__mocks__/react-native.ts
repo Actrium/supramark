@@ -1,4 +1,7 @@
-export const StyleSheet = { create: () => ({}) };
+export const StyleSheet = {
+  create: () => ({}),
+  absoluteFillObject: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+};
 export const View = 'View';
 export const Text = 'Text';
 export const ScrollView = 'ScrollView';
@@ -26,7 +29,6 @@ export const NativeModules = {};
 export const PermissionsAndroid = { request: () => Promise.resolve('granted') };
 export const BackHandler = { addEventListener: () => ({}), removeEventListener: () => {} };
 export const Linking = { openURL: () => Promise.resolve() };
-export const Appearance = { getColorScheme: () => 'light' };
 export default {
   StyleSheet,
   View,
@@ -46,5 +48,4 @@ export default {
   PermissionsAndroid,
   BackHandler,
   Linking,
-  Appearance,
 };

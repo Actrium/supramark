@@ -38,9 +38,8 @@ export {
   extractContainerInnerText,
 } from './syntax/container.js';
 
-// ContainerFeature contract (ContainerRNRenderArgs.onVideoPress etc.) —
-// the RN entry re-exports the same container-feature surface as the web
-// entry so RN hosts resolve identical types under the metro mapping.
+// ContainerFeature contract — the RN entry re-exports the same surface as the
+// web entry so RN hosts resolve identical types under the metro mapping.
 export {
   validateContainerFeature,
   type ContainerFeature,

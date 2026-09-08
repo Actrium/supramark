@@ -29,8 +29,6 @@ bun run start
 - `@supramark/rn-selection` - workspace:*
 - `@supramark/markdown-native-rn` - workspace:*
 
-## Source Code
-
 ## Project Structure
 
 ```

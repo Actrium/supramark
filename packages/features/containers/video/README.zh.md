@@ -25,25 +25,28 @@
 | `controls` | boolean | 显示原生控件，默认 `true`              |
 | `width`    | number  | 播放器宽度占容器百分比（1-100）        |
 
-未知字段会被忽略；JSON 非法时渲染内联错误卡片，而不是让整篇文档失败。
+未知字段和类型不匹配的字段会被忽略；JSON 非法时渲染内联错误卡片，而不是让整篇文档失败。
 
 ## 平台行为
 
-- **Web**：渲染原生 `<video controls poster>`。
+- **Web**：渲染原生 `<video controls poster>`。未配置 `poster` 时会使用
+  `preload="metadata"` 显示首帧，因此页面加载后浏览器可能主动请求视频 URL；
+  这与 Markdown 图片的加载隐私边界相同。`poster` 拒绝脚本型 URL scheme。
 - **React Native**：RN 没有内置视频组件，默认渲染封面图（或占位块）+ 播放按钮，
-  点击后经 `Linking` 打开系统播放器。需要内联播放的宿主可用
+  宿主未提供回调时只允许通过 `Linking` 打开 HTTP(S) URL。需要内联播放的宿主可用
   `react-native-video` / `expo-av` 自行实现渲染函数，并通过
   `<Supramark containerRenderers={{ video: myRenderer }} />` 注入。
 
 ## 宿主接入
 
 ```tsx
-import { videoFeature, renderVideoContainerWeb } from '@supramark/feature-video';
+import { videoFeature, renderVideoContainerRN } from '@supramark/feature-video';
 
 videoFeature.registerParser();
 
 <Supramark
   config={{ features: [videoFeature] }}
-  containerRenderers={{ video: renderVideoContainerWeb }}
+  containerRenderers={{ video: renderVideoContainerRN }}
+  onVideoPress={({ src, title }) => openVideoPlayer({ src, title })}
 />;
 ```

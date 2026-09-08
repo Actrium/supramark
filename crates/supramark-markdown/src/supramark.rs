@@ -1801,11 +1801,45 @@ fn copy_config_field(
     }
 }
 
+/// Copies a config field only when its JSON value has the expected type.
+///
+/// This keeps the AST contract clean before data reaches bundled or
+/// third-party renderers. Wrong-typed values are treated like unknown fields.
+fn copy_typed_config_field(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    source: &serde_json::Map<String, serde_json::Value>,
+    output_key: &str,
+    input_keys: &[&str],
+    predicate: fn(&serde_json::Value) -> bool,
+) {
+    // Resolve aliases in priority order, matching the existing copy helper.
+    if let Some(value) = input_keys.iter().find_map(|key| source.get(*key)) {
+        // Reject null and wrong-typed values before they enter the AST.
+        if !value.is_null() && predicate(value) {
+            target.insert(output_key.to_owned(), value.clone());
+        }
+    }
+}
+
+/// Caps invalid video config retained in the AST and rendered error card.
+fn truncate_video_raw_config(value: &str) -> String {
+    // Count Unicode scalar values so truncation never splits a UTF-8 sequence.
+    const MAX_RAW_CONFIG_CHARS: usize = 1024;
+    let mut chars = value.chars();
+    let truncated: String = chars.by_ref().take(MAX_RAW_CONFIG_CHARS).collect();
+    // Append a marker only when content was actually omitted.
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
 /// Parses a `:::video` container body (a JSON object) into structured data.
 ///
 /// Recognized fields: src / poster / title / autoplay / loop / muted /
-/// controls / width. Unknown fields are dropped. Invalid JSON or a non-object
-/// body yields `parseError` + `rawConfig` instead of failing the parse.
+/// controls / width. Unknown and wrong-typed fields are dropped. Invalid JSON
+/// or a non-object body yields `parseError` + `rawConfig` instead of failing.
 fn parse_video_data(value: &str) -> serde_json::Value {
     let mut object = serde_json::Map::new();
 
@@ -1817,20 +1851,68 @@ fn parse_video_data(value: &str) -> serde_json::Value {
 
     match parsed {
         Ok(config) => {
-            copy_config_field(&mut object, &config, "src", &["src"]);
-            copy_config_field(&mut object, &config, "poster", &["poster"]);
-            copy_config_field(&mut object, &config, "title", &["title"]);
-            copy_config_field(&mut object, &config, "autoplay", &["autoplay"]);
-            copy_config_field(&mut object, &config, "loop", &["loop"]);
-            copy_config_field(&mut object, &config, "muted", &["muted"]);
-            copy_config_field(&mut object, &config, "controls", &["controls"]);
-            copy_config_field(&mut object, &config, "width", &["width"]);
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "src",
+                &["src"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "poster",
+                &["poster"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "title",
+                &["title"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "autoplay",
+                &["autoplay"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "loop",
+                &["loop"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "muted",
+                &["muted"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "controls",
+                &["controls"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "width",
+                &["width"],
+                serde_json::Value::is_number,
+            );
         }
         Err(error) => {
             object.insert("parseError".to_owned(), serde_json::Value::String(error));
             object.insert(
                 "rawConfig".to_owned(),
-                serde_json::Value::String(value.to_owned()),
+                serde_json::Value::String(truncate_video_raw_config(value)),
             );
         }
     }
