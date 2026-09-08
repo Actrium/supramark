@@ -32,6 +32,7 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -324,6 +325,14 @@ export interface SupramarkProps {
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
 
   /**
+   * Callback invoked when the user taps a :::video card.
+   *
+   * The host owns playback when supplied. Otherwise the default video
+   * renderer opens http(s) sources through React Native Linking.
+   */
+  onVideoPress?: SupramarkVideoPressHandler;
+
+  /**
    * Callback invoked when the user taps a block image.
    *
    * - When supplied, image taps are delegated to the host (e.g. to open a
@@ -345,6 +354,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   onError,
   errorFallback,
   onOpenHtmlPage,
+  onVideoPress,
   onImagePress,
   containerRenderers,
   codeHighlighter,
@@ -537,16 +547,18 @@ export const Supramark: React.FC<SupramarkProps> = ({
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <ImagePressContext.Provider value={onImagePress}>
-          <View style={mergedStyles.root}>
-            {renderRootNodes(
-              parsedDocument.root.children,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              mergedContainerRenderers
-            )}
-          </View>
+          <VideoPressContext.Provider value={onVideoPress}>
+            <View style={mergedStyles.root}>
+              {renderRootNodes(
+                parsedDocument.root.children,
+                mergedStyles,
+                parsedDocument.highlighted,
+                config,
+                onOpenHtmlPage,
+                mergedContainerRenderers
+              )}
+            </View>
+          </VideoPressContext.Provider>
         </ImagePressContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -1011,7 +1023,15 @@ function renderNode(
           config,
           onOpenHtmlPage,
           renderNode: (n, k) =>
-            renderNode(n, k, styles, highlighted, config, onOpenHtmlPage, containerRenderers),
+            renderNode(
+              n,
+              k,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            ),
           renderChildren: children =>
             children.map((child, index) =>
               renderNode(
@@ -1108,9 +1128,7 @@ function renderNode(
 
         return (
           <View key={key} style={admonitionContainerStyle}>
-            {title ? (
-              <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text>
-            ) : null}
+            {title ? <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text> : null}
             {renderAdmonitionContent()}
           </View>
         );
@@ -1264,7 +1282,15 @@ function renderNode(
       return (
         <View key={key} style={[styles.table, { width: screenWidth }]}>
           {table.children.map((row, index) =>
-            renderNode(row, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              row,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1274,7 +1300,15 @@ function renderNode(
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
-            renderNode(cell, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              cell,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1302,7 +1336,15 @@ function renderNode(
       return (
         <View key={key} style={styles.blockquote}>
           {quote.children.map((child, i) =>
-            renderNode(child, i, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              i,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1482,7 +1524,15 @@ function renderListItemBody(
     flushInline();
     out.push(
       <View key={`li-${seq}`} style={styles.listItemIndent}>
-        {renderNode(child, 0, styles, highlighted, config, onOpenHtmlPage, containerRenderers)}
+        {renderNode(
+          child,
+          0,
+          styles,
+          highlighted,
+          config,
+          onOpenHtmlPage,
+          containerRenderers
+        )}
       </View>
     );
     seq += 1;
@@ -1526,13 +1576,7 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(
-          strongNode.children,
-          styles,
-          highlighted,
-          config,
-          'strong'
-        );
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
       }
       return (
         <Text key={key} style={styles.strong}>

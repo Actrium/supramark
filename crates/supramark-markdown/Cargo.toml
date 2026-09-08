@@ -45,6 +45,7 @@ container-map = ["container"]
 container-html = ["container", "raw-html"]
 container-weather = ["container"]
 container-vison = ["container"]
+container-video = ["container"]
 linkify = ["dep:linkify"]
 
 [dependencies]

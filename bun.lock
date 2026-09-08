@@ -197,6 +197,7 @@
         "@supramark/feature-html-page": "workspace:*",
         "@supramark/feature-map": "workspace:*",
         "@supramark/feature-math": "workspace:*",
+        "@supramark/feature-video": "workspace:*",
         "@supramark/markdown-native-rn": "workspace:*",
         "@supramark/rn": "workspace:*",
         "@supramark/rn-selection": "workspace:*",
@@ -240,6 +241,7 @@
         "@supramark/feature-math": "workspace:*",
         "@supramark/feature-mermaid": "workspace:*",
         "@supramark/feature-plantuml": "workspace:*",
+        "@supramark/feature-video": "workspace:*",
         "@supramark/feature-weather": "workspace:*",
         "@supramark/web": "workspace:*",
         "echarts": "^5.5.0",
@@ -375,6 +377,27 @@
       "peerDependencies": {
         "@supramark/core": "*",
       },
+    },
+    "packages/features/containers/video": {
+      "name": "@supramark/feature-video",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@supramark/rn": "workspace:*",
+        "@types/jest": "^29.5.0",
+        "react": "19.1.0",
+        "react-dom": "19.1.0",
+        "typescript": "^5.5.0",
+      },
+      "peerDependencies": {
+        "@supramark/core": "*",
+        "@supramark/rn": "*",
+        "react": ">=18.0.0",
+        "react-native": ">=0.72.0",
+      },
+      "optionalPeers": [
+        "@supramark/rn",
+        "react-native",
+      ],
     },
     "packages/features/containers/weather": {
       "name": "@supramark/feature-weather",
@@ -1420,6 +1443,8 @@
     "@supramark/feature-mermaid": ["@supramark/feature-mermaid@workspace:packages/features/diagrams/mermaid"],
 
     "@supramark/feature-plantuml": ["@supramark/feature-plantuml@workspace:packages/features/diagrams/plantuml"],
+
+    "@supramark/feature-video": ["@supramark/feature-video@workspace:packages/features/containers/video"],
 
     "@supramark/feature-weather": ["@supramark/feature-weather@workspace:packages/features/containers/weather"],
 

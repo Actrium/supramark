@@ -1,4 +1,7 @@
-export const StyleSheet = { create: () => ({}) };
+export const StyleSheet = {
+  create: () => ({}),
+  absoluteFillObject: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+};
 export const View = 'View';
 export const Text = 'Text';
 export const ScrollView = 'ScrollView';
@@ -6,6 +9,7 @@ export const FlatList = 'FlatList';
 export const Image = 'Image';
 export const TouchableOpacity = 'TouchableOpacity';
 export const TouchableHighlight = 'TouchableHighlight';
+export const Pressable = 'Pressable';
 export const TextInput = 'TextInput';
 export const Modal = 'Modal';
 export const KeyboardAvoidingView = 'KeyboardAvoidingView';
@@ -24,6 +28,7 @@ export const Animated = {
 export const NativeModules = {};
 export const PermissionsAndroid = { request: () => Promise.resolve('granted') };
 export const BackHandler = { addEventListener: () => ({}), removeEventListener: () => {} };
+export const Linking = { openURL: () => Promise.resolve() };
 export default {
   StyleSheet,
   View,
@@ -33,6 +38,7 @@ export default {
   Image,
   TouchableOpacity,
   TouchableHighlight,
+  Pressable,
   TextInput,
   Modal,
   KeyboardAvoidingView,
@@ -41,4 +47,5 @@ export default {
   NativeModules,
   PermissionsAndroid,
   BackHandler,
+  Linking,
 };
