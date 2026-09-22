@@ -2,7 +2,7 @@
 name = "graphviz-anywhere"
 version = "0.2.5"
 edition = "2021"
-rust-version = "1.64"
+rust-version = "1.67"
 description = "Safe Rust wrapper for the graphviz-anywhere C library with bundled prebuilt binaries (and a wasm32 JS bridge)"
 license = "Apache-2.0"
 authors = ["kookyleo <kookyleo@gmail.com>"]
