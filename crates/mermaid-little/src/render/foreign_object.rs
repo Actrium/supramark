@@ -869,7 +869,7 @@ pub fn measure_html_label(
     // the second and later lines painting below the node box — markon #97.)
     // Width stays the concatenated-text width of the reference geometry.
     let stripped = strip_paired_markdown_markers(text);
-    let lines = stripped.split('\n').count();
+    let lines = crate::layout::label_metrics::split_label_lines(&stripped).len();
     let concatenated: String = stripped.split('\n').collect();
     let concat_w = text_width(&concatenated, family, size, bold, false);
     let lh = html_label_line_height(size);
@@ -951,26 +951,17 @@ pub fn measure_html_markup_label(
         return (0.0, html_label_line_height(size));
     }
     let _ = (max_width_px, wrap_enabled);
-    let lines = parse_html_text_lines(text);
+    let lines = crate::layout::label_metrics::split_label_lines(text).len();
     let lh = html_label_line_height(size);
     // Height: one line-height per painted line. Width: the concatenated
     // text, as the reference geometry measures it.
-    let concat: String = lines.concat();
-    let total_w = text_width(&concat, family, size, base_bold, false);
-    (total_w, lh * lines.len() as f64)
+    let total_w = text_width(&html_text_content(text), family, size, base_bold, false);
+    (total_w, lh * lines as f64)
 }
 
-/// Parse HTML label markup into the plain-text lines a browser paints.
-///
-/// - Every `<br>` / `<br/>` / `<br />` starts a new line — browsers honour
-///   forced breaks even under the label div's `white-space: nowrap`.
-/// - All other HTML tags are stripped (`<strong>`, `<i class="fa …">`, …).
-/// - HTML entities are decoded (`&gt;` → `>`, `&amp;` → `&`, etc.).
-///
-/// Bold markup is ignored by the caller: all text measures at the label's
-/// base weight. Returns one entry per line (at least one).
-fn parse_html_text_lines(html: &str) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
+/// jsdom-`textContent`-style plain text of label markup: every tag
+/// (including `<br>`) stripped, entities decoded, measured as one segment.
+fn html_text_content(html: &str) -> String {
     let mut text = String::with_capacity(html.len());
     let mut i = 0;
     let bytes = html.as_bytes();
@@ -994,9 +985,6 @@ fn parse_html_text_lines(html: &str) -> Vec<String> {
             };
             if is_tag_start {
                 if let Some(rel_end) = html[i..].find('>') {
-                    if is_br_tag(&html[i..i + rel_end + 1]) {
-                        lines.push(std::mem::take(&mut text));
-                    }
                     i += rel_end + 1;
                     continue;
                 }
@@ -1031,19 +1019,7 @@ fn parse_html_text_lines(html: &str) -> Vec<String> {
             i += ch_len;
         }
     }
-    lines.push(text);
-    lines
-}
-
-/// Whether a complete tag (`<…>`) is a line break: `<br>`, `<br/>`,
-/// `<br />`, any ASCII case.
-fn is_br_tag(tag: &str) -> bool {
-    let inner = tag
-        .trim_start_matches('<')
-        .trim_end_matches('>')
-        .trim_end_matches('/')
-        .trim();
-    inner.eq_ignore_ascii_case("br")
+    text
 }
 
 /// Convert a markdown-syntax label string to rendered HTML for embedding

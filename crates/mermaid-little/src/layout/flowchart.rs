@@ -1128,20 +1128,24 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 ///
 /// Markdown `**bold**` → `<strong>bold</strong>` → textContent `bold`.
 /// Markdown `*italic*` → `<em>italic</em>` → textContent `italic`.
-/// HTML tags like `<br>` embedded in markdown are stripped by textContent.
-/// The `\n` → `<br/>` → stripped. Result: plain text, single line.
+/// Other HTML tags embedded in markdown are stripped; line structure is
+/// kept as zero-width markup — `<br>` and `\n` (rendered as `<br/>`) become
+/// `<br/>`, and each paragraph is wrapped in `<p>…</p>` — so the caller can
+/// count the painted lines with `split_label_lines`. Stripping all tags
+/// leaves the concatenated plain text, as before.
 ///
 /// Mirrors marked.lexer's paragraph tokenisation: blank-line-separated
 /// runs become separate `<p>` elements, and each paragraph drops its
-/// trailing whitespace. The textContent of `<p>p1</p><p>p2</p>` is
-/// `p1` concatenated with `p2` (no separator, since paragraph tags
-/// themselves contribute nothing to textContent), which is what we
-/// reproduce here.
+/// trailing whitespace.
 fn strip_markdown_for_measure(label: &str) -> String {
     let paragraphs = split_paragraphs_for_measure(label);
     let mut out = String::with_capacity(label.len());
+    // Each paragraph renders as its own `<p>` block, i.e. its own line(s);
+    // keep the block boundaries so the line count survives the stripping.
     for para in &paragraphs {
+        out.push_str("<p>");
         out.push_str(&strip_markdown_paragraph_for_measure(para));
+        out.push_str("</p>");
     }
     out
 }
@@ -1188,8 +1192,12 @@ fn strip_markdown_paragraph_for_measure(label: &str) -> String {
         } else if bytes[i] == b'`' {
             i += 1; // skip backtick (inline code marker)
         } else if bytes[i] == b'<' {
-            // HTML tag embedded in markdown: skip to '>'
+            // HTML tag embedded in markdown: skip to '>', keeping line breaks
+            // (zero width) so the line count survives.
             if let Some(rel_end) = label[i..].find('>') {
+                if crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + rel_end]) {
+                    out.push_str("<br/>");
+                }
                 i += rel_end + 1; // skip the tag
             } else {
                 // Bare '<' with no '>' — treat as literal
@@ -1197,7 +1205,8 @@ fn strip_markdown_paragraph_for_measure(label: &str) -> String {
                 i += 1;
             }
         } else if bytes[i] == b'\n' {
-            // \n → <br/> in HTML → stripped by textContent
+            // `\n` renders as `<br/>`: zero width, but a line break.
+            out.push_str("<br/>");
             i += 1;
         } else {
             out.push(bytes[i] as char);
@@ -1467,45 +1476,28 @@ fn strip_fa_icons(text: &str) -> String {
     out
 }
 
-/// Split label text into measurement lines, treating `<br>` / `<br/>` /
-/// `<br />` and `\n` as line breaks (upstream `string_label_to_html`
-/// converts the source `\n` into `<br/>` before rendering). All other HTML
-/// tags are stripped.
-///
-/// Used by [`measure_text`] for the line count of the rendered
-/// foreignObject `<div>`.
-fn split_html_into_lines(s: &str) -> Vec<String> {
-    let mut lines: Vec<String> = vec![String::new()];
+/// Plain text of a label for width measurement: every `<…>` tag stripped
+/// and `\n` dropped, i.e. the concatenation of all lines measured as one
+/// segment (the reference geometry). Bytes are copied one by one as the
+/// original measurement did — widths of non-ASCII labels are part of the
+/// current geometry and are left alone here.
+fn concat_label_text_for_width(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'<' {
             if let Some(rel_end) = s[i..].find('>') {
-                let tag_full = &s[i..i + rel_end + 1];
-                let lowered: String = tag_full.chars().map(|c| c.to_ascii_lowercase()).collect();
-                let trimmed = lowered
-                    .trim_start_matches('<')
-                    .trim_end_matches('>')
-                    .trim_end_matches('/')
-                    .trim();
-                if trimmed == "br" {
-                    lines.push(String::new());
-                }
                 i += rel_end + 1;
-            } else {
-                lines.last_mut().unwrap().push('<');
-                i += 1;
+                continue;
             }
-        } else if bytes[i] == b'\n' {
-            // Upstream rewrites a label's `\n` to `<br/>` before rendering.
-            lines.push(String::new());
-            i += 1;
-        } else {
-            lines.last_mut().unwrap().push(bytes[i] as char);
-            i += 1;
         }
+        if bytes[i] != b'\n' {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
     }
-    lines
+    out
 }
 
 /// Measure the overall width/height of the (possibly multi-line) label.
@@ -1551,11 +1543,11 @@ fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f6
     // Width stays the width of the concatenated lines, measured as one
     // segment (the reference geometry). It over-estimates a multi-line label,
     // which currently also absorbs the shim's CJK under-measurement.
-    let lines = split_html_into_lines(&stripped);
-    let concat: String = lines.concat();
+    let lines = crate::layout::label_metrics::split_label_lines(&stripped).len();
+    let concat = concat_label_text_for_width(&stripped);
     let width =
         font_metrics::text_width(&concat, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
-    (width, multiline_label_height(lh, lines.len(), font_size_px))
+    (width, multiline_label_height(lh, lines, font_size_px))
 }
 
 /// Height of a label block of `lines` lines whose first line measures

@@ -553,10 +553,10 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                         let note_id = format!("{}----note-{}", target, ctr);
                         let note_dom_id = format!("state-{}----note-{}", target, ctr);
                         // Note width: text_width(stripped text) + 2*15.
-                        // Upstream measures the note HTML via jsdom textContent
-                        // which strips all HTML tags (including <br/>, <br>, etc.)
-                        // and returns a single concatenated line. `\n` has zero
-                        // advance in text_width. Strip HTML tags before measuring.
+                        // Width: the note text with all HTML tags (including
+                        // <br/>) stripped, as one concatenated segment — the
+                        // reference geometry. `\n` has zero advance in
+                        // text_width.
                         let stripped_text = strip_html_tags(&note.text);
                         let note_text_w = text_width(
                             &stripped_text,
@@ -566,8 +566,15 @@ pub fn layout(d: &StateDiagram, theme: &ThemeVariables) -> Result<StateLayout> {
                             false,
                         );
                         const NOTE_PAD: f64 = 15.0;
-                        let note_height =
-                            html_label_line_height(DEFAULT_FONT_SIZE) + 2.0 * NOTE_PAD;
+                        // Height: one line-height per painted line (`\n` and
+                        // `<br/>` both break; a trailing break opens none), so
+                        // a multi-line note's label fits inside its box. Same
+                        // count the note shape uses for its label.
+                        let note_lines =
+                            crate::layout::label_metrics::split_label_lines(&note.text).len();
+                        let note_height = html_label_line_height(DEFAULT_FONT_SIZE)
+                            * note_lines as f64
+                            + 2.0 * NOTE_PAD;
                         let note_w = note_text_w + 2.0 * NOTE_PAD;
                         let note_node = LNode {
                             id: note_id.clone(),

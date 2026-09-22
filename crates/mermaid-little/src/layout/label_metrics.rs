@@ -69,26 +69,49 @@ pub fn edge_label_plain_text(text: &str, is_markdown: bool) -> String {
     strip_html_for_measurement(&measure_text)
 }
 
-/// Split label markup at line breaks (`<br>` variants, any case, and `\n`)
-/// and reduce each line to its painted plain text via
-/// [`strip_html_for_measurement`]. Always returns at least one line.
-pub fn plain_text_lines(s: &str) -> Vec<String> {
-    let mut lines = Vec::new();
+/// Split label markup into the lines a browser paints, as raw markup slices.
+///
+/// This is the single source of truth for label line counting (layout and
+/// render both use it), checked against headless Chromium on the label div
+/// (`display: table-cell; white-space: nowrap; line-height: 1.5`):
+///
+/// - `<br>` in any spelling (`<br/>`, `<br />`, `<BR>`, `<br class="x">`)
+///   and a source `\n` (upstream rewrites it to `<br/>`) end a line.
+/// - `</p>` ends a block, so `<p>a</p><p>b</p>` (markdown paragraphs) is two
+///   lines.
+/// - A break at the end of a block opens no new line: `a<br/>` is one line,
+///   `a<br/><br/>` two, `a<br/><br/>b` three, `<br/>a` two, `<br/>` one.
+///   Trailing whitespace or empty tags after the last break count as empty.
+/// - A block with no text and no break (`<p></p>`) paints no line.
+///
+/// Always returns at least one line. Callers strip the remaining tags and
+/// decode entities per line themselves.
+pub fn split_label_lines(s: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = Vec::new();
+    // Lines of the current `<p>` block (or the whole label).
+    let mut block: Vec<&str> = Vec::new();
     let mut start = 0;
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\n' {
-            lines.push(strip_html_for_measurement(&s[start..i]));
+            block.push(&s[start..i]);
             i += 1;
             start = i;
             continue;
         }
         if bytes[i] == b'<' {
             if let Some(rel_end) = s[i..].find('>') {
-                let inner = s[i + 1..i + rel_end].trim_end_matches('/').trim();
-                if inner.eq_ignore_ascii_case("br") {
-                    lines.push(strip_html_for_measurement(&s[start..i]));
+                let tag = &s[i + 1..i + rel_end];
+                if is_br_tag_body(tag) {
+                    block.push(&s[start..i]);
+                    i += rel_end + 1;
+                    start = i;
+                    continue;
+                }
+                if tag.trim().eq_ignore_ascii_case("/p") {
+                    block.push(&s[start..i]);
+                    end_block(&mut block, &mut lines);
                     i += rel_end + 1;
                     start = i;
                     continue;
@@ -97,8 +120,52 @@ pub fn plain_text_lines(s: &str) -> Vec<String> {
         }
         i += 1;
     }
-    lines.push(strip_html_for_measurement(&s[start..]));
+    block.push(&s[start..]);
+    // The markup after the last `</p>` is usually empty; a bare trailing
+    // blank block then contributes nothing.
+    if !lines.is_empty() && block.len() == 1 && is_blank_markup(block[0]) {
+        block.clear();
+    }
+    end_block(&mut block, &mut lines);
+    if lines.is_empty() {
+        lines.push("");
+    }
     lines
+}
+
+/// Move a finished block's lines into `lines`: a break at the end of the
+/// block opens no line, and a block without text or breaks paints nothing.
+fn end_block<'a>(block: &mut Vec<&'a str>, lines: &mut Vec<&'a str>) {
+    if block.len() > 1 && is_blank_markup(block[block.len() - 1]) {
+        block.pop();
+    }
+    if !(block.len() == 1 && is_blank_markup(block[0])) {
+        lines.append(block);
+    }
+    block.clear();
+}
+
+/// Body of a tag (between `<` and `>`) that is a line break: `br`, any
+/// case, optionally followed by whitespace-separated attributes and `/`.
+pub fn is_br_tag_body(tag: &str) -> bool {
+    let tag = tag.trim_end_matches('/');
+    tag.len() >= 2
+        && tag[..2].eq_ignore_ascii_case("br")
+        && tag[2..].chars().next().is_none_or(char::is_whitespace)
+}
+
+/// Markup that paints no glyph: only whitespace and tags.
+fn is_blank_markup(s: &str) -> bool {
+    strip_html_for_measurement(s).trim().is_empty()
+}
+
+/// [`split_label_lines`] reduced to each line's painted plain text via
+/// [`strip_html_for_measurement`].
+pub fn plain_text_lines(s: &str) -> Vec<String> {
+    split_label_lines(s)
+        .into_iter()
+        .map(strip_html_for_measurement)
+        .collect()
 }
 
 /// Strip HTML tags and decode common entities to mirror jsdom's `textContent`
@@ -256,11 +323,38 @@ mod tests {
     #[test]
     fn plain_lines_split_on_every_br_form_and_newline() {
         assert_eq!(
-            plain_text_lines("a<br/>b<BR>c<br />d\ne"),
-            ["a", "b", "c", "d", "e"]
+            plain_text_lines("a<br/>b<BR>c<br />d\ne<br class=\"x\">f"),
+            ["a", "b", "c", "d", "e", "f"]
         );
         assert_eq!(plain_text_lines("<b>x</b> &amp; y"), ["x & y"]);
         assert_eq!(plain_text_lines(""), [""]);
+        // Not a break: tags that merely start with `br`.
+        assert_eq!(plain_text_lines("a<brand>b"), ["ab"]);
+    }
+
+    /// Line counts measured in headless Chromium on the label div
+    /// (`display: table-cell; white-space: nowrap; line-height: 1.5`).
+    #[test]
+    fn line_count_matches_browser_line_boxes() {
+        let n = |s: &str| split_label_lines(s).len();
+        assert_eq!(n("a"), 1);
+        assert_eq!(n("a<br/>b"), 2);
+        assert_eq!(n("a<br/>"), 1, "trailing <br> opens no line");
+        assert_eq!(n("a<br/> "), 1);
+        assert_eq!(n("<strong>a<br/></strong>"), 1);
+        // Source `\n` is upstream's `<br/>`, so this is `a<br/><br/>`.
+        assert_eq!(n("a<br/>\n"), 2);
+        assert_eq!(n("a<br/><br/>"), 2);
+        assert_eq!(n("a<br/><br/>b"), 3, "an empty middle line counts");
+        assert_eq!(n("a<br> <br>b"), 3);
+        assert_eq!(n("<br/>a"), 2, "a leading <br> opens an empty line");
+        assert_eq!(n("<br/>"), 1);
+        assert_eq!(n("a\n"), 1, "trailing newline is a trailing <br/>");
+        // Markdown paragraphs are blocks.
+        assert_eq!(n("<p>a</p><p>b</p>"), 2);
+        assert_eq!(n("<p>a<br/></p><p>b</p>"), 2);
+        assert_eq!(n("<p>a<br/>b</p>"), 2);
+        assert_eq!(n("<p></p><p>a</p>"), 1);
     }
 
     #[test]

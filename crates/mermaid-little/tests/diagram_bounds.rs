@@ -275,3 +275,149 @@ fn flowchart_multiline_edge_labels_measure_every_line() {
         "layout reserved only {grow}px for the extra line"
     );
 }
+
+/// Node id, vertical extent of its rect, vertical extent of its label.
+type NodeExtents = (String, (f64, f64), (f64, f64));
+
+/// Vertical extent of each flowchart node's rect and label foreignObject.
+fn node_label_extents(svg: &str) -> Vec<NodeExtents> {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    doc.descendants()
+        .filter(|n| {
+            n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+        })
+        .map(|node| {
+            let id = node.attribute("id").unwrap_or_default().to_string();
+            let rect = node
+                .children()
+                .find(|n| n.has_tag_name("rect"))
+                .expect("node rect");
+            let ry = parse_number(rect.attribute("y").unwrap());
+            let rh = parse_number(rect.attribute("height").unwrap());
+            let label = node
+                .children()
+                .find(|n| n.attribute("class") == Some("label"))
+                .expect("node label");
+            let (_, ly) = translate(label);
+            let fo = label
+                .descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .expect("label foreignObject");
+            let fh = parse_number(fo.attribute("height").unwrap());
+            (id, (ry, ry + rh), (ly, ly + fh))
+        })
+        .collect()
+}
+
+fn assert_node_lines(source: &str, expected: &[(&str, usize)]) {
+    let svg = convert_with_id(source, "bounds-lines").expect("render flowchart");
+    let nodes = node_label_extents(&svg);
+    for (suffix, lines) in expected {
+        let (id, (r0, r1), (l0, l1)) = nodes
+            .iter()
+            .find(|(id, ..)| id.contains(&format!("-flowchart-{suffix}-")))
+            .unwrap_or_else(|| panic!("node {suffix} not rendered"));
+        assert_eq!(
+            l1 - l0,
+            24.0 * *lines as f64,
+            "{id}: label should be {lines} line(s)"
+        );
+        assert!(
+            *l0 >= *r0 && *l1 <= *r1,
+            "{id}: label [{l0}, {l1}] overflows node box [{r0}, {r1}]"
+        );
+        // The box grows with the label: one-line box + 24px per extra line.
+        let one_line_box = 46.296875;
+        assert_eq!(
+            r1 - r0,
+            one_line_box + 24.0 * (*lines as f64 - 1.0),
+            "{id}: node box height"
+        );
+    }
+}
+
+/// PR review blocker 1: markdown labels break lines too — `<br/>`, a source
+/// newline (rendered as `<br/>`) and blank-line-separated paragraphs (`<p>`
+/// blocks) — and the layout box must grow with them, not only the label.
+#[test]
+fn flowchart_markdown_multiline_labels_fit_inside_their_box() {
+    let source = "flowchart TB\n    A[\"`md<br/>br`\"]\n    B[\"`The dog in **the** hog.(1)\nNL`\"]\n    C[\"`para one\n\npara two`\"]\n    D[\"`one **line**`\"]\n";
+    assert_node_lines(source, &[("A", 2), ("B", 2), ("C", 2), ("D", 1)]);
+}
+
+/// PR review blocker 2: a `<br/>` at the end of a label opens no line box in
+/// a browser (`a<br/>` paints one line; checked in headless Chromium), while
+/// an empty line in the middle or at the start does count.
+#[test]
+fn flowchart_trailing_br_opens_no_line() {
+    let source = "flowchart TB\n    A[\"trailing<br/>\"]\n    B[\"a<br/><br/>b\"]\n    C[\"<br/>lead\"]\n    D[\"a<br/><br/>\"]\n    E[\"`md trailing<br/>`\"]\n    F[\"x<br class='q'/>y\"]\n";
+    assert_node_lines(
+        source,
+        &[("A", 1), ("B", 3), ("C", 2), ("D", 2), ("E", 1), ("F", 2)],
+    );
+    let svg = convert_with_id(
+        "flowchart TB\n    A -->|\"edge<br/>\"| B\n",
+        "bounds-trailing-edge",
+    )
+    .expect("render");
+    let fo = foreign_objects(&svg)
+        .into_iter()
+        .find(|fo| fo.text.starts_with("edge"))
+        .expect("edge label");
+    assert_eq!(fo.height, 24.0, "trailing <br/> in an edge label");
+}
+
+/// PR review blocker 3: state-diagram notes are multi-line-aware end to end.
+/// A `note … end note` block and a literal `<br/>` note both measure one
+/// line per painted line, and the note box grows so the label stays inside.
+#[test]
+fn state_multiline_notes_fit_inside_their_box() {
+    let source = "stateDiagram-v2\n    A --> B\n    B --> C\n    note right of A\n        line one\n        line two\n    end note\n    note left of B : x<br/>y<br/>z\n    note right of C : single<br/>\n";
+    let svg = convert_with_id(source, "bounds-state-notes").expect("render state");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    let notes: Vec<_> = doc
+        .descendants()
+        .filter(|n| {
+            n.has_tag_name("g")
+                && n.attribute("class")
+                    .is_some_and(|c| c.contains("statediagram-note"))
+        })
+        .collect();
+    assert_eq!(notes.len(), 3);
+    let mut heights = Vec::new();
+    for note in notes {
+        let id = note.attribute("id").unwrap_or_default();
+        // Fill path `M-hw -hh L…`: the box spans [-hh, hh].
+        let d = note
+            .descendants()
+            .find(|n| n.has_tag_name("path"))
+            .and_then(|n| n.attribute("d"))
+            .expect("note path");
+        let hh = -parse_number(d.trim_start_matches('M').split_whitespace().nth(1).unwrap());
+        let label = note
+            .children()
+            .find(|n| {
+                n.attribute("class")
+                    .is_some_and(|c| c.contains("noteLabel"))
+            })
+            .expect("note label");
+        let (_, ly) = translate(label);
+        let fh = parse_number(
+            label
+                .descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .and_then(|fo| fo.attribute("height"))
+                .expect("note foreignObject height"),
+        );
+        assert!(
+            ly >= -hh && ly + fh <= hh,
+            "{id}: label [{ly}, {}] overflows note box [{}, {hh}]",
+            ly + fh,
+            -hh
+        );
+        assert_eq!(2.0 * hh, fh + 30.0, "{id}: note box = label + 2*15 padding");
+        heights.push(fh);
+    }
+    heights.sort_by(f64::total_cmp);
+    assert_eq!(heights, [24.0, 48.0, 72.0]);
+}
