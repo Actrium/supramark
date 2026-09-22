@@ -74,7 +74,8 @@ pub fn edge_label_plain_text(text: &str, is_markdown: bool) -> String {
 /// A `<` only opens a tag when the next character is an ASCII letter (`<br>`,
 /// `<strong>`), `/` plus a letter (`</p>`), or `!` (`<!-- comment -->`, which
 /// a browser hides); anything else (`<<`, `< `, `<1`) is literal text that a
-/// browser paints, as in `A["a < b"]`. Every
+/// browser paints, as in `A["a < b"]`; so is a `<` whose only `>` sits past
+/// another `<` or a line break. Every
 /// label helper — line splitting, plain-text stripping, width measurement —
 /// uses this one rule, so a bare `<` is never mistaken for markup and swallows
 /// the text up to the next `>`.
@@ -92,7 +93,15 @@ pub fn tag_len(s: &str, i: usize) -> Option<usize> {
     if !opens {
         return None;
     }
-    s[i..].find('>').map(|rel_end| rel_end + 1)
+    // The span must be a plausible tag: a `>` that only shows up after
+    // another `<` or a line break belongs to later markup, and borrowing it
+    // would swallow the text in between (`a<b<br/>c>d`).
+    let rel_end = s[i..].find('>')?;
+    let body = &s[i + 1..i + rel_end];
+    if body.contains('<') || body.contains('\n') {
+        return None;
+    }
+    Some(rel_end + 1)
 }
 
 /// Split label markup into the lines a browser paints, as raw markup slices.
@@ -387,8 +396,17 @@ mod tests {
         assert_eq!(n("a<br/>&nbsp;b"), 2);
         // A `<` that opens no tag is text, not markup.
         assert_eq!(plain_text_lines("a < b</p>"), ["a < b"]);
+        // A `>` behind a later `<` or a line break is not this tag's `>`.
+        assert_eq!(plain_text_lines("a<b<br/>c>d"), ["a<b", "c>d"]);
+        assert_eq!(
+            strip_html_for_measurement("a<b\nc>d"),
+            "a<b\nc>d".replace('\n', "")
+        );
         assert_eq!(n("<p>a < b</p><p>c</p>"), 2);
-        // Whitespace between blocks belongs to no line of its own.
+        // Whitespace between blocks belongs to no line of its own. (Two
+        // newlines between blocks would count as blank lines here where a
+        // browser paints none; no producer emits whitespace between blocks,
+        // so this stays pinned rather than special-cased.)
         assert_eq!(n("<p>a</p>\n<p>b</p>"), 2);
         // An opening `<p>` ends the previous block too.
         assert_eq!(n("one<p>two"), 2);

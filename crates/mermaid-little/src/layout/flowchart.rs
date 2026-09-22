@@ -1529,16 +1529,59 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
 /// `<p>` content (cypress fixture 150's `classDef larger font-size:30px`),
 /// so the jsdom shim measures the bbox at the larger font.
 fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f64>) -> (f64, f64) {
-    // A plain string label is markup already (its `<br/>` reaches the
-    // renderer as-is), so its painted lines are the lines of that markup.
-    let lines = crate::layout::label_metrics::split_label_lines(label).len();
     measure_label_box(
         label,
-        &concat_label_text_for_width(label),
-        lines,
+        &concat_label_text_for_width(&strip_fa_icons_per_line(label)),
+        rendered_label_lines(label, false),
         force_bold,
         font_size_px,
     )
+}
+
+/// Painted lines of a label: the count the renderer gets, from the very
+/// markup it will emit (`string_label_to_html` / `markdown_label_to_html`,
+/// then `replace_fa_icons`), split by the splitter the renderer itself uses.
+/// Counting anything else lets layout and render disagree — an FA icon alone
+/// on a line, for instance, paints no line box of its own.
+fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
+    let html = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let rendered = crate::render::foreign_object::replace_fa_icons(&html);
+    crate::layout::label_metrics::split_label_lines(&rendered).len()
+}
+
+/// [`strip_fa_icons`] applied to each line of the raw label, keeping the line
+/// breaks. An icon name ends at its line break exactly as it ends at a `<`,
+/// so stripping must happen before the lines are concatenated for width —
+/// otherwise `fa:fa-car<br/>Longer text` eats the next line's first word.
+fn strip_fa_icons_per_line(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut segment_start = 0;
+    let bytes = label.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let brk = if bytes[i] == b'\n' {
+            Some(1)
+        } else {
+            crate::layout::label_metrics::tag_len(label, i).filter(|len| {
+                crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + len - 1])
+            })
+        };
+        match brk {
+            Some(len) => {
+                out.push_str(&strip_fa_icons(&label[segment_start..i]));
+                out.push_str(&label[i..i + len]);
+                i += len;
+                segment_start = i;
+            }
+            None => i += 1,
+        }
+    }
+    out.push_str(&strip_fa_icons(&label[segment_start..]));
+    out
 }
 
 /// Measure a markdown label (the ``["`...`"]`` spelling).
@@ -1554,19 +1597,17 @@ fn measure_markdown_with_size(
     force_bold: bool,
     font_size_px: Option<f64>,
 ) -> (f64, f64) {
-    let rendered = crate::render::foreign_object::markdown_label_to_html(label);
-    let lines = crate::layout::label_metrics::split_label_lines(&rendered).len();
     measure_label_box(
         label,
-        &strip_markdown_for_measure(label),
-        lines,
+        &strip_markdown_for_measure(&strip_fa_icons_per_line(label)),
+        rendered_label_lines(label, true),
         force_bold,
         font_size_px,
     )
 }
 
-/// Width x height of a label box from its plain text and its painted line
-/// count. `raw_label` only decides the empty-label case.
+/// Width x height of a label box from its painted plain text and its painted
+/// line count. `raw_label` only decides the empty-label case.
 ///
 /// Width is the plain text measured as one segment (the reference geometry;
 /// it over-estimates a multi-line label, which currently also absorbs the
@@ -1587,11 +1628,18 @@ fn measure_label_box(
     if raw_label.is_empty() {
         return (0.0, font_size);
     }
-    // Strip FA icon tokens - they render as <i> elements with no width.
-    let stripped = strip_fa_icons(plain_text);
+    // `plain_text` is already the painted text (FA icon tokens stripped per
+    // line by the caller). Nothing here may scan across a line boundary: the
+    // lines are joined, so any scan would run past a break the renderer
+    // honours.
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, font_size, false, false);
-    let width =
-        font_metrics::text_width(&stripped, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
+    let width = font_metrics::text_width(
+        plain_text,
+        DEFAULT_FONT_FAMILY,
+        font_size,
+        force_bold,
+        false,
+    );
     (width, multiline_label_height(lh, lines, font_size_px))
 }
 

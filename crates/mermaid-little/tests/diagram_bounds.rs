@@ -516,3 +516,68 @@ fn state_multiline_edge_labels_measure_every_line() {
     heights.sort_by(f64::total_cmp);
     assert_eq!(heights, [24.0, 24.0, 48.0, 72.0]);
 }
+
+/// Rect width of every node, in document order, read as text (a label may
+/// emit markup that is not well-formed XML).
+fn rect_widths(svg: &str) -> Vec<f64> {
+    svg.split(r#"<rect class="basic label-container""#)
+        .skip(1)
+        .map(|chunk| {
+            let at = chunk.find(r#" width=""#).expect("rect width") + 8;
+            let end = chunk[at..].find('"').expect("rect width end") + at;
+            parse_number(&chunk[at..end])
+        })
+        .collect()
+}
+
+/// An FA icon token ends at its line break: `fa:fa-car<br/>Longer text` is an
+/// icon plus a second line, not an icon whose name ran into that line. The
+/// icon tokens must therefore be stripped before the lines are joined for the
+/// width measurement.
+#[test]
+fn flowchart_fa_icon_before_a_line_break_keeps_the_next_line() {
+    let source = "flowchart TB\n    A[\"fa:fa-car<br/>Longer text here\"]\n    B[\"`fa:fa-car<br/>Longer text here`\"]\n    C[\"Car fa:fa-car<br/>Longer text here\"]\n    D[\"fa:fa-car<br/>x\"]\n";
+    let svg = convert_with_id(source, "bounds-fa").expect("render flowchart");
+    let widths = rect_widths(&svg);
+    let nodes = node_label_extents(&svg);
+    for (i, (id, (r0, r1), (l0, l1))) in nodes.iter().enumerate() {
+        let fo_w = parse_number(
+            svg.split(r#"<foreignObject width=""#)
+                .nth(i + 1)
+                .and_then(|c| c.split('"').next())
+                .expect("label width"),
+        );
+        assert!(
+            widths[i] >= fo_w,
+            "{id}: box {} is narrower than its label {fo_w}",
+            widths[i]
+        );
+        assert_eq!(l1 - l0, 48.0, "{id}: icon plus one text line");
+        assert!(*l0 >= *r0 && *l1 <= *r1, "{id}: label outside the box");
+    }
+    // Both spellings of the same label measure alike, and the text after the
+    // break still counts (the whole label, not just "Longer" onwards).
+    assert_eq!(widths[0], widths[1], "markdown vs plain FA label");
+    assert!(
+        widths[0] > 170.0,
+        "box {} lost the text after the break",
+        widths[0]
+    );
+    assert!(widths[2] > widths[0], "a leading word widens the box");
+}
+
+/// An FA icon alone on the second line paints no line box of its own (the
+/// emitted `<i>` is empty), so layout must agree with the renderer: one line.
+#[test]
+fn flowchart_fa_icon_alone_on_a_line_agrees_with_the_renderer() {
+    let svg = convert_with_id(
+        "flowchart TB\n    A[\"a<br/>fa:fa-car\"]\n    B[\"fa:fa-car<br/>fa:fa-bus\"]\n",
+        "bounds-fa-alone",
+    )
+    .expect("render flowchart");
+    for (id, (r0, r1), (l0, l1)) in node_label_extents(&svg) {
+        assert_eq!(l1 - l0, 24.0, "{id}: icons paint no line of their own");
+        assert_eq!(r1 - r0, 46.296875, "{id}: one-line box");
+    }
+    assert_eq!(rect_widths(&svg)[1], 60.0, "two icons measure as empty");
+}
