@@ -85,7 +85,7 @@ Build outputs land in `output/<platform>/`.
 > the script otherwise expects `make` and `pkg-config` on `PATH`.
 
 Prebuilt native binaries are published from the current repository namespace:
-[GitHub Releases](https://github.com/Actrium/graphviz-anywhere/releases).
+[GitHub Releases](https://github.com/Actrium/supramark/releases).
 
 ## C API
 

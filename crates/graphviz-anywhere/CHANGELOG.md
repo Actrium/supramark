@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-09-22
+
+### Fixed
+
+- **`cargo install` of downstream binaries** — `build.rs` now downloads the
+  matching GitHub release asset by default when no local library is found.
+  The published crate carries no native library, so the previous opt-in
+  (`GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1`) made every plain crates.io install
+  fail. Set `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1` to keep builds offline;
+  `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD` is still accepted and is now a no-op.
+- **Linux linking without -dev packages** — the static archive's system
+  dependencies are linked by SONAME (`libstdc++.so.6`, `libexpat.so.1`,
+  `libz.so.1`), so hosts with only the runtime packages installed (no
+  `libexpat1-dev` / `zlib1g-dev` / `g++`) no longer fail with
+  `library not found: expat`. MSRV is now 1.67 for the `+verbatim` link
+  modifier.
+
 ## [0.2.5] — 2026-07-13
 
 ### Fixed
@@ -182,7 +199,9 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
 
 ---
 
-[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Actrium/supramark/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/Actrium/supramark/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Actrium/supramark/compare/v0.2.3...v0.2.4
 [0.2.1]: https://github.com/Actrium/graphviz-anywhere/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Actrium/graphviz-anywhere/compare/v0.1.8...v0.2.0
