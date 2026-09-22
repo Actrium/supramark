@@ -72,8 +72,9 @@ pub fn edge_label_plain_text(text: &str, is_markdown: bool) -> String {
 /// Length of the HTML tag starting at byte `i` of `s`, including `<` and `>`.
 ///
 /// A `<` only opens a tag when the next character is an ASCII letter (`<br>`,
-/// `<strong>`) or `/` plus a letter (`</p>`); anything else (`<<`, `< `, `<1`,
-/// `<!`) is literal text that a browser paints, as in `A["a < b"]`. Every
+/// `<strong>`), `/` plus a letter (`</p>`), or `!` (`<!-- comment -->`, which
+/// a browser hides); anything else (`<<`, `< `, `<1`) is literal text that a
+/// browser paints, as in `A["a < b"]`. Every
 /// label helper — line splitting, plain-text stripping, width measurement —
 /// uses this one rule, so a bare `<` is never mistaken for markup and swallows
 /// the text up to the next `>`.
@@ -84,6 +85,7 @@ pub fn tag_len(s: &str, i: usize) -> Option<usize> {
     }
     let opens = match bytes.get(i + 1).copied() {
         Some(c) if c.is_ascii_alphabetic() => true,
+        Some(b'!') => true,
         Some(b'/') => bytes.get(i + 2).is_some_and(|c| c.is_ascii_alphabetic()),
         _ => false,
     };
@@ -128,7 +130,10 @@ pub fn split_label_lines(s: &str) -> Vec<&str> {
             let tag = &s[i + 1..i + len - 1];
             if is_br_tag_body(tag) {
                 block.push(&s[start..i]);
-            } else if tag.trim().eq_ignore_ascii_case("/p") {
+            } else if is_p_tag_body(tag) {
+                // `</p>` closes a block and `<p>` opens one, so either ends
+                // the lines collected so far (a browser paints `one<p>two`
+                // as two lines).
                 block.push(&s[start..i]);
                 end_block(&mut block, &mut lines);
             } else {
@@ -164,6 +169,15 @@ fn end_block<'a>(block: &mut Vec<&'a str>, lines: &mut Vec<&'a str>) {
         lines.append(block);
     }
     block.clear();
+}
+
+/// Body of a tag that starts or ends a paragraph block: `p` or `/p`.
+fn is_p_tag_body(tag: &str) -> bool {
+    let tag = tag.trim_end_matches('/').trim();
+    let tag = tag.strip_prefix('/').unwrap_or(tag);
+    !tag.is_empty()
+        && tag[..1].eq_ignore_ascii_case("p")
+        && tag[1..].chars().next().is_none_or(char::is_whitespace)
 }
 
 /// Body of a tag (between `<` and `>`) that is a line break: `br`, any
@@ -374,9 +388,14 @@ mod tests {
         // A `<` that opens no tag is text, not markup.
         assert_eq!(plain_text_lines("a < b</p>"), ["a < b"]);
         assert_eq!(n("<p>a < b</p><p>c</p>"), 2);
-        // No producer puts whitespace between blocks; pinned so the rule is
-        // visible if one ever does (the `\n` counts as a break here).
-        assert_eq!(n("<p>a</p>\n<p>b</p>"), 3);
+        // Whitespace between blocks belongs to no line of its own.
+        assert_eq!(n("<p>a</p>\n<p>b</p>"), 2);
+        // An opening `<p>` ends the previous block too.
+        assert_eq!(n("one<p>two"), 2);
+        assert_eq!(n("<p>a</p><p>b</p><p>c</p>"), 3);
+        // An HTML comment paints nothing and is not a break.
+        assert_eq!(plain_text_lines("a <!-- hidden --> b"), ["a  b"]);
+        assert_eq!(n("a<br/><!-- x -->"), 1);
     }
 
     #[test]

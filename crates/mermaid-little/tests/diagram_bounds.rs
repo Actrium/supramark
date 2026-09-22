@@ -351,7 +351,9 @@ fn flowchart_markdown_multiline_labels_fit_inside_their_box() {
 /// helper swallow everything from the `<` to the next `>`.)
 #[test]
 fn flowchart_markdown_labels_measure_literal_less_than() {
-    let source = "flowchart TB\n    A[\"`a < b`\"]\n    B[\"`< b`\"]\n    C[\"`a < b < c`\"]\n    D[\"`a < b`\"]\n    E[\"a < b\"]\n";
+    // `<` + letter has no `>` of its own: the markdown path must not borrow
+    // one from markup it generated itself.
+    let source = "flowchart TB\n    A[\"`a < b`\"]\n    B[\"`< b`\"]\n    C[\"`a < b < c`\"]\n    D[\"`a < b`\"]\n    E[\"a < b\"]\n    F[\"`count<max`\"]\n    G[\"`if i<n then loop again`\"]\n    H[\"`x<y and y<z`\"]\n";
     let svg = convert_with_id(source, "bounds-md-lt").expect("render flowchart");
     let doc = roxmltree::Document::parse(&svg).expect("valid svg");
     for node in doc.descendants().filter(|n| {
@@ -387,6 +389,38 @@ fn flowchart_markdown_labels_measure_literal_less_than() {
     assert_eq!(widths[0], widths[3], "two markdown `a < b` labels");
     assert_eq!(widths[0], widths[4], "markdown vs plain `a < b`");
     assert!(widths[2] > widths[0], "`a < b < c` is wider than `a < b`");
+    // A markdown label measures like its plain spelling: the text after a
+    // literal `<` counts towards the width.
+    let plain = convert_with_id(
+        "flowchart TB\n    F[\"count<max\"]\n    G[\"if i<n then loop again\"]\n    H[\"x<y and y<z\"]\n",
+        "bounds-md-lt-plain",
+    )
+    .expect("render flowchart");
+    // Scanned as text, not parsed: a plain string label emits `<max` as a raw
+    // tag, so the document is not well-formed XML (pre-existing).
+    let plain_widths: Vec<f64> = plain
+        .split(r#"<rect class="basic label-container""#)
+        .skip(1)
+        .map(|chunk| {
+            let at = chunk.find(r#" width=""#).expect("rect width") + 8;
+            let end = chunk[at..].find('"').expect("rect width end") + at;
+            parse_number(&chunk[at..end])
+        })
+        .collect();
+    assert_eq!(
+        &widths[5..8],
+        &plain_widths[..],
+        "markdown vs plain `<` labels"
+    );
+}
+
+/// A markdown label whose paragraph ends with a literal `<` + letter must
+/// still split at the paragraph break: the label paints two lines, so the box
+/// has to hold two.
+#[test]
+fn flowchart_markdown_paragraphs_split_after_literal_less_than() {
+    let source = "flowchart TB\n    A[\"`a<b\n\nsecond paragraph`\"]\n";
+    assert_node_lines(source, &[("A", 2)]);
 }
 
 /// PR review blocker 2: a `<br/>` at the end of a label opens no line box in

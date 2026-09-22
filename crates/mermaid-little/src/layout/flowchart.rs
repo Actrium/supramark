@@ -1128,11 +1128,11 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 ///
 /// Markdown `**bold**` → `<strong>bold</strong>` → textContent `bold`.
 /// Markdown `*italic*` → `<em>italic</em>` → textContent `italic`.
-/// Other HTML tags embedded in markdown are stripped; line structure is
-/// kept as zero-width markup — `<br>` and `\n` (rendered as `<br/>`) become
-/// `<br/>`, and each paragraph is wrapped in `<p>…</p>` — so the caller can
-/// count the painted lines with `split_label_lines`. Stripping all tags
-/// leaves the concatenated plain text, as before.
+/// HTML tags embedded in markdown are stripped, `\n` is dropped and the
+/// paragraphs are concatenated: the result is plain text, used for width
+/// only. The painted line count comes from the rendered HTML instead (see
+/// [`measure_markdown_with_size`]), so literal text is never re-scanned as
+/// markup.
 ///
 /// Mirrors marked.lexer's paragraph tokenisation: blank-line-separated
 /// runs become separate `<p>` elements, and each paragraph drops its
@@ -1140,12 +1140,8 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 fn strip_markdown_for_measure(label: &str) -> String {
     let paragraphs = split_paragraphs_for_measure(label);
     let mut out = String::with_capacity(label.len());
-    // Each paragraph renders as its own `<p>` block, i.e. its own line(s);
-    // keep the block boundaries so the line count survives the stripping.
     for para in &paragraphs {
-        out.push_str("<p>");
         out.push_str(&strip_markdown_paragraph_for_measure(para));
-        out.push_str("</p>");
     }
     out
 }
@@ -1192,22 +1188,20 @@ fn strip_markdown_paragraph_for_measure(label: &str) -> String {
         } else if bytes[i] == b'`' {
             i += 1; // skip backtick (inline code marker)
         } else if bytes[i] == b'<' {
-            // HTML tag embedded in markdown: skip it, keeping line breaks
-            // (zero width) so the line count survives. A `<` that opens no
-            // tag (`a < b`) is literal text, as the renderer and the browser
-            // treat it.
+            // A real HTML tag embedded in markdown paints nothing; a `<`
+            // that opens no tag (`a < b`, `` `i<n` ``) is literal text, as
+            // `markdown_label_to_html` (which escapes it) and the browser
+            // both treat it. Each paragraph is scanned on its own, so no `>`
+            // from later markup can turn text into a tag.
             if let Some(len) = crate::layout::label_metrics::tag_len(label, i) {
-                if crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + len - 1]) {
-                    out.push_str("<br/>");
-                }
                 i += len;
             } else {
                 out.push('<');
                 i += 1;
             }
         } else if bytes[i] == b'\n' {
-            // `\n` renders as `<br/>`: zero width, but a line break.
-            out.push_str("<br/>");
+            // `\n` renders as `<br/>`, which paints nothing; the line it
+            // opens is counted from the rendered HTML, not from this text.
             i += 1;
         } else {
             out.push(bytes[i] as char);
@@ -1239,6 +1233,15 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     } else {
         label.clone()
     };
+    // Markdown labels measure through the HTML the renderer will emit; a
+    // plain string label is markup already.
+    let measure = |text: &str, bold: bool, size: Option<f64>| {
+        if is_markdown {
+            measure_markdown_with_size(&label, bold, size)
+        } else {
+            measure_text_with_size(text, bold, size)
+        }
+    };
     // KaTeX `$$..$$` math labels: the rendered HTML is a structured KaTeX
     // tree. Measuring its textContent (via `measure_html_markup_label`)
     // reproduces what jsdom's `getBoundingClientRect` shim does on the
@@ -1250,10 +1253,10 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
         let font = crate::render::foreign_object::HtmlLabelFont::default();
         match crate::render::foreign_object::try_render_katex_label(&measure_label, &font) {
             Some((_, w, h)) => (w, h),
-            None => measure_text_with_size(&measure_label, is_bold, font_size_px),
+            None => measure(&measure_label, is_bold, font_size_px),
         }
     } else {
-        measure_text_with_size(&measure_label, is_bold, font_size_px)
+        measure(&measure_label, is_bold, font_size_px)
     };
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
@@ -1410,18 +1413,22 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
                 .as_ref()
                 .map(|l| l.kind == LabelKind::Markdown)
                 .unwrap_or(false);
-            let label_text = if has_label {
-                let raw = display_label(v);
-                if is_markdown {
-                    strip_markdown_for_measure(&raw)
-                } else {
-                    raw
-                }
+            let raw_label = if has_label {
+                display_label(v)
             } else {
                 String::new()
             };
+            let label_text = if is_markdown {
+                strip_markdown_for_measure(&raw_label)
+            } else {
+                raw_label.clone()
+            };
             let (tw_icon, th_icon) = if has_label && !label_text.is_empty() {
-                measure_text_with_size(&label_text, is_bold, font_size_px)
+                if is_markdown {
+                    measure_markdown_with_size(&raw_label, is_bold, font_size_px)
+                } else {
+                    measure_text_with_size(&label_text, is_bold, font_size_px)
+                }
             } else {
                 let fs = font_size_px.unwrap_or(LABEL_FONT_SIZE);
                 let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, fs, false, false);
@@ -1522,30 +1529,69 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
 /// `<p>` content (cypress fixture 150's `classDef larger font-size:30px`),
 /// so the jsdom shim measures the bbox at the larger font.
 fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f64>) -> (f64, f64) {
+    // A plain string label is markup already (its `<br/>` reaches the
+    // renderer as-is), so its painted lines are the lines of that markup.
+    let lines = crate::layout::label_metrics::split_label_lines(label).len();
+    measure_label_box(
+        label,
+        &concat_label_text_for_width(label),
+        lines,
+        force_bold,
+        font_size_px,
+    )
+}
+
+/// Measure a markdown label (the ``["`...`"]`` spelling).
+///
+/// The painted line count comes from the very HTML the renderer will emit —
+/// `markdown_label_to_html`, parsed by the same splitter the renderer uses —
+/// so layout and render agree by construction. The width comes from the
+/// marker-free plain text of [`strip_markdown_for_measure`], which is never
+/// re-parsed as markup: a literal `<` in `` `i<n` `` stays text on both
+/// sides instead of being read as a tag that swallows the rest of the label.
+fn measure_markdown_with_size(
+    label: &str,
+    force_bold: bool,
+    font_size_px: Option<f64>,
+) -> (f64, f64) {
+    let rendered = crate::render::foreign_object::markdown_label_to_html(label);
+    let lines = crate::layout::label_metrics::split_label_lines(&rendered).len();
+    measure_label_box(
+        label,
+        &strip_markdown_for_measure(label),
+        lines,
+        force_bold,
+        font_size_px,
+    )
+}
+
+/// Width x height of a label box from its plain text and its painted line
+/// count. `raw_label` only decides the empty-label case.
+///
+/// Width is the plain text measured as one segment (the reference geometry;
+/// it over-estimates a multi-line label, which currently also absorbs the
+/// shim's CJK under-measurement). Height is the single-line height this
+/// layout has always used plus one rendered HTML line-height per extra line,
+/// which is exactly what the renderer's foreignObject grows by. Measuring
+/// every label as ONE line (the jsdom reference shim's `textContent`
+/// behaviour) left every line after the first painting below the node box —
+/// markon #97.
+fn measure_label_box(
+    raw_label: &str,
+    plain_text: &str,
+    lines: usize,
+    force_bold: bool,
+    font_size_px: Option<f64>,
+) -> (f64, f64) {
     let font_size = font_size_px.unwrap_or(LABEL_FONT_SIZE);
-    if label.is_empty() {
+    if raw_label.is_empty() {
         return (0.0, font_size);
     }
-    // Strip FA icon tokens first — they render as <i> elements with no width.
-    let stripped = strip_fa_icons(label);
+    // Strip FA icon tokens - they render as <i> elements with no width.
+    let stripped = strip_fa_icons(plain_text);
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, font_size, false, false);
-
-    // A browser breaks the label at every `<br/>` (and `\n`, which upstream
-    // rewrites to `<br/>`), even under the label div's `white-space: nowrap`,
-    // so the box must be tall enough for every line. The first line keeps the
-    // single-line height this layout has always used (so single-line diagrams
-    // are unchanged); each further line adds one rendered HTML line-height,
-    // which is what the renderer's foreignObject grows by. Measuring the label
-    // as ONE line (the jsdom reference shim's `textContent` behaviour) left
-    // every line after the first painting below the node box — markon #97.
-    //
-    // Width stays the width of the concatenated lines, measured as one
-    // segment (the reference geometry). It over-estimates a multi-line label,
-    // which currently also absorbs the shim's CJK under-measurement.
-    let lines = crate::layout::label_metrics::split_label_lines(&stripped).len();
-    let concat = concat_label_text_for_width(&stripped);
     let width =
-        font_metrics::text_width(&concat, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
+        font_metrics::text_width(&stripped, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
     (width, multiline_label_height(lh, lines, font_size_px))
 }
 
