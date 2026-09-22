@@ -1354,12 +1354,14 @@ fn decode_label_entities(s: &str) -> String {
 
 /// Measure the dimensions of an edge label for dagre layout.
 ///
-/// Mirrors upstream's `getBoundingClientRect` shim on the label's HTML
+/// Width mirrors upstream's `getBoundingClientRect` shim on the label's HTML
 /// foreignObject: the shim measures `textContent`, which concatenates all
 /// text nodes without the `<br/>` separators.  In our model the label is
 /// stored as `lines.join("\n")` where each `\n` was a `<br/>` in the source;
 /// since `text_width("\n") == 0`, summing all characters via `text_width` on
 /// the full joined string gives the same result as measuring the textContent.
+/// Height is one line-height per painted line, as the browser breaks at
+/// every `<br/>`.
 fn measure_edge_label(text: &str) -> (f64, f64) {
     const EDGE_LABEL_FONT: &str = "sans-serif";
     const EDGE_LABEL_SIZE: f64 = HTML_LABEL_FONT_SIZE;
@@ -1371,7 +1373,9 @@ fn measure_edge_label(text: &str) -> (f64, f64) {
     // sum equals the textContent width (with <br/> tags stripped).  This
     // matches upstream's getBoundingClientRect measurement on the HTML label.
     let w = text_width(text, EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
-    (w, h)
+    // Reserve one line-height per painted line: each `\n` renders as `<br/>`.
+    let lines = crate::layout::label_metrics::split_label_lines(text).len();
+    (w, h * lines as f64)
 }
 
 /// Precise label-box measurement using DejaVu Sans font metrics

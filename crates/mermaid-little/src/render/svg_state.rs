@@ -1392,7 +1392,13 @@ fn emit_edge_label(e: &Edge, nodes: &[Node]) -> String {
             false,
             false,
         );
-        (tw, html_label_line_height(HTML_LABEL_FONT_SIZE))
+        // Height: one line-height per painted line — each `\n` is a `<br/>`
+        // in the emitted body and a browser breaks the line there.
+        let lines = crate::layout::label_metrics::split_label_lines(&decoded).len();
+        (
+            tw,
+            html_label_line_height(HTML_LABEL_FONT_SIZE) * lines as f64,
+        )
     };
 
     let (x, y) = recompute_edge_label_position(e, nodes)

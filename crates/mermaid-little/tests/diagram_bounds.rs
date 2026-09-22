@@ -421,3 +421,20 @@ fn state_multiline_notes_fit_inside_their_box() {
     heights.sort_by(f64::total_cmp);
     assert_eq!(heights, [24.0, 48.0, 72.0]);
 }
+
+/// State-diagram edge labels break at `<br/>` (and at the `\n` the parser
+/// stores for it) just like flowchart labels.
+#[test]
+fn state_multiline_edge_labels_measure_every_line() {
+    // A literal `\n` in a state label is not turned into a break by the
+    // parser (pre-existing, unrelated to line counting), so S4 stays one line.
+    let source = "stateDiagram-v2\n    [*] --> S1\n    S1 --> S2: one<br/>two\n    S1 --> S3: one <br>two<br>three\n    S1 --> S4: one \\ntwo\n    S1 --> S5: one line\n";
+    let svg = convert_with_id(source, "bounds-state-edges").expect("render state");
+    let mut heights: Vec<f64> = foreign_objects(&svg)
+        .into_iter()
+        .filter(|fo| fo.text.starts_with("one"))
+        .map(|fo| fo.height)
+        .collect();
+    heights.sort_by(f64::total_cmp);
+    assert_eq!(heights, [24.0, 24.0, 48.0, 72.0]);
+}
