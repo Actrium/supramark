@@ -188,3 +188,396 @@ namespace WorkspaceLayer {
         namespace.height
     );
 }
+
+/// `translate(x, y)` of an element's `transform` attribute.
+fn translate(node: roxmltree::Node) -> (f64, f64) {
+    let t = node.attribute("transform").expect("transform");
+    let inner = t
+        .trim_start_matches("translate(")
+        .trim_end_matches(')')
+        .replace(',', " ");
+    let parts: Vec<f64> = inner.split_whitespace().map(parse_number).collect();
+    (parts[0], parts[1])
+}
+
+/// markon #97: a `<br/>` breaks the label line in the browser, so the node
+/// box must be tall enough for every line. The label used to be measured as
+/// one line, and the second line painted below the node's bottom edge.
+#[test]
+fn flowchart_multiline_node_labels_fit_inside_their_box() {
+    let source = "flowchart TB\n    A[\"line1<br/>line2\"]\n    B[\"one<br>two<br />three\"]\n    C[\"\u{5458}\u{5DE5}\u{8BBE}\u{5907}<br/>Mac / Windows\"]\n    D[single]\n";
+    let svg = convert_with_id(source, "bounds-multiline").expect("render flowchart");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    let nodes: Vec<_> = doc
+        .descendants()
+        .filter(|n| {
+            n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+        })
+        .collect();
+    assert_eq!(nodes.len(), 4);
+    for node in nodes {
+        let id = node.attribute("id").unwrap_or_default();
+        let rect = node
+            .children()
+            .find(|n| n.has_tag_name("rect"))
+            .expect("node rect");
+        let rect_y = parse_number(rect.attribute("y").unwrap());
+        let rect_h = parse_number(rect.attribute("height").unwrap());
+        let label = node
+            .children()
+            .find(|n| n.attribute("class") == Some("label"))
+            .expect("node label");
+        let (_, label_y) = translate(label);
+        let fo = label
+            .descendants()
+            .find(|n| n.has_tag_name("foreignObject"))
+            .expect("label foreignObject");
+        let fo_h = parse_number(fo.attribute("height").unwrap());
+        let lines = fo.descendants().filter(|n| n.has_tag_name("br")).count() + 1;
+        assert_eq!(
+            fo_h,
+            24.0 * lines as f64,
+            "{id}: label height for {lines} lines"
+        );
+        assert!(
+            label_y >= rect_y && label_y + fo_h <= rect_y + rect_h,
+            "{id}: label [{label_y}, {}] overflows node box [{rect_y}, {}]",
+            label_y + fo_h,
+            rect_y + rect_h
+        );
+    }
+}
+
+/// markon #97: multi-line edge labels are sized (and reserved in layout) for
+/// every line, not just the first.
+#[test]
+fn flowchart_multiline_edge_labels_measure_every_line() {
+    let single = convert_with_id("flowchart TB\n    A -->|\"one\"| B\n", "bounds-edge-1")
+        .expect("render single-line edge label");
+    let multi = convert_with_id(
+        "flowchart TB\n    A -->|\"one<br/>two\"| B\n",
+        "bounds-edge-2",
+    )
+    .expect("render multi-line edge label");
+    let edge_fo_h = |svg: &str| {
+        foreign_objects(svg)
+            .into_iter()
+            .find(|fo| fo.text.starts_with("one"))
+            .expect("edge label")
+            .height
+    };
+    assert_eq!(edge_fo_h(&single), 24.0);
+    assert_eq!(edge_fo_h(&multi), 48.0);
+    // The extra line is reserved in the layout: the diagram grows by it.
+    let grow = viewbox(&multi)[3] - viewbox(&single)[3];
+    assert!(
+        grow >= 24.0,
+        "layout reserved only {grow}px for the extra line"
+    );
+}
+
+/// Node id, vertical extent of its rect, vertical extent of its label.
+type NodeExtents = (String, (f64, f64), (f64, f64));
+
+/// Vertical extent of each flowchart node's rect and label foreignObject.
+fn node_label_extents(svg: &str) -> Vec<NodeExtents> {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    doc.descendants()
+        .filter(|n| {
+            n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+        })
+        .map(|node| {
+            let id = node.attribute("id").unwrap_or_default().to_string();
+            let rect = node
+                .children()
+                .find(|n| n.has_tag_name("rect"))
+                .expect("node rect");
+            let ry = parse_number(rect.attribute("y").unwrap());
+            let rh = parse_number(rect.attribute("height").unwrap());
+            let label = node
+                .children()
+                .find(|n| n.attribute("class") == Some("label"))
+                .expect("node label");
+            let (_, ly) = translate(label);
+            let fo = label
+                .descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .expect("label foreignObject");
+            let fh = parse_number(fo.attribute("height").unwrap());
+            (id, (ry, ry + rh), (ly, ly + fh))
+        })
+        .collect()
+}
+
+fn assert_node_lines(source: &str, expected: &[(&str, usize)]) {
+    let svg = convert_with_id(source, "bounds-lines").expect("render flowchart");
+    let nodes = node_label_extents(&svg);
+    for (suffix, lines) in expected {
+        let (id, (r0, r1), (l0, l1)) = nodes
+            .iter()
+            .find(|(id, ..)| id.contains(&format!("-flowchart-{suffix}-")))
+            .unwrap_or_else(|| panic!("node {suffix} not rendered"));
+        assert_eq!(
+            l1 - l0,
+            24.0 * *lines as f64,
+            "{id}: label should be {lines} line(s)"
+        );
+        assert!(
+            *l0 >= *r0 && *l1 <= *r1,
+            "{id}: label [{l0}, {l1}] overflows node box [{r0}, {r1}]"
+        );
+        // The box grows with the label: one-line box + 24px per extra line.
+        let one_line_box = 46.296875;
+        assert_eq!(
+            r1 - r0,
+            one_line_box + 24.0 * (*lines as f64 - 1.0),
+            "{id}: node box height"
+        );
+    }
+}
+
+/// PR review blocker 1: markdown labels break lines too — `<br/>`, a source
+/// newline (rendered as `<br/>`) and blank-line-separated paragraphs (`<p>`
+/// blocks) — and the layout box must grow with them, not only the label.
+#[test]
+fn flowchart_markdown_multiline_labels_fit_inside_their_box() {
+    let source = "flowchart TB\n    A[\"`md<br/>br`\"]\n    B[\"`The dog in **the** hog.(1)\nNL`\"]\n    C[\"`para one\n\npara two`\"]\n    D[\"`one **line**`\"]\n";
+    assert_node_lines(source, &[("A", 2), ("B", 2), ("C", 2), ("D", 1)]);
+}
+
+/// A `<` that opens no tag is literal text in a markdown label, so it must
+/// still be measured: the node box may not shrink below the label it holds.
+/// (Wrapping paragraphs in `<p>` for line counting once made the width
+/// helper swallow everything from the `<` to the next `>`.)
+#[test]
+fn flowchart_markdown_labels_measure_literal_less_than() {
+    // `<` + letter has no `>` of its own: the markdown path must not borrow
+    // one from markup it generated itself.
+    let source = "flowchart TB\n    A[\"`a < b`\"]\n    B[\"`< b`\"]\n    C[\"`a < b < c`\"]\n    D[\"`a < b`\"]\n    E[\"a < b\"]\n    F[\"`count<max`\"]\n    G[\"`if i<n then loop again`\"]\n    H[\"`x<y and y<z`\"]\n";
+    let svg = convert_with_id(source, "bounds-md-lt").expect("render flowchart");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    for node in doc.descendants().filter(|n| {
+        n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+    }) {
+        let id = node.attribute("id").unwrap_or_default();
+        let rect_w = parse_number(
+            node.children()
+                .find(|n| n.has_tag_name("rect"))
+                .and_then(|r| r.attribute("width"))
+                .expect("node rect width"),
+        );
+        let fo_w = parse_number(
+            node.descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .and_then(|fo| fo.attribute("width"))
+                .expect("label width"),
+        );
+        assert!(
+            rect_w >= fo_w,
+            "{id}: box {rect_w} is narrower than its label {fo_w}"
+        );
+        // Literal `<` text is measured, so no label degenerates to the
+        // empty-label box (padding only).
+        assert!(rect_w > 60.0, "{id}: box {rect_w} looks unmeasured");
+    }
+    // The markdown and plain spellings of the same text measure alike.
+    let widths: Vec<f64> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("rect") && n.attribute("class") == Some("basic label-container"))
+        .map(|r| parse_number(r.attribute("width").unwrap()))
+        .collect();
+    assert_eq!(widths[0], widths[3], "two markdown `a < b` labels");
+    assert_eq!(widths[0], widths[4], "markdown vs plain `a < b`");
+    assert!(widths[2] > widths[0], "`a < b < c` is wider than `a < b`");
+    // A markdown label measures like its plain spelling: the text after a
+    // literal `<` counts towards the width.
+    let plain = convert_with_id(
+        "flowchart TB\n    F[\"count<max\"]\n    G[\"if i<n then loop again\"]\n    H[\"x<y and y<z\"]\n",
+        "bounds-md-lt-plain",
+    )
+    .expect("render flowchart");
+    // Scanned as text, not parsed: a plain string label emits `<max` as a raw
+    // tag, so the document is not well-formed XML (pre-existing).
+    let plain_widths: Vec<f64> = plain
+        .split(r#"<rect class="basic label-container""#)
+        .skip(1)
+        .map(|chunk| {
+            let at = chunk.find(r#" width=""#).expect("rect width") + 8;
+            let end = chunk[at..].find('"').expect("rect width end") + at;
+            parse_number(&chunk[at..end])
+        })
+        .collect();
+    assert_eq!(
+        &widths[5..8],
+        &plain_widths[..],
+        "markdown vs plain `<` labels"
+    );
+}
+
+/// A markdown label whose paragraph ends with a literal `<` + letter must
+/// still split at the paragraph break: the label paints two lines, so the box
+/// has to hold two.
+#[test]
+fn flowchart_markdown_paragraphs_split_after_literal_less_than() {
+    let source = "flowchart TB\n    A[\"`a<b\n\nsecond paragraph`\"]\n";
+    assert_node_lines(source, &[("A", 2)]);
+}
+
+/// PR review blocker 2: a `<br/>` at the end of a label opens no line box in
+/// a browser (`a<br/>` paints one line; checked in headless Chromium), while
+/// an empty line in the middle or at the start does count.
+#[test]
+fn flowchart_trailing_br_opens_no_line() {
+    let source = "flowchart TB\n    A[\"trailing<br/>\"]\n    B[\"a<br/><br/>b\"]\n    C[\"<br/>lead\"]\n    D[\"a<br/><br/>\"]\n    E[\"`md trailing<br/>`\"]\n    F[\"x<br class='q'/>y\"]\n";
+    assert_node_lines(
+        source,
+        &[("A", 1), ("B", 3), ("C", 2), ("D", 2), ("E", 1), ("F", 2)],
+    );
+    let svg = convert_with_id(
+        "flowchart TB\n    A -->|\"edge<br/>\"| B\n",
+        "bounds-trailing-edge",
+    )
+    .expect("render");
+    let fo = foreign_objects(&svg)
+        .into_iter()
+        .find(|fo| fo.text.starts_with("edge"))
+        .expect("edge label");
+    assert_eq!(fo.height, 24.0, "trailing <br/> in an edge label");
+}
+
+/// PR review blocker 3: state-diagram notes are multi-line-aware end to end.
+/// A `note … end note` block and a literal `<br/>` note both measure one
+/// line per painted line, and the note box grows so the label stays inside.
+#[test]
+fn state_multiline_notes_fit_inside_their_box() {
+    let source = "stateDiagram-v2\n    A --> B\n    B --> C\n    note right of A\n        line one\n        line two\n    end note\n    note left of B : x<br/>y<br/>z\n    note right of C : single<br/>\n";
+    let svg = convert_with_id(source, "bounds-state-notes").expect("render state");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    let notes: Vec<_> = doc
+        .descendants()
+        .filter(|n| {
+            n.has_tag_name("g")
+                && n.attribute("class")
+                    .is_some_and(|c| c.contains("statediagram-note"))
+        })
+        .collect();
+    assert_eq!(notes.len(), 3);
+    let mut heights = Vec::new();
+    for note in notes {
+        let id = note.attribute("id").unwrap_or_default();
+        // Fill path `M-hw -hh L…`: the box spans [-hh, hh].
+        let d = note
+            .descendants()
+            .find(|n| n.has_tag_name("path"))
+            .and_then(|n| n.attribute("d"))
+            .expect("note path");
+        let hh = -parse_number(d.trim_start_matches('M').split_whitespace().nth(1).unwrap());
+        let label = note
+            .children()
+            .find(|n| {
+                n.attribute("class")
+                    .is_some_and(|c| c.contains("noteLabel"))
+            })
+            .expect("note label");
+        let (_, ly) = translate(label);
+        let fh = parse_number(
+            label
+                .descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .and_then(|fo| fo.attribute("height"))
+                .expect("note foreignObject height"),
+        );
+        assert!(
+            ly >= -hh && ly + fh <= hh,
+            "{id}: label [{ly}, {}] overflows note box [{}, {hh}]",
+            ly + fh,
+            -hh
+        );
+        assert_eq!(2.0 * hh, fh + 30.0, "{id}: note box = label + 2*15 padding");
+        heights.push(fh);
+    }
+    heights.sort_by(f64::total_cmp);
+    assert_eq!(heights, [24.0, 48.0, 72.0]);
+}
+
+/// State-diagram edge labels break at `<br/>` (and at the `\n` the parser
+/// stores for it) just like flowchart labels.
+#[test]
+fn state_multiline_edge_labels_measure_every_line() {
+    // A literal `\n` in a state label is not turned into a break by the
+    // parser (pre-existing, unrelated to line counting), so S4 stays one line.
+    let source = "stateDiagram-v2\n    [*] --> S1\n    S1 --> S2: one<br/>two\n    S1 --> S3: one <br>two<br>three\n    S1 --> S4: one \\ntwo\n    S1 --> S5: one line\n";
+    let svg = convert_with_id(source, "bounds-state-edges").expect("render state");
+    let mut heights: Vec<f64> = foreign_objects(&svg)
+        .into_iter()
+        .filter(|fo| fo.text.starts_with("one"))
+        .map(|fo| fo.height)
+        .collect();
+    heights.sort_by(f64::total_cmp);
+    assert_eq!(heights, [24.0, 24.0, 48.0, 72.0]);
+}
+
+/// Rect width of every node, in document order, read as text (a label may
+/// emit markup that is not well-formed XML).
+fn rect_widths(svg: &str) -> Vec<f64> {
+    svg.split(r#"<rect class="basic label-container""#)
+        .skip(1)
+        .map(|chunk| {
+            let at = chunk.find(r#" width=""#).expect("rect width") + 8;
+            let end = chunk[at..].find('"').expect("rect width end") + at;
+            parse_number(&chunk[at..end])
+        })
+        .collect()
+}
+
+/// An FA icon token ends at its line break: `fa:fa-car<br/>Longer text` is an
+/// icon plus a second line, not an icon whose name ran into that line. The
+/// icon tokens must therefore be stripped before the lines are joined for the
+/// width measurement.
+#[test]
+fn flowchart_fa_icon_before_a_line_break_keeps_the_next_line() {
+    let source = "flowchart TB\n    A[\"fa:fa-car<br/>Longer text here\"]\n    B[\"`fa:fa-car<br/>Longer text here`\"]\n    C[\"Car fa:fa-car<br/>Longer text here\"]\n    D[\"fa:fa-car<br/>x\"]\n";
+    let svg = convert_with_id(source, "bounds-fa").expect("render flowchart");
+    let widths = rect_widths(&svg);
+    let nodes = node_label_extents(&svg);
+    for (i, (id, (r0, r1), (l0, l1))) in nodes.iter().enumerate() {
+        let fo_w = parse_number(
+            svg.split(r#"<foreignObject width=""#)
+                .nth(i + 1)
+                .and_then(|c| c.split('"').next())
+                .expect("label width"),
+        );
+        assert!(
+            widths[i] >= fo_w,
+            "{id}: box {} is narrower than its label {fo_w}",
+            widths[i]
+        );
+        assert_eq!(l1 - l0, 48.0, "{id}: icon plus one text line");
+        assert!(*l0 >= *r0 && *l1 <= *r1, "{id}: label outside the box");
+    }
+    // Both spellings of the same label measure alike, and the text after the
+    // break still counts (the whole label, not just "Longer" onwards).
+    assert_eq!(widths[0], widths[1], "markdown vs plain FA label");
+    assert!(
+        widths[0] > 170.0,
+        "box {} lost the text after the break",
+        widths[0]
+    );
+    assert!(widths[2] > widths[0], "a leading word widens the box");
+}
+
+/// An FA icon alone on the second line paints no line box of its own (the
+/// emitted `<i>` is empty), so layout must agree with the renderer: one line.
+#[test]
+fn flowchart_fa_icon_alone_on_a_line_agrees_with_the_renderer() {
+    let svg = convert_with_id(
+        "flowchart TB\n    A[\"a<br/>fa:fa-car\"]\n    B[\"fa:fa-car<br/>fa:fa-bus\"]\n",
+        "bounds-fa-alone",
+    )
+    .expect("render flowchart");
+    for (id, (r0, r1), (l0, l1)) in node_label_extents(&svg) {
+        assert_eq!(l1 - l0, 24.0, "{id}: icons paint no line of their own");
+        assert_eq!(r1 - r0, 46.296875, "{id}: one-line box");
+    }
+    assert_eq!(rect_widths(&svg)[1], 60.0, "two icons measure as empty");
+}

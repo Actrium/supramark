@@ -1128,15 +1128,15 @@ fn label_kind_string(l: Option<&Label>) -> &'static str {
 ///
 /// Markdown `**bold**` → `<strong>bold</strong>` → textContent `bold`.
 /// Markdown `*italic*` → `<em>italic</em>` → textContent `italic`.
-/// HTML tags like `<br>` embedded in markdown are stripped by textContent.
-/// The `\n` → `<br/>` → stripped. Result: plain text, single line.
+/// HTML tags embedded in markdown are stripped, `\n` is dropped and the
+/// paragraphs are concatenated: the result is plain text, used for width
+/// only. The painted line count comes from the rendered HTML instead (see
+/// [`measure_markdown_with_size`]), so literal text is never re-scanned as
+/// markup.
 ///
 /// Mirrors marked.lexer's paragraph tokenisation: blank-line-separated
 /// runs become separate `<p>` elements, and each paragraph drops its
-/// trailing whitespace. The textContent of `<p>p1</p><p>p2</p>` is
-/// `p1` concatenated with `p2` (no separator, since paragraph tags
-/// themselves contribute nothing to textContent), which is what we
-/// reproduce here.
+/// trailing whitespace.
 fn strip_markdown_for_measure(label: &str) -> String {
     let paragraphs = split_paragraphs_for_measure(label);
     let mut out = String::with_capacity(label.len());
@@ -1188,16 +1188,20 @@ fn strip_markdown_paragraph_for_measure(label: &str) -> String {
         } else if bytes[i] == b'`' {
             i += 1; // skip backtick (inline code marker)
         } else if bytes[i] == b'<' {
-            // HTML tag embedded in markdown: skip to '>'
-            if let Some(rel_end) = label[i..].find('>') {
-                i += rel_end + 1; // skip the tag
+            // A real HTML tag embedded in markdown paints nothing; a `<`
+            // that opens no tag (`a < b`, `` `i<n` ``) is literal text, as
+            // `markdown_label_to_html` (which escapes it) and the browser
+            // both treat it. Each paragraph is scanned on its own, so no `>`
+            // from later markup can turn text into a tag.
+            if let Some(len) = crate::layout::label_metrics::tag_len(label, i) {
+                i += len;
             } else {
-                // Bare '<' with no '>' — treat as literal
                 out.push('<');
                 i += 1;
             }
         } else if bytes[i] == b'\n' {
-            // \n → <br/> in HTML → stripped by textContent
+            // `\n` renders as `<br/>`, which paints nothing; the line it
+            // opens is counted from the rendered HTML, not from this text.
             i += 1;
         } else {
             out.push(bytes[i] as char);
@@ -1229,6 +1233,15 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     } else {
         label.clone()
     };
+    // Markdown labels measure through the HTML the renderer will emit; a
+    // plain string label is markup already.
+    let measure = |text: &str, bold: bool, size: Option<f64>| {
+        if is_markdown {
+            measure_markdown_with_size(&label, bold, size)
+        } else {
+            measure_text_with_size(text, bold, size)
+        }
+    };
     // KaTeX `$$..$$` math labels: the rendered HTML is a structured KaTeX
     // tree. Measuring its textContent (via `measure_html_markup_label`)
     // reproduces what jsdom's `getBoundingClientRect` shim does on the
@@ -1240,10 +1253,10 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
         let font = crate::render::foreign_object::HtmlLabelFont::default();
         match crate::render::foreign_object::try_render_katex_label(&measure_label, &font) {
             Some((_, w, h)) => (w, h),
-            None => measure_text_with_size(&measure_label, is_bold, font_size_px),
+            None => measure(&measure_label, is_bold, font_size_px),
         }
     } else {
-        measure_text_with_size(&measure_label, is_bold, font_size_px)
+        measure(&measure_label, is_bold, font_size_px)
     };
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
@@ -1400,18 +1413,22 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
                 .as_ref()
                 .map(|l| l.kind == LabelKind::Markdown)
                 .unwrap_or(false);
-            let label_text = if has_label {
-                let raw = display_label(v);
-                if is_markdown {
-                    strip_markdown_for_measure(&raw)
-                } else {
-                    raw
-                }
+            let raw_label = if has_label {
+                display_label(v)
             } else {
                 String::new()
             };
+            let label_text = if is_markdown {
+                strip_markdown_for_measure(&raw_label)
+            } else {
+                raw_label.clone()
+            };
             let (tw_icon, th_icon) = if has_label && !label_text.is_empty() {
-                measure_text_with_size(&label_text, is_bold, font_size_px)
+                if is_markdown {
+                    measure_markdown_with_size(&raw_label, is_bold, font_size_px)
+                } else {
+                    measure_text_with_size(&label_text, is_bold, font_size_px)
+                }
             } else {
                 let fs = font_size_px.unwrap_or(LABEL_FONT_SIZE);
                 let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, fs, false, false);
@@ -1467,64 +1484,35 @@ fn strip_fa_icons(text: &str) -> String {
     out
 }
 
-/// Split label text into measurement lines, treating `<br>` / `<br/>` /
-/// `<br />` as line breaks. All other HTML tags are stripped and `\n`
-/// characters are dropped.
-///
-/// Used by [`measure_text`] when the rendered foreignObject `<div>` needs
-/// the per-line maximum width. Upstream `string_label_to_html` converts
-/// the source `\n` into `<br/>` BEFORE passing the string to the renderer
-/// — but its measurement runs on the post-conversion HTML, so only the
-/// `<br>` variants count as line breaks here. Bare `\n` characters that
-/// survive (e.g. inside a markdown paragraph) are treated like upstream
-/// `textContent` and ignored.
-fn split_html_into_lines(s: &str) -> Vec<String> {
-    let mut lines: Vec<String> = vec![String::new()];
+/// Plain text of a label for width measurement: every HTML tag stripped
+/// (per `label_metrics::tag_len`, so a bare `<` stays literal) and `\n` dropped, i.e. the concatenation of all lines measured as one
+/// segment (the reference geometry). Bytes are copied one by one as the
+/// original measurement did — widths of non-ASCII labels are part of the
+/// current geometry and are left alone here.
+fn concat_label_text_for_width(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'<' {
-            if let Some(rel_end) = s[i..].find('>') {
-                let tag_full = &s[i..i + rel_end + 1];
-                let lowered: String = tag_full.chars().map(|c| c.to_ascii_lowercase()).collect();
-                let trimmed = lowered
-                    .trim_start_matches('<')
-                    .trim_end_matches('>')
-                    .trim_end_matches('/')
-                    .trim();
-                if trimmed == "br" {
-                    lines.push(String::new());
-                }
-                i += rel_end + 1;
-            } else {
-                lines.last_mut().unwrap().push('<');
-                i += 1;
-            }
-        } else if bytes[i] == b'\n' {
-            // jsdom textContent on `<p>foo\nbar</p>` keeps the newline as
-            // whitespace (or strips it, depending on context). Treat as
-            // dropped to match the legacy single-line behaviour.
-            i += 1;
-        } else {
-            lines.last_mut().unwrap().push(bytes[i] as char);
-            i += 1;
+        if let Some(len) = crate::layout::label_metrics::tag_len(s, i) {
+            i += len;
+            continue;
         }
+        if bytes[i] != b'\n' {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
     }
-    lines
+    out
 }
 
 /// Measure the overall width/height of the (possibly multi-line) label.
 ///
-/// Upstream mermaid measures node labels via `measureTextBlock` which puts
-/// the rendered HTML into a jsdom `<div>` and then reads `el.textContent`.
-/// `textContent` strips ALL HTML tags (including `<br/>`) and returns the
-/// concatenated plain text — which never contains `\n` since `\n` in the
-/// original label was already converted to `<br/>` before measurement.
-/// Therefore the measured block is always exactly ONE line, regardless of
-/// how many `<br/>` or `\n` appear in the source label.
-///
-/// Width is the width of the concatenated plain text (with bold spans
-/// measured at bold weight). Height is always one `line_height`.
+/// Each `<br/>` / `\n` starts a new line, as in a browser: height is one
+/// `line_height` plus one rendered HTML line-height per extra line (see
+/// [`multiline_label_height`]). Width is the width of the concatenated plain
+/// text (with bold spans measured at bold weight), matching the reference
+/// geometry.
 ///
 /// `force_bold` is set when the vertex's resolved styles (classDef +
 /// inline style) include `font-weight:bold` — in which case ALL text
@@ -1541,28 +1529,129 @@ fn measure_text(label: &str, force_bold: bool) -> (f64, f64) {
 /// `<p>` content (cypress fixture 150's `classDef larger font-size:30px`),
 /// so the jsdom shim measures the bbox at the larger font.
 fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f64>) -> (f64, f64) {
+    measure_label_box(
+        label,
+        &concat_label_text_for_width(&strip_fa_icons_per_line(label)),
+        rendered_label_lines(label, false),
+        force_bold,
+        font_size_px,
+    )
+}
+
+/// Painted lines of a label: the count the renderer gets, from the very
+/// markup it will emit (`string_label_to_html` / `markdown_label_to_html`,
+/// then `replace_fa_icons`), split by the splitter the renderer itself uses.
+/// Counting anything else lets layout and render disagree — an FA icon alone
+/// on a line, for instance, paints no line box of its own.
+fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
+    let html = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let rendered = crate::render::foreign_object::replace_fa_icons(&html);
+    crate::layout::label_metrics::split_label_lines(&rendered).len()
+}
+
+/// [`strip_fa_icons`] applied to each line of the raw label, keeping the line
+/// breaks. An icon name ends at its line break exactly as it ends at a `<`,
+/// so stripping must happen before the lines are concatenated for width —
+/// otherwise `fa:fa-car<br/>Longer text` eats the next line's first word.
+fn strip_fa_icons_per_line(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut segment_start = 0;
+    let bytes = label.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let brk = if bytes[i] == b'\n' {
+            Some(1)
+        } else {
+            crate::layout::label_metrics::tag_len(label, i).filter(|len| {
+                crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + len - 1])
+            })
+        };
+        match brk {
+            Some(len) => {
+                out.push_str(&strip_fa_icons(&label[segment_start..i]));
+                out.push_str(&label[i..i + len]);
+                i += len;
+                segment_start = i;
+            }
+            None => i += 1,
+        }
+    }
+    out.push_str(&strip_fa_icons(&label[segment_start..]));
+    out
+}
+
+/// Measure a markdown label (the ``["`...`"]`` spelling).
+///
+/// The painted line count comes from the very HTML the renderer will emit —
+/// `markdown_label_to_html`, parsed by the same splitter the renderer uses —
+/// so layout and render agree by construction. The width comes from the
+/// marker-free plain text of [`strip_markdown_for_measure`], which is never
+/// re-parsed as markup: a literal `<` in `` `i<n` `` stays text on both
+/// sides instead of being read as a tag that swallows the rest of the label.
+fn measure_markdown_with_size(
+    label: &str,
+    force_bold: bool,
+    font_size_px: Option<f64>,
+) -> (f64, f64) {
+    measure_label_box(
+        label,
+        &strip_markdown_for_measure(&strip_fa_icons_per_line(label)),
+        rendered_label_lines(label, true),
+        force_bold,
+        font_size_px,
+    )
+}
+
+/// Width x height of a label box from its painted plain text and its painted
+/// line count. `raw_label` only decides the empty-label case.
+///
+/// Width is the plain text measured as one segment (the reference geometry;
+/// it over-estimates a multi-line label, which currently also absorbs the
+/// shim's CJK under-measurement). Height is the single-line height this
+/// layout has always used plus one rendered HTML line-height per extra line,
+/// which is exactly what the renderer's foreignObject grows by. Measuring
+/// every label as ONE line (the jsdom reference shim's `textContent`
+/// behaviour) left every line after the first painting below the node box —
+/// markon #97.
+fn measure_label_box(
+    raw_label: &str,
+    plain_text: &str,
+    lines: usize,
+    force_bold: bool,
+    font_size_px: Option<f64>,
+) -> (f64, f64) {
     let font_size = font_size_px.unwrap_or(LABEL_FONT_SIZE);
-    if label.is_empty() {
+    if raw_label.is_empty() {
         return (0.0, font_size);
     }
-    // Strip FA icon tokens first — they render as <i> elements with no width.
-    let stripped = strip_fa_icons(label);
+    // `plain_text` is already the painted text (FA icon tokens stripped per
+    // line by the caller). Nothing here may scan across a line boundary: the
+    // lines are joined, so any scan would run past a break the renderer
+    // honours.
     let lh = font_metrics::line_height(DEFAULT_FONT_FAMILY, font_size, false, false);
+    let width = font_metrics::text_width(
+        plain_text,
+        DEFAULT_FONT_FAMILY,
+        font_size,
+        force_bold,
+        false,
+    );
+    (width, multiline_label_height(lh, lines, font_size_px))
+}
 
-    // Upstream measures the rendered foreignObject `<div>` via
-    // `el.textContent`, which strips ALL HTML tags (including `<br/>`) and
-    // returns the concatenated plain text as a SINGLE line. The block height
-    // is therefore exactly one `line_height`, regardless of how many `<br/>`
-    // or `\n` appear in the source label. Cypress fixtures 67 / 200 / 214 and
-    // demos 06 / 07 all encode multi-line diamond / hexagon labels via
-    // `<br/>` and expect the foreignObject geometry of the concatenated text.
-    //
-    // Width is the width of the concatenated lines, measured as one segment.
-    let lines = split_html_into_lines(&stripped);
-    let concat: String = lines.concat();
-    let width =
-        font_metrics::text_width(&concat, DEFAULT_FONT_FAMILY, font_size, force_bold, false);
-    (width, lh)
+/// Height of a label block of `lines` lines whose first line measures
+/// `first_line_h`: every extra line adds one rendered HTML line-height
+/// (`font-size × 1.5`, the label div's `line-height`). `font_size_px` is the
+/// label's explicit font-size override; `None` means the browser default.
+fn multiline_label_height(first_line_h: f64, lines: usize, font_size_px: Option<f64>) -> f64 {
+    let rendered_lh = crate::render::foreign_object::html_label_line_height(
+        font_size_px.unwrap_or(crate::render::foreign_object::HTML_LABEL_FONT_SIZE),
+    );
+    first_line_h + rendered_lh * lines.saturating_sub(1) as f64
 }
 
 fn measure_subgraph_title_box(title: Option<&Label>) -> (f64, f64) {
@@ -1637,9 +1726,7 @@ fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64,
     };
     // Mirror `parse_html_text_segments`/textContent semantics: strip HTML
     // tags (`<br>`, `<strong>`, …) and decode entities, then measure the
-    // result as ONE line — `<br>` does not split because `textContent`
-    // collapses break tags. `\n` characters survive as whitespace and are
-    // dropped here to match upstream's `measureTextBlock` shim.
+    // width of the concatenated text as one segment.
     let plain = crate::layout::label_metrics::strip_html_for_measurement(&measure_text);
     let w = font_metrics::text_width(&plain, EDGE_LABEL_FONT, EDGE_LABEL_SIZE, false, false);
     if !html_labels {
@@ -1648,7 +1735,12 @@ fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64,
         // → dagre sees the inflated dimensions.
         return (w + 4.0, h + 4.0);
     }
-    (w, h)
+    // HTML labels break at every `<br/>` in the browser, so reserve one extra
+    // rendered line-height per extra line — the same growth the rendered
+    // foreignObject gets. Reserving a single line let multi-line edge labels
+    // crowd into their neighbours (markon #97).
+    let lines = crate::layout::label_metrics::plain_text_lines(&measure_text).len();
+    (w, multiline_label_height(h, lines, None))
 }
 
 /// Build a unified::Edge from a model Edge, applying link-style overrides.
