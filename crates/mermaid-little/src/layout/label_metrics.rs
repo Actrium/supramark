@@ -69,6 +69,30 @@ pub fn edge_label_plain_text(text: &str, is_markdown: bool) -> String {
     strip_html_for_measurement(&measure_text)
 }
 
+/// Length of the HTML tag starting at byte `i` of `s`, including `<` and `>`.
+///
+/// A `<` only opens a tag when the next character is an ASCII letter (`<br>`,
+/// `<strong>`) or `/` plus a letter (`</p>`); anything else (`<<`, `< `, `<1`,
+/// `<!`) is literal text that a browser paints, as in `A["a < b"]`. Every
+/// label helper — line splitting, plain-text stripping, width measurement —
+/// uses this one rule, so a bare `<` is never mistaken for markup and swallows
+/// the text up to the next `>`.
+pub fn tag_len(s: &str, i: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.get(i) != Some(&b'<') {
+        return None;
+    }
+    let opens = match bytes.get(i + 1).copied() {
+        Some(c) if c.is_ascii_alphabetic() => true,
+        Some(b'/') => bytes.get(i + 2).is_some_and(|c| c.is_ascii_alphabetic()),
+        _ => false,
+    };
+    if !opens {
+        return None;
+    }
+    s[i..].find('>').map(|rel_end| rel_end + 1)
+}
+
 /// Split label markup into the lines a browser paints, as raw markup slices.
 ///
 /// This is the single source of truth for label line counting (layout and
@@ -100,23 +124,20 @@ pub fn split_label_lines(s: &str) -> Vec<&str> {
             start = i;
             continue;
         }
-        if bytes[i] == b'<' {
-            if let Some(rel_end) = s[i..].find('>') {
-                let tag = &s[i + 1..i + rel_end];
-                if is_br_tag_body(tag) {
-                    block.push(&s[start..i]);
-                    i += rel_end + 1;
-                    start = i;
-                    continue;
-                }
-                if tag.trim().eq_ignore_ascii_case("/p") {
-                    block.push(&s[start..i]);
-                    end_block(&mut block, &mut lines);
-                    i += rel_end + 1;
-                    start = i;
-                    continue;
-                }
+        if let Some(len) = tag_len(s, i) {
+            let tag = &s[i + 1..i + len - 1];
+            if is_br_tag_body(tag) {
+                block.push(&s[start..i]);
+            } else if tag.trim().eq_ignore_ascii_case("/p") {
+                block.push(&s[start..i]);
+                end_block(&mut block, &mut lines);
+            } else {
+                i += len;
+                continue;
             }
+            i += len;
+            start = i;
+            continue;
         }
         i += 1;
     }
@@ -154,9 +175,12 @@ pub fn is_br_tag_body(tag: &str) -> bool {
         && tag[2..].chars().next().is_none_or(char::is_whitespace)
 }
 
-/// Markup that paints no glyph: only whitespace and tags.
+/// Markup that paints no glyph: only tags and collapsible whitespace.
+/// A no-break space is a painted glyph, so `a<br/>&nbsp;` is two lines.
 fn is_blank_markup(s: &str) -> bool {
-    strip_html_for_measurement(s).trim().is_empty()
+    strip_html_for_measurement(s)
+        .chars()
+        .all(|c| c.is_whitespace() && c != '\u{00A0}')
 }
 
 /// [`split_label_lines`] reduced to each line's painted plain text via
@@ -179,20 +203,9 @@ pub fn strip_html_for_measurement(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            let next = bytes.get(i + 1).copied();
-            let is_tag_start = match next {
-                Some(c) if c.is_ascii_alphabetic() => true,
-                Some(b'/') => bytes
-                    .get(i + 2)
-                    .map(|c| c.is_ascii_alphabetic())
-                    .unwrap_or(false),
-                _ => false,
-            };
-            if is_tag_start {
-                if let Some(rel_end) = s[i..].find('>') {
-                    i += rel_end + 1;
-                    continue;
-                }
+            if let Some(len) = tag_len(s, i) {
+                i += len;
+                continue;
             }
             out.push('<');
             i += 1;
@@ -355,6 +368,15 @@ mod tests {
         assert_eq!(n("<p>a<br/></p><p>b</p>"), 2);
         assert_eq!(n("<p>a<br/>b</p>"), 2);
         assert_eq!(n("<p></p><p>a</p>"), 1);
+        // A no-break space is painted, so it is a line of its own.
+        assert_eq!(n("a<br/>&nbsp;"), 2);
+        assert_eq!(n("a<br/>&nbsp;b"), 2);
+        // A `<` that opens no tag is text, not markup.
+        assert_eq!(plain_text_lines("a < b</p>"), ["a < b"]);
+        assert_eq!(n("<p>a < b</p><p>c</p>"), 2);
+        // No producer puts whitespace between blocks; pinned so the rule is
+        // visible if one ever does (the `\n` counts as a break here).
+        assert_eq!(n("<p>a</p>\n<p>b</p>"), 3);
     }
 
     #[test]

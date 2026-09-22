@@ -974,20 +974,9 @@ fn html_text_content(html: &str) -> String {
             // is treated as literal text — matching how a real HTML parser
             // recovers from invalid tag starts and how jsdom's `textContent`
             // surfaces the offending `<` as a normal character.
-            let next = bytes.get(i + 1).copied();
-            let is_tag_start = match next {
-                Some(c) if c.is_ascii_alphabetic() => true,
-                Some(b'/') => bytes
-                    .get(i + 2)
-                    .map(|c| c.is_ascii_alphabetic())
-                    .unwrap_or(false),
-                _ => false,
-            };
-            if is_tag_start {
-                if let Some(rel_end) = html[i..].find('>') {
-                    i += rel_end + 1;
-                    continue;
-                }
+            if let Some(len) = crate::layout::label_metrics::tag_len(html, i) {
+                i += len;
+                continue;
             }
             text.push('<');
             i += 1;

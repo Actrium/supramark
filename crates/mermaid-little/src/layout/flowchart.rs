@@ -1192,15 +1192,16 @@ fn strip_markdown_paragraph_for_measure(label: &str) -> String {
         } else if bytes[i] == b'`' {
             i += 1; // skip backtick (inline code marker)
         } else if bytes[i] == b'<' {
-            // HTML tag embedded in markdown: skip to '>', keeping line breaks
-            // (zero width) so the line count survives.
-            if let Some(rel_end) = label[i..].find('>') {
-                if crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + rel_end]) {
+            // HTML tag embedded in markdown: skip it, keeping line breaks
+            // (zero width) so the line count survives. A `<` that opens no
+            // tag (`a < b`) is literal text, as the renderer and the browser
+            // treat it.
+            if let Some(len) = crate::layout::label_metrics::tag_len(label, i) {
+                if crate::layout::label_metrics::is_br_tag_body(&label[i + 1..i + len - 1]) {
                     out.push_str("<br/>");
                 }
-                i += rel_end + 1; // skip the tag
+                i += len;
             } else {
-                // Bare '<' with no '>' — treat as literal
                 out.push('<');
                 i += 1;
             }
@@ -1476,8 +1477,8 @@ fn strip_fa_icons(text: &str) -> String {
     out
 }
 
-/// Plain text of a label for width measurement: every `<…>` tag stripped
-/// and `\n` dropped, i.e. the concatenation of all lines measured as one
+/// Plain text of a label for width measurement: every HTML tag stripped
+/// (per `label_metrics::tag_len`, so a bare `<` stays literal) and `\n` dropped, i.e. the concatenation of all lines measured as one
 /// segment (the reference geometry). Bytes are copied one by one as the
 /// original measurement did — widths of non-ASCII labels are part of the
 /// current geometry and are left alone here.
@@ -1486,11 +1487,9 @@ fn concat_label_text_for_width(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'<' {
-            if let Some(rel_end) = s[i..].find('>') {
-                i += rel_end + 1;
-                continue;
-            }
+        if let Some(len) = crate::layout::label_metrics::tag_len(s, i) {
+            i += len;
+            continue;
         }
         if bytes[i] != b'\n' {
             out.push(bytes[i] as char);

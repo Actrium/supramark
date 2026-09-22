@@ -345,6 +345,50 @@ fn flowchart_markdown_multiline_labels_fit_inside_their_box() {
     assert_node_lines(source, &[("A", 2), ("B", 2), ("C", 2), ("D", 1)]);
 }
 
+/// A `<` that opens no tag is literal text in a markdown label, so it must
+/// still be measured: the node box may not shrink below the label it holds.
+/// (Wrapping paragraphs in `<p>` for line counting once made the width
+/// helper swallow everything from the `<` to the next `>`.)
+#[test]
+fn flowchart_markdown_labels_measure_literal_less_than() {
+    let source = "flowchart TB\n    A[\"`a < b`\"]\n    B[\"`< b`\"]\n    C[\"`a < b < c`\"]\n    D[\"`a < b`\"]\n    E[\"a < b\"]\n";
+    let svg = convert_with_id(source, "bounds-md-lt").expect("render flowchart");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    for node in doc.descendants().filter(|n| {
+        n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+    }) {
+        let id = node.attribute("id").unwrap_or_default();
+        let rect_w = parse_number(
+            node.children()
+                .find(|n| n.has_tag_name("rect"))
+                .and_then(|r| r.attribute("width"))
+                .expect("node rect width"),
+        );
+        let fo_w = parse_number(
+            node.descendants()
+                .find(|n| n.has_tag_name("foreignObject"))
+                .and_then(|fo| fo.attribute("width"))
+                .expect("label width"),
+        );
+        assert!(
+            rect_w >= fo_w,
+            "{id}: box {rect_w} is narrower than its label {fo_w}"
+        );
+        // Literal `<` text is measured, so no label degenerates to the
+        // empty-label box (padding only).
+        assert!(rect_w > 60.0, "{id}: box {rect_w} looks unmeasured");
+    }
+    // The markdown and plain spellings of the same text measure alike.
+    let widths: Vec<f64> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("rect") && n.attribute("class") == Some("basic label-container"))
+        .map(|r| parse_number(r.attribute("width").unwrap()))
+        .collect();
+    assert_eq!(widths[0], widths[3], "two markdown `a < b` labels");
+    assert_eq!(widths[0], widths[4], "markdown vs plain `a < b`");
+    assert!(widths[2] > widths[0], "`a < b < c` is wider than `a < b`");
+}
+
 /// PR review blocker 2: a `<br/>` at the end of a label opens no line box in
 /// a browser (`a<br/>` paints one line; checked in headless Chromium), while
 /// an empty line in the middle or at the start does count.
