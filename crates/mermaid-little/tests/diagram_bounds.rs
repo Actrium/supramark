@@ -188,3 +188,90 @@ namespace WorkspaceLayer {
         namespace.height
     );
 }
+
+/// `translate(x, y)` of an element's `transform` attribute.
+fn translate(node: roxmltree::Node) -> (f64, f64) {
+    let t = node.attribute("transform").expect("transform");
+    let inner = t
+        .trim_start_matches("translate(")
+        .trim_end_matches(')')
+        .replace(',', " ");
+    let parts: Vec<f64> = inner.split_whitespace().map(parse_number).collect();
+    (parts[0], parts[1])
+}
+
+/// markon #97: a `<br/>` breaks the label line in the browser, so the node
+/// box must be tall enough for every line. The label used to be measured as
+/// one line, and the second line painted below the node's bottom edge.
+#[test]
+fn flowchart_multiline_node_labels_fit_inside_their_box() {
+    let source = "flowchart TB\n    A[\"line1<br/>line2\"]\n    B[\"one<br>two<br />three\"]\n    C[\"\u{5458}\u{5DE5}\u{8BBE}\u{5907}<br/>Mac / Windows\"]\n    D[single]\n";
+    let svg = convert_with_id(source, "bounds-multiline").expect("render flowchart");
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    let nodes: Vec<_> = doc
+        .descendants()
+        .filter(|n| {
+            n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c.starts_with("node "))
+        })
+        .collect();
+    assert_eq!(nodes.len(), 4);
+    for node in nodes {
+        let id = node.attribute("id").unwrap_or_default();
+        let rect = node
+            .children()
+            .find(|n| n.has_tag_name("rect"))
+            .expect("node rect");
+        let rect_y = parse_number(rect.attribute("y").unwrap());
+        let rect_h = parse_number(rect.attribute("height").unwrap());
+        let label = node
+            .children()
+            .find(|n| n.attribute("class") == Some("label"))
+            .expect("node label");
+        let (_, label_y) = translate(label);
+        let fo = label
+            .descendants()
+            .find(|n| n.has_tag_name("foreignObject"))
+            .expect("label foreignObject");
+        let fo_h = parse_number(fo.attribute("height").unwrap());
+        let lines = fo.descendants().filter(|n| n.has_tag_name("br")).count() + 1;
+        assert_eq!(
+            fo_h,
+            24.0 * lines as f64,
+            "{id}: label height for {lines} lines"
+        );
+        assert!(
+            label_y >= rect_y && label_y + fo_h <= rect_y + rect_h,
+            "{id}: label [{label_y}, {}] overflows node box [{rect_y}, {}]",
+            label_y + fo_h,
+            rect_y + rect_h
+        );
+    }
+}
+
+/// markon #97: multi-line edge labels are sized (and reserved in layout) for
+/// every line, not just the first.
+#[test]
+fn flowchart_multiline_edge_labels_measure_every_line() {
+    let single = convert_with_id("flowchart TB\n    A -->|\"one\"| B\n", "bounds-edge-1")
+        .expect("render single-line edge label");
+    let multi = convert_with_id(
+        "flowchart TB\n    A -->|\"one<br/>two\"| B\n",
+        "bounds-edge-2",
+    )
+    .expect("render multi-line edge label");
+    let edge_fo_h = |svg: &str| {
+        foreign_objects(svg)
+            .into_iter()
+            .find(|fo| fo.text.starts_with("one"))
+            .expect("edge label")
+            .height
+    };
+    assert_eq!(edge_fo_h(&single), 24.0);
+    assert_eq!(edge_fo_h(&multi), 48.0);
+    // The extra line is reserved in the layout: the diagram grows by it.
+    let grow = viewbox(&multi)[3] - viewbox(&single)[3];
+    assert!(
+        grow >= 24.0,
+        "layout reserved only {grow}px for the extra line"
+    );
+}

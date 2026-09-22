@@ -69,6 +69,38 @@ pub fn edge_label_plain_text(text: &str, is_markdown: bool) -> String {
     strip_html_for_measurement(&measure_text)
 }
 
+/// Split label markup at line breaks (`<br>` variants, any case, and `\n`)
+/// and reduce each line to its painted plain text via
+/// [`strip_html_for_measurement`]. Always returns at least one line.
+pub fn plain_text_lines(s: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' {
+            lines.push(strip_html_for_measurement(&s[start..i]));
+            i += 1;
+            start = i;
+            continue;
+        }
+        if bytes[i] == b'<' {
+            if let Some(rel_end) = s[i..].find('>') {
+                let inner = s[i + 1..i + rel_end].trim_end_matches('/').trim();
+                if inner.eq_ignore_ascii_case("br") {
+                    lines.push(strip_html_for_measurement(&s[start..i]));
+                    i += rel_end + 1;
+                    start = i;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    lines.push(strip_html_for_measurement(&s[start..]));
+    lines
+}
+
 /// Strip HTML tags and decode common entities to mirror jsdom's `textContent`
 /// for label width measurement. A `<` only starts a tag when followed by an
 /// ASCII letter or `/letter` (so `<<`, `<1`, `<!` stay literal); entities
@@ -219,6 +251,16 @@ mod tests {
     #[test]
     fn empty_returns_shim() {
         assert_eq!(cjk_aware_label_width("", 5.0), 5.0);
+    }
+
+    #[test]
+    fn plain_lines_split_on_every_br_form_and_newline() {
+        assert_eq!(
+            plain_text_lines("a<br/>b<BR>c<br />d\ne"),
+            ["a", "b", "c", "d", "e"]
+        );
+        assert_eq!(plain_text_lines("<b>x</b> &amp; y"), ["x & y"]);
+        assert_eq!(plain_text_lines(""), [""]);
     }
 
     #[test]
