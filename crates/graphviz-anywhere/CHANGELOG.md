@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-09-22
+
 ### Fixed
 
 - **`cargo install` of downstream binaries** — `build.rs` now downloads the
@@ -197,7 +199,9 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
 
 ---
 
-[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Actrium/supramark/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/Actrium/supramark/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Actrium/supramark/compare/v0.2.3...v0.2.4
 [0.2.1]: https://github.com/Actrium/graphviz-anywhere/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Actrium/graphviz-anywhere/compare/v0.1.8...v0.2.0
