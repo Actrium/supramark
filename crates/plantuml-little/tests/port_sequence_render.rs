@@ -367,3 +367,50 @@ fn issue28_frame_width_matches_official_in_svg() {
         "outer frame width = {w}, expected 327.9619 (official PlantUML); pre-fix was 341.2046"
     );
 }
+
+// CJK message labels must be measured at 1em per ideograph, as Java's
+// composite `SansSerif` font does via its CJK fallback slot. Measuring
+// them with the embedded Latin subset's `.notdef` advance (~0.6em)
+// emitted a `textLength` ~40% too short, so renderers applying
+// `lengthAdjust="spacing"` drew the glyphs on top of each other, and
+// participants were spaced too tightly for the label (markon#102).
+#[test]
+fn cjk_message_label_is_measured_full_width() {
+    let svg = convert(
+        "@startuml\n\
+         actor User\n\
+         participant Client\n\
+         User -> Client: \u{8F93}\u{5165}\u{8D26}\u{53F7}\u{5BC6}\u{7801}\n\
+         Client --> User: \u{767B}\u{5F55}\u{6210}\u{529F}\n\
+         @enduml",
+    );
+
+    let text_lengths: Vec<f64> = extract_all_attrs(&svg, "<text", "textLength")
+        .into_iter()
+        .map(|v| v.parse().expect("numeric textLength"))
+        .collect();
+    // 6 and 4 ideographs at the default 13px message font size.
+    assert!(
+        text_lengths.iter().any(|w| (w - 78.0).abs() < 1e-6),
+        "6-ideograph label should be 78px wide, got {text_lengths:?}"
+    );
+    assert!(
+        text_lengths.iter().any(|w| (w - 52.0).abs() < 1e-6),
+        "4-ideograph label should be 52px wide, got {text_lengths:?}"
+    );
+
+    // The label must fit between the two lifelines.
+    let lifelines: Vec<f64> = extract_all_attrs(
+        &svg,
+        "<line style=\"stroke:#181818;stroke-width:0.5;stroke-dasharray:5,5;\"",
+        "x1",
+    )
+    .into_iter()
+    .map(|v| v.parse().expect("numeric x1"))
+    .collect();
+    let gap = lifelines[1] - lifelines[0];
+    assert!(
+        gap > 78.0,
+        "lifeline gap {gap} narrower than the 78px label"
+    );
+}
