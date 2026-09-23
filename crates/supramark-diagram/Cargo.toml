@@ -1,6 +1,6 @@
 [package]
 name = "supramark-diagram"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ description = "Facade assembling the four engines: default_registry() yields a u
 [dependencies]
 supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
 d2-little = { path = "../d2-little", version = "=0.7.1-1" }
-mermaid-little = { path = "../mermaid-little", version = "=11.14.0-4", features = ["metrics-ttf-parser", "semantic-serde"] }
+mermaid-little = { path = "../mermaid-little", version = "=11.14.0-5", features = ["metrics-ttf-parser", "semantic-serde"] }
 plantuml-little = { path = "../plantuml-little", version = "1.2026.2-4", default-features = false, features = ["metrics-ttf-parser", "semantic-serde"] }
 serde_json = "1"
 
