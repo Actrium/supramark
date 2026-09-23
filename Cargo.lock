@@ -858,7 +858,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "mermaid-little"
-version = "11.14.0-5"
+version = "11.14.0-6"
 dependencies = [
  "dagre 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "supramark-diagram"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "d2-little",
  "graphviz-anywhere",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "supramark-diagram-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",

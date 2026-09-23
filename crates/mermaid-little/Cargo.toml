@@ -1,6 +1,6 @@
 [package]
 name = "mermaid-little"
-version = "11.14.0-5"
+version = "11.14.0-6"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -96,7 +96,7 @@ semantic-serde = []
 
 [dependencies]
 # Unified trait/AST envelope shared by the four engines (DiagramEngine / EngineAst / RenderOutput / DiagramError).
-supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1.1" }
 # Shared font metrics. The `metrics-*` Cargo features above pick
 # which `Metrics` impl `crate::font_metrics` routes through; the
 # dev-dep self-cycle below selects `metrics-ttf-parser`, which
