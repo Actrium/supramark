@@ -1465,7 +1465,10 @@ fn strip_fa_icons(text: &str) -> String {
         let prefix = &tail[..prefix_end];
         // Valid FA prefixes: fa, fab, fak, fal, far, fas
         let valid_prefix = matches!(prefix, "fa" | "fab" | "fak" | "fal" | "far" | "fas");
-        if valid_prefix && tail[prefix_end + 1..].starts_with("fa-") {
+        // `prefix_end == tail.len()` when there is no colon at all, and then
+        // `prefix_end + 1` is past the end — a label ending in `fa` (`A[sofa]`)
+        // reaches that with a valid-looking prefix.
+        if valid_prefix && prefix_end < tail.len() && tail[prefix_end + 1..].starts_with("fa-") {
             // Consume leading text up to this match.
             out.push_str(&rest[..pos]);
             // Skip past "prefix:fa-name" where name is [a-z0-9-]+.

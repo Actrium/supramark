@@ -186,7 +186,11 @@ fn extract_defs_by_id(content: &str) {
                 }
             }
             if content.as_bytes().get(pos) != Some(&b'<') || content[pos..].starts_with("</") {
-                pos += 1;
+                // Step a whole character: the byte here is not `<`, so it may
+                // be the lead of a multi-byte one, and the next iteration
+                // slices `content` as a `str` at this offset. (The `pos += 1`
+                // steps below are reached only when that byte is `<`.)
+                pos += content[pos..].chars().next().map_or(1, char::len_utf8);
                 continue;
             }
             // Parse element
@@ -565,7 +569,9 @@ fn convert_elements_inner(
         }
 
         if content.as_bytes()[pos] != b'<' {
-            pos += 1;
+            // Step a whole character — this byte may lead a multi-byte one and
+            // the checks below slice `content` as a `str` at `pos`.
+            pos += content[pos..].chars().next().map_or(1, char::len_utf8);
             continue;
         }
 
@@ -672,7 +678,9 @@ fn parse_element(s: &str) -> Option<(String, usize)> {
 
     // Self-closing tag: only check for /> before the first >
     let gt = s.find('>')?;
-    if gt >= 2 && &s[gt - 1..gt + 1] == "/>" {
+    // `gt - 1` is a byte index into arbitrary tag content, so compare bytes:
+    // the character before `>` may be multi-byte.
+    if gt >= 2 && s.as_bytes()[gt - 1] == b'/' {
         return Some((s[..gt + 1].to_string(), gt + 1));
     }
 

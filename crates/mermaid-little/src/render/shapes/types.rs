@@ -408,7 +408,11 @@ pub fn hex_color_to_rgb(value: &str) -> String {
         let b = u8::from_str_radix(&s[4..6], 16).ok()?;
         Some((r, g, b))
     };
-    let rgb = if hex.len() == 3 {
+    // `len()` is a byte count, so a non-ASCII value can reach a 3- or 6-byte
+    // branch and be sliced mid-character. Only hex digits can parse anyway.
+    let rgb = if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        None
+    } else if hex.len() == 3 {
         parse3(hex)
     } else if hex.len() == 6 {
         parse6(hex)
