@@ -346,10 +346,14 @@ fn strip_init_directive(src: &str) -> String {
 }
 
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    // Compare bytes: `s[..prefix.len()]` panics when that index lands inside a
+    // multi-byte character, and every line of the diagram reaches here — a
+    // three-character CJK line cuts through its third character on the 8-byte
+    // `acctitle`.
     if s.len() < prefix.len() {
         return None;
     }
-    if s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+    if s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes()) {
         Some(&s[prefix.len()..])
     } else {
         None
@@ -366,9 +370,11 @@ fn try_req_kind(line: &str) -> Option<(RequirementKind, &str)> {
         ("requirement", RequirementKind::Requirement),
     ] {
         if line.len() > kw.len() {
-            let head = &line[..kw.len()];
+            // Bytes, not a `str` slice: `kw.len()` can land inside a
+            // multi-byte character of a user-written line.
+            let head = &line.as_bytes()[..kw.len()];
             let tail_ch = line.as_bytes()[kw.len()];
-            if head.eq_ignore_ascii_case(kw)
+            if head.eq_ignore_ascii_case(kw.as_bytes())
                 && (tail_ch == b' ' || tail_ch == b'\t' || tail_ch == b'"')
             {
                 return Some((kind, &line[kw.len()..]));

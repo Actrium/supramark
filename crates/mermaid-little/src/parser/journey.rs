@@ -221,6 +221,8 @@ fn strip_frontmatter(source: &str, d: &mut JourneyDiagram) -> String {
 
 fn find_line_start(s: &str, needle: &str) -> Option<usize> {
     // search for `\n---` or start-of-string `---`.
+    // `i` indexes `s` as a `str` below, so it steps whole characters: the
+    // needle is ASCII, so stepping a character never walks past a match.
     let mut i = 0;
     while i < s.len() {
         let rest = &s[i..];
@@ -237,7 +239,7 @@ fn find_line_start(s: &str, needle: &str) -> Option<usize> {
                 }
             }
         }
-        i += 1;
+        i += rest.chars().next().map_or(1, char::len_utf8);
     }
     None
 }

@@ -41,7 +41,11 @@ pub(super) fn format_string_array(values: &[String]) -> String {
 /// Parse a hex color string (with or without `#` prefix) into RGB.
 pub(super) fn parse_color_hex(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.trim().trim_start_matches('#');
-    if hex.len() == 6 {
+    // `len()` counts bytes, so a non-ASCII value can reach a 3- or 6-byte
+    // branch and be sliced mid-character. Only hex digits can parse anyway.
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        None
+    } else if hex.len() == 6 {
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
         let b = u8::from_str_radix(&hex[4..6], 16).ok()?;

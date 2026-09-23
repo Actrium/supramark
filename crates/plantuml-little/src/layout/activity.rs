@@ -600,8 +600,12 @@ fn collect_unclosed_creole_prefix(line: &str) -> String {
         Size,
     }
 
+    // Compares bytes: `haystack` walks a label one character at a time, so
+    // `haystack[..needle.len()]` would panic whenever a multi-byte character
+    // is shorter than the tag being tested for.
     fn starts_with_ci(haystack: &str, needle: &str) -> bool {
-        haystack.len() >= needle.len() && haystack[..needle.len()].eq_ignore_ascii_case(needle)
+        haystack.len() >= needle.len()
+            && haystack.as_bytes()[..needle.len()].eq_ignore_ascii_case(needle.as_bytes())
     }
 
     let mut stack: Vec<(TagKind, String)> = Vec::new();

@@ -193,8 +193,11 @@ fn is_p_tag_body(tag: &str) -> bool {
 /// case, optionally followed by whitespace-separated attributes and `/`.
 pub fn is_br_tag_body(tag: &str) -> bool {
     let tag = tag.trim_end_matches('/');
+    // Bytes: `tag` is whatever the author wrote between `<` and `>`, so byte
+    // index 2 can land inside a character. A byte match against `br` implies
+    // the first two bytes are ASCII, which makes index 2 a boundary.
     tag.len() >= 2
-        && tag[..2].eq_ignore_ascii_case("br")
+        && tag.as_bytes()[..2].eq_ignore_ascii_case(b"br")
         && tag[2..].chars().next().is_none_or(char::is_whitespace)
 }
 

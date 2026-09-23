@@ -888,17 +888,19 @@ fn find_arrow_start_forward(before_gt: &str) -> Option<usize> {
     let bytes = before_gt.as_bytes();
     let mut pos = bytes.len();
 
+    // Compare bytes throughout: the walk steps back one byte at a time, so
+    // slicing `before_gt` as a `str` would panic on a multi-byte character
+    // ending where a direction word is being looked for. Every token here is
+    // ASCII, so a byte match implies a character-boundary match.
     while pos > 0 {
-        let ch = bytes[pos - 1] as char;
-        if ch == '-' || ch == '.' || ch == '>' {
+        let b = bytes[pos - 1];
+        if b == b'-' || b == b'.' || b == b'>' {
             pos -= 1;
-        } else if pos >= 2 && &before_gt[pos - 2..pos] == "up" {
+        } else if pos >= 2 && &bytes[pos - 2..pos] == b"up" {
             pos -= 2;
-        } else if pos >= 4
-            && (&before_gt[pos - 4..pos] == "down" || &before_gt[pos - 4..pos] == "left")
-        {
+        } else if pos >= 4 && (&bytes[pos - 4..pos] == b"down" || &bytes[pos - 4..pos] == b"left") {
             pos -= 4;
-        } else if pos >= 5 && &before_gt[pos - 5..pos] == "right" {
+        } else if pos >= 5 && &bytes[pos - 5..pos] == b"right" {
             pos -= 5;
         } else {
             break;

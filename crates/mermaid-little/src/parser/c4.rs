@@ -134,7 +134,7 @@ pub fn parse(source: &str) -> Result<C4Diagram, MermaidError> {
         let name = p.read_ident();
         if name.is_empty() {
             // Unknown char; skip one to avoid infinite loop.
-            p.advance(1);
+            p.advance_one_char();
             continue;
         }
         // Top-level kind keyword may appear again (rare); skip rest of line.
@@ -598,6 +598,15 @@ impl<'a> Parser<'a> {
     }
     fn advance(&mut self, n: usize) {
         self.i = (self.i + n).min(self.s.len());
+    }
+    /// Skip one whole character.
+    ///
+    /// The cursor is a byte index that later slices `self.s` as a `str`, so
+    /// skipping a single byte of an unrecognised multi-byte character leaves
+    /// it mid-character and the next slice panics.
+    fn advance_one_char(&mut self) {
+        let step = self.s[self.i..].chars().next().map_or(1, char::len_utf8);
+        self.advance(step);
     }
     fn eat_char(&mut self, c: char) -> bool {
         if self.peek() == Some(c as u8) {

@@ -1150,8 +1150,9 @@ fn resolve_fill_attrs(color: &str) -> String {
     if c.eq_ignore_ascii_case("transparent") || c.eq_ignore_ascii_case("#transparent") {
         return r#"fill="none""#.to_string();
     }
-    // 8-digit hex: #RRGGBBAA
-    if c.starts_with('#') && c.len() == 9 {
+    // 8-digit hex: #RRGGBBAA. `len()` counts bytes, so require ASCII before
+    // slicing — a non-ASCII colour can reach 9 bytes and split a character.
+    if c.starts_with('#') && c.len() == 9 && c.is_ascii() {
         let rgb = &c[..7];
         if let Ok(alpha) = u8::from_str_radix(&c[7..9], 16) {
             if alpha == 0 {
