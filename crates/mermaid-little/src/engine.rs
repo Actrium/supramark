@@ -225,14 +225,8 @@ mod render_options_tests {
     #[test]
     fn render_with_edge_label_decluster_produces_svg() {
         let src = "flowchart LR\n    A -->|one| B\n    A -->|two| B\n";
-        let out = MermaidEngine
-            .render_with_options(
-                src,
-                &EngineRenderOptions {
-                    edge_label_decluster: true,
-                },
-            )
-            .unwrap();
+        let opts = EngineRenderOptions::default().with_edge_label_decluster(true);
+        let out = MermaidEngine.render_with_options(src, &opts).unwrap();
         assert_eq!(out.mime, "image/svg+xml");
         let svg = String::from_utf8(out.bytes).unwrap();
         assert!(svg.contains("<svg"));
