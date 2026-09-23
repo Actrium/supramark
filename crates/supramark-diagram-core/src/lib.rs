@@ -44,9 +44,22 @@ impl RenderOutput {
 /// region overlap. This is upstream Mermaid behaviour (issue #93), not a
 /// regression, so it is off by default. Engines that support it (mermaid) nudge
 /// overlapping label boxes apart when set.
+///
+/// Marked `#[non_exhaustive]` so a later readability flag is an additive
+/// release rather than a breaking one. Build one from [`Default`] and the
+/// `with_*` setters instead of a struct literal.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EngineRenderOptions {
     pub edge_label_decluster: bool,
+}
+
+impl EngineRenderOptions {
+    /// Set [`edge_label_decluster`](Self::edge_label_decluster).
+    pub fn with_edge_label_decluster(mut self, on: bool) -> Self {
+        self.edge_label_decluster = on;
+        self
+    }
 }
 
 /// Public unified semantic AST envelope: across the boundary (serialized to

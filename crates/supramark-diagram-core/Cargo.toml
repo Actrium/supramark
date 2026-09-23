@@ -4,6 +4,8 @@ version = "0.1.1"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
+homepage = "https://github.com/Actrium/supramark"
+repository = "https://github.com/Actrium/supramark"
 description = "Unified DiagramEngine trait and public EngineAst envelope that converge supramark's four diagram engines."
 
 [dependencies]
