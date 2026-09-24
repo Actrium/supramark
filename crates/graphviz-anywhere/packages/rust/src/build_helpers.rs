@@ -14,6 +14,15 @@ pub fn target_triple_to_asset_name(target: &str) -> Option<&'static str> {
 
         "aarch64-unknown-linux-gnu" => Some("graphviz-native-linux-aarch64.tar.gz"),
 
+        // ── Linux / musl ───────────────────────────────────────────────────────
+        // Separate assets, not shared with glibc: the archive is built against
+        // musl and carries its own libstdc++ / expat / zlib members (see
+        // scripts/build-linux.sh --libc musl), because a musl host has neither
+        // the -dev packages nor g++ by default and rustc links these targets
+        // `crt-static`.
+        "x86_64-unknown-linux-musl" => Some("graphviz-native-linux-musl-x86_64.tar.gz"),
+        "aarch64-unknown-linux-musl" => Some("graphviz-native-linux-musl-aarch64.tar.gz"),
+
         // ── macOS ──────────────────────────────────────────────────────────────
         "x86_64-apple-darwin"
         | "aarch64-apple-darwin"
@@ -55,6 +64,14 @@ pub fn target_triple_to_prebuilt_subdir(target: &str) -> Option<(&'static str, &
             Some(("aarch64-unknown-linux-gnu", "libgraphviz_api.a"))
         }
 
+        "x86_64-unknown-linux-musl" => {
+            Some(("x86_64-unknown-linux-musl", "libgraphviz_api.a"))
+        }
+
+        "aarch64-unknown-linux-musl" => {
+            Some(("aarch64-unknown-linux-musl", "libgraphviz_api.a"))
+        }
+
         "x86_64-apple-darwin" => Some(("x86_64-apple-darwin", "libgraphviz_api.a")),
         "aarch64-apple-darwin" => Some(("aarch64-apple-darwin", "libgraphviz_api.a")),
 
@@ -81,6 +98,10 @@ pub fn target_triple_to_output_dirs(target: &str) -> &'static [&'static str] {
         "x86_64-unknown-linux-gnu" => &["output/linux-x86_64/lib", "output/linux/lib"],
 
         "aarch64-unknown-linux-gnu" => &["output/linux-aarch64/lib", "output/linux/lib"],
+
+        // No `output/linux/lib` fallback: that legacy directory is glibc.
+        "x86_64-unknown-linux-musl" => &["output/linux-musl-x86_64/lib"],
+        "aarch64-unknown-linux-musl" => &["output/linux-musl-aarch64/lib"],
 
         "x86_64-apple-darwin"
         | "aarch64-apple-darwin"
@@ -133,10 +154,14 @@ pub fn legacy_prebuilt_is_compatible(host: &str, target: &str) -> bool {
 /// system library can otherwise be selected at process launch. Android keeps
 /// the shared library because the application package owns JNI library
 /// staging and loading.
+///
+/// musl is not merely "also desktop": rustc links those targets `crt-static` by
+/// default, so a shared library is not linkable there at all.
 pub fn asset_is_static(target: &str) -> bool {
     is_ios_target(target)
         || target.contains("windows-msvc")
         || target.contains("unknown-linux-gnu")
+        || target.contains("unknown-linux-musl")
         || target.contains("apple-darwin")
 }
 
@@ -148,7 +173,9 @@ pub fn asset_lib_filename(target: &str) -> &'static str {
         | "universal-apple-darwin" => "libgraphviz_api.a",
         t if is_ios_target(t) => "libgraphviz_api.a",
         t if t.contains("windows-msvc") => "graphviz_api.lib",
-        t if t.contains("unknown-linux-gnu") => "libgraphviz_api.a",
+        t if t.contains("unknown-linux-gnu") || t.contains("unknown-linux-musl") => {
+            "libgraphviz_api.a"
+        }
         _ => "libgraphviz_api.so",
     }
 }
@@ -217,6 +244,24 @@ mod tests {
         assert_eq!(
             target_triple_to_asset_name("aarch64-unknown-linux-gnu"),
             Some("graphviz-native-linux-aarch64.tar.gz")
+        );
+    }
+
+    #[test]
+    fn linux_musl_assets_are_separate_from_glibc() {
+        // Sharing the glibc archive would link a glibc-built library into a musl
+        // binary; the musl assets are built and packaged independently.
+        assert_eq!(
+            target_triple_to_asset_name("x86_64-unknown-linux-musl"),
+            Some("graphviz-native-linux-musl-x86_64.tar.gz")
+        );
+        assert_eq!(
+            target_triple_to_asset_name("aarch64-unknown-linux-musl"),
+            Some("graphviz-native-linux-musl-aarch64.tar.gz")
+        );
+        assert_ne!(
+            target_triple_to_asset_name("x86_64-unknown-linux-musl"),
+            target_triple_to_asset_name("x86_64-unknown-linux-gnu")
         );
     }
 
@@ -378,6 +423,10 @@ mod tests {
     #[test]
     fn asset_lib_filename_linux_is_static() {
         assert_eq!(asset_lib_filename("x86_64-unknown-linux-gnu"), "libgraphviz_api.a");
+        assert_eq!(
+            asset_lib_filename("x86_64-unknown-linux-musl"),
+            "libgraphviz_api.a"
+        );
     }
 
     #[test]
@@ -426,19 +475,23 @@ mod tests {
         assert!(asset_is_static("x86_64-pc-windows-msvc"));
         assert!(asset_is_static("x86_64-unknown-linux-gnu"));
         assert!(asset_is_static("aarch64-unknown-linux-gnu"));
+        // rustc links musl targets crt-static by default, so a shared library is
+        // not an option there.
+        assert!(asset_is_static("x86_64-unknown-linux-musl"));
+        assert!(asset_is_static("aarch64-unknown-linux-musl"));
         assert!(asset_is_static("aarch64-apple-darwin"));
         assert!(asset_is_static("x86_64-apple-darwin"));
         assert!(!asset_is_static("aarch64-linux-android"));
     }
 
+    /// A target only gets an asset once one is actually built *for its ABI*.
+    /// musl now has its own (see `linux_musl_assets_are_separate_from_glibc`);
+    /// windows-gnu still has none, and must not silently fall back to the MSVC
+    /// archive.
     #[test]
     fn incompatible_abi_assets_are_not_auto_selected() {
-        assert_eq!(target_triple_to_asset_name("x86_64-unknown-linux-musl"), None);
-        assert_eq!(target_triple_to_asset_name("aarch64-unknown-linux-musl"), None);
         assert_eq!(target_triple_to_asset_name("x86_64-pc-windows-gnu"), None);
-        assert_eq!(target_triple_to_prebuilt_subdir("x86_64-unknown-linux-musl"), None);
         assert_eq!(target_triple_to_prebuilt_subdir("x86_64-pc-windows-gnu"), None);
-        assert!(target_triple_to_output_dirs("aarch64-unknown-linux-musl").is_empty());
         assert!(target_triple_to_output_dirs("x86_64-pc-windows-gnu").is_empty());
     }
 
@@ -505,6 +558,8 @@ mod tests {
         for target in [
             "aarch64-apple-ios",
             "x86_64-unknown-linux-gnu",
+            "x86_64-unknown-linux-musl",
+            "aarch64-unknown-linux-musl",
             "aarch64-apple-darwin",
             "aarch64-linux-android",
             "x86_64-pc-windows-msvc",
