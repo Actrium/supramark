@@ -47,7 +47,9 @@ CI or airgapped environments). Override the release tag with
 ## x86_64-unknown-linux-musl / aarch64-unknown-linux-musl
 
 - **Toolchain**: a musl toolchain, i.e. build inside Alpine —
-  `apk add build-base cmake bison flex pkgconf expat-dev expat-static zlib-dev zlib-static`.
+  `apk add build-base cmake bison flex python3 pkgconf expat-dev expat-static zlib-dev zlib-static`
+  (python3 is Graphviz's own build requirement, preinstalled on the glibc CI
+  image but absent from a minimal Alpine).
   The script checks `cc -dumpmachine` and refuses to run on a glibc toolchain,
   so a glibc archive cannot be packaged as a musl asset by mistake.
 - **Build**: `./scripts/build-linux.sh --arch x86_64 --libc musl`

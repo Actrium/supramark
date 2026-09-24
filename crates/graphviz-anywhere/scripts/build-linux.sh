@@ -14,9 +14,9 @@
 #
 # -- --libc musl ------------------------------------------------------------
 # Run this inside a musl toolchain (Alpine: apk add build-base cmake bison flex
-# expat-dev expat-static zlib-dev zlib-static); the script refuses to run if the
-# compiler does not actually target musl, so a glibc archive can never be
-# packaged as a musl asset.
+# python3 expat-dev expat-static zlib-dev zlib-static); the script refuses to
+# run if the compiler does not actually target musl, so a glibc archive can
+# never be packaged as a musl asset.
 #
 # The musl archive is *self-contained*: libstdc++, libexpat and libz are merged
 # into libgraphviz_api.a. On glibc the crate instead links those at the consumer
@@ -114,7 +114,12 @@ log_info "Build directory: ${BUILD_DIR}"
 log_info "Install directory: ${INSTALL_DIR}"
 
 check_build_deps
-for dep in bison flex; do
+# python3 is Graphviz's own requirement, not ours: its CMakeLists.txt marks
+# Python3 REQUIRED and shells out to gen_version.py. Without it CMake fails with
+# "Abnormal exit with child return code: no such file or directory", which says
+# nothing about what is missing. Distro images that ship python3 by default
+# (ubuntu-latest) hide this; a minimal Alpine does not.
+for dep in bison flex python3; do
     check_command "$dep"
 done
 

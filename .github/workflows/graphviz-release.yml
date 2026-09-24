@@ -129,12 +129,14 @@ jobs:
       # Before checkout: that action needs git, and the default `bash` shell
       # every later step uses does not exist on a bare Alpine image.
       # expat-static / zlib-static / g++ supply the archives that get merged
-      # into libgraphviz_api.a so the asset is self-contained.
+      # into libgraphviz_api.a so the asset is self-contained. python3 is
+      # Graphviz's own hard requirement (its CMakeLists runs gen_version.py);
+      # the ubuntu runner has it preinstalled, a minimal Alpine image does not.
       - name: Install dependencies
         shell: sh
         run: |
           apk add --no-cache bash git tar curl cmake make g++ bison flex \
-            pkgconf expat-dev expat-static zlib-dev zlib-static \
+            python3 pkgconf expat-dev expat-static zlib-dev zlib-static \
             rust cargo
 
       - uses: actions/checkout@v6
