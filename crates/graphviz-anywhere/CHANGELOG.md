@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **musl targets** — `x86_64-unknown-linux-musl` and
+  `aarch64-unknown-linux-musl` now have their own release assets
+  (`graphviz-native-linux-musl-*.tar.gz`), so `cargo install` of a downstream
+  binary works on Alpine. Previously those targets had no asset at all and
+  `build.rs` ended in its "unable to locate graphviz_api native library"
+  panic. The glibc archive is not reused: it is not linkable against musl.
+
+  The musl archive is self-contained — `libstdc++`, `libexpat` and `libz` are
+  merged into `libgraphviz_api.a` at build time. On glibc these are linked at
+  the consumer by runtime SONAME, which works because every desktop distro
+  ships them; a musl host has neither those SONAMEs nor the static packages
+  (Alpine keeps them in `g++` / `expat-static` / `zlib-static`), and rustc
+  links musl targets `crt-static`. Nothing beyond musl libc is needed to link
+  or run, which CI asserts with `ldd` after removing the dev packages.
+
+  musl targets are matched by triple **suffix**, so a distro toolchain resolves
+  too: Alpine's own rustc reports `x86_64-alpine-linux-musl`, not rustup's
+  `x86_64-unknown-linux-musl`, and `apk add cargo` is the most likely way a
+  musl build happens. Matching the rustup spelling alone would have left that
+  toolchain with no asset — and classified as a shared-library target, so it
+  linked `libgraphviz_api.so` and then failed at runtime with
+  `gv_context_new: symbol not found`.
+
 ## [0.2.6] — 2026-09-22
 
 ### Fixed

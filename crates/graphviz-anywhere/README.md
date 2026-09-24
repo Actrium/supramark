@@ -38,6 +38,8 @@ partial coverage only.
 | --- | --- | --- | --- | --- |
 | x86_64-unknown-linux-gnu | ✅ | ✅ | ✅ `graphviz-native-linux-x86_64.tar.gz` | ✅ |
 | aarch64-unknown-linux-gnu | ✅ | ✅ (ubuntu-24.04-arm, NEW) | ✅ `graphviz-native-linux-aarch64.tar.gz` (NEW) | ✅ (NEW) |
+| x86_64-unknown-linux-musl | ✅ `--libc musl` | ✅ (alpine container) | ✅ `graphviz-native-linux-musl-x86_64.tar.gz` | ✅ |
+| aarch64-unknown-linux-musl | ✅ `--libc musl` | ✅ (alpine container, ubuntu-22.04-arm) | ✅ `graphviz-native-linux-musl-aarch64.tar.gz` | ✅ |
 | aarch64-apple-darwin | ✅ (universal) | ✅ | ✅ `graphviz-native-macos-universal.tar.gz` | ✅ |
 | x86_64-apple-darwin | ✅ (universal) | ✅ | ✅ `graphviz-native-macos-universal.tar.gz` | ✅ |
 | aarch64-apple-ios | ✅ | ✅ | ✅ per-slice (NEW) | ✅ (NEW) |

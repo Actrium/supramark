@@ -6,11 +6,24 @@
 # together with the C ABI wrapper into a single unified libgraphviz_api.so.
 #
 # Usage:
-#   ./scripts/build-linux.sh [--arch x86_64|aarch64]
+#   ./scripts/build-linux.sh [--arch x86_64|aarch64] [--libc gnu|musl]
 #
 # Environment variables:
-#   BUILD_DIR   - Build directory (default: build/linux-<arch>)
-#   INSTALL_DIR - Install prefix (default: output/linux-<arch>)
+#   BUILD_DIR   - Build directory (default: build/linux[-musl]-<arch>)
+#   INSTALL_DIR - Install prefix (default: output/linux[-musl]-<arch>)
+#
+# -- --libc musl ------------------------------------------------------------
+# Run this inside a musl toolchain (Alpine: apk add build-base cmake bison flex
+# python3 expat-dev expat-static zlib-dev zlib-static); the script refuses to
+# run if the compiler does not actually target musl, so a glibc archive can
+# never be packaged as a musl asset.
+#
+# The musl archive is *self-contained*: libstdc++, libexpat and libz are merged
+# into libgraphviz_api.a. On glibc the crate instead links those at the consumer
+# by runtime SONAME (see packages/rust/build.rs), which works because every
+# desktop distro ships them. A musl host has neither those SONAMEs nor the
+# static packages -- and rustc links musl targets `crt-static` -- so anything
+# left unresolved here becomes a link error in every downstream `cargo install`.
 #
 # ── aarch64 build notes ────────────────────────────────────────────────────
 # Two supported scenarios:
@@ -54,10 +67,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 ARCH="${ARCH:-$(uname -m)}"
+LIBC="${LIBC:-gnu}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --arch) ARCH="$2"; shift 2 ;;
+        --libc) LIBC="$2"; shift 2 ;;
         *) log_error "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -68,15 +83,43 @@ case "$ARCH" in
     *) log_error "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build/linux-${ARCH}}"
-INSTALL_DIR="${INSTALL_DIR:-${PROJECT_ROOT}/output/linux-${ARCH}}"
+case "$LIBC" in
+    gnu|musl) ;;
+    *) log_error "Unsupported libc: $LIBC (expected gnu or musl)"; exit 1 ;;
+esac
 
-log_info "Building Graphviz for Linux ${ARCH}"
+# Fail closed: shipping a glibc-linked archive as the musl asset would break at
+# link time on every musl host, and the mistake is invisible in the packaged
+# tarball. `-dumpmachine` is the compiler's own answer about its target.
+if [[ "$LIBC" == "musl" ]]; then
+    CC_TARGET="$(${CC:-gcc} -dumpmachine 2>/dev/null || true)"
+    if [[ "$CC_TARGET" != *musl* ]]; then
+        log_error "--libc musl needs a musl toolchain, but ${CC:-gcc} targets '${CC_TARGET:-unknown}'"
+        log_error "run this inside a musl environment (e.g. the alpine container in CI)"
+        exit 1
+    fi
+fi
+
+if [[ "$LIBC" == "musl" ]]; then
+    PLATFORM="linux-musl-${ARCH}"
+else
+    PLATFORM="linux-${ARCH}"
+fi
+
+BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build/${PLATFORM}}"
+INSTALL_DIR="${INSTALL_DIR:-${PROJECT_ROOT}/output/${PLATFORM}}"
+
+log_info "Building Graphviz for Linux ${ARCH} (${LIBC})"
 log_info "Build directory: ${BUILD_DIR}"
 log_info "Install directory: ${INSTALL_DIR}"
 
 check_build_deps
-for dep in bison flex; do
+# python3 is Graphviz's own requirement, not ours: its CMakeLists.txt marks
+# Python3 REQUIRED and shells out to gen_version.py. Without it CMake fails with
+# "Abnormal exit with child return code: no such file or directory", which says
+# nothing about what is missing. Distro images that ship python3 by default
+# (ubuntu-latest) hide this; a minimal Alpine does not.
+for dep in bison flex python3; do
     check_command "$dep"
 done
 
@@ -178,11 +221,32 @@ AR="${AR:-ar}"
 # script: ADDLIB pulls every object out of each component static library, so
 # the result is a single self-contained archive — mirroring what the .so gets
 # via --whole-archive.
+#
+# On musl the archive must additionally be self-contained (see the --libc musl
+# note in the header): resolve each system library the Graphviz objects still
+# reference and merge it in too. `-print-file-name` answers with the compiler's
+# own search paths, and echoes the bare name back when it finds nothing — so an
+# absolute, existing path is the only accepted answer.
+MERGE_LIBS=()
+if [[ "$LIBC" == "musl" ]]; then
+    for _want in libstdc++.a libexpat.a libz.a; do
+        _found="$(${CXX:-g++} -print-file-name="${_want}" 2>/dev/null || true)"
+        if [[ "${_found}" == /* && -f "${_found}" ]]; then
+            log_info "Merging ${_want} from ${_found}"
+            MERGE_LIBS+=("${_found}")
+        else
+            log_error "musl build needs a static ${_want}, which this toolchain does not have"
+            log_error "on Alpine: apk add g++ expat-static zlib-static"
+            exit 1
+        fi
+    done
+fi
+
 ar_mri="${BUILD_DIR}/libgraphviz_api.mri"
 {
     echo "CREATE ${INSTALL_DIR}/lib/libgraphviz_api.a"
     echo "ADDMOD ${BUILD_DIR}/graphviz_api.o"
-    for _lib in "${GV_STATIC_LIBS[@]}"; do
+    for _lib in "${GV_STATIC_LIBS[@]}" ${MERGE_LIBS[@]+"${MERGE_LIBS[@]}"}; do
         echo "ADDLIB ${_lib}"
     done
     echo "SAVE"
@@ -198,4 +262,4 @@ verify_output "${INSTALL_DIR}/include/graphviz_api.h" "Wrapper header"
 
 log_info "Library size (.so): $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.so" | cut -f1)"
 log_info "Library size (.a):  $(du -h "${INSTALL_DIR}/lib/libgraphviz_api.a"  | cut -f1)"
-log_info "Linux ${ARCH} build complete: ${INSTALL_DIR}"
+log_info "Linux ${ARCH} (${LIBC}) build complete: ${INSTALL_DIR}"

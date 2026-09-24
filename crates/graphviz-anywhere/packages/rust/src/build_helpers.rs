@@ -3,11 +3,47 @@
 // This module is `include!`-d from build.rs so the same logic can be unit-tested
 // without duplicating code. Do NOT add dependencies beyond `std` here.
 
+/// Architecture of a musl Linux target, or `None` when it is not one.
+///
+/// Matched by suffix rather than by exact triple. Alpine's distro rustc reports
+/// its host as `x86_64-alpine-linux-musl`, not rustup's
+/// `x86_64-unknown-linux-musl` — and `apk add cargo` is the most likely way
+/// anyone builds this on Alpine. Keying on the rustup spelling alone left that
+/// toolchain with no asset at all (the build.rs panic the download path exists
+/// to avoid) and, worse, classified it as a shared-library target, producing a
+/// binary that linked `libgraphviz_api.so` and then could not find it at
+/// runtime.
+pub fn musl_linux_arch(target: &str) -> Option<&'static str> {
+    if !target.ends_with("-linux-musl") {
+        return None;
+    }
+    match target.split('-').next() {
+        Some("x86_64") => Some("x86_64"),
+        Some("aarch64") => Some("aarch64"),
+        _ => None,
+    }
+}
+
+/// Returns `true` for any musl Linux target, including ABI variants this crate
+/// ships no asset for (e.g. `armv7-unknown-linux-musleabihf`). Those still link
+/// statically when a library is supplied by hand: rustc defaults musl targets to
+/// `crt-static`, which makes a shared library unusable.
+fn is_musl_linux(target: &str) -> bool {
+    target.contains("-linux-musl")
+}
+
 /// Maps a Rust target triple to the GitHub release asset name.
 ///
 /// Returns `None` for targets that are not yet covered (caller should fall back
 /// to `GRAPHVIZ_ANYWHERE_DIR` env override or a manual prebuilt drop-in).
 pub fn target_triple_to_asset_name(target: &str) -> Option<&'static str> {
+    // musl first, by suffix, so distro triples resolve too — see `musl_linux_arch`.
+    match musl_linux_arch(target) {
+        Some("x86_64") => return Some("graphviz-native-linux-musl-x86_64.tar.gz"),
+        Some("aarch64") => return Some("graphviz-native-linux-musl-aarch64.tar.gz"),
+        _ => {}
+    }
+
     match target {
         // ── Linux ──────────────────────────────────────────────────────────────
         "x86_64-unknown-linux-gnu" => Some("graphviz-native-linux-x86_64.tar.gz"),
@@ -45,6 +81,14 @@ pub fn target_triple_to_asset_name(target: &str) -> Option<&'static str> {
 ///
 /// Returns `None` when the triple is unrecognised or wasm (no native link needed).
 pub fn target_triple_to_prebuilt_subdir(target: &str) -> Option<(&'static str, &'static str)> {
+    // Every musl spelling maps to the canonical rustup-named directory, which is
+    // what CI populates.
+    match musl_linux_arch(target) {
+        Some("x86_64") => return Some(("x86_64-unknown-linux-musl", "libgraphviz_api.a")),
+        Some("aarch64") => return Some(("aarch64-unknown-linux-musl", "libgraphviz_api.a")),
+        _ => {}
+    }
+
     // (subdirectory under prebuilt/, lib filename)
     match target {
         "x86_64-unknown-linux-gnu" => {
@@ -77,6 +121,13 @@ pub fn target_triple_to_prebuilt_subdir(target: &str) -> Option<(&'static str, &
 /// Returns an empty slice for unrecognised targets; the caller should treat that
 /// as "not found".
 pub fn target_triple_to_output_dirs(target: &str) -> &'static [&'static str] {
+    // No `output/linux/lib` fallback for musl: that legacy directory is glibc.
+    match musl_linux_arch(target) {
+        Some("x86_64") => return &["output/linux-musl-x86_64/lib"],
+        Some("aarch64") => return &["output/linux-musl-aarch64/lib"],
+        _ => {}
+    }
+
     match target {
         "x86_64-unknown-linux-gnu" => &["output/linux-x86_64/lib", "output/linux/lib"],
 
@@ -133,10 +184,14 @@ pub fn legacy_prebuilt_is_compatible(host: &str, target: &str) -> bool {
 /// system library can otherwise be selected at process launch. Android keeps
 /// the shared library because the application package owns JNI library
 /// staging and loading.
+///
+/// musl is not merely "also desktop": rustc links those targets `crt-static` by
+/// default, so a shared library is not linkable there at all.
 pub fn asset_is_static(target: &str) -> bool {
     is_ios_target(target)
         || target.contains("windows-msvc")
         || target.contains("unknown-linux-gnu")
+        || is_musl_linux(target)
         || target.contains("apple-darwin")
 }
 
@@ -148,7 +203,7 @@ pub fn asset_lib_filename(target: &str) -> &'static str {
         | "universal-apple-darwin" => "libgraphviz_api.a",
         t if is_ios_target(t) => "libgraphviz_api.a",
         t if t.contains("windows-msvc") => "graphviz_api.lib",
-        t if t.contains("unknown-linux-gnu") => "libgraphviz_api.a",
+        t if t.contains("unknown-linux-gnu") || is_musl_linux(t) => "libgraphviz_api.a",
         _ => "libgraphviz_api.so",
     }
 }
@@ -217,6 +272,77 @@ mod tests {
         assert_eq!(
             target_triple_to_asset_name("aarch64-unknown-linux-gnu"),
             Some("graphviz-native-linux-aarch64.tar.gz")
+        );
+    }
+
+    /// Regression: Alpine's distro rustc reports `x86_64-alpine-linux-musl`, and
+    /// `apk add cargo` is how Alpine users most often build. Matching only the
+    /// rustup spelling gave that toolchain no asset (build.rs panic) and treated
+    /// it as a shared-library target, yielding a binary that linked
+    /// `libgraphviz_api.so` and could not find it at runtime.
+    #[test]
+    fn distro_musl_triples_resolve_like_the_rustup_one() {
+        for target in [
+            "x86_64-unknown-linux-musl",
+            "x86_64-alpine-linux-musl",
+        ] {
+            assert_eq!(
+                target_triple_to_asset_name(target),
+                Some("graphviz-native-linux-musl-x86_64.tar.gz"),
+                "{target}"
+            );
+            assert_eq!(
+                target_triple_to_prebuilt_subdir(target),
+                Some(("x86_64-unknown-linux-musl", "libgraphviz_api.a")),
+                "{target}"
+            );
+            assert_eq!(
+                target_triple_to_output_dirs(target),
+                &["output/linux-musl-x86_64/lib"],
+                "{target}"
+            );
+            assert!(asset_is_static(target), "{target} must link statically");
+            assert_eq!(asset_lib_filename(target), "libgraphviz_api.a", "{target}");
+        }
+
+        for target in [
+            "aarch64-unknown-linux-musl",
+            "aarch64-alpine-linux-musl",
+        ] {
+            assert_eq!(
+                target_triple_to_asset_name(target),
+                Some("graphviz-native-linux-musl-aarch64.tar.gz"),
+                "{target}"
+            );
+            assert!(asset_is_static(target), "{target} must link statically");
+        }
+    }
+
+    /// A musl ABI variant with no asset still must not be classified as a
+    /// shared-library target: crt-static makes a `.so` unusable there.
+    #[test]
+    fn musl_abi_variants_without_assets_still_link_statically() {
+        let target = "armv7-unknown-linux-musleabihf";
+        assert_eq!(target_triple_to_asset_name(target), None);
+        assert!(asset_is_static(target));
+        assert_eq!(asset_lib_filename(target), "libgraphviz_api.a");
+    }
+
+    #[test]
+    fn linux_musl_assets_are_separate_from_glibc() {
+        // Sharing the glibc archive would link a glibc-built library into a musl
+        // binary; the musl assets are built and packaged independently.
+        assert_eq!(
+            target_triple_to_asset_name("x86_64-unknown-linux-musl"),
+            Some("graphviz-native-linux-musl-x86_64.tar.gz")
+        );
+        assert_eq!(
+            target_triple_to_asset_name("aarch64-unknown-linux-musl"),
+            Some("graphviz-native-linux-musl-aarch64.tar.gz")
+        );
+        assert_ne!(
+            target_triple_to_asset_name("x86_64-unknown-linux-musl"),
+            target_triple_to_asset_name("x86_64-unknown-linux-gnu")
         );
     }
 
@@ -378,6 +504,10 @@ mod tests {
     #[test]
     fn asset_lib_filename_linux_is_static() {
         assert_eq!(asset_lib_filename("x86_64-unknown-linux-gnu"), "libgraphviz_api.a");
+        assert_eq!(
+            asset_lib_filename("x86_64-unknown-linux-musl"),
+            "libgraphviz_api.a"
+        );
     }
 
     #[test]
@@ -426,19 +556,23 @@ mod tests {
         assert!(asset_is_static("x86_64-pc-windows-msvc"));
         assert!(asset_is_static("x86_64-unknown-linux-gnu"));
         assert!(asset_is_static("aarch64-unknown-linux-gnu"));
+        // rustc links musl targets crt-static by default, so a shared library is
+        // not an option there.
+        assert!(asset_is_static("x86_64-unknown-linux-musl"));
+        assert!(asset_is_static("aarch64-unknown-linux-musl"));
         assert!(asset_is_static("aarch64-apple-darwin"));
         assert!(asset_is_static("x86_64-apple-darwin"));
         assert!(!asset_is_static("aarch64-linux-android"));
     }
 
+    /// A target only gets an asset once one is actually built *for its ABI*.
+    /// musl now has its own (see `linux_musl_assets_are_separate_from_glibc`);
+    /// windows-gnu still has none, and must not silently fall back to the MSVC
+    /// archive.
     #[test]
     fn incompatible_abi_assets_are_not_auto_selected() {
-        assert_eq!(target_triple_to_asset_name("x86_64-unknown-linux-musl"), None);
-        assert_eq!(target_triple_to_asset_name("aarch64-unknown-linux-musl"), None);
         assert_eq!(target_triple_to_asset_name("x86_64-pc-windows-gnu"), None);
-        assert_eq!(target_triple_to_prebuilt_subdir("x86_64-unknown-linux-musl"), None);
         assert_eq!(target_triple_to_prebuilt_subdir("x86_64-pc-windows-gnu"), None);
-        assert!(target_triple_to_output_dirs("aarch64-unknown-linux-musl").is_empty());
         assert!(target_triple_to_output_dirs("x86_64-pc-windows-gnu").is_empty());
     }
 
@@ -505,6 +639,8 @@ mod tests {
         for target in [
             "aarch64-apple-ios",
             "x86_64-unknown-linux-gnu",
+            "x86_64-unknown-linux-musl",
+            "aarch64-unknown-linux-musl",
             "aarch64-apple-darwin",
             "aarch64-linux-android",
             "x86_64-pc-windows-msvc",
