@@ -387,13 +387,13 @@ fn try_github_release() -> bool {
             return false;
         }
 
-        let tar_flag = if asset.ends_with(".zip") {
-            "-xf"
-        } else {
-            "-xzf"
-        };
+        // Every asset in `target_triple_to_asset_name` is a gzipped tarball,
+        // Windows included. There used to be a `.zip` branch here that passed
+        // `tar -xf`, which cannot read a zip anyway — it advertised a fallback
+        // that could not have worked. A future zip asset needs a real unzip
+        // step, not a flag.
         let untar = Command::new("tar")
-            .arg(tar_flag)
+            .arg("-xzf")
             .arg(&archive)
             .arg("-C")
             .arg(&staging)
