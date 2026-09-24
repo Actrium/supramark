@@ -56,7 +56,11 @@ CI or airgapped environments). Override the release tag with
 - **Output**: `output/linux-musl-<arch>/lib/libgraphviz_api.a`
 - **Release asset**: `graphviz-native-linux-musl-<arch>.tar.gz`
 - **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/linux-musl-x86_64 cargo build --target x86_64-unknown-linux-musl`
-- **build.rs auto-resolve**: ✅
+- **build.rs auto-resolve**: ✅, and matched by triple *suffix*. Alpine's distro
+  rustc reports its host as `x86_64-alpine-linux-musl`, not rustup's
+  `x86_64-unknown-linux-musl`, so both spellings (and any other vendor field)
+  resolve to the same asset and to the canonical
+  `prebuilt/x86_64-unknown-linux-musl/` directory.
 - **Self-contained archive**: unlike the glibc asset, the musl archive has
   `libstdc++`, `libexpat` and `libz` merged into it, and `build.rs` emits no
   system-library link flags for musl targets. A musl host has neither the

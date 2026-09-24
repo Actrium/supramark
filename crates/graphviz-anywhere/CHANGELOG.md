@@ -23,6 +23,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   links musl targets `crt-static`. Nothing beyond musl libc is needed to link
   or run, which CI asserts with `ldd` after removing the dev packages.
 
+  musl targets are matched by triple **suffix**, so a distro toolchain resolves
+  too: Alpine's own rustc reports `x86_64-alpine-linux-musl`, not rustup's
+  `x86_64-unknown-linux-musl`, and `apk add cargo` is the most likely way a
+  musl build happens. Matching the rustup spelling alone would have left that
+  toolchain with no asset — and classified as a shared-library target, so it
+  linked `libgraphviz_api.so` and then failed at runtime with
+  `gv_context_new: symbol not found`.
+
 ## [0.2.6] — 2026-09-22
 
 ### Fixed
