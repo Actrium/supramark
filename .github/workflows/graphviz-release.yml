@@ -186,24 +186,46 @@ jobs:
         run: |
           apk del expat-dev expat-static zlib-dev zlib-static
           GVA_DIR="${GITHUB_WORKSPACE}/crates/graphviz-anywhere/output/linux-musl-${{ matrix.arch }}/lib"
-          for flags in "" "-C target-feature=+crt-static"; do
-            echo "=== RUSTFLAGS='${flags}' ==="
-            rm -rf target/musl-verify
-            env GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 \
-                GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" \
-                RUSTFLAGS="$flags" \
-                CARGO_TARGET_DIR=target/musl-verify \
-              cargo build --release -p graphviz-anywhere-example
-            binary="target/musl-verify/release/graphviz-anywhere-example"
+          # Alpine's distro rustc reports x86_64-alpine-linux-musl, not rustup's
+          # x86_64-unknown-linux-musl. Ask it rather than hardcoding either.
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          echo "host triple: ${host}"
+
+          verify() {
+            label="$1"; binary="$2"; shift 2
+            echo "=== ${label} ==="
+            env GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" "$@"
+            # Assert the binary exists before inspecting it: `ldd` on a missing
+            # file prints an error that matches none of the patterns below, so
+            # the check would pass for a binary that was never produced.
+            test -x "$binary"
             "$binary" > graphviz-smoke.log
             grep -q "SVG output" graphviz-smoke.log
             echo "--- ldd ---"
             ldd "$binary" || true
             if ldd "$binary" | grep -Eq 'libstdc\+\+|libexpat|libz\.so|libgraphviz_api'; then
-              echo "::error::the binary depends on a library beyond musl libc"
+              echo "::error::${label}: the binary depends on a library beyond musl libc"
               exit 1
             fi
-          done
+          }
+
+          rm -rf target/musl-verify target/musl-static
+
+          verify "dynamic musl (Alpine rust default)" \
+            "target/musl-verify/release/graphviz-anywhere-example" \
+            env CARGO_TARGET_DIR=target/musl-verify \
+              cargo build --release -p graphviz-anywhere-example
+
+          # `--target` here is required, not cosmetic: with host == target a
+          # global RUSTFLAGS also reaches proc-macro crates, and a crt-static
+          # target cannot produce them ("cannot produce proc-macro for
+          # serde_derive ... does not support these crate types"). Naming the
+          # target makes cargo build host proc macros separately.
+          verify "static musl (+crt-static)" \
+            "target/musl-static/${host}/release/graphviz-anywhere-example" \
+            env RUSTFLAGS="-C target-feature=+crt-static" \
+                CARGO_TARGET_DIR=target/musl-static \
+              cargo build --release --target "${host}" -p graphviz-anywhere-example
 
       - name: Package
         run: |
