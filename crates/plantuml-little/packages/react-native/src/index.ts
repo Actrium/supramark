@@ -24,6 +24,8 @@ const LINKING_ERROR =
   Platform.select({
     ios: '- You have run `pod install`\n',
     android: '',
+    windows: '',
+    macos: '- You have run `pod install`\n',
     default: '',
   }) +
   '- You rebuilt the app after installing the package\n' +

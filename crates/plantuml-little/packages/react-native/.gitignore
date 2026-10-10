@@ -3,6 +3,7 @@
 ios/Frameworks/
 macos/Frameworks/
 android/src/main/jniLibs/
+windows/Frameworks/
 
 # react-native-builder-bob build output
 lib/
