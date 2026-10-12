@@ -39,6 +39,11 @@ export function parserOptionsForCase(testCase) {
   // (a separate rule), not this extension.
   if (isMicromark) {
     options.gfmAutolink = false;
+    // micromark deviates from CommonMark §5.2: a link reference definition
+    // indented 4+ spaces (or a tab) is still recognised when it immediately
+    // follows another definition. Supramark is strict CommonMark by default;
+    // opt into the deviation for micromark cases only.
+    options.subsequentIndentedDefinitions = true;
   }
   return options;
 }
