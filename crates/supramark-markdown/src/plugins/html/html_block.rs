@@ -43,14 +43,19 @@ struct HTMLSequence {
     open: Regex,
     close: Regex,
     can_terminate_paragraph: bool,
+    /// Whether a blank line ends the block. CommonMark §4.6: types 1–5 end
+    /// only at their specific close condition (running through blank lines);
+    /// types 6–7 end at a blank line.
+    ends_at_blank: bool,
 }
 
 impl HTMLSequence {
-    pub fn new(open: Regex, close: Regex, can_terminate_paragraph: bool) -> Self {
+    pub fn new(open: Regex, close: Regex, can_terminate_paragraph: bool, ends_at_blank: bool) -> Self {
         Self {
             open,
             close,
             can_terminate_paragraph,
+            ends_at_blank,
         }
     }
 }
@@ -67,36 +72,43 @@ static HTML_SEQUENCES: Lazy<[HTMLSequence; 7]> = Lazy::new(|| {
             Regex::new(r#"(?i)^<(script|pre|style|textarea)(\s|>|$)"#).unwrap(),
             Regex::new(r#"(?i)</(script|pre|style|textarea)>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<!--"#).unwrap(),
             Regex::new(r#"-->"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<\?"#).unwrap(),
             Regex::new(r#"\?>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
-            Regex::new(r#"^<![A-Z]"#).unwrap(),
+            Regex::new(r#"^<![A-Za-z]"#).unwrap(),
             Regex::new(r#">"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(r#"^<!\[CDATA\["#).unwrap(),
             Regex::new(r#"\]\]>"#).unwrap(),
             true,
+            false,
         ),
         HTMLSequence::new(
             Regex::new(&format!("(?i)^</?({block_names})(\\s|/?>|$)")).unwrap(),
             Regex::new(r#"^$"#).unwrap(),
+            true,
             true,
         ),
         HTMLSequence::new(
             Regex::new(&format!("{open_close_tag_re}\\s*$")).unwrap(),
             Regex::new(r#"^$"#).unwrap(),
             false,
+            true,
         ),
     ]
 });
@@ -152,7 +164,9 @@ impl BlockRule for HtmlBlockScanner {
         // Let's roll down till block end.
         if !sequence.close.is_match(line_text) {
             while next_line < state.line_max {
-                if state.line_indent(next_line) < 0 {
+                // Types 6–7 end at a blank line; types 1–5 run through blank
+                // lines until their specific close condition.
+                if sequence.ends_at_blank && state.line_indent(next_line) < 0 {
                     break;
                 }
 
@@ -169,7 +183,15 @@ impl BlockRule for HtmlBlockScanner {
             }
         }
 
-        let (content, _) = state.get_lines(start_line, next_line, state.blk_indent, true);
+        // micromark includes a trailing line ending in an HTML block's raw
+        // content only when one is actually present in the source — i.e. when
+        // the block's last line is followed by more input, not when it sits at
+        // document EOF. `line_end` points at the line's newline byte (or at
+        // `src.len()` for the final, newline-less line), so `line_end < src.len()`
+        // distinguishes "newline present" from "EOF".
+        let last_line = next_line - 1;
+        let keep_last_lf = state.line_offsets[last_line].line_end < state.src.len();
+        let (content, _) = state.get_lines(start_line, next_line, state.blk_indent, keep_last_lf);
         let node = Node::new(HtmlBlock { content });
         Some((node, next_line - state.line))
     }

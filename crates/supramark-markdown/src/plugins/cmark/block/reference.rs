@@ -305,6 +305,13 @@ impl BlockRule for ReferenceScanner {
             }
         }
 
+        // CommonMark §5.3: a link label can have at most 999 characters inside
+        // the square brackets; a longer run is not a valid reference definition
+        // and the line falls back to a paragraph.
+        if str[1..label_end].chars().count() > 999 {
+            return None;
+        }
+
         let Some((_, ':')) = chars.next() else {
             return None;
         };

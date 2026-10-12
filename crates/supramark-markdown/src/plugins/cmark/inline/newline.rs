@@ -80,27 +80,38 @@ impl InlineRule for NewlineScanner {
             pos += 1;
         }
 
-        // '  \n' -> hardbreak
-        let mut tail_size = 0;
+        // Trailing line suffix = the maximal run of spaces/tabs at the end of
+        // the preceding text. A hard break requires 2+ trailing spaces, and a
+        // tab anywhere in that suffix makes it a soft break (matching
+        // micromark's mixed-line-suffix handling). The whole suffix is popped
+        // so neither the spaces nor a mixed-in tab leak into the output text.
         let trailing_text = state.trailing_text_get();
-
+        let mut suffix_len = 0;
+        let mut suffix_spaces = 0;
+        let mut suffix_has_tab = false;
         for ch in trailing_text.chars().rev() {
-            if ch == ' ' {
-                tail_size += 1;
-            } else {
-                break;
+            match ch {
+                ' ' => {
+                    suffix_len += 1;
+                    suffix_spaces += 1;
+                }
+                '\t' => {
+                    suffix_len += 1;
+                    suffix_has_tab = true;
+                }
+                _ => break,
             }
         }
 
-        state.trailing_text_pop(tail_size);
+        state.trailing_text_pop(suffix_len);
 
-        let node = if tail_size >= 2 {
+        let node = if suffix_spaces >= 2 && !suffix_has_tab {
             Node::new(Hardbreak)
         } else {
             Node::new(Softbreak)
         };
 
-        state.pos -= tail_size; // backtrack to include tail in source maps
+        state.pos -= suffix_len; // backtrack to include the suffix in source maps
         Some((node, pos - state.pos))
     }
 }

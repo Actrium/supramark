@@ -39,6 +39,14 @@ pub struct MarkdownParser {
     /// default i32::MAX, indented code blocks will set this to 4
     pub max_indent: i32,
 
+    /// Runtime disable flags for micromark constructs whose scanner is shared
+    /// with another construct, so they can't be turned off by removing a rule.
+    /// `hardBreakEscape`/`characterEscape` share `EscapeScanner`;
+    /// `labelEnd` can't be removed because `parse_link_label` matches `]` directly.
+    pub disable_hard_break_escape: bool,
+    pub disable_character_escape: bool,
+    pub disable_label_end: bool,
+
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
@@ -85,6 +93,9 @@ impl Default for MarkdownParser {
             max_nesting: 100,
             ruler: Ruler::new(),
             max_indent: i32::MAX,
+            disable_hard_break_escape: false,
+            disable_character_escape: false,
+            disable_label_end: false,
         };
         block::builtin::add(&mut md);
         inline::builtin::add(&mut md);

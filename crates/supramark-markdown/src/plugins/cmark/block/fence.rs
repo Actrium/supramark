@@ -179,7 +179,23 @@ impl BlockRule for FenceScanner {
 
         // If a fence has heading spaces, they should be removed from its inner block
         let indent = state.line_offsets[state.line].indent_nonspace;
-        let (content, _) = state.get_lines(state.line + 1, next_line, indent as usize, true);
+        let (mut content, _) = state.get_lines(state.line + 1, next_line, indent as usize, true);
+
+        // micromark emits a trailing line ending for a fenced code block only
+        // when at least one content line produced a `codeFlowValue` (i.e. was
+        // non-empty after prefix removal). `get_lines` always appends a `\n`
+        // after the last line, so for an unclosed fence that runs to document
+        // EOF on a newline-less final line whose content is entirely blank
+        // lines, that trailing `\n` is spurious — drop it.
+        if !have_end_marker {
+            let last_line = next_line - 1;
+            if state.line_offsets[last_line].line_end >= state.src.len()
+                && !content.is_empty()
+                && content.bytes().all(|b| b == b'\n')
+            {
+                content.pop();
+            }
+        }
 
         let lang_prefix = state
             .md
