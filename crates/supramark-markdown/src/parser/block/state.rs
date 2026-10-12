@@ -54,6 +54,13 @@ where
     /// definition has been parsed, and self-invalidating thereafter because line
     /// numbers only increase.
     pub last_def_end_line: Option<usize>,
+
+    /// Set by a container (blockquote / list) while testing whether a
+    /// lazy-continuation candidate line instead begins a new block construct.
+    /// Matches micromark's `self.parser.lazy[line]`: a type-7 (complete-tag)
+    /// HTML block can only interrupt a paragraph on a lazy line — at the top
+    /// level (non-lazy) it stays inline paragraph text (CommonMark 0.30 §4.6).
+    pub in_lazy_continuation: bool,
 }
 
 /// Holds start/end/etc. positions for a specific source text line.
@@ -130,6 +137,7 @@ impl<'a, 'b> BlockState<'a, 'b> {
             list_indent: None,
             level: 0,
             last_def_end_line: None,
+            in_lazy_continuation: false,
         };
 
         result.generate_caches();
