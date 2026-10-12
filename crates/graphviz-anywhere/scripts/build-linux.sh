@@ -90,14 +90,18 @@ esac
 
 # Fail closed: shipping a glibc-linked archive as the musl asset would break at
 # link time on every musl host, and the mistake is invisible in the packaged
-# tarball. `-dumpmachine` is the compiler's own answer about its target.
+# tarball. `-dumpmachine` is the compiler's own answer about its target. Check
+# CXX as well as CC: the C++ objects and the libstdc++.a merged in below come
+# from CXX, so a mixed CC/CXX pair would smuggle glibc objects into the archive.
 if [[ "$LIBC" == "musl" ]]; then
-    CC_TARGET="$(${CC:-gcc} -dumpmachine 2>/dev/null || true)"
-    if [[ "$CC_TARGET" != *musl* ]]; then
-        log_error "--libc musl needs a musl toolchain, but ${CC:-gcc} targets '${CC_TARGET:-unknown}'"
-        log_error "run this inside a musl environment (e.g. the alpine container in CI)"
-        exit 1
-    fi
+    for _tool in "${CC:-gcc}" "${CXX:-g++}"; do
+        _target="$(${_tool} -dumpmachine 2>/dev/null || true)"
+        if [[ "$_target" != *musl* ]]; then
+            log_error "--libc musl needs a musl toolchain, but ${_tool} targets '${_target:-unknown}'"
+            log_error "run this inside a musl environment (e.g. the alpine container in CI)"
+            exit 1
+        fi
+    done
 fi
 
 if [[ "$LIBC" == "musl" ]]; then
