@@ -30,25 +30,26 @@ graphviz-anywhere/
 
 ## Native Target Status
 
-The table below reflects the state after concurrent PRs (Agents A–C) land.
-Entries marked **NEW** are not yet in `main`; entries marked **⚠️** have
-partial coverage only.
+Every row below is the current state of `main`. The source of truth for the
+last two columns is `.github/workflows/graphviz-release.yml` (which jobs run,
+which assets the release attaches) and `target_triple_to_asset_name` in
+`packages/rust/src/build_helpers.rs` (which asset `build.rs` resolves).
 
 | Target | `scripts/build-*.sh` | CI matrix | GitHub Release asset | Rust `build.rs` auto-resolve |
 | --- | --- | --- | --- | --- |
 | x86_64-unknown-linux-gnu | ✅ | ✅ | ✅ `graphviz-native-linux-x86_64.tar.gz` | ✅ |
-| aarch64-unknown-linux-gnu | ✅ | ✅ (ubuntu-24.04-arm, NEW) | ✅ `graphviz-native-linux-aarch64.tar.gz` (NEW) | ✅ (NEW) |
+| aarch64-unknown-linux-gnu | ✅ | ✅ (ubuntu-22.04-arm) | ✅ `graphviz-native-linux-aarch64.tar.gz` | ✅ |
 | aarch64-apple-darwin | ✅ (universal) | ✅ | ✅ `graphviz-native-macos-universal.tar.gz` | ✅ |
 | x86_64-apple-darwin | ✅ (universal) | ✅ | ✅ `graphviz-native-macos-universal.tar.gz` | ✅ |
-| aarch64-apple-ios | ✅ | ✅ | ✅ per-slice (NEW) | ✅ (NEW) |
-| aarch64-apple-ios-sim | ✅ | ✅ | ✅ per-slice (NEW) | ✅ (NEW) |
-| x86_64-apple-ios | ✅ (NEW) | ✅ (NEW) | ✅ per-slice (NEW) | ✅ (NEW) |
+| aarch64-apple-ios | ✅ | ✅ | ✅ per-slice | ✅ |
+| aarch64-apple-ios-sim | ✅ | ✅ | ✅ per-slice | ✅ |
+| x86_64-apple-ios | ✅ | ✅ | ✅ per-slice | ✅ |
 | aarch64-linux-android | ✅ | ✅ | ✅ `graphviz-native-android-arm64-v8a.tar.gz` | ✅ |
 | armv7-linux-androideabi | ✅ | ✅ | ✅ `graphviz-native-android-armeabi-v7a.tar.gz` | ✅ |
 | x86_64-linux-android | ✅ | ✅ | ✅ `graphviz-native-android-x86_64.tar.gz` | ✅ |
-| i686-linux-android | ✅ (NEW) | ✅ (NEW) | ✅ `graphviz-native-android-x86.tar.gz` (NEW) | ✅ (NEW) |
-| x86_64-pc-windows-msvc | ✅ | ✅ | ✅ `graphviz-native-windows-x86_64.zip` | ⚠️ env-override only (zip layout not auto-extracted) |
-| aarch64-pc-windows-msvc | ⚠️ skeleton | ⚠️ continue-on-error | ⚠️ planned | ⚠️ env-override only |
+| i686-linux-android | ✅ | ✅ | ✅ `graphviz-native-android-x86.tar.gz` | ✅ |
+| x86_64-pc-windows-msvc | ✅ | ✅ | ✅ `graphviz-native-windows-x86_64.tar.gz` | ✅ |
+| aarch64-pc-windows-msvc | ✅ | ✅ (windows-11-arm) | ✅ `graphviz-native-windows-arm64.tar.gz` | ✅ |
 | wasm32-unknown-unknown | — (JS bridge) | ✅ wasm build | — (bundled in npm) | — (no native link needed) |
 
 ## Cross-Compilation

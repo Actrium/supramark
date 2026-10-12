@@ -117,7 +117,7 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
   postinstall script.
 - **Windows ARM64**: skeleton (`scripts/build-windows.sh --arch arm64`, CI
   matrix entry with `continue-on-error: true`, asset name
-  `graphviz-native-windows-arm64.zip`, `build.rs` env-override path). Needs
+  `graphviz-native-windows-arm64.tar.gz`, `build.rs` env-override path). Needs
   real verification on a Windows ARM runner.
 - **RN postinstall paths in `try_repo_output`**: `build.rs` now scans
   `packages/react-native/{ios,android}/...` when the Rust crate is built
