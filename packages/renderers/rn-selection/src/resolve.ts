@@ -28,6 +28,15 @@ export interface SelectionUnitIndex {
    * of a drag.
    */
   structuralGroupBounds: Map<string, { min: number; max: number }>;
+  /**
+   * The selectable region each unit belongs to, or -1 for a hard boundary
+   * (atom / boundary units). Selection may not cross a hard boundary, so a
+   * range whose endpoints land in different regions is clamped to the
+   * anchor's; geometry, highlighting and copying all see the clamped range.
+   */
+  regionOf: number[];
+  /** Inclusive unit-index spans of the selectable regions, in document order. */
+  regions: Array<{ start: number; end: number }>;
 }
 
 /** Length a unit contributes to the global plain-text stream. */
@@ -51,11 +60,18 @@ export function buildUnitIndex(units: readonly SelectionUnit[]): SelectionUnitIn
   const byUnitId = new Map<string, number>();
   const byNodeId = new Map<string, number[]>();
   const structuralGroupBounds = new Map<string, { min: number; max: number }>();
+  const regionOf: number[] = [];
+  const regions: Array<{ start: number; end: number }> = [];
   let startOffset = 0;
   units.forEach((unit, unitIndex) => {
     const textLength = unitTextLength(unit);
     entries.push({ unit, unitIndex, startOffset, textLength });
-    byUnitId.set(unit.unitId, unitIndex);
+    // Unit ids must be unique per document. A collision would silently re-point
+    // every offset past it, so the FIRST holder keeps the id (a later unit never
+    // steals it) and dev builds report the collision — see detectDuplicateUnitIds.
+    if (!byUnitId.has(unit.unitId)) {
+      byUnitId.set(unit.unitId, unitIndex);
+    }
     const existing = byNodeId.get(unit.nodeId);
     if (existing) existing.push(unitIndex);
     else byNodeId.set(unit.nodeId, [unitIndex]);
@@ -69,9 +85,151 @@ export function buildUnitIndex(units: readonly SelectionUnit[]): SelectionUnitIn
         structuralGroupBounds.set(group, { min: unitIndex, max: unitIndex });
       }
     }
+    // Hard boundaries are not selectable and split the document into regions.
+    if (unit.kind === 'atom' || unit.kind === 'boundary') {
+      regionOf.push(-1);
+    } else {
+      const open = regions[regions.length - 1];
+      if (open !== undefined && open.end === unitIndex - 1) {
+        open.end = unitIndex;
+        regionOf.push(regions.length - 1);
+      } else {
+        regions.push({ start: unitIndex, end: unitIndex });
+        regionOf.push(regions.length - 1);
+      }
+    }
     startOffset += textLength;
   });
-  return { entries, byUnitId, byNodeId, structuralGroupBounds };
+  reportDuplicateUnitIds(units);
+  return { entries, byUnitId, byNodeId, structuralGroupBounds, regionOf, regions };
+}
+
+/**
+ * Clamp a range so its endpoints stay inside one selectable region.
+ *
+ * Hard boundaries — inline images / math / diagrams, container and unsupported
+ * boundaries — are selection limits, not gaps to skip over: hit testing,
+ * highlighting and copying must all agree, so the clamp lives here and every
+ * consumer (store, overlay, toolbar, serializer) derives from the result. The
+ * anchor owns the region; a focus past it clamps to that region's edge, and an
+ * anchor sitting on a boundary snaps toward the focus side.
+ */
+export function clampSelectionRange(
+  index: SelectionUnitIndex,
+  range: SelectionRange
+): SelectionRange {
+  const a = locateSelectionPoint(index, range.anchor);
+  const f = locateSelectionPoint(index, range.focus);
+  const regionA = index.regionOf[a.unitIndex];
+  const regionF = index.regionOf[f.unitIndex];
+  if (regionA === regionF && regionA !== -1) return range;
+  if (regionA === -1 && regionF === -1) {
+    // Neither endpoint is selectable: collapse so the range resolves to
+    // nothing instead of spanning every boundary in between.
+    return { anchor: range.anchor, focus: range.anchor };
+  }
+
+  const pointAtStart = (region: number): SelectionPoint => {
+    const entry = index.entries[index.regions[region].start];
+    return { nodeId: entry.unit.nodeId, unitId: entry.unit.unitId, offset: 0 };
+  };
+  const pointAtEnd = (region: number): SelectionPoint => {
+    const entry = index.entries[index.regions[region].end];
+    return { nodeId: entry.unit.nodeId, unitId: entry.unit.unitId, offset: entry.textLength };
+  };
+
+  let anchor = range.anchor;
+  let owner = regionA;
+  if (owner === -1) {
+    // The anchor itself sits on a boundary: snap it to the nearest region on
+    // the focus side. With no region there, nothing selectable is in reach.
+    const forward = f.unitIndex > a.unitIndex;
+    let found = -1;
+    if (forward) {
+      for (let region = 0; region < index.regions.length; region += 1) {
+        if (index.regions[region].start > a.unitIndex) {
+          found = region;
+          break;
+        }
+      }
+    } else {
+      for (let region = index.regions.length - 1; region >= 0; region -= 1) {
+        if (index.regions[region].end < a.unitIndex) {
+          found = region;
+          break;
+        }
+      }
+    }
+    if (found === -1) return range;
+    owner = found;
+    anchor = forward ? pointAtStart(owner) : pointAtEnd(owner);
+  }
+
+  const within = index.regions[owner];
+  if (f.unitIndex < within.start) return { anchor, focus: pointAtStart(owner) };
+  if (f.unitIndex > within.end) return { anchor, focus: pointAtEnd(owner) };
+  return { anchor, focus: range.focus };
+}
+
+/** A unitId claimed by more than one unit — an identity bug upstream. */
+export interface DuplicateUnitId {
+  unitId: string;
+  /** Index of the unit that keeps the id (the first in document order). */
+  firstIndex: number;
+  /** Index of the unit whose claim is ignored. */
+  duplicateIndex: number;
+}
+
+/**
+ * Every unitId claimed by more than one unit, in document order. Exported so
+ * tests can assert uniqueness on real parser output directly, without depending
+ * on `__DEV__` or console capture.
+ */
+export function detectDuplicateUnitIds(units: readonly SelectionUnit[]): DuplicateUnitId[] {
+  const firstSeen = new Map<string, number>();
+  const duplicates: DuplicateUnitId[] = [];
+  units.forEach((unit, unitIndex) => {
+    const first = firstSeen.get(unit.unitId);
+    if (first === undefined) {
+      firstSeen.set(unit.unitId, unitIndex);
+      return;
+    }
+    duplicates.push({ unitId: unit.unitId, firstIndex: first, duplicateIndex: unitIndex });
+  });
+  return duplicates;
+}
+
+declare const __DEV__: boolean | undefined;
+
+/** `__DEV__` in React Native bundles; off in tests, web and production alike. */
+function isDevEnvironment(): boolean {
+  return typeof __DEV__ !== 'undefined' && __DEV__ === true;
+}
+
+// One report per distinct collision set: the index is rebuilt on every unit
+// stream change, and an unfixed collision would otherwise warn on every frame.
+const reportedDuplicateSets = new Set<string>();
+
+/** Dev-only: surface duplicate ids with their positions so they can be located. */
+function reportDuplicateUnitIds(units: readonly SelectionUnit[]): void {
+  if (!isDevEnvironment()) return;
+  const duplicates = detectDuplicateUnitIds(units);
+  if (duplicates.length === 0) return;
+  const signature = duplicates.map(duplicate => duplicate.unitId).join('|');
+  if (reportedDuplicateSets.has(signature)) return;
+  reportedDuplicateSets.add(signature);
+  const shown = duplicates
+    .slice(0, 5)
+    .map(
+      duplicate =>
+        `${JSON.stringify(duplicate.unitId)} (#${duplicate.firstIndex} vs #${duplicate.duplicateIndex})`
+    )
+    .join(', ');
+  console.warn(
+    `[supramark] ${duplicates.length} duplicate selection unitId(s): ${shown}` +
+      `${duplicates.length > 5 ? ', ...' : ''}. ` +
+      'Unit ids must be unique per document; every offset past a collision resolves wrongly.'
+  );
 }
 
 /**
@@ -266,8 +424,9 @@ export function resolveSelectionRange(
   prebuiltIndex?: SelectionUnitIndex
 ): SelectionUnit[] {
   const index = prebuiltIndex ?? buildUnitIndex(units);
-  const a = locateSelectionPoint(index, range.anchor);
-  const f = locateSelectionPoint(index, range.focus);
+  const clamped = clampSelectionRange(index, range);
+  const a = locateSelectionPoint(index, clamped.anchor);
+  const f = locateSelectionPoint(index, clamped.focus);
 
   // Normalize so that `start` precedes `end` in (unitIndex, intraOffset) order.
   let start = a;

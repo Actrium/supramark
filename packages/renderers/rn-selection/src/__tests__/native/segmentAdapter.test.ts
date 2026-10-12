@@ -278,3 +278,37 @@ describe('rangeToSegmentSelection grapheme agreement with the serializer', () =>
     }
   });
 });
+
+describe('buildSegmentSpans atom units', () => {
+  const atom = (unitId: string, nodeId: string): SelectionUnit => ({
+    kind: 'atom',
+    unitId,
+    nodeId,
+    label: 'image',
+    node: NODE,
+    payload: {},
+  });
+
+  const units: SelectionUnit[] = [
+    tUnit('p#0', 'p', 'see '),
+    atom('img#0', 'img'),
+    tUnit('p#2', 'p', ' now'),
+  ];
+  const index = buildUnitIndex(units);
+  const spans = buildSegmentSpans({ unitIds: ['p#0', 'img#0', 'p#2'] }, index);
+
+  test('an attachment atom occupies exactly one display offset, keeping spans contiguous', () => {
+    expect(spans).toEqual([
+      { unitId: 'p#0', nodeId: 'p', start: 0, end: 4 },
+      { unitId: 'img#0', nodeId: 'img', start: 4, end: 5 },
+      { unitId: 'p#2', nodeId: 'p', start: 5, end: 9 },
+    ]);
+    // The atom's single display offset resolves to the atom itself.
+    expect(segmentOffsetToPoint(spans, 4)).toEqual({ nodeId: 'img', unitId: 'img#0', offset: 0 });
+  });
+
+  test('segmentTextFromSpans renders the atom as the object replacement character', () => {
+    // U+FFFC keeps word/grapheme math neutral; it never enters the clipboard.
+    expect(segmentTextFromSpans(index, spans)).toBe('see ￼ now');
+  });
+});
