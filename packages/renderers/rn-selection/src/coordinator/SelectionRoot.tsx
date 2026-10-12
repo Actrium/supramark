@@ -423,6 +423,11 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         pointAt,
         wordAt,
         handleAt,
+        // Preserve the grab offset against the visible edge's own text line.
+        handlePoint: edge => {
+          const handle = computeHandles(currentRects())?.[edge];
+          return handle ? { x: handle.x, y: handle.y + handle.h / 2 } : null;
+        },
         fixedPointForHandle,
         onPhaseChange: phase => publishGestureActivity(phase === 'extending' || phase === 'handle'),
         config: { longPressMs, moveTolerance, longPress: longPressEnabled },
@@ -432,6 +437,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       pointAt,
       wordAt,
       handleAt,
+      currentRects,
       fixedPointForHandle,
       publishGestureActivity,
       longPressMs,
@@ -719,12 +725,12 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   );
 
   const onHandleGrant = useCallback(
-    (edge: HandleEdge) => {
+    (edge: HandleEdge, point?: Point) => {
       if (!gestureEnabled) return;
       refreshRootOrigin();
       clearTimer();
       scopeGestureToHandle(edge);
-      gesture.handleStart(edge, Date.now());
+      gesture.handleStart(edge, Date.now(), point);
     },
     [gestureEnabled, refreshRootOrigin, clearTimer, scopeGestureToHandle, gesture]
   );
@@ -960,7 +966,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
             (renderToolbar ? (
               <ToolbarSlot viewport={viewport} render={renderToolbar} />
             ) : (
-              <SelectionToolbar viewport={viewport} />
+              <SelectionToolbar viewport={viewport} anchor={rootRef} />
             ))}
         </SelectionContext.Provider>
       </SelectionGestureActivityContext.Provider>

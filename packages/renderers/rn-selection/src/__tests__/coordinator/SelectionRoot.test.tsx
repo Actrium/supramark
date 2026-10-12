@@ -5,6 +5,7 @@ import type { SupramarkNode } from '@supramark/core';
 import type { SelectionUnit } from '../../model';
 import type { SelectionStore } from '../../coordinator/state';
 import type { SelectionRootHandle } from '../../coordinator/SelectionRoot';
+import type { SelectionToolbarHostHandle } from '../../coordinator/SelectionToolbarHost';
 
 mock.module('react-native', () => ({
   Platform: { OS: 'android' },
@@ -52,6 +53,82 @@ const UNITS: SelectionUnit[] = [
   },
 ];
 
+test('a short message uses host-sized toolbar layout, follows scrolling, and keeps copy actionable', async () => {
+  // The host is deliberately much wider and taller than its twenty-point message.
+  const { SelectionToolbarHost } = await import('../../coordinator/SelectionToolbarHost');
+  const hostRef = React.createRef<SelectionToolbarHostHandle>();
+  let rootY = 200;
+  let selection: SelectionStore | undefined;
+  const copies: string[] = [];
+  // Register one short native text box, independently of the host portal.
+  function Block() {
+    const ctx = useSelectionContext();
+    useEffect(() => {
+      selection = ctx.store;
+      return ctx.registerBlock({
+        nodeId: 'p1',
+        unitIds: ['p1#0'],
+        kind: 'text',
+        rect: { x: 0, y: 0, w: 20, h: 20 },
+      });
+    }, [ctx]);
+    return null;
+  }
+  await act(async () => {
+    renderer = create(
+      <SelectionToolbarHost testID="toolbar-host" hostRef={hostRef}>
+        <SelectionRoot
+          units={UNITS}
+          handles={false}
+          overlay={false}
+          toolbarItems={[{ id: 'copy', title: 'Copy', format: 'plainText' }]}
+          onCopy={request => copies.push(request.text)}
+        >
+          <Block />
+        </SelectionRoot>
+      </SelectionToolbarHost>,
+      {
+        createNodeMock: element => ({
+          measureInWindow: (callback: (...args: number[]) => void) =>
+            element.props.testID === 'toolbar-host'
+              ? callback(0, 50, 360, 600)
+              : callback(100, rootY, 20, 20),
+        }),
+      }
+    );
+    await Promise.resolve();
+  });
+  await act(async () => {
+    selection!.beginAt({ nodeId: 'p1', unitId: 'p1#0', offset: 0 });
+    selection!.extendTo({ nodeId: 'p1', unitId: 'p1#0', offset: 5 });
+    selection!.commit();
+  });
+  // Feed the intrinsic menu measurement; its width exceeds the message width.
+  const button = renderer!.root.findByType('TouchableOpacity');
+  await act(async () =>
+    button.parent!.props.onLayout({ nativeEvent: { layout: { width: 64, height: 36 } } })
+  );
+  const menu = button.parent!.parent!;
+  expect(menu.props.style.width).toBe(344);
+  expect(menu.props.style.top + 36).toBeLessThan(150);
+  const before = menu.props.style.top;
+  rootY += 100;
+  await act(async () => {
+    hostRef.current!.refresh();
+  });
+  expect(menu.props.style.top).toBe(before + 100);
+  // The portal consumes its action touch so host background dismissal cannot run first.
+  let stopped = false;
+  menu.props.onTouchEnd({
+    stopPropagation: () => {
+      stopped = true;
+    },
+  });
+  expect(stopped).toBe(true);
+  await act(async () => button.props.onPress());
+  expect(copies).toEqual(['hello']);
+  expect(renderer!.root.findAllByType('TouchableOpacity')).toHaveLength(0);
+});
 
 function eventAt(x: number, y: number, location = { x: -500, y: -500 }, timestamp?: number) {
   return {
@@ -737,7 +814,6 @@ describe('SelectionRoot responder negotiation', () => {
     expect(store.getSnapshot().range).toBeNull();
   });
 
-
   test('handle drags resolve from page coordinates through the root origin', () => {
     let store: SelectionStore | null = null;
 
@@ -801,7 +877,8 @@ describe('SelectionRoot responder negotiation', () => {
     )[1];
     act(() => {
       endKnob.props.onResponderGrant(eventAt(160, 326));
-      endKnob.props.onResponderMove(eventAt(130, 310), { dx: 999, dy: 999 });
+      // Move horizontally from the knob; the pointer-to-caret vertical offset stays fixed.
+      endKnob.props.onResponderMove(eventAt(130, 326), { dx: 999, dy: 999 });
     });
 
     expect(store.getSnapshot().range).toEqual({
