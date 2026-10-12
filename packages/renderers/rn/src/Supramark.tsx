@@ -45,6 +45,8 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
+import { CodeBlock, CodeCopyContext } from './CodeBlock';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -344,6 +346,22 @@ export interface SupramarkProps {
   containerRenderers?: Record<string, ContainerRendererRN>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  /**
+   * Copy handler for code blocks with a language info string. When provided,
+   * the header renders a copy button that calls this with the raw source.
+   *
+   * RN stays clipboard-free: the host owns the clipboard API
+   * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
+   * inside this callback. Without it, no copy button is shown on RN.
+   * Language-less fences and indented code have no distinct AST flag and do
+   * not render a copy button.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /**
+   * Whether to show the code-block copy button (requires onCopyCode;
+   * default: enabled).
+   */
+  copyButton?: boolean;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -352,6 +370,14 @@ export interface SupramarkProps {
    * - the host may open a new page / modal / external browser from the callback.
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
+
+  /**
+   * Callback invoked when the user taps a :::video card.
+   *
+   * The host owns playback when supplied. Otherwise the default video
+   * renderer opens http(s) sources through React Native Linking.
+   */
+  onVideoPress?: SupramarkVideoPressHandler;
 
   /**
    * Callback invoked when the user taps a block image.
@@ -383,11 +409,14 @@ export const Supramark: React.FC<SupramarkProps> = ({
   onError,
   errorFallback,
   onOpenHtmlPage,
+  onVideoPress,
   onImagePress,
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
   selection,
+  onCopyCode,
+  copyButton,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -675,6 +704,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return () => callback(null);
   }, [selectionReady, selectionHandle]);
 
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton]
+  );
+
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
     if (errorFallback) {
@@ -710,40 +745,44 @@ export const Supramark: React.FC<SupramarkProps> = ({
 
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
-      <SelectionPlanContext.Provider value={selectionPlan}>
-        <SourceStateContext.Provider value={parsedDocument.sourceState}>
-          <ImagePressContext.Provider value={onImagePress}>
-            {selectionPlan ? (
-              <SelectionRoot
-                units={selectionPlan.units}
-                enabled={selection?.enabled !== false}
-                longPress={selection?.longPress}
-                handleRef={selectionRootRef}
-                onSelectionChange={selection?.onSelectionChange}
-                onCopy={request =>
-                  selection?.onAction?.({
-                    ...request,
-                    documentId: selectionPlan.documentId,
-                    revision: selectionPlan.revision,
-                  })
-                }
-                toolbarItems={selection?.toolbarItems}
-                renderToolbar={selection?.renderToolbar}
-                overlay={selection?.overlay}
-                handles={selection?.handles}
-                toolbar={selection?.toolbar}
-                longPressMs={selection?.longPressMs}
-                moveTolerance={selection?.moveTolerance}
-                onGestureActiveChange={selection?.onGestureActiveChange}
-              >
-                {documentView}
-              </SelectionRoot>
-            ) : (
-              documentView
-            )}
-          </ImagePressContext.Provider>
-        </SourceStateContext.Provider>
-      </SelectionPlanContext.Provider>
+      <VideoPressContext.Provider value={onVideoPress}>
+        <CodeCopyContext.Provider value={codeCopyContextValue}>
+          <SelectionPlanContext.Provider value={selectionPlan}>
+            <SourceStateContext.Provider value={parsedDocument.sourceState}>
+              <ImagePressContext.Provider value={onImagePress}>
+                {selectionPlan ? (
+                  <SelectionRoot
+                    units={selectionPlan.units}
+                    enabled={selection?.enabled !== false}
+                    longPress={selection?.longPress}
+                    handleRef={selectionRootRef}
+                    onSelectionChange={selection?.onSelectionChange}
+                    onCopy={request =>
+                      selection?.onAction?.({
+                        ...request,
+                        documentId: selectionPlan.documentId,
+                        revision: selectionPlan.revision,
+                      })
+                    }
+                    toolbarItems={selection?.toolbarItems}
+                    renderToolbar={selection?.renderToolbar}
+                    overlay={selection?.overlay}
+                    handles={selection?.handles}
+                    toolbar={selection?.toolbar}
+                    longPressMs={selection?.longPressMs}
+                    moveTolerance={selection?.moveTolerance}
+                    onGestureActiveChange={selection?.onGestureActiveChange}
+                  >
+                    {documentView}
+                  </SelectionRoot>
+                ) : (
+                  documentView
+                )}
+              </ImagePressContext.Provider>
+            </SourceStateContext.Provider>
+          </SelectionPlanContext.Provider>
+        </CodeCopyContext.Provider>
+      </VideoPressContext.Provider>
     </ErrorBoundary>
   );
 };
@@ -1181,7 +1220,11 @@ function renderNode(
     }
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, styles, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} styles={styles}>
+          {renderCodeContent(codeBlock, styles, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -1290,7 +1333,15 @@ function renderNode(
           config,
           onOpenHtmlPage,
           renderNode: (n, k) =>
-            renderNode(n, k, styles, highlighted, config, onOpenHtmlPage, containerRenderers),
+            renderNode(
+              n,
+              k,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            ),
           renderChildren: children =>
             children.map((child, index) =>
               renderNode(
@@ -1558,7 +1609,15 @@ function renderNode(
       return (
         <View key={key} style={[styles.table, { width: screenWidth }]}>
           {table.children.map((row, index) =>
-            renderNode(row, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              row,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1568,7 +1627,15 @@ function renderNode(
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
-            renderNode(cell, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              cell,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1596,7 +1663,15 @@ function renderNode(
       return (
         <View key={key} style={styles.blockquote}>
           {quote.children.map((child, i) =>
-            renderNode(child, i, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              i,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1615,9 +1690,9 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+/** Render selectable code inside the shared copy-button shell, excluding header chrome. */
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>
 ): RenderedNode {
@@ -1627,29 +1702,25 @@ function renderCodeBlock(
 
   if (!highlight) {
     return (
-      <View key={key} style={styles.codeBlock}>
-        <SelectableTextBlock node={codeBlock} style={styles.code}>
-          {codeBlock.value}
-        </SelectableTextBlock>
-      </View>
+      <SelectableTextBlock node={codeBlock} style={styles.code}>
+        {codeBlock.value}
+      </SelectableTextBlock>
     );
   }
 
   return (
-    <View key={key} style={styles.codeBlock}>
-      <SelectableTextBlock node={codeBlock} style={styles.code}>
-        {highlight.lines.map((line, lineIndex) => (
-          <Text key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
-                {token.text}
-              </Text>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </Text>
-        ))}
-      </SelectableTextBlock>
-    </View>
+    <SelectableTextBlock node={codeBlock} style={styles.code}>
+      {highlight.lines.map((line, lineIndex) => (
+        <Text key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
+              {token.text}
+            </Text>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </Text>
+      ))}
+    </SelectableTextBlock>
   );
 }
 
@@ -1761,7 +1832,15 @@ function renderListItemBody(
     flushInline();
     out.push(
       <View key={`li-${seq}`} style={styles.listItemIndent}>
-        {renderNode(child, 0, styles, highlighted, config, onOpenHtmlPage, containerRenderers)}
+        {renderNode(
+          child,
+          0,
+          styles,
+          highlighted,
+          config,
+          onOpenHtmlPage,
+          containerRenderers
+        )}
       </View>
     );
     seq += 1;
@@ -1805,13 +1884,7 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(
-          strongNode.children,
-          styles,
-          highlighted,
-          config,
-          'strong'
-        );
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
       }
       return (
         <Text key={key} style={styles.strong}>

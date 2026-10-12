@@ -47,6 +47,7 @@ import { DiagramEngineContext } from './DiagramEngineProvider.js';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary.js';
 import { MathBlockWeb, MathInlineWeb } from './MathBlockWeb.js';
 import { SourceStateContext } from './SourceStateContext.js';
+import { CodeBlock, CodeCopyContext } from './CodeBlock.js';
 import {
   getRendererCache,
   resolveDiagramCachePolicy,
@@ -79,6 +80,18 @@ export interface SupramarkWebProps {
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
   onRenderStateChange?: (state: SupramarkRenderState) => void;
+  /**
+   * Copy handler for code blocks with a language info string. When provided,
+   * the copy button calls it instead of `navigator.clipboard.writeText`.
+   * Language-less fences and indented code have no distinct AST flag, so they
+   * render the code card without a copy button.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /**
+   * Whether to show code-block copy chrome (default: true). False restores
+   * the standalone pre.
+   */
+  copyButton?: boolean;
 }
 
 export interface SupramarkRenderState {
@@ -210,6 +223,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   codeHighlighter,
   codeHighlightTheme,
   onRenderStateChange,
+  onCopyCode,
+  copyButton,
 }) => {
   const diagramEngine = useContext(DiagramEngineContext) ?? defaultDiagramEngine;
   // Parsing, engine output, highlighting, and source state form one renderable source version.
@@ -359,6 +374,12 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     [footnoteStyle, parsedDocument],
   );
 
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton],
+  );
+
   if (parseError) {
     if (errorFallback) {
       return <>{errorFallback(parseError)}</>;
@@ -385,34 +406,36 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     >
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <FootnoteMetaContext.Provider value={footnoteMeta}>
-          <div className={mergedClassNames.root}>
-            {mergeRawNodes(
-              bodyChildren,
-              (node, index) =>
-                renderNode(
-                  node,
-                  index,
-                  mergedClassNames,
-                  parsedDocument.rendered,
-                  parsedDocument.highlighted,
-                  config,
-                  mergedContainerRenderers,
-                ),
-              mergedClassNames,
-              config,
-              parsedDocument.highlighted
-            )}
-            {footnoteMeta && footnoteMeta.defs.length > 0 && (
-              <FootnoteSection
-                defs={footnoteMeta.defs}
-                classNames={mergedClassNames}
-                rendered={parsedDocument.rendered}
-                highlighted={parsedDocument.highlighted}
-                config={config}
-                containerRenderers={mergedContainerRenderers}
-              />
-            )}
-          </div>
+          <CodeCopyContext.Provider value={codeCopyContextValue}>
+            <div className={mergedClassNames.root}>
+              {mergeRawNodes(
+                bodyChildren,
+                (node, index) =>
+                  renderNode(
+                    node,
+                    index,
+                    mergedClassNames,
+                    parsedDocument.rendered,
+                    parsedDocument.highlighted,
+                    config,
+                    mergedContainerRenderers,
+                  ),
+                mergedClassNames,
+                config,
+                parsedDocument.highlighted
+              )}
+              {footnoteMeta && footnoteMeta.defs.length > 0 && (
+                <FootnoteSection
+                  defs={footnoteMeta.defs}
+                  classNames={mergedClassNames}
+                  rendered={parsedDocument.rendered}
+                  highlighted={parsedDocument.highlighted}
+                  config={config}
+                  containerRenderers={mergedContainerRenderers}
+                />
+              )}
+            </div>
+          </CodeCopyContext.Provider>
         </FootnoteMetaContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -1178,7 +1201,11 @@ function renderNode(
       return <hr key={key} className={classNames.thematicBreak} />;
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, classNames, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} classNames={classNames}>
+          {renderCodeContent(codeBlock, classNames, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -1715,9 +1742,8 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   classNames: SupramarkClassNames,
   highlighted: Map<string, SupramarkCodeHighlightResult>
 ): React.ReactNode {
@@ -1728,28 +1754,22 @@ function renderCodeBlock(
   const codeClassName = [classNames.code, languageClass].filter(Boolean).join(' ') || undefined;
 
   if (!highlight) {
-    return (
-      <pre key={key} className={classNames.codeBlock}>
-        <code className={codeClassName}>{codeBlock.value}</code>
-      </pre>
-    );
+    return <code className={codeClassName}>{codeBlock.value}</code>;
   }
 
   return (
-    <pre key={key} className={classNames.codeBlock}>
-      <code className={codeClassName} data-language={highlight.language ?? codeBlock.lang}>
-        {highlight.lines.map((line, lineIndex) => (
-          <React.Fragment key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <span key={tokenIndex} style={codeTokenStyle(token)}>
-                {token.text}
-              </span>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </React.Fragment>
-        ))}
-      </code>
-    </pre>
+    <code className={codeClassName} data-language={highlight.language ?? codeBlock.lang}>
+      {highlight.lines.map((line, lineIndex) => (
+        <React.Fragment key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <span key={tokenIndex} style={codeTokenStyle(token)}>
+              {token.text}
+            </span>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </React.Fragment>
+      ))}
+    </code>
   );
 }
 
@@ -1916,9 +1936,9 @@ function serializeBlockToHtml(
         ? ` class="${escapeHtmlAttr(classNames.codeBlock)}"`
         : '';
       // When this code block was folded into a RawHtml fragment (cross-block
-      // active-formatting reconstruction), the normal React renderCodeBlock
+      // active-formatting reconstruction), the normal React renderCodeContent
       // path is bypassed — so emit the highlighted spans here too, mirroring
-      // renderCodeBlock's token structure, otherwise the fold silently drops
+      // renderCodeContent's token structure, otherwise the fold silently drops
       // syntax highlighting for any code block following an unclosed-inline
       // paragraph.
       const inner = serializeCodeInner(node, highlighted);
@@ -1958,7 +1978,7 @@ function serializeBlocksToHtml(
 }
 
 // Emits the inner HTML for a fenced code block when it is serialized into a
-// RawHtml fragment. Mirrors renderCodeBlock: highlighted spans when a result
+// RawHtml fragment. Mirrors renderCodeContent: highlighted spans when a result
 // exists for this block's key, otherwise the plain escaped source.
 function serializeCodeInner(
   codeBlock: SupramarkCodeNode,
