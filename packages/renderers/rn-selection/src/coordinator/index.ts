@@ -33,3 +33,5 @@ export { SelectableBlock, type SelectableBlockProps } from './SelectableBlock';
 export { SelectionViewport, type SelectionViewportProps } from './SelectionViewport';
 
 export { SelectableInlineObject } from './SelectableInlineObject';
+
+export { SelectionToolbarHost, type SelectionToolbarHostHandle } from './SelectionToolbarHost';

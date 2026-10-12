@@ -27,6 +27,13 @@ describe('unionRect', () => {
 });
 
 describe('computeToolbarPlacement', () => {
+  test('hides offscreen selections and keeps partially visible selections reachable', () => {
+    expect(computeToolbarPlacement([{ x: 20, y: 900, w: 100, h: 20 }], BAR, SCREEN)).toBeNull();
+    // The selected message can extend above the list even though its last line is visible.
+    const placement = computeToolbarPlacement([{ x: 20, y: -200, w: 100, h: 240 }], BAR, SCREEN);
+    expect(placement?.side).toBe('below');
+    expect(placement?.y).toBe(48);
+  });
   test('no selection means no bar', () => {
     expect(computeToolbarPlacement([], BAR, SCREEN)).toBeNull();
   });

@@ -21,7 +21,7 @@ export interface SelectionHandlesProps {
   zIndex?: number; // default 11
   /** Width of the vertical caret bar at each selection edge. */
   barWidth?: number;
-  onHandleGrant?(edge: HandleEdge): void;
+  onHandleGrant?(edge: HandleEdge, point?: Point): void;
   onHandleMove?(point: Point): void;
   onHandleRelease?(point: Point): void;
   onHandleCancel?(): void;
@@ -97,7 +97,7 @@ const HandleKnob: React.FC<{
   diameter: number;
   handle: HandleGeometry;
   hitSlop: number;
-  onHandleGrant?(edge: HandleEdge): void;
+  onHandleGrant?(edge: HandleEdge, point?: Point): void;
   onHandleMove?(point: Point): void;
   onHandleRelease?(point: Point): void;
   onHandleCancel?(): void;
@@ -127,7 +127,11 @@ const HandleKnob: React.FC<{
         onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponderCapture: () => true,
-        onPanResponderGrant: () => onHandleGrant?.(handle.edge),
+        onPanResponderGrant: (event, gestureState) =>
+          onHandleGrant?.(
+            handle.edge,
+            gestureToRootPoint(event, handle, gestureState, toRootPoint)
+          ),
         onPanResponderMove: (event, gestureState) =>
           onHandleMove?.(gestureToRootPoint(event, handle, gestureState, toRootPoint)),
         onPanResponderRelease: (event, gestureState) =>
