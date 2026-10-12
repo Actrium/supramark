@@ -631,8 +631,10 @@ fn strip_kw_ci<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
     if s.len() < kw.len() {
         return None;
     }
-    let head = &s[..kw.len()];
-    if !head.eq_ignore_ascii_case(kw) {
+    // Bytes, not a `str` slice: every line reaches here, and `kw.len()` can
+    // land inside a multi-byte character.
+    let head = &s.as_bytes()[..kw.len()];
+    if !head.eq_ignore_ascii_case(kw.as_bytes()) {
         return None;
     }
     let rest = &s[kw.len()..];

@@ -530,7 +530,11 @@ fn parse_note_direction_inline(line: &str) -> Option<(String, String, String)> {
 }
 
 fn parse_note_direction(line: &str) -> Option<(String, String, Option<String>)> {
-    let lower = line.to_lowercase();
+    // ASCII-only folding: the prefix length measured on `lower` indexes
+    // `line` below, and `to_lowercase` can change a string's byte length
+    // (U+1E9E folds to two-byte `ss`), which would carry that length into the
+    // middle of a character.
+    let lower = line.to_ascii_lowercase();
     let rest = lower.strip_prefix("note ")?;
     for (position, prefix) in [
         ("right", "right of "),
