@@ -1,5 +1,11 @@
 import type { SelectionPoint, SelectionRange, SelectionUnit } from '../model';
-import { buildUnitIndex, resolveSelectionRange, type SelectionUnitIndex } from '../resolve';
+import {
+  buildUnitIndex,
+  clampSelectionRange,
+  locateSelectionPoint,
+  resolveSelectionRange,
+  type SelectionUnitIndex,
+} from '../resolve';
 
 export type SelectionPhase = 'idle' | 'selecting' | 'selected';
 
@@ -89,6 +95,11 @@ export function createSelectionStore(getUnits: () => readonly SelectionUnit[]): 
       };
     },
     beginAt(point) {
+      // A press inside a hard boundary (an inline image, a disabled-feature
+      // object) starts nothing: those are selection limits, not text.
+      const current = getUnits();
+      const located = locateSelectionPoint(indexFor(current), point);
+      if (indexFor(current).regionOf[located.unitIndex] === -1) return;
       anchor = point;
       focus = point;
       phase = 'selecting';
@@ -97,8 +108,15 @@ export function createSelectionStore(getUnits: () => readonly SelectionUnit[]): 
     },
     extendTo(point) {
       // A drag before a begin is ignored: phase, not focus, gates selection.
-      if (phase === 'idle') return;
-      focus = point;
+      if (phase === 'idle' || anchor === null) return;
+      // Clamp along the anchor so a drag across a hard boundary stops at its
+      // edge. The stored range is what every layer derives from — geometry,
+      // highlighting and copying — and clampSelectionRange is idempotent, so
+      // re-clamping inside resolve keeps them in agreement either way.
+      const current = getUnits();
+      const clamped = clampSelectionRange(indexFor(current), { anchor, focus: point });
+      anchor = clamped.anchor;
+      focus = clamped.focus;
       phase = 'selecting';
       recompute();
     },

@@ -34,9 +34,9 @@ function clamp(value: number, min: number, max: number): number {
 
 /**
  * Build the segment-local span table for a block's units, in registration
- * order. Only units with `textLength > 0` (text + inline break) participate
- * in the native view's visible plain text; empty-text syntax units are
- * skipped. Unknown unit ids (not present in `index`) are skipped too.
+ * order. Text and inline breaks use their UTF-16 lengths; attachment atoms
+ * use one native placeholder offset. Empty syntax units and unknown ids are
+ * skipped. Display offsets are distinct from global clipboard offsets.
  */
 export function buildSegmentSpans(
   block: Pick<RegisteredBlock, 'unitIds'>,
@@ -48,8 +48,10 @@ export function buildSegmentSpans(
     const unitIndex = index.byUnitId.get(unitId);
     if (unitIndex === undefined) continue;
     const entry = index.entries[unitIndex];
-    if (entry.textLength <= 0) continue;
-    const end = start + entry.textLength;
+    // Each inline native attachment occupies one display offset, but remains a document boundary.
+    const displayLength = entry.unit.kind === 'atom' ? 1 : entry.textLength;
+    if (displayLength <= 0) continue;
+    const end = start + displayLength;
     spans.push({ unitId, nodeId: entry.unit.nodeId, start, end });
     start = end;
   }
@@ -174,16 +176,21 @@ export function rangeToSegmentSelection(
  * Reassemble the segment's visible plain text from its span table, so
  * `rangeToSegmentSelection` can snap against the same string the block laid
  * out. Spans are contiguous and ordered by construction
- * (`buildSegmentSpans`), and every span's unit is a text/break unit — those
- * are the only kinds with a non-zero `textLength`.
+ * (`buildSegmentSpans`); attachments contribute a neutral replacement character
+ * for word/grapheme calculations without entering the serialized clipboard.
  */
-export function segmentTextFromSpans(index: SelectionUnitIndex, spans: readonly SegmentSpan[]): string {
+export function segmentTextFromSpans(
+  index: SelectionUnitIndex,
+  spans: readonly SegmentSpan[]
+): string {
   let text = '';
   for (const span of spans) {
     const unitIndex = index.byUnitId.get(span.unitId);
     if (unitIndex === undefined) continue;
     const unit = index.entries[unitIndex].unit;
     if (unit.kind === 'text' || unit.kind === 'break') text += unit.text;
+    // Use a neutral placeholder for grapheme and word boundaries, never clipboard text.
+    else if (unit.kind === 'atom') text += '\ufffc';
   }
   return text;
 }

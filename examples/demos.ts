@@ -12,6 +12,7 @@ import { footnoteExamples } from '@supramark/feature-footnote';
 import { coreMarkdownExamples } from '@supramark/feature-core-markdown';
 import { htmlPageExamples } from '@supramark/feature-html-page';
 import { mapExamples } from '@supramark/feature-map';
+import { videoExamples } from '@supramark/feature-video';
 
 // Aggregate all examples and attach a unique id field
 export const DEMOS = [
@@ -24,4 +25,5 @@ export const DEMOS = [
   ...footnoteExamples.map((ex, idx) => ({ ...ex, id: `footnote-${idx}` })),
   ...htmlPageExamples.map((ex, idx) => ({ ...ex, id: `html-page-${idx}` })),
   ...mapExamples.map((ex, idx) => ({ ...ex, id: `map-${idx}` })),
+  ...videoExamples.map((ex, idx) => ({ ...ex, id: `video-${idx}` })),
 ];

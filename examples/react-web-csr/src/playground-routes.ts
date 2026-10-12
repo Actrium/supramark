@@ -16,6 +16,7 @@ export const PLAYGROUND_ROUTES = [
   { feature: 'math', slug: 'math' },
   { feature: 'mermaid', slug: 'mermaid' },
   { feature: 'plantuml', slug: 'plantuml' },
+  { feature: 'video', slug: 'video' },
   { feature: 'weather', slug: 'weather' },
 ] as const;
 

@@ -563,6 +563,29 @@ export type SupramarkInlineNode =
   | SupramarkRawNode
   | SupramarkUnsupportedNode;
 
+/**
+ * Runtime counterpart of `SupramarkInlineNode` (minus `unsupported`, which the
+ * renderers route through their block path). Renderers and the selection
+ * linearizer share this one set instead of each deriving their own list.
+ */
+export const INLINE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'text',
+  'strong',
+  'emphasis',
+  'inline_code',
+  'math_inline',
+  'link',
+  'image',
+  'break',
+  'delete',
+  'footnote_reference',
+  'raw',
+]);
+
+export function isInlineNode(node: SupramarkNode): boolean {
+  return INLINE_NODE_TYPES.has(node.type);
+}
+
 export type SupramarkNode = SupramarkRootNode | SupramarkBlockNode | SupramarkInlineNode;
 
 export interface SupramarkRootNode extends SupramarkParentNode {
