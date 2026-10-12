@@ -21,7 +21,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ships them; a musl host has neither those SONAMEs nor the static packages
   (Alpine keeps them in `g++` / `expat-static` / `zlib-static`), and rustc
   links musl targets `crt-static`. Nothing beyond musl libc is needed to link
-  or run, which CI asserts with `ldd` after removing the dev packages.
+  or run — dynamic builds still carry the usual `libgcc_s` from the compiler
+  runtime — which CI asserts with `ldd` after removing the dev packages.
 
   musl targets are matched by triple **suffix**, so a distro toolchain resolves
   too: Alpine's own rustc reports `x86_64-alpine-linux-musl`, not rustup's
