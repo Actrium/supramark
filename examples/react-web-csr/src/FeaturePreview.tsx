@@ -13,6 +13,11 @@ import {
   containerRenderers,
   type FeatureEntry,
 } from './feature-registry';
+import {
+  DEFAULT_PLAYGROUND_FEATURE,
+  featureFromPlaygroundPath,
+  playgroundPathForFeature,
+} from './playground-routes';
 import './FeaturePreview.css';
 
 type MobilePane = 'preview' | 'editor';
@@ -48,7 +53,8 @@ function previewEnginesForFeature(shortName: string): string[] {
 }
 
 export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
-  const initial = findFeature(initialFeature) ?? featureRegistry[0];
+  const initial =
+    findFeature(initialFeature) ?? findFeature(DEFAULT_PLAYGROUND_FEATURE) ?? featureRegistry[0];
   const [feature, setFeature] = useState<FeatureEntry>(initial);
   const [selectedExample, setSelectedExample] = useState(0);
   const [markdown, setMarkdown] = useState(initial.examples[0]?.markdown ?? '');
@@ -60,6 +66,19 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   const [isMobile, setIsMobile] = useState(false);
   const [mobilePane, setMobilePane] = useState<MobilePane>('preview');
   const [renderState, setRenderState] = useState<SupramarkRenderState>(IDLE_RENDER_STATE);
+
+  const loadFeature = useCallback((nextFeature: FeatureEntry) => {
+    setRenderState({
+      pending: true,
+      renderTasks: 0,
+      highlightTasks: 0,
+      engines: previewEnginesForFeature(nextFeature.shortName),
+    });
+    setFeature(nextFeature);
+    setSelectedExample(0);
+    setMarkdown(nextFeature.examples[0]?.markdown ?? '');
+    setDirty(false);
+  }, []);
 
   // Splitter drag
   const [leftPct, setLeftPct] = useState(50);
@@ -114,6 +133,25 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
       setMobilePane('preview');
     }
   }, [feature.shortName, isMobile, selectedExample]);
+
+  useEffect(() => {
+    document.title = `${feature.displayName} · Supramark Playground`;
+  }, [feature.displayName]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const routeFeature =
+        featureFromPlaygroundPath(window.location.pathname, import.meta.env.BASE_URL) ??
+        DEFAULT_PLAYGROUND_FEATURE;
+      const nextFeature = findFeature(routeFeature);
+      if (nextFeature && nextFeature.shortName !== feature.shortName) {
+        loadFeature(nextFeature);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [feature.shortName, loadFeature]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -176,19 +214,12 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
   const switchFeature = (shortName: string) => {
     const f = findFeature(shortName);
     if (!f) return;
-    setRenderState({
-      pending: true,
-      renderTasks: 0,
-      highlightTasks: 0,
-      engines: previewEnginesForFeature(f.shortName),
-    });
-    setFeature(f);
-    setSelectedExample(0);
-    setMarkdown(f.examples[0]?.markdown ?? '');
-    setDirty(false);
-    const url = new URL(window.location.href);
-    url.searchParams.set('feature', shortName);
-    window.history.replaceState(null, '', url.toString());
+    loadFeature(f);
+    window.history.pushState(
+      { feature: f.shortName },
+      '',
+      playgroundPathForFeature(f.shortName, import.meta.env.BASE_URL)
+    );
   };
 
   const switchExample = (idx: number) => {
@@ -460,9 +491,7 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
         >
           {renderPreviewLoading()}
           <div
-            className={`feature-preview-render-content${
-              renderState.pending ? ' is-hidden' : ''
-            }`}
+            className={`feature-preview-render-content${renderState.pending ? ' is-hidden' : ''}`}
           >
             <Supramark
               markdown={markdown}

@@ -6,7 +6,6 @@ on:
     paths:
       - 'docs/**'
       - 'examples/react-web-csr/**'
-      - 'examples/d2-playground/**'
       - 'packages/features/**'
       - 'packages/renderers/**'
       - 'packages/engines/**'
