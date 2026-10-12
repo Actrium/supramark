@@ -225,16 +225,6 @@ fn parse_link_label(state: &mut InlineState, start: usize, enable_nested: bool) 
     }
 
     if found {
-        // CommonMark §5.3: a link label can have at most 999 characters
-        // inside the square brackets. A longer run is not a valid label, so
-        // the bracket pair falls back to literal text.
-        let label_len = state.src[start + 1..state.pos].chars().count();
-        if label_len > 999 {
-            found = false;
-        }
-    }
-
-    if found {
         label_end = Some(state.pos);
     }
 
@@ -514,8 +504,17 @@ fn parse_link(state: &mut InlineState, pos: usize, enable_nested: bool) -> Optio
     match state.src[pos..state.pos_max].chars().next() {
         Some('[') => {
             if let Some(x) = parse_link_label(state, pos, false) {
-                maybe_label = Some(&state.src[pos + 1..x]);
-                pos = x + 1;
+                // CommonMark §5.3: a link label can have at most 999
+                // characters inside the square brackets. A longer second
+                // bracket run is not a valid label — ignore the pair and let
+                // the first label stand on its own (shortcut reference).
+                let second = &state.src[pos + 1..x];
+                if second.chars().count() <= 999 {
+                    maybe_label = Some(second);
+                    pos = x + 1;
+                } else {
+                    pos = label_end + 1;
+                }
             } else {
                 pos = label_end + 1;
             }
@@ -532,6 +531,14 @@ fn parse_link(state: &mut InlineState, pos: usize, enable_nested: bool) -> Optio
     } else {
         maybe_label.unwrap()
     };
+
+    // CommonMark §5.3: the 999-character limit applies to the label used for
+    // reference resolution, not to inline link text — `[a…](url)` with a
+    // 1000-character text is still a link, but a 1000-character shortcut or
+    // collapsed reference label is not.
+    if label.chars().count() > 999 {
+        return None;
+    }
 
     let (destination, title) = references.get(label)?;
 

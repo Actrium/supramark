@@ -53,6 +53,17 @@ export function parserOptionsForCase(testCase) {
     // follows another definition. Supramark is strict CommonMark by default;
     // opt into the deviation for micromark cases only.
     options.subsequentIndentedDefinitions = true;
+    // micromark's safe-URI policy for image `src` (protocolSource =
+    // /^https?$/i) empties any non-http(s) scheme — including raster
+    // `data:image/*` URLs the product LinkFormatter explicitly allows. That
+    // policy belongs to the micromark comparison profile only: the product
+    // AST must preserve the URL so the renderer/host keeps final say.
+    options.sanitizeImageSrc = true;
+    // micromark's hardBreakTrailing resolution: a tab anywhere in the
+    // trailing whitespace run makes the break soft. CommonMark/cmark decide
+    // solely by the spaces immediately preceding the newline (`a\t  \nb` is a
+    // hard break), which stays the product default.
+    options.mixedLineSuffixSoftBreak = true;
   }
   return options;
 }

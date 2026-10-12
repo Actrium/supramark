@@ -294,8 +294,10 @@ pub enum SupramarkNode {
 }
 
 /// Runtime parse options. Mirrors the subset of micromark's per-case options
-/// that the conformance harness needs to forward (`disable`, `allowDangerousHtml`,
-/// `allowDangerousProtocol`).
+/// and profile deviations that the conformance harness needs to forward
+/// (`disable`, `allowDangerousHtml`, `allowDangerousProtocol`,
+/// `subsequentIndentedDefinitions`, `sanitizeImageSrc`,
+/// `mixedLineSuffixSoftBreak`).
 ///
 /// Defaults follow the product profile: raw HTML passes through verbatim
 /// (`allow_dangerous_html: true`) but dangerous protocols are sanitized
@@ -338,6 +340,23 @@ pub struct ParseOptions {
     /// conformance harness enables it for the micromark source only.
     #[serde(default)]
     pub subsequent_indented_definitions: bool,
+    /// micromark's safe-URI policy for image `src` (`protocolSource` =
+    /// `/^https?$/i`): a scheme other than `http`/`https` — including
+    /// `data:` — collapses the `src` to empty. Off by default: the product AST
+    /// preserves the parser-level URL (raster `data:image/*` allowed by the
+    /// LinkFormatter survives) and leaves final URL policy to the
+    /// renderer/host, which cannot recover a URL the parser already dropped.
+    /// The conformance harness enables it for the micromark source only.
+    #[serde(default)]
+    pub sanitize_image_src: bool,
+    /// micromark's hardBreakTrailing resolution: a tab anywhere in the
+    /// trailing whitespace run (line suffix) makes the break soft, and the
+    /// whole suffix is dropped from the text. Off by default: CommonMark
+    /// decides solely by the spaces immediately preceding the newline
+    /// (`a\t␣␣\nb` is a hard break), and only the spaces are dropped.
+    /// The conformance harness enables it for the micromark source only.
+    #[serde(default)]
+    pub mixed_line_suffix_soft_break: bool,
 }
 
 fn default_true() -> bool {
@@ -357,6 +376,8 @@ impl Default for ParseOptions {
             allow_dangerous_html: true,
             allow_dangerous_protocol: false,
             subsequent_indented_definitions: false,
+            sanitize_image_src: false,
+            mixed_line_suffix_soft_break: false,
         }
     }
 }
@@ -491,6 +512,8 @@ fn create_parser(options: ParseOptions) -> (MarkdownParser, Vec<String>) {
         crate::plugins::extra::gfm_autolink::add(&mut md);
     }
     md.subsequent_indented_definitions = options.subsequent_indented_definitions;
+    md.sanitize_image_src = options.sanitize_image_src;
+    md.mixed_line_suffix_soft_break = options.mixed_line_suffix_soft_break;
     md.allow_dangerous_protocol = options.allow_dangerous_protocol;
 
     let unknown_disabled = apply_disabled(&mut md, &options.disable);
@@ -2393,6 +2416,207 @@ pub(crate) fn build_extension_node(
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    fn children_of(node: &SupramarkNode) -> &[SupramarkNode] {
+        match node {
+            SupramarkNode::Root { children, .. }
+            | SupramarkNode::Paragraph { children, .. }
+            | SupramarkNode::Heading { children, .. }
+            | SupramarkNode::Strong { children, .. }
+            | SupramarkNode::Emphasis { children, .. }
+            | SupramarkNode::Delete { children, .. }
+            | SupramarkNode::Link { children, .. }
+            | SupramarkNode::Blockquote { children, .. }
+            | SupramarkNode::List { children, .. }
+            | SupramarkNode::ListItem { children, .. } => children,
+            _ => &[],
+        }
+    }
+
+    fn any_node(node: &SupramarkNode, pred: &dyn Fn(&SupramarkNode) -> bool) -> bool {
+        pred(node) || children_of(node).iter().any(|c| any_node(c, pred))
+    }
+
+    fn has_link(ast: &SupramarkNode) -> bool {
+        any_node(ast, &|n| matches!(n, SupramarkNode::Link { .. }))
+    }
+
+    fn has_break(ast: &SupramarkNode) -> bool {
+        any_node(ast, &|n| matches!(n, SupramarkNode::Break { .. }))
+    }
+
+    fn only_child(ast: &SupramarkNode) -> &SupramarkNode {
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        assert_eq!(children.len(), 1, "expected a single top-level node");
+        &children[0]
+    }
+
+    // --- CommonMark §5.3 label-length limit (PR #196 review): the 999-char
+    // limit applies to reference labels only, never to inline link text or
+    // image alt text.
+
+    #[test]
+    fn inline_link_text_longer_than_999_chars_still_linkifies() {
+        let text = "a".repeat(1000);
+        let ast = parse(&format!("[{text}](https://example.com)"));
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Link { url, children, .. } = &children[0] else {
+            panic!("expected link, got {:?}", children[0]);
+        };
+        assert_eq!(url, "https://example.com");
+        assert!(
+            matches!(&children[0], SupramarkNode::Text { value, .. } if value == &text),
+            "link text must keep all 1000 characters"
+        );
+    }
+
+    #[test]
+    fn image_alt_longer_than_999_chars_still_produces_image() {
+        let alt = "a".repeat(1000);
+        let ast = parse(&format!("![{alt}](https://example.com)"));
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Image {
+            url, alt: got_alt, ..
+        } = &children[0]
+        else {
+            panic!("expected image, got {:?}", children[0]);
+        };
+        assert_eq!(url, "https://example.com");
+        assert_eq!(got_alt, &alt);
+    }
+
+    #[test]
+    fn shortcut_reference_label_longer_than_999_chars_does_not_resolve() {
+        let label = "a".repeat(1000);
+        // The definition line is also rejected (reference labels share the
+        // limit), so the bracket run stays literal text.
+        let ast = parse(&format!("[{label}]: /url\n\n[{label}]"));
+        assert!(!has_link(&ast), "overlong reference label must not linkify");
+    }
+
+    #[test]
+    fn overlong_second_label_falls_back_to_shortcut_reference() {
+        let label = "a".repeat(1000);
+        let ast = parse(&format!("[foo][{label}]\n\n[foo]: /url"));
+        // The overlong second bracket run is not a label, so `[foo]` stands on
+        // its own and resolves as a shortcut reference (cmark's behaviour).
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Link { url, .. } = &children[0] else {
+            panic!("expected shortcut link, got {:?}", children[0]);
+        };
+        assert_eq!(url, "/url");
+        assert!(
+            matches!(&children[1], SupramarkNode::Text { value, .. } if value.starts_with('[')),
+            "overlong second label stays literal, got {:?}",
+            children[1]
+        );
+    }
+
+    // --- Image `src` policy (PR #196 review): micromark's protocolSource
+    // sanitization is the conformance profile, not the product default.
+
+    #[test]
+    fn product_profile_preserves_raster_data_image_url() {
+        let ast = parse("![pixel](data:image/png;base64,iVBORw0KGgo=)");
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Image { url, .. } = &children[0] else {
+            panic!("expected image, got {:?}", children[0]);
+        };
+        // The LinkFormatter explicitly allows raster data images; the AST spec
+        // assigns final URL policy to the renderer/host, so the parser must
+        // not drop it.
+        assert_eq!(url, "data:image/png;base64,iVBORw0KGgo=");
+    }
+
+    #[test]
+    fn conformance_profile_empties_non_http_image_src() {
+        let options = ParseOptions {
+            sanitize_image_src: true,
+            ..Default::default()
+        };
+        let ast = parse_with_options("![pixel](data:image/png;base64,iVBORw0KGgo=)", options);
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Image { url, .. } = &children[0] else {
+            panic!("expected image, got {:?}", children[0]);
+        };
+        assert_eq!(url, "");
+    }
+
+    #[test]
+    fn product_profile_still_empties_dangerous_image_protocol() {
+        let ast = parse("![x](javascript:alert(1))");
+        let SupramarkNode::Paragraph { children, .. } = only_child(&ast) else {
+            panic!("expected paragraph");
+        };
+        let SupramarkNode::Image { url, .. } = &children[0] else {
+            panic!("expected image, got {:?}", children[0]);
+        };
+        // The LinkFormatter rejects `javascript:` upstream in `full_link`, so
+        // the safe product default holds without the micromark policy.
+        assert_eq!(url, "");
+    }
+
+    // --- Hard breaks (PR #196 review): CommonMark decides by the spaces
+    // immediately preceding the newline; micromark's mixed-line-suffix
+    // resolution is the conformance profile.
+
+    #[test]
+    fn product_profile_hard_break_ignores_tab_before_trailing_spaces() {
+        let ast = parse("a\t  \nb");
+        assert!(
+            has_break(&ast),
+            "cmark treats `a\\t  \\nb` as a hard break, got {ast:?}"
+        );
+    }
+
+    #[test]
+    fn conformance_profile_tab_in_line_suffix_softens_break() {
+        let options = ParseOptions {
+            mixed_line_suffix_soft_break: true,
+            ..Default::default()
+        };
+        let ast = parse_with_options("a\t  \nb", options);
+        assert!(
+            !has_break(&ast),
+            "micromark resolves a tab in the line suffix to a soft break"
+        );
+        assert!(
+            any_node(
+                &ast,
+                &|n| matches!(n, SupramarkNode::Text { value, .. } if value.contains('\n'))
+            ),
+            "soft break must survive as a newline in the text"
+        );
+    }
+
+    #[test]
+    fn two_trailing_spaces_are_a_hard_break_in_both_profiles() {
+        for options in [
+            ParseOptions::default(),
+            ParseOptions {
+                mixed_line_suffix_soft_break: true,
+                ..Default::default()
+            },
+        ] {
+            let ast = parse_with_options("a  \nb", options);
+            assert!(
+                has_break(&ast),
+                "`a  \\nb` is a hard break in every profile"
+            );
+        }
+    }
 
     #[test]
     fn parses_inline_positions_with_utf16_offsets() {

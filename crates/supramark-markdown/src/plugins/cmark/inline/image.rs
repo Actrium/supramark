@@ -45,7 +45,13 @@ impl NodeValue for Image {
 pub fn add(md: &mut MarkdownParser) {
     full_link::add_prefix::<'!', true>(md, |md, href, title| {
         let mut url = href.unwrap_or_default();
-        if !md.allow_dangerous_protocol {
+        // micromark's safe-URI policy for image `src` is opt-in
+        // (`ParseOptions::sanitize_image_src`, the conformance profile): the
+        // product default keeps the parser-level URL so the renderer/host
+        // decides the final policy — the LinkFormatter already emptied truly
+        // dangerous destinations upstream in `full_link`, and raster
+        // `data:image/*` URLs it allows must survive into the AST.
+        if md.sanitize_image_src && !md.allow_dangerous_protocol {
             url = sanitize_image_src(&url);
         }
         Node::new(Image { url, title })
@@ -57,8 +63,9 @@ pub fn add(md: &mut MarkdownParser) {
 /// `https`. A colon that lands after a `/`, `?`, or `#` is part of the path,
 /// query, or hash — not a scheme — so the URL is treated as relative. Any other
 /// scheme (`irc:`, `mailto:`, `data:`, `javascript:`, …) collapses to an empty
-/// `src`. Applied when `allow_dangerous_protocol` is off (micromark's safe
-/// default for `img[src]`); with it on, the `src` passes through verbatim.
+/// `src`. Applied only when `sanitize_image_src` is on and
+/// `allow_dangerous_protocol` is off (micromark's safe default for `img[src]`);
+/// with `allow_dangerous_protocol` on, the `src` passes through verbatim.
 fn sanitize_image_src(url: &str) -> String {
     static IMAGE_PROTO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^https?$").unwrap());
 

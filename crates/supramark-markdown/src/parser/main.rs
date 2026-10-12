@@ -58,6 +58,19 @@ pub struct MarkdownParser {
     /// protocols through. See `ParseOptions::allow_dangerous_protocol`.
     pub allow_dangerous_protocol: bool,
 
+    /// micromark's safe-URI policy for image `src` (`protocolSource` =
+    /// `/^https?$/i`). Off by default: the product AST keeps the parser-level
+    /// URL (raster `data:image/*` allowed by the LinkFormatter survives) and
+    /// leaves final URL policy to the renderer/host. See
+    /// `ParseOptions::sanitize_image_src`.
+    pub sanitize_image_src: bool,
+
+    /// micromark's hardBreakTrailing resolution: a tab anywhere in the
+    /// trailing whitespace run (line suffix) makes the break soft. Off by
+    /// default: CommonMark decides solely by the spaces immediately preceding
+    /// the newline. See `ParseOptions::mixed_line_suffix_soft_break`.
+    pub mixed_line_suffix_soft_break: bool,
+
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
@@ -109,6 +122,8 @@ impl Default for MarkdownParser {
             disable_label_end: false,
             subsequent_indented_definitions: false,
             allow_dangerous_protocol: false,
+            sanitize_image_src: false,
+            mixed_line_suffix_soft_break: false,
         };
         block::builtin::add(&mut md);
         inline::builtin::add(&mut md);
