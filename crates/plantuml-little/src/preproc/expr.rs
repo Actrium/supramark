@@ -136,9 +136,12 @@ pub(super) fn replace_word_boundary(haystack: &str, name: &str, replacement: &st
             result.push_str(replacement);
             search_from = end_pos;
         } else {
-            // Not a word boundary, copy the character and continue
-            result.push_str(&haystack[search_from..abs_pos + 1]);
-            search_from = abs_pos + 1;
+            // Not a word boundary, copy the character and continue. Step a
+            // whole one: a needle can begin with a multi-byte character, and
+            // `abs_pos + 1` would then split it.
+            let step = haystack[abs_pos..].chars().next().map_or(1, char::len_utf8);
+            result.push_str(&haystack[search_from..abs_pos + step]);
+            search_from = abs_pos + step;
         }
     }
     result.push_str(&haystack[search_from..]);
@@ -161,7 +164,9 @@ fn find_whole_word(haystack: &str, name: &str) -> Option<usize> {
         if before_ok {
             return Some(abs_pos);
         }
-        search_from = abs_pos + 1;
+        // Step a whole character: `name` can begin with a multi-byte one, and
+        // `abs_pos + 1` would then split it for the next `haystack[..]`.
+        search_from = abs_pos + haystack[abs_pos..].chars().next().map_or(1, char::len_utf8);
     }
     None
 }

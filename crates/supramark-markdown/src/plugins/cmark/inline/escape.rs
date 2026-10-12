@@ -8,6 +8,21 @@ use crate::parser::inline::{InlineRule, InlineState, TextSpecial};
 use crate::plugins::cmark::inline::newline::Hardbreak;
 use crate::{MarkdownParser, Node};
 
+/// Whether `chr` is a CommonMark backslash-escapable punctuation character.
+///
+/// This is the single source of truth for the escapable set
+/// (<https://spec.commonmark.org/0.30/#backslash-escapes>). Other modules
+/// (e.g. the AST v2 inline mapper) reuse it instead of duplicating the set.
+pub fn is_escapable_punct(chr: char) -> bool {
+    matches!(
+        chr,
+        '\\' | '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')'
+            | '*' | '+' | ',' | '-' | '.' | '/' | ':' | ';' | '<' | '='
+            | '>' | '?' | '@' | '[' | ']' | '^' | '_' | '`' | '{' | '|'
+            | '}' | '~'
+    )
+}
+
 pub fn add(md: &mut MarkdownParser) {
     md.inline.add_rule::<EscapeScanner>();
 }
@@ -39,11 +54,10 @@ impl InlineRule for EscapeScanner {
                 let mut orig_str = "\\".to_owned();
                 orig_str.push(chr);
 
-                let content_str = match chr {
-                    '\\' | '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+'
-                    | ',' | '.' | '/' | ':' | ';' | '<' | '=' | '>' | '?' | '@' | '[' | ']'
-                    | '^' | '_' | '`' | '{' | '|' | '}' | '~' | '-' => chr.into(),
-                    _ => orig_str.clone(),
+                let content_str = if is_escapable_punct(chr) {
+                    chr.into()
+                } else {
+                    orig_str.clone()
                 };
 
                 let node = Node::new(TextSpecial {

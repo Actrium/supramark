@@ -6,7 +6,7 @@
  * the styles prop.
  */
 
-import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
+import { StyleSheet, type ImageStyle, type TextStyle, type ViewStyle } from 'react-native';
 
 /**
  * Supramark's customizable style keys
@@ -38,7 +38,20 @@ export interface SupramarkStyles {
   emphasis?: TextStyle;
   inlineCode?: TextStyle;
   link?: TextStyle;
-  imageText?: TextStyle;
+  /** Stable outer box used by an image-only paragraph. */
+  imageContainer?: ViewStyle;
+  /** Single-row content layout for adjacent horizontally scrolling block images. */
+  imageGallery?: ViewStyle;
+  /** Non-growing viewport for the horizontal image gallery. */
+  imageGalleryViewport?: ViewStyle;
+  /** Image content rendered inside imageContainer; resizeMode defaults to cover. */
+  image?: ImageStyle;
+  /** Fixed-size image used when an image is mixed with other inline content. */
+  inlineImage?: ImageStyle;
+  /** Placeholder shown when an image fails to load or its URL is unusable. */
+  imagePlaceholder?: ViewStyle;
+  /** Placeholder text (alt/title) shown over a failed or unusable image. */
+  imagePlaceholderText?: TextStyle;
   delete?: TextStyle;
 
   // Tables
@@ -269,9 +282,53 @@ export const defaultStyles = StyleSheet.create({
     color: '#0366d6',
     textDecorationLine: 'underline',
   },
-  imageText: {
-    color: '#666',
-    fontStyle: 'italic',
+  // Reserve the complete block-image footprint before the network image loads.
+  imageContainer: {
+    width: 200,
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  // Keep adjacent block images in one row; the owning ScrollView handles overflow.
+  imageGallery: {
+    flexDirection: 'row',
+    gap: 8,
+    alignSelf: 'flex-start',
+    flexShrink: 0,
+  },
+  // Clipped image viewport. Height falls back to imageContainer.height when the
+  // host has not set one, so a flex parent cannot create blank space.
+  imageGalleryViewport: {
+    flexGrow: 0,
+    flexShrink: 0,
+    overflow: 'hidden',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  // inlineImage is a separate key from `image` (block): hosts that set only
+  // image.resizeMode do not affect inline images. Both default to 'cover'.
+  inlineImage: {
+    width: 20,
+    height: 20,
+    resizeMode: 'cover',
+  },
+  // Placeholder shown when a block image fails to load or its URL is unusable.
+  imagePlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  imagePlaceholderText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
   delete: {
     textDecorationLine: 'line-through',
@@ -339,7 +396,7 @@ export function mergeStyles(customStyles?: SupramarkStyles): typeof defaultStyle
   }
 
   // Create a new object to avoid mutating defaultStyles
-  const merged: Record<string, TextStyle | ViewStyle> = {};
+  const merged: Record<string, ImageStyle | TextStyle | ViewStyle> = {};
 
   // First copy all default styles
   Object.keys(defaultStyles).forEach(key => {
@@ -396,9 +453,6 @@ export const darkThemeStyles: SupramarkStyles = {
   link: {
     color: '#58a6ff',
   },
-  imageText: {
-    color: '#8b949e',
-  },
   table: {
     borderColor: '#444',
   },
@@ -422,6 +476,12 @@ export const darkThemeStyles: SupramarkStyles = {
     backgroundColor: '#1a1a1a',
   },
   diagramPlaceholderText: {
+    color: '#8b949e',
+  },
+  imagePlaceholder: {
+    backgroundColor: '#1a1a1a',
+  },
+  imagePlaceholderText: {
     color: '#8b949e',
   },
   mapCard: {

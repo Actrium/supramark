@@ -23,23 +23,11 @@
  * The registry API is imported from `@supramark/core/rn` (keeping the web
  * entry point clean, mirroring the pattern used by `@supramark/engines/rn`).
  */
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 import { registerNativeParserAdapter } from '@supramark/core/rn';
+import { resolveNative, type NativeSupramarkMarkdownModule } from './resolveNative';
 
-const LINKING_ERROR =
-  `The package '@supramark/markdown-native-rn' doesn't seem to be linked. Make sure:\n\n` +
-  Platform.select({
-    ios: '- You have run `pod install`\n',
-    android: '',
-    default: '',
-  }) +
-  '- You rebuilt the app after installing the package\n' +
-  '- You are not using Expo Go\n';
-
-interface NativeSupramarkMarkdownModule {
-  parseJson(source: string): Promise<string>;
-  getVersion(): Promise<string>;
-}
+export { resolveNative } from './resolveNative';
 
 /** Shape of the codegen'd TurboModule spec module (CommonJS interop). */
 interface NativeSupramarkMarkdownSpecModule {
@@ -60,33 +48,6 @@ function loadTurboModule(): NativeSupramarkMarkdownModule | null {
     // not codegen'd or new-arch disabled — fall through
     return null;
   }
-}
-
-/**
- * Pick the native module implementation, preferring the New Architecture
- * TurboModule over the legacy bridge. When neither is available the
- * package wasn't linked, so return a Proxy that throws an actionable
- * error on first use (rather than crashing at import time).
- *
- * Exported for unit tests — pass the candidates explicitly so the
- * fallback order can be exercised without relying on import-time module
- * resolution.
- */
-export function resolveNative(
-  turbo: NativeSupramarkMarkdownModule | null | undefined,
-  bridged: NativeSupramarkMarkdownModule | null | undefined
-): NativeSupramarkMarkdownModule {
-  // TurboModule (new arch) first.
-  if (turbo) return turbo;
-  // Bridge-based fallback (old arch).
-  if (!bridged) {
-    return new Proxy({} as NativeSupramarkMarkdownModule, {
-      get() {
-        throw new Error(LINKING_ERROR);
-      },
-    });
-  }
-  return bridged;
 }
 
 const native = resolveNative(

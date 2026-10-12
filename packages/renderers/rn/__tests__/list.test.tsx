@@ -96,8 +96,24 @@ describe('list rendering', () => {
       listAst({ ordered: false, items: [{ checked: false, text: 'a' }, { checked: true, text: 'b' }] }),
     );
     const texts = textContents(r.root);
-    expect(texts).toContain('☐ a');
-    expect(texts).toContain('☑ b');
+    expect(texts).toContain('• ☐ a');
+    expect(texts).toContain('• ☑ b');
+  });
+
+  it('ordered task list preserves numeric markers before checkboxes', async () => {
+    const r = await renderAst(
+      listAst({
+        ordered: true,
+        start: 3,
+        items: [
+          { checked: false, text: 'a' },
+          { checked: true, text: 'b' },
+        ],
+      }),
+    );
+    const texts = textContents(r.root);
+    expect(texts).toContain('3. ☐ a');
+    expect(texts).toContain('4. ☑ b');
   });
 });
 

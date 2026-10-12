@@ -12,6 +12,9 @@
  *     target/macos-universal/release dylib)
  *   - `cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release
  *      -p supramark-d2-native`
+ *   - `scripts/build-windows.sh` (at crate root, produces
+ *     output/windows-x86_64/{bin/supramark_d2_native.dll,
+ *     include/supramark_d2.h})
  *
  * Then run `npm run prepare-native` (or `node scripts/prepare-native.js`).
  * Idempotent — re-running just refreshes.
@@ -55,6 +58,11 @@ const NATIVE_HEADER_SRC = path.join(
   'include'
 );
 const ANDROID_JNI_INCLUDE_DEST = path.join(PKG_DIR, 'android', 'src', 'main', 'jni', 'include');
+
+// ── Windows: the DLL + import lib + header from build-windows.sh output. ────
+const CRATE_ROOT = path.resolve(REPO_ROOT, 'crates', 'd2-little');
+const WINDOWS_OUTPUT_DIR = path.join(CRATE_ROOT, 'output');
+const WINDOWS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'windows', 'Frameworks');
 
 function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -139,9 +147,44 @@ function prepareMacOS() {
   return true;
 }
 
+// Stage the Windows DLL, import lib, and C ABI header.
+function prepareWindows() {
+  const windowsSrc = path.join(WINDOWS_OUTPUT_DIR, 'windows-x86_64');
+  const dllSrc = path.join(windowsSrc, 'bin', 'supramark_d2_native.dll');
+  if (!fileExists(dllSrc)) {
+    console.warn(`⚠  Windows: missing ${path.relative(REPO_ROOT, dllSrc)} (skip)`);
+    console.warn('   Run scripts/build-windows.sh from the crate root first.');
+    return false;
+  }
+  fs.rmSync(WINDOWS_FRAMEWORKS_DEST, { recursive: true, force: true });
+  const binDest = path.join(WINDOWS_FRAMEWORKS_DEST, 'bin');
+  const libDest = path.join(WINDOWS_FRAMEWORKS_DEST, 'lib');
+  const incDest = path.join(WINDOWS_FRAMEWORKS_DEST, 'include');
+  fs.mkdirSync(binDest, { recursive: true });
+  fs.mkdirSync(libDest, { recursive: true });
+  fs.mkdirSync(incDest, { recursive: true });
+  fs.copyFileSync(dllSrc, path.join(binDest, 'supramark_d2_native.dll'));
+  const libSrc = path.join(windowsSrc, 'lib', 'supramark_d2_native.lib');
+  if (fileExists(libSrc)) {
+    fs.copyFileSync(libSrc, path.join(libDest, 'supramark_d2_native.lib'));
+  }
+  const headerSrc = path.join(windowsSrc, 'include', 'supramark_d2.h');
+  const fallbackHeader = path.join(NATIVE_HEADER_SRC, 'supramark_d2.h');
+  if (fileExists(headerSrc)) {
+    fs.copyFileSync(headerSrc, path.join(incDest, 'supramark_d2.h'));
+  } else if (fileExists(fallbackHeader)) {
+    fs.copyFileSync(fallbackHeader, path.join(incDest, 'supramark_d2.h'));
+  }
+  console.log(
+    `✓ Windows: copied DLL + headers → ${path.relative(REPO_ROOT, WINDOWS_FRAMEWORKS_DEST)}/`
+  );
+  return true;
+}
+
 const ios = prepareIOS();
 const android = prepareAndroid();
 const macos = prepareMacOS();
+const windows = prepareWindows();
 
 // Stage the C ABI header into the package (used by the Android CMake build;
 // iOS gets its headers from inside the xcframework).
@@ -157,7 +200,7 @@ function prepareHeader() {
 }
 const header = prepareHeader();
 
-if (!ios && !android && !macos) {
+if (!ios && !android && !macos && !windows) {
   console.error('No native artefacts found. Build the Rust crate first.');
   process.exit(1);
 }

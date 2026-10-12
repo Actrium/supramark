@@ -9,6 +9,8 @@ import type {
   SupramarkListNode,
   SupramarkListItemNode,
   SupramarkDiagramNode,
+  SupramarkMathInlineNode,
+  SupramarkMathBlockNode,
 } from '../src/ast';
 
 describe('parse', () => {
@@ -197,6 +199,41 @@ describe('parse', () => {
       const ast = await parse(markdown);
 
       expect(ast.children.some((node: SupramarkNode) => node.type === 'math_block')).toBe(true);
+    });
+
+    // Regression for #207: inline math whose TeX source contains cmark
+    // backslash-escaped punctuation (`\{`, `\}`) used to collapse to literal
+    // text because cmark decodes `\{`→`{` before the math scanner runs,
+    // breaking the `$` delimiter parity check. The value must preserve the
+    // raw escapes so the TeX engine receives `\{0, ?, 1\}`, not `{0, ?, 1}`.
+    it('parses inline math with escaped braces and widehat (#207)', async () => {
+      const inputs: Array<{ src: string; expected: string }> = [
+        { src: '$\\widehat{\\rho}=1$', expected: '\\widehat{\\rho}=1' },
+        { src: '$\\widehat\\rho=1$', expected: '\\widehat\\rho=1' },
+        {
+          src: 'text $\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}$ text',
+          expected: '\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}',
+        },
+        { src: 'text $\\{0\\}$ text', expected: '\\{0\\}' },
+      ];
+      for (const { src, expected } of inputs) {
+        const ast = await parse(src);
+        const paragraph = ast.children[0] as SupramarkParentNode;
+        const math = paragraph.children.find(
+          (node: SupramarkNode) => node.type === 'math_inline'
+        ) as SupramarkMathInlineNode | undefined;
+        expect(math).toBeDefined();
+        expect(math?.value).toBe(expected);
+      }
+    });
+
+    it('parses block math with escaped braces and widehat (#207)', async () => {
+      const markdown = '$$\n\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}\n$$';
+      const ast = await parse(markdown);
+      const math = ast.children.find(
+        (node: SupramarkNode) => node.type === 'math_block'
+      ) as SupramarkMathBlockNode | undefined;
+      expect(math?.value).toBe('\\widehat{\\rho}_{\\Gamma,q}(a,s) \\in \\{0, ?, 1\\}');
     });
   });
 

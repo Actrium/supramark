@@ -23,7 +23,7 @@
     "crates/vison/vison-renderers/rn"
   ],
   "scripts": {
-    "build": "bun run --filter '*' build",
+    "build": "bun run --filter '!@supramark/example-*' build && bun run --filter '@supramark/example-*' build",
     "test": "bun run build:wasm markdown && bun run --workspaces --if-present test",
     "test:core": "bun run --filter @supramark/core test",
     "test:features": "bun run --filter '@supramark/feature-*' test",

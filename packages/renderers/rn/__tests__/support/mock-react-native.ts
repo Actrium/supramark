@@ -13,6 +13,7 @@ import { mock } from 'bun:test';
 mock.module('react-native', () => ({
   View: 'View',
   Text: 'Text',
+  Image: 'Image',
   ScrollView: 'ScrollView',
   TouchableOpacity: 'TouchableOpacity',
   ActivityIndicator: 'ActivityIndicator',
