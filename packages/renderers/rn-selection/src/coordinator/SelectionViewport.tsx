@@ -151,9 +151,18 @@ export const SelectionViewport: React.FC<SelectionViewportProps> = ({ children, 
   const childOnMomentumScrollBegin = children.props.onMomentumScrollBegin;
   const onMomentumScrollBegin = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Momentum starts only after the finger has left the native scroller.
+      // Android can swallow the matching JS touch-end/cancel, leaving
+      // `touchingRef` stale and the enclosing host interaction locked for the
+      // whole fling. Treat this native lifecycle event as the authoritative
+      // release signal.
+      touchingRef.current = false;
+      draggingRef.current = false;
+      clearReleaseTimer();
+      releaseIfIdle();
       childOnMomentumScrollBegin?.(event);
     },
-    [childOnMomentumScrollBegin]
+    [childOnMomentumScrollBegin, clearReleaseTimer, releaseIfIdle]
   );
 
   const childOnMomentumScrollEnd = children.props.onMomentumScrollEnd;

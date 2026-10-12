@@ -202,7 +202,9 @@ fn extract_box_text(
 
 fn remove_color_codes(input: &str) -> &str {
     let trimmed = input.trim();
-    if trimmed.len() >= 4 && trimmed.starts_with('c') {
+    // `len()` counts bytes, so byte 4 can land inside a character; the code
+    // being looked for is three ASCII alphanumerics.
+    if trimmed.len() >= 4 && trimmed.starts_with('c') && trimmed.is_char_boundary(4) {
         let code = &trimmed[1..4];
         if code.chars().all(|ch| ch.is_ascii_alphanumeric()) {
             return trimmed[4..].trim_start();

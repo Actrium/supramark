@@ -63,7 +63,11 @@ fn component_kind_skin_element(kind: &ComponentKind) -> &'static str {
 /// Parse a CSS hex color string like "#F1F1F1" into (r, g, b) components.
 fn parse_hex_color(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.strip_prefix('#')?;
-    if hex.len() == 6 {
+    // `len()` counts bytes, so a non-ASCII value can reach a 3- or 6-byte
+    // branch and be sliced mid-character. Only hex digits can parse anyway.
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        None
+    } else if hex.len() == 6 {
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
         let b = u8::from_str_radix(&hex[4..6], 16).ok()?;

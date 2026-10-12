@@ -4,6 +4,7 @@ dist
 build
 .next
 .expo
+tests/cases/_fixtures
 
 # Vendored native primitives
 packages/renderers/rn-selection/native/selectable-rich-text

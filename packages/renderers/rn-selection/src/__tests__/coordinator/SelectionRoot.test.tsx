@@ -863,6 +863,93 @@ describe('SelectionRoot responder negotiation', () => {
     expect(activity).toEqual([true, false]);
   });
 
+  test('a handle that starts outside a viewport cannot select into it', () => {
+    const scopedUnits: SelectionUnit[] = [
+      {
+        kind: 'text',
+        unitId: 'outside#0',
+        nodeId: 'outside',
+        text: 'outer',
+        node: NODE,
+      },
+      {
+        kind: 'text',
+        unitId: 'inside#0',
+        nodeId: 'inside',
+        text: 'inner',
+        node: NODE,
+      },
+    ];
+    let store: SelectionStore | null = null;
+
+    const RegisterBlocks: React.FC = () => {
+      const ctx = useSelectionContext();
+      useEffect(() => {
+        store = ctx.store;
+        const disposeOutside = ctx.registerBlock({
+          nodeId: 'outside',
+          unitIds: ['outside#0'],
+          kind: 'text',
+          rect: { x: 10, y: 10, w: 60, h: 20 },
+        });
+        const disposeInside = ctx.registerBlock({
+          nodeId: 'inside',
+          unitIds: ['inside#0'],
+          kind: 'text',
+          rect: { x: 10, y: 100, w: 60, h: 20 },
+          viewportId: 'list',
+        });
+        return () => {
+          disposeOutside();
+          disposeInside();
+        };
+      }, [ctx]);
+      return null;
+    };
+
+    act(() => {
+      renderer = create(
+        <SelectionRoot units={scopedUnits} overlay={false} toolbar={false}>
+          <RegisterBlocks />
+        </SelectionRoot>
+      );
+    });
+    if (store === null) throw new Error('test did not capture the selection store');
+    act(() => {
+      store.beginAt({ nodeId: 'outside', unitId: 'outside#0', offset: 0 });
+      store.extendTo({ nodeId: 'outside', unitId: 'outside#0', offset: 5 });
+      store.commit();
+    });
+
+    const knobs = renderer.root
+      .findAllByType('View' as unknown as React.ElementType)
+      .filter(node => {
+        const style = node.props.style as {
+          backgroundColor?: string;
+          width?: number;
+          top?: number;
+        };
+        return style?.backgroundColor === '#3399ff' && style.width === 12;
+      })
+      .sort(
+        (a, b) =>
+          ((a.props.style as { top: number }).top ?? 0) -
+          ((b.props.style as { top: number }).top ?? 0)
+      );
+    const endKnob = knobs[1];
+    if (endKnob === undefined) throw new Error('test did not find the end handle');
+
+    act(() => {
+      endKnob.props.onResponderGrant(eventAt(70, 36));
+      endKnob.props.onResponderMove(eventAt(50, 110), { dx: -20, dy: 74 });
+    });
+
+    expect(store.getSnapshot().range).toEqual({
+      anchor: { nodeId: 'outside', unitId: 'outside#0', offset: 0 },
+      focus: { nodeId: 'outside', unitId: 'outside#0', offset: 5 },
+    });
+  });
+
   test('a selection viewport locks only the enclosing scroller during its own touch', async () => {
     const activity: boolean[] = [];
 
@@ -905,6 +992,46 @@ describe('SelectionRoot responder negotiation', () => {
     act(() => {
       scrollView.props.onMomentumScrollBegin(eventAt(20, 120));
       scrollView.props.onMomentumScrollEnd(eventAt(20, 120));
+    });
+    expect(activity).toEqual([true, false]);
+  });
+
+  test('momentum releases a swallowed viewport touch before the fling continues', () => {
+    const activity: boolean[] = [];
+
+    act(() => {
+      renderer = create(
+        <SelectionRoot
+          units={UNITS}
+          overlay={false}
+          handles={false}
+          toolbar={false}
+          onGestureActiveChange={active => activity.push(active)}
+        >
+          <SelectionViewport style={{ height: 80 }}>
+            {React.createElement('ScrollView')}
+          </SelectionViewport>
+        </SelectionRoot>
+      );
+    });
+
+    const viewport = renderer.root
+      .findAllByType('View' as unknown as React.ElementType)
+      .find(node => typeof node.props.onTouchStart === 'function');
+    const scrollView = renderer.root.findByType('ScrollView' as unknown as React.ElementType);
+    if (viewport === undefined) throw new Error('test did not find the selection viewport');
+
+    act(() => {
+      viewport.props.onTouchStart(eventAt(20, 120));
+      scrollView.props.onScrollBeginDrag(eventAt(20, 120));
+      // Android sometimes omits the bubbling touch end/cancel. End-drag alone
+      // cannot release while that stale touch flag remains set.
+      scrollView.props.onScrollEndDrag(eventAt(20, 120));
+    });
+    expect(activity).toEqual([true]);
+
+    act(() => {
+      scrollView.props.onMomentumScrollBegin(eventAt(20, 120));
     });
     expect(activity).toEqual([true, false]);
   });

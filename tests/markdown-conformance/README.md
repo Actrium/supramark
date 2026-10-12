@@ -31,12 +31,25 @@ tests/cases/_fixtures/commonmark/
 
 Run from the repository root:
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/import.mjs commonmark
 node tests/markdown-conformance/scripts/validate.mjs commonmark
 ```
 
 Use `--source-dir <path>` when the upstream repository is already available locally. The adapter still validates the `origin` URL and pinned commit.
+
+## Importing cmark regression data
+
+The generic `spec-fixture` adapter imports the 27 fenced examples from cmark's
+`test/regression.txt` at pinned commit `7042d9978b20fea86ca9cc98bda55f10be392e69`.
+These are implementation regression cases, not normative specification examples. This source
+preserves original line endings so the CR+CR+LF case reaches the parser unchanged.
+
+```powershell
+node tests/markdown-conformance/scripts/import.mjs cmark-regression
+node tests/markdown-conformance/scripts/validate.mjs cmark-regression
+node tests/markdown-conformance/scripts/run.mjs cmark-regression
+```
 
 ## Importing cmark-gfm data
 
@@ -50,7 +63,7 @@ tests/cases/_fixtures/cmark-gfm/
   NOTICE.md
 ```
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/import.mjs cmark-gfm
 node tests/markdown-conformance/scripts/validate.mjs cmark-gfm
 ```
@@ -59,7 +72,7 @@ node tests/markdown-conformance/scripts/validate.mjs cmark-gfm
 
 The micromark adapter discovers core Markdown-to-HTML assertions from `test/io/**/*.js` at the pinned commit. It excludes aggregation-only modules, stream tests, and constant-table tests. In an isolated capture environment it preserves Markdown input, expected HTML, upstream options, test names, and source line numbers, producing 1,151 normalized cases. Newly matching files require no changes to the import entry point or explicit path list.
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/import.mjs micromark
 node tests/markdown-conformance/scripts/validate.mjs micromark
 ```
@@ -70,27 +83,27 @@ To add another source, provide a source configuration and adapter. The generic e
 
 Install the isolated dependencies and Chromium:
 
-```powershell
+```console
 pnpm --dir tests/markdown-conformance install --frozen-lockfile
 node tests/markdown-conformance/node_modules/playwright/cli.js install chromium
 ```
 
 Build the parser, then run semantic or visual comparison:
 
-```powershell
+```console
 cargo build -p supramark-markdown --bin supramark-markdown
 node tests/markdown-conformance/scripts/run.mjs <source-name>
 node tests/markdown-conformance/scripts/run-visual.mjs <source-name>
 ```
 
-The directly supported source names are `commonmark`, `cmark-gfm`, and `micromark`. For example:
+The directly supported source names are `commonmark`, `cmark-regression`, `cmark-gfm`, and `micromark`. For example:
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/run.mjs micromark
 node tests/markdown-conformance/scripts/run-visual.mjs micromark
 ```
 
-`run-commonmark.mjs` and `run-commonmark-visual.mjs` remain as compatibility entry points. Adding another source requires configuration, normalized fixtures, and an importer, but no source-specific runner.
+The generic import, validation, run, visual-run, and baseline entry points are source-agnostic; adding a source does not require source-specific runner wrappers.
 
 Supported environment variables:
 
@@ -121,10 +134,11 @@ Issue titles use the format `[<source display name>] Conformance failure: cases 
 
 Workflow-dispatch inputs:
 
-- `sources`: one source name, a comma-separated list, or `all`, such as `micromark` or `cmark-gfm,micromark`.
+- `sources`: one source name, a comma-separated list, or `all`, such as `cmark-regression` or `cmark-gfm,micromark`.
 - `create_issue`: create or update the aggregate issue after failures; enabled by default.
 - `run_visual`: run browser visual comparison; enabled by default. Disable it for semantic-only comparison.
 - `fail_workflow`: mark the workflow as failed when cases do not pass; enabled by default.
+- `gate_mode`: use `regression` to fail only on new failures versus the baseline, or `absolute` to fail on any non-passing case.
 - `issue_repository`: target issue repository in `owner/repo` form; leave empty to use the current repository.
 
 Push runs use GitHub Actions variables for the same behavior:
@@ -145,7 +159,7 @@ The default `github.token` can create issues when the target repository is the r
 
 Approved baselines are stored per source at `tests/markdown-conformance/baselines/<source-name>.json`. Reports use them to distinguish new, resolved, and persistent failures. A baseline can only be updated after a complete run of every case for that source, with visual testing enabled and zero semantic or visual execution errors:
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/update-baseline.mjs <source-name>
 ```
 

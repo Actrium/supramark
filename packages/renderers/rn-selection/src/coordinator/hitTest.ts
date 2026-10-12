@@ -213,3 +213,23 @@ export function resolvePointToSelectionInViewport(
         };
   return resolvePointToSelection(scoped, point, index);
 }
+
+/**
+ * Resolve a drag that started outside every nested selection viewport.
+ *
+ * `undefined` is a real ownership scope here, not "all blocks": without this
+ * filter a handle on ordinary root content can cross into a FlatList, even
+ * though the inverse direction is constrained by
+ * `resolvePointToSelectionInViewport`.
+ */
+export function resolvePointToSelectionOutsideViewports(
+  blocks: readonly RegisteredBlock[],
+  p: Point,
+  index: SelectionUnitIndex
+): SelectionPoint | null {
+  return resolvePointToSelection(
+    blocks.filter(block => block.viewportId === undefined),
+    p,
+    index
+  );
+}

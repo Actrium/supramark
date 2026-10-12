@@ -160,7 +160,7 @@ function canonicalNode(node, parentTag) {
 
 function normalizeText(value, parentTag) {
   const normalized = value.replace(/\r\n?/g, '\n');
-  if (parentTag === 'pre' || parentTag === 'code' && value.includes('\n')) return normalized;
+  if (parentTag === 'pre' || parentTag === 'code') return normalized;
   if (BLOCK_CONTAINERS.has(parentTag) && /^\s+$/.test(normalized)) return '';
   return normalized.replace(/[\t\n\f\r ]+/g, ' ');
 }

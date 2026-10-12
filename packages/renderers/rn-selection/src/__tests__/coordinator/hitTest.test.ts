@@ -11,6 +11,7 @@ import {
   pointInRect,
   resolvePointToSelection,
   resolvePointToSelectionInViewport,
+  resolvePointToSelectionOutsideViewports,
   verticalGap,
 } from '../../coordinator/hitTest';
 
@@ -141,6 +142,18 @@ describe('resolvePointToSelection', () => {
     expect(resolvePointToSelectionInViewport(scoped, { x: 50, y: 500 }, index, 'list')).toEqual({
       nodeId: 'C',
       unitId: 'C#0',
+      offset: 5,
+    });
+  });
+
+  test('a drag from root content cannot enter a nested viewport', () => {
+    const scoped = blocks();
+    scoped[1].viewportId = 'list';
+    scoped[1].clipRect = rectB;
+
+    expect(resolvePointToSelectionOutsideViewports(scoped, { x: 90, y: 40 }, index)).toEqual({
+      nodeId: 'A',
+      unitId: 'A#0',
       offset: 5,
     });
   });

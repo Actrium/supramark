@@ -1080,27 +1080,17 @@ function visualBandWithEscalation({ pixelBand, perceptual, severeSizeMismatch })
   return pixelBand;
 }
 
-function hasSevereSizePerceptualMismatch({ sizeDelta, perceptual, pixelBand }) {
+function hasSevereSizePerceptualMismatch({ sizeDelta, perceptual }) {
   const contentAreaDelta = Math.abs(sizeDelta?.content?.area ?? 0);
   const originalAreaDelta = Math.abs(sizeDelta?.original?.area ?? 0);
   const severeAreaDelta = Math.max(contentAreaDelta, originalAreaDelta) >= severeSizeDeltaThreshold;
-  const scaleOnlySizeDelta = pixelBand === 'pass' && hasScaleOnlySizeDelta(sizeDelta);
-  return severeAreaDelta && !scaleOnlySizeDelta && (perceptual?.distanceRatio ?? 0) > perceptualSimilarThreshold;
-}
-
-function hasScaleOnlySizeDelta(sizeDelta) {
-  const content = sizeDelta?.content;
-  if (!content) return false;
-  const widthDelta = content.width ?? 0;
-  const heightDelta = content.height ?? 0;
-  const sameDirection = Math.sign(widthDelta) === Math.sign(heightDelta);
-  return sameDirection && Math.abs(widthDelta - heightDelta) <= 0.08;
+  return severeAreaDelta && (perceptual?.distanceRatio ?? 0) > perceptualSimilarThreshold;
 }
 
 function runSelfTests() {
   const tests = [
     {
-      name: 'keeps scale-only size collapse as pass when visual diff passes',
+      name: 'downgrades severe scale-only size collapse with otherwise passing pixels to review',
       actual: visualBandWithEscalation({
         pixelBand: 'pass',
         perceptual: { distanceRatio: 0.16113 },
@@ -1113,7 +1103,7 @@ function runSelfTests() {
           pixelBand: 'pass',
         }),
       }),
-      expected: 'pass',
+      expected: 'review',
     },
     {
       name: 'downgrades severe non-proportional size collapse with otherwise passing pixels to review',
@@ -1130,6 +1120,22 @@ function runSelfTests() {
         }),
       }),
       expected: 'review',
+    },
+    {
+      name: 'keeps moderate scale-only size changes as pass when visual diff passes',
+      actual: visualBandWithEscalation({
+        pixelBand: 'pass',
+        perceptual: { distanceRatio: 0.20 },
+        severeSizeMismatch: hasSevereSizePerceptualMismatch({
+          sizeDelta: {
+            original: { width: -0.20, height: -0.20, area: -0.36 },
+            content: { width: -0.20, height: -0.20, area: -0.36 },
+          },
+          perceptual: { distanceRatio: 0.20 },
+          pixelBand: 'pass',
+        }),
+      }),
+      expected: 'pass',
     },
     {
       name: 'keeps ordinary size differences as pass when visual diff passes',

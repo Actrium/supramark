@@ -14,7 +14,10 @@ mock.module('react-native', () => ({
   },
 }));
 
-const { resolveNative } = await import('../src/index');
+// Import the pure resolver rather than the package entry point. Importing the
+// entry point intentionally registers an adapter, which would leak registry
+// state into index.test.ts when Bun runs both files in the same process.
+const { resolveNative } = await import('../src/resolveNative');
 
 const turbo = {
   parseJson: async () => JSON.stringify({ via: 'turbo' }),

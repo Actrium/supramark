@@ -26,6 +26,7 @@ import {
   containingBlock,
   resolvePointToSelection,
   resolvePointToSelectionInViewport,
+  resolvePointToSelectionOutsideViewports,
   type Point,
 } from './hitTest';
 import { computeSelectionRects, type OverlayRect } from './overlay';
@@ -170,7 +171,12 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   const gestureActiveRef = useRef(false);
   const viewportInteractionsRef = useRef(new Set<string>());
   const hostScrollLockedRef = useRef(false);
-  const gestureViewportIdRef = useRef<string | undefined>(undefined);
+  // `undefined` means that no block owned the gesture start, `null` is the
+  // explicit scope for root content outside nested viewports, and a string is
+  // one particular nested viewport. Keeping `null` distinct prevents an
+  // outside handle from crossing into a FlatList (the reverse of the already
+  // constrained inside-to-outside direction).
+  const gestureViewportIdRef = useRef<string | null | undefined>(undefined);
 
   const publishHostScrollLock = useCallback(() => {
     const locked = gestureActiveRef.current || viewportInteractionsRef.current.size > 0;
@@ -287,8 +293,11 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     (point: Point) => {
       const blocks = registry.getBlocks();
       const viewportId = gestureViewportIdRef.current;
-      return viewportId === undefined
-        ? resolvePointToSelection(blocks, point, registry.index)
+      if (viewportId === undefined) {
+        return resolvePointToSelection(blocks, point, registry.index);
+      }
+      return viewportId === null
+        ? resolvePointToSelectionOutsideViewports(blocks, point, registry.index)
         : resolvePointToSelectionInViewport(blocks, point, registry.index, viewportId);
     },
     [registry]
@@ -315,7 +324,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         moving.unitId === undefined
           ? registry.getBlock(moving.nodeId)
           : registry.getBlockForUnit(moving.unitId);
-      gestureViewportIdRef.current = block?.viewportId;
+      gestureViewportIdRef.current = block === undefined ? undefined : (block.viewportId ?? null);
     },
     [registry, store]
   );
@@ -404,7 +413,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       const point = toRootSpace(e);
       const edge = handleAt(point);
       if (edge === null) {
-        gestureViewportIdRef.current = containingBlock(registry.getBlocks(), point)?.viewportId;
+        const block = containingBlock(registry.getBlocks(), point);
+        gestureViewportIdRef.current = block === null ? undefined : (block.viewportId ?? null);
       } else {
         scopeGestureToHandle(edge);
       }

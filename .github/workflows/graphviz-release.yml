@@ -107,6 +107,141 @@ jobs:
           name: prebuilt-linux-${{ matrix.arch }}
           path: crates/graphviz-anywhere/packages/rust/prebuilt/
 
+  build-linux-musl:
+    # musl needs its own assets: the glibc archive is not linkable on a musl
+    # host, so without these `cargo install` of any downstream crate fails on
+    # Alpine with build.rs's "no release asset known for target" panic.
+    #
+    # Built inside Alpine rather than cross-compiled from the runner image:
+    # Alpine's gcc targets musl natively, so this stays the same build as the
+    # glibc leg instead of a second cross-toolchain to maintain.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+          - arch: aarch64
+            runs-on: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    container: alpine:3.21
+    steps:
+      # Before checkout: that action needs git, and the default `bash` shell
+      # every later step uses does not exist on a bare Alpine image.
+      # expat-static / zlib-static / g++ supply the archives that get merged
+      # into libgraphviz_api.a so the asset is self-contained. python3 is
+      # Graphviz's own hard requirement (its CMakeLists runs gen_version.py);
+      # the ubuntu runner has it preinstalled, a minimal Alpine image does not.
+      - name: Install dependencies
+        shell: sh
+        run: |
+          apk add --no-cache bash git tar curl cmake make g++ bison flex \
+            python3 pkgconf expat-dev expat-static zlib-dev zlib-static \
+            rust cargo
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Resolve graphviz submodule pin
+        id: gvpin
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo "sha=$(git rev-parse HEAD:crates/graphviz-anywhere/graphviz)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache build output
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: crates/graphviz-anywhere/output/linux-musl-${{ matrix.arch }}
+          key: gv-build-linux-musl-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/build-linux.sh --arch ${{ matrix.arch }} --libc musl
+
+      - name: Copy to packages/rust/prebuilt (target-triple layout)
+        run: |
+          TRIPLE="${{ matrix.arch }}-unknown-linux-musl"
+          mkdir -p "packages/rust/prebuilt/${TRIPLE}"
+          cp "output/linux-musl-${{ matrix.arch }}/lib/libgraphviz_api.a" \
+             "packages/rust/prebuilt/${TRIPLE}/libgraphviz_api.a" || true
+
+      - name: Verify the archive links and runs with no -dev packages
+        # The whole point of merging the system libraries in: an Alpine host that
+        # installed only what building Rust needs must still link. So remove the
+        # dev/static packages this build used, then link and run against the
+        # packaged archive.
+        #
+        # Both link modes are exercised: Alpine's own rust produces dynamically
+        # linked musl binaries, while an upstream rustup musl toolchain defaults
+        # to crt-static, and `cargo install` on Alpine may be either.
+        #
+        # The ldd assertion is the real contract — the binary may depend on musl
+        # libc and nothing else. A leftover libstdc++ / libexpat / libz
+        # dependency would install fine here (g++ is still present for the
+        # linker driver) and fail on a user's machine.
+        run: |
+          apk del expat-dev expat-static zlib-dev zlib-static
+          GVA_DIR="${GITHUB_WORKSPACE}/crates/graphviz-anywhere/output/linux-musl-${{ matrix.arch }}/lib"
+          # Alpine's distro rustc reports x86_64-alpine-linux-musl, not rustup's
+          # x86_64-unknown-linux-musl. Ask it rather than hardcoding either.
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          echo "host triple: ${host}"
+
+          verify() {
+            label="$1"; binary="$2"; shift 2
+            echo "=== ${label} ==="
+            env GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1 GRAPHVIZ_ANYWHERE_DIR="$GVA_DIR" "$@"
+            # Assert the binary exists before inspecting it: `ldd` on a missing
+            # file prints an error that matches none of the patterns below, so
+            # the check would pass for a binary that was never produced.
+            test -x "$binary"
+            "$binary" > graphviz-smoke.log
+            grep -q "SVG output" graphviz-smoke.log
+            echo "--- ldd ---"
+            ldd "$binary" || true
+            if ldd "$binary" | grep -Eq 'libstdc\+\+|libexpat|libz\.so|libgraphviz_api'; then
+              echo "::error::${label}: the binary depends on a library beyond musl libc"
+              exit 1
+            fi
+          }
+
+          rm -rf target/musl-verify target/musl-static
+
+          verify "dynamic musl (Alpine rust default)" \
+            "target/musl-verify/release/graphviz-anywhere-example" \
+            env CARGO_TARGET_DIR=target/musl-verify \
+              cargo build --release -p graphviz-anywhere-example
+
+          # `--target` here is required, not cosmetic: with host == target a
+          # global RUSTFLAGS also reaches proc-macro crates, and a crt-static
+          # target cannot produce them ("cannot produce proc-macro for
+          # serde_derive ... does not support these crate types"). Naming the
+          # target makes cargo build host proc macros separately.
+          verify "static musl (+crt-static)" \
+            "target/musl-static/${host}/release/graphviz-anywhere-example" \
+            env RUSTFLAGS="-C target-feature=+crt-static" \
+                CARGO_TARGET_DIR=target/musl-static \
+              cargo build --release --target "${host}" -p graphviz-anywhere-example
+
+      - name: Package
+        run: |
+          cd output/linux-musl-${{ matrix.arch }}
+          tar czf "${GITHUB_WORKSPACE}/graphviz-native-linux-musl-${{ matrix.arch }}.tar.gz" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-musl-${{ matrix.arch }}
+          path: graphviz-native-linux-musl-${{ matrix.arch }}.tar.gz
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prebuilt-linux-musl-${{ matrix.arch }}
+          path: crates/graphviz-anywhere/packages/rust/prebuilt/
+
   build-macos:
     runs-on: macos-14
     steps:
@@ -529,6 +664,30 @@ jobs:
           name: wasm-dist
           path: crates/graphviz-anywhere/packages/web/dist/
 
+  verify-assets:
+    # The gate between "a release exists" and "the crate is published".
+    #
+    # `needs: [release]` alone only proves the release job ran: the packaging
+    # steps use `|| true` and action-gh-release does not fail on unmatched
+    # files, so an asset can go missing without failing anything. The published
+    # crate's build.rs downloads .../v${CARGO_PKG_VERSION}/<asset> at every
+    # downstream `cargo install`, and a crates.io version is immutable — so a
+    # crate published against an incomplete release permanently breaks install
+    # on that platform. Verify the assets are actually downloadable first.
+    #
+    # Runs on test* tags too: rehearsing the asset set before the real tag is
+    # cut is the whole point of those tags.
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/test')
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify every mapped release asset is downloadable
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/verify-release-assets.sh --tag "${GITHUB_REF_NAME}"
+
   publish-cargo:
     # ONLY run on real v* tags. test* tags trigger CI matrix + GitHub
     # prerelease via the `release` job, but must NEVER publish to
@@ -536,7 +695,7 @@ jobs:
     # version number for the actual release. npm packages have an independent
     # version lifecycle and are deliberately not published from this workflow.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release]
+    needs: [verify-assets]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -555,6 +714,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/test')
     needs:
       - build-linux
+      - build-linux-musl
       - build-macos
       - build-ios
       - build-android
@@ -585,6 +745,8 @@ jobs:
           files: |
             crates/graphviz-anywhere/release-assets/graphviz-native-linux-x86_64.tar.gz
             crates/graphviz-anywhere/release-assets/graphviz-native-linux-aarch64.tar.gz
+            crates/graphviz-anywhere/release-assets/graphviz-native-linux-musl-x86_64.tar.gz
+            crates/graphviz-anywhere/release-assets/graphviz-native-linux-musl-aarch64.tar.gz
             crates/graphviz-anywhere/release-assets/graphviz-native-macos-universal.tar.gz
             crates/graphviz-anywhere/release-assets/graphviz-native-windows-x86_64.tar.gz
             crates/graphviz-anywhere/release-assets/graphviz-native-windows-arm64.tar.gz

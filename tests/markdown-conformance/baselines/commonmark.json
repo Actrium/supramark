@@ -4,25 +4,11 @@
   "sourceVersion": "0.31.2",
   "sourceCommit": "9103e341a973013013bb1a80e13567007c5cef6f",
   "caseCount": 652,
-  "parserProfile": "supramark-default",
+  "parserProfile": "supramark-commonmark",
   "comparisonTarget": "production-web-renderer-dom",
-  "semanticFailureIds": [
-    "commonmark-0.31.2-0602",
-    "commonmark-0.31.2-0608",
-    "commonmark-0.31.2-0611",
-    "commonmark-0.31.2-0612"
-  ],
-  "visualFailureIds": [
-    "commonmark-0.31.2-0602",
-    "commonmark-0.31.2-0608",
-    "commonmark-0.31.2-0611",
-    "commonmark-0.31.2-0612"
-  ],
+  "semanticFailureIds": [],
+  "visualFailureIds": [],
   "notes": {
-    "_summary": "CommonMark 0.31.2 baseline measured against Supramark's DEFAULT parser config (issue #144 premise). The default config ships the GFM bare-URL/email autolink extension ON, so bare `https://`, `www.` and `foo@bar` are linkified. CommonMark 0.31.2 has no such extension — its Autolinks section expects bare URLs/emails to stay literal — so the 4 cases listed here diverge. These are legitimate GFM-vs-CommonMark spec differences, not parser bugs: 0602 (`<https://foo.bar/baz bim>`, invalid bracketed autolink whose inner bare URL supramark linkifies), 0608 (`< https://foo.bar >`, same), 0611 (`https://example.com` bare URL), 0612 (`foo@bar.example.com` bare email). They are baselined rather than hidden: the gate parses every case with the default config and surfaces these as expected divergences. The parallel cmark-gfm spec-* Autolinks cases (spec-0610/0616/0619/0620) carry the same caveat in baselines/cmark-gfm.json.",
-    "commonmark-0.31.2-0602": "Autolinks: DIVERGENCE — CommonMark expects the invalid bracketed autolink `<https://foo.bar/baz bim>` to render literal (`&lt;…&gt;`); Supramark's default config (GFM autolink on) linkifies the bare `https://foo.bar/baz` inside. Legitimate GFM-vs-CommonMark difference, baselined.",
-    "commonmark-0.31.2-0608": "Autolinks: DIVERGENCE — `< https://foo.bar >` expected literal; Supramark default linkifies the bare `https://foo.bar`. Legitimate GFM-vs-CommonMark difference, baselined.",
-    "commonmark-0.31.2-0611": "Autolinks: DIVERGENCE — bare `https://example.com` expected literal; Supramark default (GFM autolink on) linkifies it. Legitimate GFM-vs-CommonMark difference, baselined.",
-    "commonmark-0.31.2-0612": "Autolinks: DIVERGENCE — bare `foo@bar.example.com` expected literal; Supramark default (GFM autolink on) linkifies it as a mailto. Legitimate GFM-vs-CommonMark difference, baselined."
+    "_summary": "CommonMark 0.31.2 baseline measured against Supramark's `supramark-commonmark` profile: the parser runs with the GFM bare-URL/email autolink extension toggled OFF (`--no-gfm-autolink`) so CommonMark-core cases are measured against CommonMark semantics, where bare `https://`, `www.` and `foo@bar` stay literal. Supramark's shipped default keeps the extension ON (the product's GFM profile); the cmark-gfm and micromark sources still run with the default config and their GFM-vs-CommonMark autolink divergences stay baselined there. Issue #202: the commonmark source's 4 Autolinks failures (0602/0608/0611/0612) were exactly this GFM-vs-CommonMark difference; profiling them as CommonMark resolves them, so this baseline now records 0 failures."
   }
 }

@@ -123,11 +123,15 @@ GV_LIB_TARGETS=(
 # Usage: prepare_graphviz_source <output_dir>
 prepare_graphviz_source() {
     local output_dir="$1"
-    if [ ! -d "${output_dir}" ]; then
+    local patch_marker="${output_dir}/.supramark-static-patched"
+    if [ ! -f "${patch_marker}" ]; then
         log_info "Patching Graphviz source for static build..."
-        # Use cp -r with error suppression for Windows symlink compatibility
-        cp -r "${GRAPHVIZ_SRC}" "${output_dir}" 2>/dev/null || true
-        if [ ! -d "${output_dir}/lib" ]; then
+        # Copy the source contents into the destination, even when a previous
+        # failed attempt left an empty or partial directory behind. This keeps
+        # the build retryable after the Graphviz submodule becomes available.
+        mkdir -p "${output_dir}"
+        cp -r "${GRAPHVIZ_SRC}/." "${output_dir}/" 2>/dev/null || true
+        if [ ! -d "${output_dir}/lib" ] || [ ! -f "${output_dir}/CMakeLists.txt" ]; then
             log_error "Failed to copy Graphviz source"
             exit 1
         fi
@@ -212,6 +216,7 @@ REGEX_EOF
         sed -i.bak 's|return system(c);|return -1; /* system() unavailable on iOS */|g' \
             "${output_dir}/lib/sparse/general.c"
         find "${output_dir}" -name "*.bak" -delete
+        touch "${patch_marker}"
     fi
 }
 

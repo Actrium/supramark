@@ -1,0 +1,1454 @@
+{
+  "schemaVersion": 1,
+  "source": "cmark-regression",
+  "profile": "commonmark",
+  "cases": [
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0001",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 1,
+        "section": "Regression tests",
+        "startLine": 6,
+        "endLine": 12
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "line1\r\r\nline2\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>line1</p>\n<p>line2</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0002",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 2,
+        "section": "Regression tests",
+        "startLine": 17,
+        "endLine": 34
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "By taking it apart\n\n- alternative solutions\n\t\nRepeatedly solving\n\t\n- how techniques\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>By taking it apart</p>\n<ul>\n<li>alternative solutions</li>\n</ul>\n<p>Repeatedly solving</p>\n<ul>\n<li>how techniques</li>\n</ul>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "list",
+          "list_item"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0003",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 3,
+        "section": "Regression tests",
+        "startLine": 38,
+        "endLine": 57
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "<h1>lorem</h1>\n\n<h2>lorem</h2>\n\n<h3>lorem</h3>\n\n<h4>lorem</h4>\n\n<h5>lorem</h5>\n\n<h6>lorem</h6>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<h1>lorem</h1>\n<h2>lorem</h2>\n<h3>lorem</h3>\n<h4>lorem</h4>\n<h5>lorem</h5>\n<h6>lorem</h6>\n",
+        "semanticTypes": [
+          "heading",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0004",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 4,
+        "section": "Regression tests",
+        "startLine": 62,
+        "endLine": 67
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "hi\n--\t\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<h2>hi</h2>\n",
+        "semanticTypes": [
+          "heading",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0005",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 5,
+        "section": "Regression tests",
+        "startLine": 71,
+        "endLine": 75
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "a***b* c*\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>a*<em><em>b</em> c</em></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "emphasis"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0006",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 6,
+        "section": "Regression tests",
+        "startLine": 79,
+        "endLine": 86
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[a]\n\n[a]: <te<st>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[a]</p>\n<p>[a]: &lt;te<st></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "raw"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0007",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 7,
+        "section": "Regression tests",
+        "startLine": 91,
+        "endLine": 95
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[a](te\\ st)\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[a](te\\ st)</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0008",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 8,
+        "section": "Regression tests",
+        "startLine": 99,
+        "endLine": 109
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "City:\n<span itemprop=\"contentLocation\" itemscope itemtype=\"https://schema.org/City\">\n  <meta itemprop=\"name\" content=\"Springfield\">\n</span>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>City:\n<span itemprop=\"contentLocation\" itemscope itemtype=\"https://schema.org/City\">\n<meta itemprop=\"name\" content=\"Springfield\">\n</span></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "raw"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0009",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 9,
+        "section": "Regression tests",
+        "startLine": 113,
+        "endLine": 125
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[a](\\ b)\n\n[a](<<b)\n\n[a](<b\n)\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[a](\\ b)</p>\n<p>[a](&lt;&lt;b)</p>\n<p>[a](&lt;b\n)</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0010",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 10,
+        "section": "Regression tests",
+        "startLine": 129,
+        "endLine": 133
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[link](url ((title))\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[link](url ((title))</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0011",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 11,
+        "section": "Regression tests",
+        "startLine": 138,
+        "endLine": 148
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "</script>\n\n</pre>\n\n</style>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "</script>\n</pre>\n</style>\n",
+        "semanticTypes": [],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0012",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 12,
+        "section": "Regression tests",
+        "startLine": 152,
+        "endLine": 156
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[a](<b) c>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[a](&lt;b) c&gt;</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0013",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 13,
+        "section": "Regression tests",
+        "startLine": 160,
+        "endLine": 164
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "﻿# Hi\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<h1>Hi</h1>\n",
+        "semanticTypes": [
+          "heading",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0014",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 14,
+        "section": "Regression tests",
+        "startLine": 169,
+        "endLine": 183
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "- <script>\n- some text\nsome other text\n</script>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<ul>\n<li>\n<script>\n</li>\n<li>some text\nsome other text\n</script></li>\n</ul>\n",
+        "semanticTypes": [
+          "list",
+          "list_item",
+          "raw",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0015",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 15,
+        "section": "Regression tests",
+        "startLine": 187,
+        "endLine": 191
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "*****Hello*world****\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>**<em><strong>Hello<em>world</em></strong></em></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "emphasis",
+          "strong"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0016",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 16,
+        "section": "Regression tests",
+        "startLine": 195,
+        "endLine": 199
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "*text* [link](#section)\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p><em>text</em> <a href=\"#section\">link</a></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "emphasis",
+          "text",
+          "link"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0017",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 17,
+        "section": "Regression tests",
+        "startLine": 202,
+        "endLine": 206
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "<!docType html>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<!docType html>\n",
+        "semanticTypes": [],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0018",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 18,
+        "section": "Regression tests",
+        "startLine": 209,
+        "endLine": 213
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "x <!A>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>x <!A></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "raw"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0019",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 19,
+        "section": "Regression tests",
+        "startLine": 217,
+        "endLine": 242
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "__!_!__\n\n__!x!__\n\n**!*!**\n\n---\n\n_*__*_*\n\n_*xx*_*\n\n_*__-_-\n\n_*xx-_-\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p><strong>!_!</strong></p>\n<p><strong>!x!</strong></p>\n<p><strong>!*!</strong></p>\n<hr />\n<p><em><em>__</em></em>*</p>\n<p><em><em>xx</em></em>*</p>\n<p><em>*__-</em>-</p>\n<p><em>*xx-</em>-</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "strong",
+          "text",
+          "thematic_break",
+          "emphasis"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0020",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 20,
+        "section": "Regression tests",
+        "startLine": 245,
+        "endLine": 258
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "```language-r\nx <- 1\n```\n\n```r\nx <- 1\n```\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<pre><code class=\"language-r\">x &lt;- 1\n</code></pre>\n<pre><code class=\"language-r\">x &lt;- 1\n</code></pre>\n",
+        "semanticTypes": [
+          "code"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0021",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 21,
+        "section": "Regression tests",
+        "startLine": 261,
+        "endLine": 268
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "x<!x>\n\nx<!>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>x<!x></p>\n<p>x&lt;!&gt;</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "raw"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0022",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 22,
+        "section": "Regression tests",
+        "startLine": 271,
+        "endLine": 277
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[link][µÓĐĹŠƆƦǏǶȜɆΓΨϪЇЛЯҎҶӞԆԮՄႠႴᏸᲕᲩᲿḦṎṶẚỂỪἙἿὭᾑᾥᾼῢΩↃⓉⰍⰡⱩⲔⲼⳫꙢꜢꝌꝽꞪꟇꭾꮒꮦꮺＣＷ𐐐𐐤𐓀𐕰𐖅𐲅𐲙𐲭𑢮𖹂𖹖𞤊𞤞]\n\n[μóđĺšɔʀǐƕȝɇγψϫїляҏҷӟԇԯմⴀⴔᏰვჩჿḧṏṷaʾểừἑἷὥἡιὥιαιῢωↄⓣⰽⱑⱪⲕⲽⳬꙣꜣꝍᵹɦꟈᎮᏂᏖᏪｃｗ𐐸𐑌𐓨𐖗𐖬𐳅𐳙𐳭𑣎𖹢𖹶𞤬𞥀]: /url\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p><a href=\"/url\">link</a></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "link",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0023",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 23,
+        "section": "Regression tests",
+        "startLine": 280,
+        "endLine": 284
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "(&#xFFFE;&#xFFFF;)\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>(￾￿)</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0024",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 24,
+        "section": "Regression tests",
+        "startLine": 287,
+        "endLine": 294
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[f]: z \"\\\"\n\n[f]\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>[f]: z &quot;&quot;</p>\n<p>[f]</p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0025",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 25,
+        "section": "Regression tests",
+        "startLine": 297,
+        "endLine": 309
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "-\n  ---\n\n  b\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<ul>\n<li>\n<hr />\n<p>b</p>\n</li>\n</ul>\n",
+        "semanticTypes": [
+          "list",
+          "list_item",
+          "thematic_break",
+          "paragraph",
+          "text"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0026",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 26,
+        "section": "Regression tests",
+        "startLine": 312,
+        "endLine": 322
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "<![CDATA[ text ]]>\n<![cdata[ text ]]>\n<PrE>text</pRe>\n<foo>text</foo>\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<![CDATA[ text ]]>\n<p>&lt;![cdata[ text ]]&gt;</p>\n<PrE>text</pRe>\n<p><foo>text</foo></p>\n",
+        "semanticTypes": [
+          "raw",
+          "paragraph",
+          "text",
+          "code"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "cmark-regression-master-7042d997-0027",
+      "source": {
+        "name": "cmark-regression",
+        "repository": "https://github.com/commonmark/cmark",
+        "version": "master-7042d997",
+        "path": "test/regression.txt",
+        "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+        "upstreamId": 27,
+        "section": "Regression tests",
+        "startLine": 326,
+        "endLine": 333
+      },
+      "profile": "commonmark",
+      "input": {
+        "markdown": "[bla]: /bla\n\"The title\" garbage\n[bla]\n"
+      },
+      "expected": {
+        "kind": "implementation",
+        "html": "<p>&quot;The title&quot; garbage\n<a href=\"/bla\">bla</a></p>\n",
+        "semanticTypes": [
+          "paragraph",
+          "text",
+          "link"
+        ],
+        "comparison": "semantic-html"
+      },
+      "coverage": {
+        "featureIds": [
+          "@supramark/feature-core-markdown"
+        ],
+        "syntax": [
+          "implementation-regression"
+        ],
+        "candidateNodeTypes": [
+          "document",
+          "paragraph",
+          "text",
+          "heading",
+          "list",
+          "list_item",
+          "emphasis",
+          "strong",
+          "link",
+          "code",
+          "raw"
+        ],
+        "renderers": [
+          "web",
+          "react-native"
+        ]
+      }
+    }
+  ]
+}
