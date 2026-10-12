@@ -12,10 +12,11 @@ for each supported target triple.
 3. Sibling `output/<platform>/lib/` (local build tree)
 4. Auto-download from GitHub Release (`curl` + `tar`)
 
-Linux, macOS, Windows MSVC, and iOS resolve a static archive; Android resolves
-its package-staged shared library. The resolver deliberately does not map GNU
-Linux assets to musl or MSVC assets to Windows GNU because those ABIs are not
-interchangeable.
+Linux (glibc and musl), macOS, Windows MSVC, and iOS resolve a static archive;
+Android resolves its package-staged shared library. Each ABI gets its own
+asset: musl has separate `graphviz-native-linux-musl-*` archives rather than
+reusing the glibc ones, and Windows GNU has no asset at all, because those ABIs
+are not interchangeable.
 
 Set `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1` to make step 4 a hard error (useful in
 CI or airgapped environments). Override the release tag with
@@ -42,6 +43,34 @@ CI or airgapped environments). Override the release tag with
 - **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/linux-aarch64 cargo build --target aarch64-unknown-linux-gnu`
 - **build.rs auto-resolve**: ✅
 - **Common errors**: cross-linker not on PATH → `apt-get install gcc-aarch64-linux-gnu`
+
+## x86_64-unknown-linux-musl / aarch64-unknown-linux-musl
+
+- **Toolchain**: a musl toolchain, i.e. build inside Alpine —
+  `apk add build-base cmake bison flex python3 pkgconf expat-dev expat-static zlib-dev zlib-static`
+  (python3 is Graphviz's own build requirement, preinstalled on the glibc CI
+  image but absent from a minimal Alpine).
+  The script checks `cc -dumpmachine` and refuses to run on a glibc toolchain,
+  so a glibc archive cannot be packaged as a musl asset by mistake.
+- **Build**: `./scripts/build-linux.sh --arch x86_64 --libc musl`
+- **Output**: `output/linux-musl-<arch>/lib/libgraphviz_api.a`
+- **Release asset**: `graphviz-native-linux-musl-<arch>.tar.gz`
+- **Override**: `GRAPHVIZ_ANYWHERE_DIR=output/linux-musl-x86_64 cargo build --target x86_64-unknown-linux-musl`
+- **build.rs auto-resolve**: ✅, and matched by triple *suffix*. Alpine's distro
+  rustc reports its host as `x86_64-alpine-linux-musl`, not rustup's
+  `x86_64-unknown-linux-musl`, so both spellings (and any other vendor field)
+  resolve to the same asset and to the canonical
+  `prebuilt/x86_64-unknown-linux-musl/` directory.
+- **Self-contained archive**: unlike the glibc asset, the musl archive has
+  `libstdc++`, `libexpat` and `libz` merged into it, and `build.rs` emits no
+  system-library link flags for musl targets. A musl host has neither the
+  runtime SONAMEs the glibc path names nor the static packages, and rustc links
+  these targets `crt-static`; anything left unresolved in the archive would
+  break every downstream `cargo install`. Both link modes work (Alpine's own
+  rust links musl dynamically, an upstream rustup toolchain links static).
+- **Common errors**: `--libc musl needs a musl toolchain` → you are on glibc;
+  run it in Alpine. `musl build needs a static libstdc++.a` → `apk add g++
+  expat-static zlib-static`.
 
 ## aarch64-apple-darwin / x86_64-apple-darwin (macOS universal)
 
