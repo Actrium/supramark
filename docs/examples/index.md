@@ -4,9 +4,9 @@ Supramark's examples fall into two categories: a Feature example gallery you can
 
 ## In-Site Examples
 
-### [Live Feature Preview](/preview/?feature=mermaid)
+### [Live Playground](/playground/)
 
-The homepage hosts this same interactive preview page: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples right on the page.
+The homepage hosts this same interactive playground: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples. Stable deep links such as [Mermaid](/playground/mermaid/) and [D2](/playground/d2/) open a Feature directly.
 
 To open it locally for debugging, run:
 

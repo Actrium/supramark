@@ -38,7 +38,7 @@ const FINGERPRINTS = ['echarts/renderers', 'echarts/charts', 'echarts/components
 
 if (!existsSync(distAssets)) {
   console.warn('[check:diagram-specifiers] skip: examples/react-web-csr/dist has not been built.');
-  console.warn('  This check only runs after the build output exists. Run: bun run docs:preview:build');
+  console.warn('  This check only runs after the build output exists. Run: bun run docs:playground:build');
   process.exit(0);
 }
 
