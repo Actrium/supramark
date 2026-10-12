@@ -1386,3 +1386,115 @@ describe('host-driven entries (handleRef + longPress)', () => {
     expect(seen[seen.length - 1]).toBeNull();
   });
 });
+
+// Native callbacks can outlive the document and the host action that requested them.
+describe('review regressions: native entry lifetime', () => {
+  // Mount a real nested SelectableBlock and capture deferred native measurements.
+  async function mountDeferredRoot() {
+    // Capture the imperative API exposed by the mounted root.
+    const handleRef = React.createRef<SelectionRootHandle>();
+    // Hold callbacks so tests can deliver native measurements after lifecycle changes.
+    const callbacks: Array<(...args: number[]) => void> = [];
+    let ctx!: ReturnType<typeof useSelectionContext>;
+    // Keep the probe component stable so prop updates preserve the block registration.
+    function Probe() {
+      ctx = useSelectionContext();
+      return null;
+    }
+    // Use the real block's Android Text handler rather than calling the context directly.
+    const { SelectableBlock } = await import('../../coordinator/SelectableBlock');
+    // Supply a nested viewport without requiring a native ScrollView in this unit test.
+    const { SelectionViewportContext } = await import('../../coordinator/SelectionContext');
+    // The viewport context enables Android's actual Text.onLongPress entry point.
+    const children = (
+      <>
+        <Probe />
+        <SelectionViewportContext.Provider value="nested">
+          <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+            hello
+          </SelectableBlock>
+        </SelectionViewportContext.Provider>
+      </>
+    );
+    // Preserve the tree while changing only the root's document/interaction props.
+    const tree = (props: Partial<React.ComponentProps<typeof SelectionRoot>> = {}) => (
+      <SelectionRoot
+        units={UNITS}
+        handleRef={handleRef}
+        overlay={false}
+        handles={false}
+        toolbar={false}
+        {...props}
+      >
+        {children}
+      </SelectionRoot>
+    );
+    await act(async () => {
+      renderer = create(tree(), {
+        createNodeMock: () => ({
+          measure: (callback: (...args: number[]) => void) => callbacks.push(callback),
+        }),
+      });
+    });
+    ctx.registry.updateLayout('p1', { x: 0, y: 0, w: 100, h: 20 });
+    return { handle: handleRef.current!, callbacks, ctx, tree };
+  }
+
+  test('Android nested Text long press observes the current longPress and gestures gates', async () => {
+    // Deliver the native event itself, including after the option changes on the same root.
+    const fixture = await mountDeferredRoot();
+    for (const props of [{ longPress: false }, { gestures: false }, { longPress: true }]) {
+      await act(async () => renderer!.update(fixture.tree(props)));
+      // Native layout follows any context-driven block registration change.
+      fixture.ctx.registry.updateLayout('p1', { x: 0, y: 0, w: 100, h: 20 });
+      act(() =>
+        renderer!.root.findByType('Text' as React.ElementType).props.onLongPress({
+          nativeEvent: { locationX: 20, locationY: 10 },
+        })
+      );
+      expect(fixture.ctx.store.getSnapshot().range !== null).toBe(props.longPress === true);
+    }
+  });
+
+  test.each(['document', 'clear', 'disable', 'unmount'] as const)(
+    'rejects an outstanding native measurement after %s',
+    async reason => {
+      // Reuse stable ids after replacement to expose accidental selection of the new text.
+      const fixture = await mountDeferredRoot();
+      // Start the host request before invalidating its document or interaction lifetime.
+      const pending = fixture.handle.trySelectParagraphAt(50, 10);
+      expect(fixture.callbacks).toHaveLength(1);
+      await act(async () => {
+        // Each transition ends the lifetime of the original host request.
+        if (reason === 'document')
+          renderer!.update(
+            fixture.tree({
+              units: [{ ...UNITS[0], kind: 'text', text: 'replacement' } as SelectionUnit],
+            })
+          );
+        else if (reason === 'clear') fixture.handle.clearSelection();
+        else if (reason === 'disable') renderer!.update(fixture.tree({ enabled: false }));
+        else renderer!.unmount();
+      });
+      // Re-enabling must not resurrect a request made before the disable.
+      if (reason === 'disable') await act(async () => renderer!.update(fixture.tree()));
+      await act(async () => fixture.callbacks[0](0, 0, 100, 20, 0, 0));
+      expect(await pending).toBe(false);
+      expect(fixture.ctx.store.getSnapshot().range).toBeNull();
+    }
+  );
+
+  test('a newer host request supersedes an older native measurement', async () => {
+    // The older in-bounds result must not override a newer out-of-bounds request.
+    const fixture = await mountDeferredRoot();
+    // Queue an in-bounds request that would select if its stale callback were accepted.
+    const older = fixture.handle.trySelectParagraphAt(50, 10);
+    // The most recent request takes ownership even when its hit test returns false.
+    const newer = fixture.handle.trySelectParagraphAt(500, 500);
+    await act(async () => fixture.callbacks[1](0, 0, 100, 20, 0, 0));
+    expect(await newer).toBe(false);
+    await act(async () => fixture.callbacks[0](0, 0, 100, 20, 0, 0));
+    expect(await older).toBe(false);
+    expect(fixture.ctx.store.getSnapshot().range).toBeNull();
+  });
+});

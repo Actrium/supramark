@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -221,8 +222,25 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   // Read by callbacks that must keep a stable identity (they are part of `ctx`,
   // whose churn would re-register every block) while still observing the
   // current gate.
-  const interactionEnabledRef = useRef(enabled !== false);
-  interactionEnabledRef.current = enabled !== false;
+  const interactionEnabled = enabled !== false;
+  const interactionEnabledRef = useRef(interactionEnabled);
+  interactionEnabledRef.current = interactionEnabled;
+
+  // Every host request belongs to one committed document/enablement lifetime.
+  const hostRequestGenerationRef = useRef(0);
+  // Retained handles and callbacks must refuse work after the root unmounts.
+  const mountedRef = useRef(false);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      hostRequestGenerationRef.current += 1;
+    };
+  }, []);
+  // Layout effects invalidate requests before passive document clearing can run.
+  useLayoutEffect(() => {
+    hostRequestGenerationRef.current += 1;
+  }, [units, interactionEnabled]);
 
   const items = useMemo(() => toolbarItems ?? DEFAULT_TOOLBAR_ITEMS, [toolbarItems]);
   const itemsRef = useRef(items);
@@ -411,9 +429,11 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   // selection off entirely — current selection cleared, every entry point
   // (gestures, handles, toolbar, a host driving the store) refused, host scroll
   // lock released. See the disabling effect further down.
-  const interactionEnabled = enabled !== false;
   const gestureEnabled = interactionEnabled && gestures !== false;
   const longPressEnabled = longPress !== false;
+  // The Android Text entry shares the live gesture gates without changing context identity.
+  const nativeLongPressEnabledRef = useRef(gestureEnabled && longPressEnabled);
+  nativeLongPressEnabledRef.current = gestureEnabled && longPressEnabled;
   const longPressDelay = longPressMs ?? DEFAULT_LONG_PRESS_MS;
 
   const gesture = useMemo<SelectionGesture>(
@@ -584,7 +604,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const selectWordInBlock = useCallback(
     (nodeId: SelectionNodeId, localPoint: Point) => {
-      if (!interactionEnabledRef.current) return;
+      // Native Text long presses must honor both host-menu and gesture opt-outs.
+      if (!nativeLongPressEnabledRef.current) return;
       const block = registry.getBlock(nodeId);
       if (block?.rect === undefined) return;
       const contentOffset = block.contentOffset ?? { x: 0, y: 0 };
@@ -652,7 +673,11 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       trySelectParagraphAt(pageX: number, pageY: number): Promise<boolean> {
         // Host commands and RN touch events share page space. Measure the live
         // page origin so a host scroll does not leave this entry using a stale origin.
-        if (!interactionEnabledRef.current) return Promise.resolve(false);
+        if (!mountedRef.current || !interactionEnabledRef.current) return Promise.resolve(false);
+        // New host commands supersede older native measurements, even if callbacks reorder.
+        const requestGeneration = ++hostRequestGenerationRef.current;
+        // Stable unit ids can be reused by a replacement document; retain the actual stream.
+        const requestUnits = unitsRef.current;
         const selectAt = (localX: number, localY: number): boolean => {
           const point = { x: localX, y: localY };
           const blocks = registry.getBlocks();
@@ -688,7 +713,16 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         if (!root?.measure) return Promise.resolve(false);
         return new Promise<boolean>(resolve => {
           root.measure?.((_x, _y, _width, _height, rootX, rootY) => {
-            if (!Number.isFinite(rootX) || !Number.isFinite(rootY)) {
+            // Only the current live request may publish into the current document's store.
+            if (
+              !mountedRef.current ||
+              !interactionEnabledRef.current ||
+              requestGeneration !== hostRequestGenerationRef.current ||
+              requestUnits !== unitsRef.current ||
+              rootRef.current !== root ||
+              !Number.isFinite(rootX) ||
+              !Number.isFinite(rootY)
+            ) {
               resolve(false);
               return;
             }
@@ -697,6 +731,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         });
       },
       clearSelection() {
+        // Clearing selection also cancels requests whose native measurement is still pending.
+        hostRequestGenerationRef.current += 1;
         clearTimer();
         pendingTouchCancelledRef.current = false;
         cancelGesture();

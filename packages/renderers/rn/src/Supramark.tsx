@@ -37,6 +37,7 @@ import {
   INLINE_NODE_TYPES,
   isInlineNode,
   SUPRAMARK_ADMONITION_KINDS,
+  BUILT_IN_DIAGRAM_ENGINES,
 } from '@supramark/core';
 import { DiagramNode } from './DiagramNode';
 import { MathBlock } from './MathBlock';
@@ -438,7 +439,13 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return mergeStyles(finalCustomStyles);
   }, [customStyles, theme]);
 
+  // Parsing consumes the latest options but only semantic parse/highlight inputs
+  // restart it; fresh renderer configuration objects must not replace the document.
+  const parseConfigRef = useRef(config);
+  parseConfigRef.current = config;
   useEffect(() => {
+    // Capture one configuration for this entire asynchronous document build.
+    const config = parseConfigRef.current;
     let cancelled = false;
     void (async () => {
       try {
@@ -534,7 +541,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   }, [
     markdown,
     ast,
-    config,
+    codeHighlightEnabled,
     onError,
     codeHighlighter,
     codeHighlightTheme,
@@ -557,7 +564,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   // screen, and no id/path convention has to be mirrored between the two sides.
   //
   // Each parsed snapshot carries a monotonic revision. The ref write inside the
-  // memo factory is idempotent — one document always maps to one revision — so
+  // memo factory is idempotent for the document and rendering policy, so
   // a discarded-and-recomputed memo cannot move it, and late callbacks can be
   // matched against the content version they belong to.
   // Host-driven selection entries: the root's imperative commands are forwarded
@@ -574,57 +581,86 @@ export const Supramark: React.FC<SupramarkProps> = ({
     []
   );
 
-  const planIdentityRef = useRef<{ document: ParsedDocument | null; revision: number }>({
-    document: null,
-    revision: 0,
-  });
+  // The revision identifies both the parsed document and its rendered selection policy.
+  const planIdentityRef = useRef<{
+    document: ParsedDocument | null;
+    policyKey: string;
+    documentId?: string;
+    revision: number;
+  }>({ document: null, policyKey: '', revision: 0 });
+  // An omitted selection prop avoids constructing policy sets or a selection plan.
   const selectionEnabled = selection !== undefined;
-  // Containers the renderer draws as cards rather than readable body text: the
-  // built-in html / map cards plus every host-supplied container renderer,
-  // except names the host declared as text via `containerText`. Opaque names
-  // stay a hard boundary; everything else recurses for selection.
-  const opaqueContainers = useMemo(
-    () => resolveOpaqueContainers(mergedContainerRenderers, selection?.containerText),
-    [mergedContainerRenderers, selection?.containerText]
-  );
-  // Mirrors the renderer's own feature switches (the same functions the render
-  // branches call), so a disabled math / diagram node linearizes as the source
-  // text the user actually sees.
-  const rendersAsText = useMemo(
-    () => (node: SupramarkNode) => {
-      if (node.type === 'math_inline' || node.type === 'math_block') {
-        return !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
-      }
-      if (node.type === 'diagram') {
-        return !isDiagramFeatureEnabled(config, node.engine, 'rn:diagram-feature');
-      }
-      return false;
-    },
-    [config]
-  );
-  // Plugin options are read through a ref so a host passing a fresh inline
-  // config / containerRenderers object does NOT count as a content revision —
-  // that would clear the user's selection for nothing. Only the parsed document
-  // (content) and the host document identity re-linearize.
-  const planOptionsRef = useRef({ opaqueContainers, rendersAsText });
-  planOptionsRef.current = { opaqueContainers, rendersAsText };
+  // Canonical keys compare effective sets, independent of object identity or declaration order.
+  const opaqueContainersKey = selectionEnabled
+    ? JSON.stringify(
+        [...resolveOpaqueContainers(mergedContainerRenderers, selection?.containerText)].sort()
+      )
+    : '[]';
+  // Custom renderers own their chrome, even when their child text is selectable.
+  const customContainersKey = selectionEnabled
+    ? JSON.stringify(Object.keys(mergedContainerRenderers).sort())
+    : '[]';
+  // Resolve the same feature gates as the render branches before comparing policies.
+  const mathAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
+  // Unknown engines are always enabled by core; built-in aliases are normalized below.
+  const textDiagramEnginesKey = selectionEnabled
+    ? JSON.stringify(
+        BUILT_IN_DIAGRAM_ENGINES.filter(
+          engine => !isDiagramFeatureEnabled(config, engine, 'rn:diagram-feature')
+        )
+      )
+    : '[]';
+  // One semantic key versions every policy input that can change the visible unit stream.
+  const policyKey = JSON.stringify([
+    opaqueContainersKey,
+    customContainersKey,
+    mathAsText,
+    textDiagramEnginesKey,
+  ]);
+  // Stable callbacks and sets let equivalent fresh host props retain their existing selection.
+  const planOptions = useMemo(() => {
+    // The ordinary render path needs no selection policy allocations.
+    if (!selectionEnabled) return undefined;
+    // Recover canonical sets only when their semantic contents change.
+    const opaqueContainers = new Set<string>(JSON.parse(opaqueContainersKey));
+    // Remember which containers replace the built-in title branch.
+    const customContainers = new Set<string>(JSON.parse(customContainersKey));
+    // Match every disabled diagram alias to the readable source branch.
+    const textDiagramEngines = new Set<string>(JSON.parse(textDiagramEnginesKey));
+    return {
+      opaqueContainers,
+      // Match disabled source rendering for inline/block math and diagram aliases.
+      rendersAsText: (node: SupramarkNode) =>
+        ((node.type === 'math_inline' || node.type === 'math_block') && mathAsText) ||
+        (node.type === 'diagram' && textDiagramEngines.has(node.engine.toLowerCase())),
+      // Only built-in render branches contribute the library's container title.
+      containerTitle: (node: SupramarkContainerNode) =>
+        rendererContainerTitle(node, customContainers),
+    };
+  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, textDiagramEnginesKey]);
+  // Build once per document/policy identity; fresh equivalent options keep unit identities intact.
   const selectionPlan = useMemo(() => {
+    // The existing renderer handles loading and errors without a selection model.
     if (!selectionEnabled || parsedDocument === null) return null;
-    if (planIdentityRef.current.document !== parsedDocument) {
+    // Policy changes also invalidate callbacks that carry the previous plan revision.
+    if (
+      planIdentityRef.current.document !== parsedDocument ||
+      planIdentityRef.current.policyKey !== policyKey ||
+      planIdentityRef.current.documentId !== selection?.documentId
+    ) {
       planIdentityRef.current = {
         document: parsedDocument,
+        policyKey,
+        documentId: selection?.documentId,
         revision: planIdentityRef.current.revision + 1,
       };
     }
-    const options = planOptionsRef.current;
     return buildSelectionPlan(parsedDocument.root, {
       documentId: selection?.documentId,
       revision: planIdentityRef.current.revision,
-      opaqueContainers: options.opaqueContainers,
-      rendersAsText: options.rendersAsText,
-      containerTitle: rendererContainerTitle,
+      ...planOptions,
     });
-  }, [selectionEnabled, selection?.documentId, parsedDocument]);
+  }, [selectionEnabled, selection?.documentId, parsedDocument, policyKey, planOptions]);
 
   // Read through a ref: a host passing a fresh inline callback must not re-fire
   // the notification, so the handle it holds stays the same object across

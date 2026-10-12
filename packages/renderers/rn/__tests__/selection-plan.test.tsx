@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import React from 'react';
 import { create, act, type ReactTestRenderer } from 'react-test-renderer';
 import type { SupramarkRootNode } from '@supramark/core';
+import type { ContainerRendererRN } from '../src/Supramark';
 
 import './support/mock-react-native';
 import './support/mock-renderer';
@@ -319,5 +320,124 @@ describe('host action payloads', () => {
     expect(typeof oldAction.revision).toBe('number');
     expect(typeof newAction.revision).toBe('number');
     expect(oldAction.revision).toBeLessThan(newAction.revision as number);
+  });
+});
+
+// Exercise policy updates on one mounted renderer, including semantically equal props.
+describe('selection rendering policy regressions', () => {
+  // The host renders only the body, so the container params are invisible chrome.
+  const containerAst = {
+    type: 'root',
+    ast_version: 2,
+    diagnostics: [],
+    children: [
+      { type: 'paragraph', children: [{ type: 'text', value: 'before' }] },
+      {
+        type: 'container',
+        name: 'custom',
+        params: 'Config',
+        children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Visible body' }] }],
+      },
+      { type: 'paragraph', children: [{ type: 'text', value: 'after' }] },
+    ],
+  } as unknown as SupramarkRootNode;
+  // Reuse the same renderer while toggling its declared selection contract.
+  const containerRenderers = {
+    custom: ({ node, key, renderChildren }: Parameters<ContainerRendererRN>[0]) =>
+      React.createElement('View', { key }, renderChildren(node.children)),
+  };
+
+  it('rebuilds when a custom container becomes readable and becomes opaque again', async () => {
+    // Keep the AST identity fixed so only the policy can invalidate the plan.
+    const props = { ast: containerAst, containerRenderers };
+    // Mount the policy under test and retain its renderer across updates.
+    const r = await renderTree({ ...props, selection: {} });
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(2);
+    await updateTree(r, { ...props, selection: { containerText: ['custom'] } });
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(3);
+    await updateTree(r, { ...props, selection: {} });
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(2);
+    await act(async () => r.unmount());
+  });
+
+  it('copies only rendered custom-container text across surrounding paragraphs', async () => {
+    // Inspect the actual mounted plan, rather than a separately constructed model.
+    // Mount the policy under test and retain its renderer across updates.
+    const r = await renderTree({
+      ast: containerAst,
+      containerRenderers,
+      selection: { containerText: ['custom'] },
+    });
+    // Resolve and serialize the same range the toolbar would copy.
+    const { serializeSelectionUnits, resolveSelectionRange } =
+      await import('@supramark/rn-selection');
+    // Retain the actual unit stream to check its contents or reference stability.
+    const units = r.root.findByType(SelectionRoot).props.units;
+    // Locate both endpoints using the renderer's real block bindings.
+    const blocks = r.root.findAllByType(SelectableBlock);
+    // Span from the first paragraph through the custom body to the final paragraph.
+    const range = {
+      anchor: { nodeId: blocks[0].props.nodeId, unitId: blocks[0].props.unitIds[0], offset: 0 },
+      focus: { nodeId: blocks[2].props.nodeId, unitId: blocks[2].props.unitIds[0], offset: 5 },
+    };
+    expect(serializeSelectionUnits(resolveSelectionRange(units, range))).toBe(
+      'before\nVisible body\n\nafter'
+    );
+    await act(async () => r.unmount());
+  });
+
+  it('rebuilds when a custom renderer replaces the built-in container title', async () => {
+    // Both policies expose body text, but only the built-in branch draws a title.
+    const props = { ast: containerAst, selection: { containerText: ['custom'] } };
+    // Mount the policy under test and retain its renderer across updates.
+    const r = await renderTree(props);
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(4);
+    await updateTree(r, { ...props, containerRenderers });
+    // Inspect the visible text carried by the mounted selection plan.
+    const { serializeSelectionUnits } = await import('@supramark/rn-selection');
+    expect(serializeSelectionUnits(r.root.findByType(SelectionRoot).props.units)).not.toContain(
+      'custom: Config'
+    );
+    await updateTree(r, props);
+    expect(serializeSelectionUnits(r.root.findByType(SelectionRoot).props.units)).toContain(
+      'custom: Config'
+    );
+    await act(async () => r.unmount());
+  });
+
+  it('preserves units for equivalent fresh policies and updates feature semantics', async () => {
+    // Math and diagram switches change visible text without changing the input AST.
+    const ast = {
+      type: 'root',
+      ast_version: 2,
+      diagnostics: [],
+      children: [
+        { type: 'math_block', value: 'x' },
+        { type: 'diagram', engine: 'mermaid', code: 'graph TD;', fence_closed: true },
+      ],
+    } as unknown as SupramarkRootNode;
+    // Each call deliberately allocates fresh objects and duplicate/reordered declarations.
+    const props = (enabled: boolean) => ({
+      ast,
+      containerRenderers: { ...containerRenderers },
+      selection: { containerText: ['unused', 'custom', 'custom'] },
+      config: {
+        features: [
+          { id: '@supramark/feature-math', enabled },
+          { id: '@supramark/feature-mermaid', enabled },
+        ],
+      },
+    });
+    // Mount the policy under test and retain its renderer across updates.
+    const r = await renderTree(props(false));
+    // Retain the actual unit stream to check its contents or reference stability.
+    const units = r.root.findByType(SelectionRoot).props.units;
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(2);
+    await updateTree(r, { ...props(false), selection: { containerText: ['custom', 'unused'] } });
+    expect(r.root.findByType(SelectionRoot).props.units).toBe(units);
+    await updateTree(r, props(true));
+    expect(r.root.findAllByType(SelectableBlock)).toHaveLength(0);
+    expect(r.root.findByType(SelectionRoot).props.units).not.toBe(units);
+    await act(async () => r.unmount());
   });
 });
