@@ -18,6 +18,7 @@ import type {
   SupramarkTableNode,
   SupramarkTableRowNode,
 } from '@supramark/core';
+import { isInlineNode } from '@supramark/core';
 import type {
   SelectionAtomUnit,
   SelectionBoundaryUnit,
@@ -34,7 +35,37 @@ import type { SelectionProvider } from './providers';
 
 export interface LinearizeSelectionOptions extends SelectionContext {
   providers?: readonly SelectionProvider[];
+  /**
+   * Custom node identity. Must be unique per document node and stable across
+   * re-renders of the same content, and must never collide between a node and
+   * one of its descendants — colliding identities make their units share a
+   * unitId, which corrupts every offset past the collision.
+   */
   nodeId?: (node: SupramarkNode, path: readonly SelectionPathSegment[]) => string;
+  /**
+   * Container names whose content is NOT rendered as readable text (host cards,
+   * canvas views). Those stay a hard boundary. Everything else — admonitions
+   * and unrecognized containers — renders its children through `renderNode`,
+   * so the body is linearized and selectable like any other content. The AST
+   * cannot tell the two apart (the canonical parser marks every `:::xxx`
+   * opaque), so the render side owns this list.
+   */
+  opaqueContainers?: ReadonlySet<string>;
+  /**
+   * The title a transparent container renders above its children (taken from
+   * `params` / `data.title` by the renderer). The title is visible body text,
+   * so it gets its own unit and is bound to the container node; return
+   * `undefined` (or an empty string) when the container has no title.
+   */
+  containerTitle?: (node: SupramarkContainerNode) => string | undefined;
+  /**
+   * Whether a node currently renders as readable text rather than as a
+   * non-text object — a disabled math / diagram feature draws its raw source
+   * (see `renderDisabledMathBlock` / `renderDisabledDiagram`), so selection
+   * must treat it as text. Mirrors the renderer's own feature switches so the
+   * two sides agree on what is on screen.
+   */
+  rendersAsText?: (node: SupramarkNode) => boolean;
 }
 
 /**
@@ -48,19 +79,98 @@ interface ListContext {
   index: number;
 }
 
+/**
+ * One rendered text block, as the renderer needs it to mount a SelectableBlock:
+ * the AST node to match on (by identity), the block's selectable id, and the
+ * visible text units the block renders.
+ *
+ * `unitIds` holds text, visible hard breaks and inline attachment atoms. Each
+ * atom occupies one native display offset while remaining a hard document
+ * boundary. Syntax markers and trailing block separators are excluded.
+ */
+export interface SelectableBlockBinding {
+  node: SupramarkNode;
+  nodeId: SelectionNodeId;
+  unitIds: SelectionNodeId[];
+}
+
+export interface LinearizedDocument {
+  units: SelectionUnit[];
+  /**
+   * Bindings for the block types a renderer can mount as one selectable text
+   * block: paragraph, heading, tight list_item, code, and table_cell. Whether a
+   * specific rendered instance uses its binding stays a renderer decision (an
+   * image-only paragraph renders as a gallery; a loose list item prefixes the
+   * marker onto its first paragraph), so extra bindings are harmless.
+   */
+  blocks: SelectableBlockBinding[];
+}
+
+interface BlockCollector {
+  blocks: SelectableBlockBinding[];
+}
+
+/**
+ * Record one block's visible text units. Blocks with no visible text (empty
+ * code fences, empty table cells, image-only paragraphs) are skipped: there is
+ * nothing to select, so the renderer should not mount a SelectableBlock.
+ */
+function collectBlock(
+  collector: BlockCollector | undefined,
+  node: SupramarkNode,
+  nodeId: SelectionNodeId,
+  units: readonly SelectionUnit[]
+): void {
+  if (collector === undefined) return;
+  const unitIds = units
+    // Hard line breaks occupy an offset inside the native Text, unlike block separators.
+    .filter(
+      unit =>
+        (unit.kind === 'text' && unit.text !== '') ||
+        (unit.kind === 'break' && unit.reason === 'line') ||
+        unit.kind === 'atom'
+    )
+    .map(unit => unit.unitId);
+  // Object-only blocks have no selectable text (image galleries keep their renderer).
+  if (!units.some(unit => unit.kind === 'text' && unit.text !== '')) return;
+  collector.blocks.push({ node, nodeId, unitIds });
+}
+
 export function linearizeForSelection(
   root: SupramarkRootNode | SupramarkNode[],
   options: LinearizeSelectionOptions = {}
 ): SelectionUnit[] {
-  const nodes = Array.isArray(root) ? root : root.children;
-  return nodes.flatMap((node, index) => linearizeNode(node, [index], options));
+  return linearizeDocument(root, options).units;
+}
+
+/**
+ * Linearize a document into the selection unit stream AND the per-block
+ * bindings a renderer mounts as SelectableBlocks. One traversal produces both,
+ * so unit ids and block ids cannot drift apart, and the renderer matches
+ * bindings by AST node identity — no id or traversal-path convention to keep in
+ * sync between the two sides.
+ */
+export function linearizeDocument(
+  root: SupramarkRootNode | SupramarkNode[],
+  options: LinearizeSelectionOptions = {}
+): LinearizedDocument {
+  // `?? []`: a malformed root (no children array) linearizes to an empty
+  // document instead of throwing mid-render, so the renderer's own error
+  // boundary — not the selection layer — reports the malformed AST.
+  const nodes = Array.isArray(root) ? root : (root.children ?? []);
+  const collector: BlockCollector = { blocks: [] };
+  const units = nodes.flatMap((node, index) =>
+    linearizeNode(node, [index], options, undefined, collector)
+  );
+  return { units, blocks: collector.blocks };
 }
 
 function linearizeNode(
   node: SupramarkNode,
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions,
-  listCtx?: ListContext
+  listCtx?: ListContext,
+  collector?: BlockCollector
 ): SelectionUnit[] {
   const nodeId = resolveNodeId(node, path, options);
   const provider = options.providers?.find(candidate => candidate.match(node));
@@ -72,36 +182,50 @@ function linearizeNode(
       const text = node;
       return [textUnit(makeUnitId(nodeId, 0), nodeId, text, text.value, getSourceRange(node))];
     }
-    case 'paragraph':
-      return [
-        ...linearizeChildren(node as SupramarkParentNode, path, options, listCtx),
+    case 'paragraph': {
+      const units = [
+        ...linearizeChildren(node as SupramarkParentNode, path, options, listCtx, collector),
         breakUnit(makeUnitId(nodeId, 0), nodeId, 'block', node),
       ];
+      collectBlock(collector, node, nodeId, units);
+      return units;
+    }
     case 'heading': {
       const heading = node;
       const prefix = '#'.repeat(heading.depth) + ' ';
-      return [
+      const units = [
         syntaxUnit(makeUnitId(nodeId, 0), nodeId, heading, prefix),
-        ...linearizeChildren(heading, path, options),
+        ...linearizeChildren(heading, path, options, undefined, collector),
         breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', heading),
       ];
+      collectBlock(collector, heading, nodeId, units);
+      return units;
     }
     case 'strong': {
       const strong = node;
-      return wrapInline(strong, nodeId, path, options, listCtx, '**', '**');
+      return wrapInline(strong, nodeId, path, options, listCtx, collector, '**', '**');
     }
     case 'emphasis': {
       const emphasis = node;
-      return wrapInline(emphasis, nodeId, path, options, listCtx, '_', '_');
+      return wrapInline(emphasis, nodeId, path, options, listCtx, collector, '_', '_');
     }
     case 'delete': {
       const del = node;
-      return wrapInline(del, nodeId, path, options, listCtx, '~~', '~~');
+      return wrapInline(del, nodeId, path, options, listCtx, collector, '~~', '~~');
     }
     case 'link': {
       const link = node;
       const title = link.title ? ` "${link.title}"` : '';
-      return wrapInline(link, nodeId, path, options, listCtx, '[', `](${link.url}${title})`);
+      return wrapInline(
+        link,
+        nodeId,
+        path,
+        options,
+        listCtx,
+        collector,
+        '[',
+        `](${link.url}${title})`
+      );
     }
     case 'inline_code': {
       const code = node;
@@ -128,7 +252,7 @@ function linearizeNode(
       // interior break so each line is quoted without a dangling prefix on the
       // final line. The prefixes are text:'' syntax units (invisible to
       // plainText), so the quoted text itself stays clean.
-      const inner = linearizeChildren(blockquote, path, options, listCtx);
+      const inner = linearizeChildren(blockquote, path, options, listCtx, collector);
       return [
         syntaxUnit(makeUnitId(nodeId, 0), nodeId, blockquote, '> '),
         ...prefixBlockquoteInterior(inner, nodeId, blockquote),
@@ -136,11 +260,14 @@ function linearizeNode(
       ];
     }
     case 'list':
-      return linearizeList(node, path, options, listCtx);
+      return linearizeList(node, path, options, listCtx, collector);
     case 'list_item':
-      return linearizeListItem(node, path, options, listCtx);
-    case 'code':
-      return linearizeCodeBlock(node, nodeId);
+      return linearizeListItem(node, path, options, listCtx, collector);
+    case 'code': {
+      const units = linearizeCodeBlock(node, nodeId);
+      collectBlock(collector, node, nodeId, units);
+      return units;
+    }
     case 'image': {
       const image = node;
       const alt = image.alt ?? '';
@@ -163,41 +290,76 @@ function linearizeNode(
       ];
     }
     case 'definition_list':
-      return linearizeChildren(node, path, options, listCtx);
+      return linearizeChildren(node, path, options, listCtx, collector);
     case 'definition_item':
-      return linearizeChildren(node, path, options, listCtx);
+      return linearizeChildren(node, path, options, listCtx, collector);
     case 'definition_term': {
       const term = node;
-      return [
-        ...linearizeChildren(term, path, options, listCtx),
+      const units = [
+        ...linearizeChildren(term, path, options, listCtx, collector),
         breakUnit(makeUnitId(nodeId, 0), nodeId, 'block', term),
       ];
+      collectBlock(collector, term, nodeId, units);
+      return units;
     }
     case 'definition_description': {
       const description = node;
+      // In AST v2 the description's children are BLOCK nodes (paragraphs), so
+      // the body belongs to those children and collects on its own — binding
+      // the description node here would double-count their units. The `: `
+      // syntax unit stays for Markdown serialization only.
       return [
         syntaxUnit(makeUnitId(nodeId, 0), nodeId, description, ': '),
-        ...linearizeChildren(description, path, options, listCtx),
+        ...linearizeChildren(description, path, options, listCtx, collector),
         breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', description),
       ];
     }
     case 'footnote_reference': {
       const ref = node;
-      return [textUnit(makeUnitId(nodeId, 0), nodeId, ref, `[^${ref.label ?? ref.index}]`)];
+      // The renderer draws `[index]`, so the visible unit must match it. The
+      // label and the Markdown reference syntax stay separate: `[^label]` is
+      // rebuilt on Markdown/source serialization and never leaks into the
+      // screen offsets the user selects against.
+      const markdown = `[^${ref.label ?? ref.index}]`;
+      return [
+        {
+          kind: 'text',
+          unitId: makeUnitId(nodeId, 0),
+          nodeId,
+          text: `[${ref.index}]`,
+          node: ref,
+          payload: { markdown, source: markdown },
+          sourceRange: getSourceRange(node),
+        },
+      ];
     }
     case 'footnote_definition': {
       const def = node;
       const marker = `[^${def.label ?? def.index}]: `;
       return [
         syntaxUnit(makeUnitId(nodeId, 0), nodeId, def, marker),
-        ...linearizeChildren(def, path, options, listCtx),
+        ...linearizeChildren(def, path, options, listCtx, collector),
         breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', def),
       ];
     }
     case 'raw': {
       const raw = node;
-      // `raw` reuses its literal value for every format.
-      return [textUnit(makeUnitId(nodeId, 0), nodeId, raw, raw.value, getSourceRange(raw))];
+      // Inline HTML renders as nothing (renderInlineNode returns null), and
+      // block-level raw HTML falls through to null as well: the unit carries no
+      // visible text and no Markdown payload, so a hidden node neither occupies
+      // screen offsets nor copies its tags. The original syntax stays in
+      // `source` alone, keeping source serialization verbatim.
+      return [
+        {
+          kind: 'text',
+          unitId: makeUnitId(nodeId, 0),
+          nodeId,
+          text: '',
+          node: raw,
+          payload: { source: raw.value },
+          sourceRange: getSourceRange(node),
+        },
+      ];
     }
     case 'thematic_break': {
       const rule = node;
@@ -206,35 +368,89 @@ function linearizeNode(
         breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', rule),
       ];
     }
-    case 'math_inline':
+    case 'math_inline': {
+      // A disabled math feature draws the raw TeX as readable text
+      // (renderInlineNode returns the value), so selection treats it as text
+      // instead of an object.
+      if (options.rendersAsText?.(node) === true) {
+        return [renderedSourceUnit(nodeId, node, node.value, `$${node.value}$`)];
+      }
       return [mathAtom(node, nodeId, false)];
-    case 'math_block':
+    }
+    case 'math_block': {
+      if (options.rendersAsText?.(node) === true) {
+        const units = [
+          renderedSourceUnit(nodeId, node, node.value, `$$\n${node.value}\n$$`),
+          breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
+        ];
+        collectBlock(collector, node, nodeId, units);
+        return units;
+      }
       return [
         mathAtom(node, nodeId, true),
         breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
       ];
-    case 'diagram':
-      return [
-        diagramAtom(node, nodeId),
-        breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
-      ];
+    }
+    case 'diagram': {
+      if (options.rendersAsText?.(node) === true) {
+        const fenced = '```' + node.engine + '\n' + node.code + '\n```';
+        const units = [
+          renderedSourceUnit(nodeId, node, node.code, fenced),
+          breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
+        ];
+        collectBlock(collector, node, nodeId, units);
+        return units;
+      }
+      return [diagramAtom(node, nodeId), breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node)];
+    }
     // Tables linearize into a fully compositional unit stream: per-cell inline
     // text units plus structural text units carrying the per-format separators
     // (markdown pipes / HTML tags). Every format reconstructs by concatenation.
     case 'table':
-      return linearizeTable(node, nodeId, path, options);
+      return linearizeTable(node, nodeId, path, options, collector);
     // Stray rows/cells (outside a table) recurse into their children so they
     // never fall through to the 'unsupported' boundary.
     case 'table_row':
     case 'table_cell':
-      return linearizeChildren(node as SupramarkParentNode, path, options, listCtx);
-    // Container payloads are owned by milestone 4 providers; keep a boundary
-    // plus trailing break as the placeholder.
-    case 'container':
-      return [
-        containerBoundary(node, nodeId),
-        breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
+      return linearizeChildren(node as SupramarkParentNode, path, options, listCtx, collector);
+    // Containers whose content is NOT rendered as readable text — host cards,
+    // built-in html/map cards — keep a hard boundary plus a trailing break.
+    // Everything else (admonitions, unrecognized containers) renders its
+    // children through renderNode, so the body linearizes and its blocks
+    // collect like any other content.
+    case 'container': {
+      const container = node;
+      if (options.opaqueContainers?.has(container.name) === true) {
+        return [
+          containerBoundary(container, nodeId),
+          breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', container),
+        ];
+      }
+      // The visible title is body text: its own unit, bound to the container
+      // node so the title's rendered <Text> can register as a block. The
+      // children keep their own nodes and bindings.
+      const title = options.containerTitle?.(container)?.trim();
+      const titleUnit =
+        title !== undefined && title !== ''
+          ? {
+              kind: 'text' as const,
+              unitId: makeUnitId(nodeId, 0),
+              nodeId,
+              text: title,
+              node: container,
+              sourceRange: getSourceRange(container),
+            }
+          : undefined;
+      const units = [
+        ...(titleUnit !== undefined ? [titleUnit] : []),
+        ...linearizeChildren(container, path, options, undefined, collector),
+        breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', container),
       ];
+      if (titleUnit !== undefined && collector !== undefined) {
+        collector.blocks.push({ node: container, nodeId, unitIds: [titleUnit.unitId] });
+      }
+      return units;
+    }
     case 'input':
       return [
         { kind: 'boundary', unitId: makeUnitId(nodeId, 0), nodeId, node: node, reason: 'input' },
@@ -252,10 +468,11 @@ function linearizeChildren(
   node: SupramarkParentNode,
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions,
-  listCtx?: ListContext
+  listCtx?: ListContext,
+  collector?: BlockCollector
 ): SelectionUnit[] {
   return node.children.flatMap((child, index) =>
-    linearizeNode(child, [...path, 'children', index], options, listCtx)
+    linearizeNode(child, [...path, 'children', index], options, listCtx, collector)
   );
 }
 
@@ -271,12 +488,13 @@ function wrapInline(
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions,
   listCtx: ListContext | undefined,
+  collector: BlockCollector | undefined,
   open: string,
   close: string
 ): SelectionUnit[] {
   return [
     syntaxUnit(makeUnitId(nodeId, 0), nodeId, node, open),
-    ...linearizeChildren(node, path, options, listCtx),
+    ...linearizeChildren(node, path, options, listCtx, collector),
     syntaxUnit(makeUnitId(nodeId, 1), nodeId, node, close),
   ];
 }
@@ -285,7 +503,8 @@ function linearizeList(
   list: SupramarkListNode,
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions,
-  parentListCtx?: ListContext
+  parentListCtx?: ListContext,
+  collector?: BlockCollector
 ): SelectionUnit[] {
   const depth = (parentListCtx?.depth ?? 0) + 1;
   const start = list.start ?? 1;
@@ -296,7 +515,7 @@ function linearizeList(
       child.type === 'list_item'
         ? { depth, ordered: list.ordered, start, index: itemIndex++ }
         : parentListCtx;
-    return linearizeNode(child, [...path, 'children', index], options, childListCtx);
+    return linearizeNode(child, [...path, 'children', index], options, childListCtx, collector);
   });
 }
 
@@ -304,7 +523,8 @@ function linearizeListItem(
   item: SupramarkListItemNode,
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions,
-  listCtx?: ListContext
+  listCtx?: ListContext,
+  collector?: BlockCollector
 ): SelectionUnit[] {
   const nodeId = resolveNodeId(item, path, options);
   const depth = Math.max(0, (listCtx?.depth ?? 1) - 1);
@@ -317,11 +537,18 @@ function linearizeListItem(
         ? '- [ ] '
         : '- ';
 
-  return [
+  const units = [
     syntaxUnit(makeUnitId(nodeId, 0), nodeId, item, indent + marker),
-    ...linearizeChildren(item, path, options, listCtx),
+    ...linearizeChildren(item, path, options, listCtx, collector),
     breakUnit(makeUnitId(nodeId, 1), nodeId, 'list-item', item),
   ];
+  // Only a tight item (inline-only children) renders as one selectable text
+  // block. A loose item's text belongs to its child paragraphs, which are
+  // collected on their own.
+  if (item.children.every(isInlineNode)) {
+    collectBlock(collector, item, nodeId, units);
+  }
+  return units;
 }
 
 function linearizeCodeBlock(code: SupramarkCodeNode, nodeId: SelectionNodeId): SelectionUnit[] {
@@ -391,7 +618,8 @@ function linearizeTable(
   table: SupramarkTableNode,
   nodeId: SelectionNodeId,
   path: readonly SelectionPathSegment[],
-  options: LinearizeSelectionOptions
+  options: LinearizeSelectionOptions,
+  collector?: BlockCollector
 ): SelectionUnit[] {
   const units: SelectionUnit[] = [];
   const rows: Array<[SupramarkTableRowNode, number]> = [];
@@ -451,7 +679,17 @@ function linearizeTable(
       }
       cellCount++;
       const cellPath = [...rowPath, 'children', cellIndex];
-      units.push(...linearizeChildren(cell as SupramarkParentNode, cellPath, options));
+      // Each cell renders as one text block; collect it under its own id.
+      const cellNodeId = resolveNodeId(cell, cellPath, options);
+      const cellUnits = linearizeChildren(
+        cell as SupramarkParentNode,
+        cellPath,
+        options,
+        undefined,
+        collector
+      );
+      collectBlock(collector, cell, cellNodeId, cellUnits);
+      units.push(...cellUnits);
     });
     units.push(
       richTextUnit(
@@ -580,6 +818,29 @@ function prefixBlockquoteInterior(
 }
 
 /**
+ * A source view rendered as readable text (a feature disabled in the renderer):
+ * the visible `text` is what the renderer draws, while the Markdown payload
+ * rebuilds the original syntax. Distinct from an atom, which carries no
+ * on-screen text.
+ */
+function renderedSourceUnit(
+  nodeId: SelectionNodeId,
+  node: SupramarkNode,
+  text: string,
+  markdown: string
+): SelectionTextUnit {
+  return {
+    kind: 'text',
+    unitId: makeUnitId(nodeId, 0),
+    nodeId,
+    text,
+    node,
+    payload: { markdown, source: text },
+    sourceRange: getSourceRange(node),
+  };
+}
+
+/**
  * Plain-text content unit: `text` is the visible text and there is no payload,
  * so the serializer falls back to `text` for markdown/html/source.
  */
@@ -618,17 +879,22 @@ function makeUnitId(nodeId: SelectionNodeId, localIdx: number): SelectionNodeId 
   return `${nodeId}#${localIdx}`;
 }
 
+/**
+ * Default identity: the node's type plus its AST path. Unique for every node in
+ * a document and stable across re-renders of the same content.
+ *
+ * Source positions cannot serve as identity: the canonical parser reports the
+ * same range for a paragraph and its only text child, so position-based ids
+ * collide between a node and its descendant and their units end up sharing a
+ * unitId. Positions remain on each unit's `sourceRange` as metadata only.
+ */
 function resolveNodeId(
   node: SupramarkNode,
   path: readonly SelectionPathSegment[],
   options: LinearizeSelectionOptions
 ): string {
   if (options.nodeId) return options.nodeId(node, path);
-  const range = getSourceRange(node);
-  if (range?.startUtf16 !== undefined && range.endUtf16 !== undefined) {
-    return `pos:${range.startUtf16}-${range.endUtf16}`;
-  }
-  return `path:${path.join('/')}`;
+  return `${node.type}@${path.join('/')}`;
 }
 
 function getSourceRange(node: SupramarkNode): SelectionSourceRange | undefined {

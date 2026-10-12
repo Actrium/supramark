@@ -12,6 +12,12 @@ export interface SelectionProvider<TNode extends SupramarkNode = SupramarkNode> 
   id: string;
   match(node: SupramarkNode): node is TNode;
   getBehavior?(node: TNode, context: SelectionContext): SelectionBehavior;
+  /**
+   * Custom units for one node. Every returned `unitId` must be unique across
+   * the whole document and derived from the provided `nodeId` — colliding ids
+   * (between units, or with another node's units) corrupt every offset past
+   * the collision, and are reported in dev by `detectDuplicateUnitIds`.
+   */
   getUnits?(
     node: TNode,
     context: SelectionContext & { nodeId: SelectionNodeId }
