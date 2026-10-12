@@ -55,6 +55,21 @@ fn emit_static_link(static_lib: &Path, link_name: &str) {
 }
 
 fn emit_static_sys_libs(target_os: &str) {
+    // Read here rather than threading it through all five call sites: every one
+    // of them already resolved `target_os` from the environment, and the libc
+    // flavour is only ever needed inside this decision.
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    // musl: the release archive is self-contained — libstdc++, expat and zlib
+    // are merged into it at build time (scripts/build-linux.sh --libc musl).
+    // A musl host has none of those as separate static libraries (they live in
+    // Alpine's g++ / expat-static / zlib-static packages, which a `cargo
+    // install` host does not have), and rustc links these targets `crt-static`
+    // so the glibc trick below — naming runtime SONAMEs — cannot apply either.
+    if target_os == "linux" && target_env == "musl" {
+        return;
+    }
+
     let libs: &[&str] = match target_os {
         // Graphviz 14.x ships C++ libraries (libstdc++), plus expat (HTML
         // labels), zlib and libm.
@@ -72,6 +87,7 @@ fn emit_static_sys_libs(target_os: &str) {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
     if target_os == "linux" {
+        // glibc only; musl returned early above.
         // Link the runtime SONAMEs verbatim (`-l:libexpat.so.1`) rather than
         // `-lexpat`: the unversioned `libexpat.so` / `libz.so` / `libstdc++.so`
         // symlinks only come with the -dev packages (or g++), which a typical
@@ -387,13 +403,13 @@ fn try_github_release() -> bool {
             return false;
         }
 
-        let tar_flag = if asset.ends_with(".zip") {
-            "-xf"
-        } else {
-            "-xzf"
-        };
+        // Every asset in `target_triple_to_asset_name` is a gzipped tarball,
+        // Windows included. There used to be a `.zip` branch here that passed
+        // `tar -xf`, which cannot read a zip anyway — it advertised a fallback
+        // that could not have worked. A future zip asset needs a real unzip
+        // step, not a flag.
         let untar = Command::new("tar")
-            .arg(tar_flag)
+            .arg("-xzf")
             .arg(&archive)
             .arg("-C")
             .arg(&staging)
