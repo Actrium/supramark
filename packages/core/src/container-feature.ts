@@ -161,6 +161,22 @@ export interface ContainerWebRenderArgs {
 export type ContainerWebRenderer = (args: ContainerWebRenderArgs) => unknown;
 
 /**
+ * Video tap event delivered to a host-supplied onVideoPress handler.
+ *
+ * Shaped like the image-press event in `@supramark/rn`, but without gallery
+ * merging because videos render as standalone cards. The handler itself stays
+ * in the RN renderer package so this core container contract is feature-neutral.
+ */
+export interface SupramarkVideoPressEvent {
+  /** The video source URL. */
+  src: string;
+  /** Poster image URL, if configured. */
+  poster?: string;
+  /** Title, if configured. */
+  title?: string;
+}
+
+/**
  * Arguments for a Container RN render function.
  */
 export interface ContainerRNRenderArgs {

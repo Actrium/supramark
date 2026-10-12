@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "bun test",
     "lint": "eslint .",
     "preview": "vite preview",
     "supramark:gen": "bun x supramark-gen",
@@ -33,6 +34,7 @@
     "@supramark/feature-mermaid": "workspace:*",
     "@supramark/feature-plantuml": "workspace:*",
     "@supramark/feature-weather": "workspace:*",
+    "@supramark/feature-video": "workspace:*",
     "@supramark/web": "workspace:*",
     "echarts": "^5.5.0",
     "react": "19.1.0",

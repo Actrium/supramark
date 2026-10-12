@@ -100,7 +100,7 @@ export interface SupramarkSelectionOptions {
 export interface SupramarkSelectionActionRequest extends SelectionCopyRequest {
   /** The plan's document instance id, when the host supplied one. */
   documentId?: string;
-  /** Monotonic revision of the parsed snapshot the selection belongs to. */
+  /** Monotonic revision of the parsed snapshot and rendering policy the selection belongs to. */
   revision: number;
 }
 
@@ -140,8 +140,8 @@ export interface SupramarkSelectionPlan {
   /** Host identity of the document instance, when the host supplied one. */
   documentId?: string;
   /**
-   * Monotonic revision of the parsed snapshot this plan was built from. Every
-   * document change gets a fresh revision, so late callbacks and gestures can
+   * Monotonic revision of the parsed snapshot and rendering policy. Every
+   * document or policy change gets a fresh revision, so late callbacks and gestures can
    * be matched against the content they actually belong to.
    */
   revision: number;
@@ -180,7 +180,12 @@ export function resolveOpaqueContainers(
  * `name: params`. html / map cards are opaque and never reach this path; a host
  * renderer declared as text draws its own chrome, which this layer cannot know.
  */
-export function rendererContainerTitle(node: SupramarkContainerNode): string | undefined {
+export function rendererContainerTitle(
+  node: SupramarkContainerNode,
+  customContainers?: ReadonlySet<string>
+): string | undefined {
+  // A host renderer replaces the entire built-in branch, including its title.
+  if (customContainers?.has(node.name)) return undefined;
   const name = node.name;
   if (SUPRAMARK_ADMONITION_KINDS.includes(name as (typeof SUPRAMARK_ADMONITION_KINDS)[number])) {
     return node.params || (node.data?.title as string | undefined);

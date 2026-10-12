@@ -37,6 +37,7 @@ import {
   INLINE_NODE_TYPES,
   isInlineNode,
   SUPRAMARK_ADMONITION_KINDS,
+  BUILT_IN_DIAGRAM_ENGINES,
 } from '@supramark/core';
 import { DiagramNode } from './DiagramNode';
 import { MathBlock } from './MathBlock';
@@ -44,6 +45,8 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
+import { CodeBlock, CodeCopyContext } from './CodeBlock';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -343,6 +346,22 @@ export interface SupramarkProps {
   containerRenderers?: Record<string, ContainerRendererRN>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  /**
+   * Copy handler for code blocks with a language info string. When provided,
+   * the header renders a copy button that calls this with the raw source.
+   *
+   * RN stays clipboard-free: the host owns the clipboard API
+   * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
+   * inside this callback. Without it, no copy button is shown on RN.
+   * Language-less fences and indented code have no distinct AST flag and do
+   * not render a copy button.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /**
+   * Whether to show the code-block copy button (requires onCopyCode;
+   * default: enabled).
+   */
+  copyButton?: boolean;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -351,6 +370,14 @@ export interface SupramarkProps {
    * - the host may open a new page / modal / external browser from the callback.
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
+
+  /**
+   * Callback invoked when the user taps a :::video card.
+   *
+   * The host owns playback when supplied. Otherwise the default video
+   * renderer opens http(s) sources through React Native Linking.
+   */
+  onVideoPress?: SupramarkVideoPressHandler;
 
   /**
    * Callback invoked when the user taps a block image.
@@ -382,11 +409,14 @@ export const Supramark: React.FC<SupramarkProps> = ({
   onError,
   errorFallback,
   onOpenHtmlPage,
+  onVideoPress,
   onImagePress,
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
   selection,
+  onCopyCode,
+  copyButton,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -438,7 +468,13 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return mergeStyles(finalCustomStyles);
   }, [customStyles, theme]);
 
+  // Parsing consumes the latest options but only semantic parse/highlight inputs
+  // restart it; fresh renderer configuration objects must not replace the document.
+  const parseConfigRef = useRef(config);
+  parseConfigRef.current = config;
   useEffect(() => {
+    // Capture one configuration for this entire asynchronous document build.
+    const config = parseConfigRef.current;
     let cancelled = false;
     void (async () => {
       try {
@@ -534,7 +570,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   }, [
     markdown,
     ast,
-    config,
+    codeHighlightEnabled,
     onError,
     codeHighlighter,
     codeHighlightTheme,
@@ -557,7 +593,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   // screen, and no id/path convention has to be mirrored between the two sides.
   //
   // Each parsed snapshot carries a monotonic revision. The ref write inside the
-  // memo factory is idempotent — one document always maps to one revision — so
+  // memo factory is idempotent for the document and rendering policy, so
   // a discarded-and-recomputed memo cannot move it, and late callbacks can be
   // matched against the content version they belong to.
   // Host-driven selection entries: the root's imperative commands are forwarded
@@ -574,57 +610,86 @@ export const Supramark: React.FC<SupramarkProps> = ({
     []
   );
 
-  const planIdentityRef = useRef<{ document: ParsedDocument | null; revision: number }>({
-    document: null,
-    revision: 0,
-  });
+  // The revision identifies both the parsed document and its rendered selection policy.
+  const planIdentityRef = useRef<{
+    document: ParsedDocument | null;
+    policyKey: string;
+    documentId?: string;
+    revision: number;
+  }>({ document: null, policyKey: '', revision: 0 });
+  // An omitted selection prop avoids constructing policy sets or a selection plan.
   const selectionEnabled = selection !== undefined;
-  // Containers the renderer draws as cards rather than readable body text: the
-  // built-in html / map cards plus every host-supplied container renderer,
-  // except names the host declared as text via `containerText`. Opaque names
-  // stay a hard boundary; everything else recurses for selection.
-  const opaqueContainers = useMemo(
-    () => resolveOpaqueContainers(mergedContainerRenderers, selection?.containerText),
-    [mergedContainerRenderers, selection?.containerText]
-  );
-  // Mirrors the renderer's own feature switches (the same functions the render
-  // branches call), so a disabled math / diagram node linearizes as the source
-  // text the user actually sees.
-  const rendersAsText = useMemo(
-    () => (node: SupramarkNode) => {
-      if (node.type === 'math_inline' || node.type === 'math_block') {
-        return !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
-      }
-      if (node.type === 'diagram') {
-        return !isDiagramFeatureEnabled(config, node.engine, 'rn:diagram-feature');
-      }
-      return false;
-    },
-    [config]
-  );
-  // Plugin options are read through a ref so a host passing a fresh inline
-  // config / containerRenderers object does NOT count as a content revision —
-  // that would clear the user's selection for nothing. Only the parsed document
-  // (content) and the host document identity re-linearize.
-  const planOptionsRef = useRef({ opaqueContainers, rendersAsText });
-  planOptionsRef.current = { opaqueContainers, rendersAsText };
+  // Canonical keys compare effective sets, independent of object identity or declaration order.
+  const opaqueContainersKey = selectionEnabled
+    ? JSON.stringify(
+        [...resolveOpaqueContainers(mergedContainerRenderers, selection?.containerText)].sort()
+      )
+    : '[]';
+  // Custom renderers own their chrome, even when their child text is selectable.
+  const customContainersKey = selectionEnabled
+    ? JSON.stringify(Object.keys(mergedContainerRenderers).sort())
+    : '[]';
+  // Resolve the same feature gates as the render branches before comparing policies.
+  const mathAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
+  // Unknown engines are always enabled by core; built-in aliases are normalized below.
+  const textDiagramEnginesKey = selectionEnabled
+    ? JSON.stringify(
+        BUILT_IN_DIAGRAM_ENGINES.filter(
+          engine => !isDiagramFeatureEnabled(config, engine, 'rn:diagram-feature')
+        )
+      )
+    : '[]';
+  // One semantic key versions every policy input that can change the visible unit stream.
+  const policyKey = JSON.stringify([
+    opaqueContainersKey,
+    customContainersKey,
+    mathAsText,
+    textDiagramEnginesKey,
+  ]);
+  // Stable callbacks and sets let equivalent fresh host props retain their existing selection.
+  const planOptions = useMemo(() => {
+    // The ordinary render path needs no selection policy allocations.
+    if (!selectionEnabled) return undefined;
+    // Recover canonical sets only when their semantic contents change.
+    const opaqueContainers = new Set<string>(JSON.parse(opaqueContainersKey));
+    // Remember which containers replace the built-in title branch.
+    const customContainers = new Set<string>(JSON.parse(customContainersKey));
+    // Match every disabled diagram alias to the readable source branch.
+    const textDiagramEngines = new Set<string>(JSON.parse(textDiagramEnginesKey));
+    return {
+      opaqueContainers,
+      // Match disabled source rendering for inline/block math and diagram aliases.
+      rendersAsText: (node: SupramarkNode) =>
+        ((node.type === 'math_inline' || node.type === 'math_block') && mathAsText) ||
+        (node.type === 'diagram' && textDiagramEngines.has(node.engine.toLowerCase())),
+      // Only built-in render branches contribute the library's container title.
+      containerTitle: (node: SupramarkContainerNode) =>
+        rendererContainerTitle(node, customContainers),
+    };
+  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, textDiagramEnginesKey]);
+  // Build once per document/policy identity; fresh equivalent options keep unit identities intact.
   const selectionPlan = useMemo(() => {
+    // The existing renderer handles loading and errors without a selection model.
     if (!selectionEnabled || parsedDocument === null) return null;
-    if (planIdentityRef.current.document !== parsedDocument) {
+    // Policy changes also invalidate callbacks that carry the previous plan revision.
+    if (
+      planIdentityRef.current.document !== parsedDocument ||
+      planIdentityRef.current.policyKey !== policyKey ||
+      planIdentityRef.current.documentId !== selection?.documentId
+    ) {
       planIdentityRef.current = {
         document: parsedDocument,
+        policyKey,
+        documentId: selection?.documentId,
         revision: planIdentityRef.current.revision + 1,
       };
     }
-    const options = planOptionsRef.current;
     return buildSelectionPlan(parsedDocument.root, {
       documentId: selection?.documentId,
       revision: planIdentityRef.current.revision,
-      opaqueContainers: options.opaqueContainers,
-      rendersAsText: options.rendersAsText,
-      containerTitle: rendererContainerTitle,
+      ...planOptions,
     });
-  }, [selectionEnabled, selection?.documentId, parsedDocument]);
+  }, [selectionEnabled, selection?.documentId, parsedDocument, policyKey, planOptions]);
 
   // Read through a ref: a host passing a fresh inline callback must not re-fire
   // the notification, so the handle it holds stays the same object across
@@ -638,6 +703,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     callback(selectionReady ? selectionHandle : null);
     return () => callback(null);
   }, [selectionReady, selectionHandle]);
+
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton]
+  );
 
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
@@ -674,40 +745,44 @@ export const Supramark: React.FC<SupramarkProps> = ({
 
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
-      <SelectionPlanContext.Provider value={selectionPlan}>
-        <SourceStateContext.Provider value={parsedDocument.sourceState}>
-          <ImagePressContext.Provider value={onImagePress}>
-            {selectionPlan ? (
-              <SelectionRoot
-                units={selectionPlan.units}
-                enabled={selection?.enabled !== false}
-                longPress={selection?.longPress}
-                handleRef={selectionRootRef}
-                onSelectionChange={selection?.onSelectionChange}
-                onCopy={request =>
-                  selection?.onAction?.({
-                    ...request,
-                    documentId: selectionPlan.documentId,
-                    revision: selectionPlan.revision,
-                  })
-                }
-                toolbarItems={selection?.toolbarItems}
-                renderToolbar={selection?.renderToolbar}
-                overlay={selection?.overlay}
-                handles={selection?.handles}
-                toolbar={selection?.toolbar}
-                longPressMs={selection?.longPressMs}
-                moveTolerance={selection?.moveTolerance}
-                onGestureActiveChange={selection?.onGestureActiveChange}
-              >
-                {documentView}
-              </SelectionRoot>
-            ) : (
-              documentView
-            )}
-          </ImagePressContext.Provider>
-        </SourceStateContext.Provider>
-      </SelectionPlanContext.Provider>
+      <VideoPressContext.Provider value={onVideoPress}>
+        <CodeCopyContext.Provider value={codeCopyContextValue}>
+          <SelectionPlanContext.Provider value={selectionPlan}>
+            <SourceStateContext.Provider value={parsedDocument.sourceState}>
+              <ImagePressContext.Provider value={onImagePress}>
+                {selectionPlan ? (
+                  <SelectionRoot
+                    units={selectionPlan.units}
+                    enabled={selection?.enabled !== false}
+                    longPress={selection?.longPress}
+                    handleRef={selectionRootRef}
+                    onSelectionChange={selection?.onSelectionChange}
+                    onCopy={request =>
+                      selection?.onAction?.({
+                        ...request,
+                        documentId: selectionPlan.documentId,
+                        revision: selectionPlan.revision,
+                      })
+                    }
+                    toolbarItems={selection?.toolbarItems}
+                    renderToolbar={selection?.renderToolbar}
+                    overlay={selection?.overlay}
+                    handles={selection?.handles}
+                    toolbar={selection?.toolbar}
+                    longPressMs={selection?.longPressMs}
+                    moveTolerance={selection?.moveTolerance}
+                    onGestureActiveChange={selection?.onGestureActiveChange}
+                  >
+                    {documentView}
+                  </SelectionRoot>
+                ) : (
+                  documentView
+                )}
+              </ImagePressContext.Provider>
+            </SourceStateContext.Provider>
+          </SelectionPlanContext.Provider>
+        </CodeCopyContext.Provider>
+      </VideoPressContext.Provider>
     </ErrorBoundary>
   );
 };
@@ -1145,7 +1220,11 @@ function renderNode(
     }
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, styles, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} styles={styles}>
+          {renderCodeContent(codeBlock, styles, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -1254,7 +1333,15 @@ function renderNode(
           config,
           onOpenHtmlPage,
           renderNode: (n, k) =>
-            renderNode(n, k, styles, highlighted, config, onOpenHtmlPage, containerRenderers),
+            renderNode(
+              n,
+              k,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            ),
           renderChildren: children =>
             children.map((child, index) =>
               renderNode(
@@ -1522,7 +1609,15 @@ function renderNode(
       return (
         <View key={key} style={[styles.table, { width: screenWidth }]}>
           {table.children.map((row, index) =>
-            renderNode(row, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              row,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1532,7 +1627,15 @@ function renderNode(
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
-            renderNode(cell, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              cell,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1560,7 +1663,15 @@ function renderNode(
       return (
         <View key={key} style={styles.blockquote}>
           {quote.children.map((child, i) =>
-            renderNode(child, i, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              i,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1579,9 +1690,9 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+/** Render selectable code inside the shared copy-button shell, excluding header chrome. */
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>
 ): RenderedNode {
@@ -1591,29 +1702,25 @@ function renderCodeBlock(
 
   if (!highlight) {
     return (
-      <View key={key} style={styles.codeBlock}>
-        <SelectableTextBlock node={codeBlock} style={styles.code}>
-          {codeBlock.value}
-        </SelectableTextBlock>
-      </View>
+      <SelectableTextBlock node={codeBlock} style={styles.code}>
+        {codeBlock.value}
+      </SelectableTextBlock>
     );
   }
 
   return (
-    <View key={key} style={styles.codeBlock}>
-      <SelectableTextBlock node={codeBlock} style={styles.code}>
-        {highlight.lines.map((line, lineIndex) => (
-          <Text key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
-                {token.text}
-              </Text>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </Text>
-        ))}
-      </SelectableTextBlock>
-    </View>
+    <SelectableTextBlock node={codeBlock} style={styles.code}>
+      {highlight.lines.map((line, lineIndex) => (
+        <Text key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
+              {token.text}
+            </Text>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </Text>
+      ))}
+    </SelectableTextBlock>
   );
 }
 
@@ -1725,7 +1832,15 @@ function renderListItemBody(
     flushInline();
     out.push(
       <View key={`li-${seq}`} style={styles.listItemIndent}>
-        {renderNode(child, 0, styles, highlighted, config, onOpenHtmlPage, containerRenderers)}
+        {renderNode(
+          child,
+          0,
+          styles,
+          highlighted,
+          config,
+          onOpenHtmlPage,
+          containerRenderers
+        )}
       </View>
     );
     seq += 1;
@@ -1769,13 +1884,7 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(
-          strongNode.children,
-          styles,
-          highlighted,
-          config,
-          'strong'
-        );
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
       }
       return (
         <Text key={key} style={styles.strong}>
