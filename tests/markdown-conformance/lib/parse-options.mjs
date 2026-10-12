@@ -25,10 +25,22 @@ export function parserOptionsForCase(testCase) {
   const allowDangerousHtml = isMicromark
     ? upstream?.allowDangerousHtml === true
     : true;
-  return {
+  const options = {
     allowDangerousHtml,
     disable: collectDisable(upstream),
   };
+  // micromark's CommonMark profile has no GFM bare-URL/email autolink-literal
+  // extension, so bare `http://`, `www.`, and `foo@bar` must stay literal.
+  // Supramark ships that extension ON by default (#144 measures exactly that for
+  // the commonmark/cmark-gfm gates). For an apples-to-apples micromark comparison
+  // we turn it off here — scoped to micromark, so #144's default-config stance is
+  // untouched elsewhere. This cannot regress a micromark case: micromark never
+  // linkifies a bare URL, and angle-bracket autolinks are the core AutolinkScanner
+  // (a separate rule), not this extension.
+  if (isMicromark) {
+    options.gfmAutolink = false;
+  }
+  return options;
 }
 
 /** `--options <json>` argv for the parser binary, ready to spread into spawnSync args. */

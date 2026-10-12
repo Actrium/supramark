@@ -164,6 +164,15 @@ impl BlockRule for HtmlBlockScanner {
         // Let's roll down till block end.
         if !sequence.close.is_match(line_text) {
             while next_line < state.line_max {
+                // HTML blocks never allow lazy continuation. A non-blank line
+                // that has dropped out of the enclosing container (e.g. lost
+                // the blockquote `>` marker) ends the block for every type.
+                // `line_indent < 0` catches this (the line's content sits
+                // before `blk_indent`); `is_empty` excludes genuine blank
+                // lines, whose effect is governed by the next guard.
+                if !state.is_empty(next_line) && state.line_indent(next_line) < 0 {
+                    break;
+                }
                 // Types 6–7 end at a blank line; types 1–5 run through blank
                 // lines until their specific close condition.
                 if sequence.ends_at_blank && state.line_indent(next_line) < 0 {
