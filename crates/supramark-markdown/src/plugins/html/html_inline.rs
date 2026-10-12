@@ -57,7 +57,7 @@ impl InlineRule for HtmlInlineScanner {
             .as_str();
         let capture_len = capture.len();
 
-        let content = capture.to_owned();
+        let content = normalize_raw_inline(capture);
 
         if HTML_LINK_OPEN.is_match(&content) {
             state.link_level += 1;
@@ -68,4 +68,32 @@ impl InlineRule for HtmlInlineScanner {
         let node = Node::new(HtmlInline { content });
         Some((node, capture_len))
     }
+}
+
+/// micromark's raw-text HTML inline constructs (comment, processing
+/// instruction, declaration, CDATA) consume a line ending plus its
+/// following leading whitespace via the `spnl` pattern, but only keep the
+/// line ending in the emitted value. Plain open/close tags are unaffected —
+/// their attribute whitespace is normalized by the HTML parser during the
+/// semantic comparison. Without this normalization a construct like
+/// `<?\n    ?>` would round-trip as `<?\n    ?>` instead of micromark's
+/// `<?\n?>`.
+fn normalize_raw_inline(value: &str) -> String {
+    let multi_line = value.starts_with("<!--")
+        || value.starts_with("<?")
+        || value.starts_with("<![CDATA[")
+        || value.starts_with("<!");
+    if !multi_line {
+        return value.to_owned();
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut lines = value.split('\n');
+    if let Some(first) = lines.next() {
+        out.push_str(first);
+    }
+    for line in lines {
+        out.push('\n');
+        out.push_str(line.trim_start_matches(|c: char| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{0c}')));
+    }
+    out
 }
