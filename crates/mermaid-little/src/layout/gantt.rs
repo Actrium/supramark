@@ -372,7 +372,9 @@ fn parse_date(s: &str, fmt: &str) -> Option<f64> {
     // YYYY-MM-DD with time component(s).
     if fmt.starts_with("YYYY-MM-DD ") || fmt.starts_with("YYYY-MM-DDT") {
         // Trim everything after the date portion.
-        if s.len() < 10 {
+        // `len()` counts bytes, so a date containing a multi-byte character
+        // could be sliced mid-character; an ISO date is ASCII anyway.
+        if s.len() < 10 || !s.is_char_boundary(10) {
             return None;
         }
         let date = parse_iso_date(&s[..10])?;

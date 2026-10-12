@@ -6,6 +6,49 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **musl targets** — `x86_64-unknown-linux-musl` and
+  `aarch64-unknown-linux-musl` now have their own release assets
+  (`graphviz-native-linux-musl-*.tar.gz`), so `cargo install` of a downstream
+  binary works on Alpine. Previously those targets had no asset at all and
+  `build.rs` ended in its "unable to locate graphviz_api native library"
+  panic. The glibc archive is not reused: it is not linkable against musl.
+
+  The musl archive is self-contained — `libstdc++`, `libexpat` and `libz` are
+  merged into `libgraphviz_api.a` at build time. On glibc these are linked at
+  the consumer by runtime SONAME, which works because every desktop distro
+  ships them; a musl host has neither those SONAMEs nor the static packages
+  (Alpine keeps them in `g++` / `expat-static` / `zlib-static`), and rustc
+  links musl targets `crt-static`. Nothing beyond musl libc is needed to link
+  or run — dynamic builds still carry the usual `libgcc_s` from the compiler
+  runtime — which CI asserts with `ldd` after removing the dev packages.
+
+  musl targets are matched by triple **suffix**, so a distro toolchain resolves
+  too: Alpine's own rustc reports `x86_64-alpine-linux-musl`, not rustup's
+  `x86_64-unknown-linux-musl`, and `apk add cargo` is the most likely way a
+  musl build happens. Matching the rustup spelling alone would have left that
+  toolchain with no asset — and classified as a shared-library target, so it
+  linked `libgraphviz_api.so` and then failed at runtime with
+  `gv_context_new: symbol not found`.
+
+## [0.2.6] — 2026-09-22
+
+### Fixed
+
+- **`cargo install` of downstream binaries** — `build.rs` now downloads the
+  matching GitHub release asset by default when no local library is found.
+  The published crate carries no native library, so the previous opt-in
+  (`GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1`) made every plain crates.io install
+  fail. Set `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1` to keep builds offline;
+  `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD` is still accepted and is now a no-op.
+- **Linux linking without -dev packages** — the static archive's system
+  dependencies are linked by SONAME (`libstdc++.so.6`, `libexpat.so.1`,
+  `libz.so.1`), so hosts with only the runtime packages installed (no
+  `libexpat1-dev` / `zlib1g-dev` / `g++`) no longer fail with
+  `library not found: expat`. MSRV is now 1.67 for the `+verbatim` link
+  modifier.
+
 ## [0.2.5] — 2026-07-13
 
 ### Fixed
@@ -100,7 +143,7 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
   postinstall script.
 - **Windows ARM64**: skeleton (`scripts/build-windows.sh --arch arm64`, CI
   matrix entry with `continue-on-error: true`, asset name
-  `graphviz-native-windows-arm64.zip`, `build.rs` env-override path). Needs
+  `graphviz-native-windows-arm64.tar.gz`, `build.rs` env-override path). Needs
   real verification on a Windows ARM runner.
 - **RN postinstall paths in `try_repo_output`**: `build.rs` now scans
   `packages/react-native/{ios,android}/...` when the Rust crate is built
@@ -182,7 +225,9 @@ Target version: **0.2.0** (cross-target build.rs + asset coverage)
 
 ---
 
-[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Actrium/supramark/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/Actrium/supramark/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/Actrium/supramark/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/Actrium/supramark/compare/v0.2.3...v0.2.4
 [0.2.1]: https://github.com/Actrium/graphviz-anywhere/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Actrium/graphviz-anywhere/compare/v0.1.8...v0.2.0

@@ -35,7 +35,8 @@ pub fn parse_ebnf_diagram(source: &str) -> Result<EbnfDiagram> {
         if trimmed == "title" {
             continue;
         }
-        if trimmed.starts_with("(*") && trimmed.ends_with("*)") {
+        // `(*)` satisfies both ends at once and would give a reversed range.
+        if trimmed.len() >= 4 && trimmed.starts_with("(*") && trimmed.ends_with("*)") {
             comment = Some(trimmed[2..trimmed.len() - 2].trim().to_string());
             continue;
         }

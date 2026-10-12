@@ -2823,12 +2823,18 @@ fn untranslate_backslashes(s: &str) -> String {
 }
 
 /// Strip a directive prefix case-insensitively.
+///
+/// Compares bytes rather than slicing the line as a `str`: every line reaches
+/// here, and `line[..prefix.len()]` panics whenever that byte index lands
+/// inside a multi-byte character. `actor ` is six bytes, so a three-byte
+/// character after it spans bytes 6..9 and the 8-byte `!define ` cuts it in
+/// half. Matching the prefix byte-wise leaves the tail slice safe, because
+/// the matched bytes are ASCII (or byte-identical to `prefix`), so
+/// `prefix.len()` is a character boundary.
 fn strip_directive_prefix<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
-        Some(&line[prefix.len()..])
-    } else {
-        None
-    }
+    let head = line.as_bytes().get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix.as_bytes())
+        .then(|| &line[prefix.len()..])
 }
 
 // ─── tests ──────────────────────────────────────────────────────
