@@ -17,6 +17,10 @@ mock.module('react-native', () => ({
   ScrollView: 'ScrollView',
   TouchableOpacity: 'TouchableOpacity',
   ActivityIndicator: 'ActivityIndicator',
+  Platform: { OS: 'ios', select: (spec: Record<string, unknown>) => spec.ios ?? spec.default },
+  // The selection layer attaches a root PanResponder; the mock only needs the
+  // shape (`panHandlers`) since tests never drive touches.
+  PanResponder: { create: () => ({ panHandlers: {} }) },
   Dimensions: { get: () => ({ width: 375, height: 812 }) },
   Linking: { openURL: async () => undefined },
   StyleSheet: { create: (s: unknown) => s },

@@ -31,7 +31,8 @@
   },
   "dependencies": {
     "@supramark/core": "workspace:*",
-    "@supramark/engines": "workspace:*"
+    "@supramark/engines": "workspace:*",
+    "@supramark/rn-selection": "workspace:*"
   },
   "devDependencies": {
     "@actrium/graphviz-anywhere-rn": "workspace:*",

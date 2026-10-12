@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "supramark",
@@ -31,7 +30,11 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/d2-little/packages/web": {
       "name": "@actrium/d2-little-web",
@@ -83,7 +86,11 @@
         "@supramark/engines": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/mermaid-little/packages/web": {
       "name": "@actrium/mermaid-little-web",
@@ -121,7 +128,11 @@
         "@supramark/core": "workspace:*",
         "react": "*",
         "react-native": "*",
+        "react-native-windows": "*",
       },
+      "optionalPeers": [
+        "react-native-windows",
+      ],
     },
     "crates/supramark-markdown/packages/web": {
       "name": "@supramark/markdown-web",
@@ -572,6 +583,7 @@
       "dependencies": {
         "@supramark/core": "workspace:*",
         "@supramark/engines": "workspace:*",
+        "@supramark/rn-selection": "workspace:*",
       },
       "devDependencies": {
         "@actrium/graphviz-anywhere-rn": "workspace:*",

@@ -108,6 +108,12 @@ export function computeSelectionRects(input: SelectionRectsInput): OverlayRect[]
     if (!block.unitIds.some(id => covered.has(id))) continue;
 
     const metrics = block.metrics;
+    // Never paint an entire mixed paragraph while its native attachments are still being measured.
+    if (
+      !metrics &&
+      block.unitIds.some(id => index.entries[index.byUnitId.get(id) ?? -1]?.unit.kind === 'atom')
+    )
+      continue;
     if (range !== null && metrics && metrics.lines.length > 0) {
       const spans = buildSegmentSpans(block, index);
       const segment = rangeToSegmentSelection(range, index, spans);

@@ -18,6 +18,7 @@ export * from './gesture';
 export {
   SelectionRoot,
   pointToSelectionForRoot,
+  type SelectionRootHandle,
   type SelectionRootProps,
   type SelectionToolbarRenderProps,
 } from './SelectionRoot';
@@ -30,3 +31,5 @@ export { SelectionHandles, type SelectionHandlesProps } from './SelectionHandles
 export { SelectionToolbar, type SelectionToolbarProps } from './SelectionToolbar';
 export { SelectableBlock, type SelectableBlockProps } from './SelectableBlock';
 export { SelectionViewport, type SelectionViewportProps } from './SelectionViewport';
+
+export { SelectableInlineObject } from './SelectableInlineObject';

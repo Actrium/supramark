@@ -1,5 +1,15 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Text, View, Image, Linking, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Text,
+  View,
+  Image,
+  Linking,
+  ScrollView,
+  TouchableOpacity,
+  Dimensions,
+  type StyleProp,
+  type TextStyle,
+} from 'react-native';
 import type {
   SupramarkRootNode,
   SupramarkNode,
@@ -24,6 +34,8 @@ import {
   isFeatureEnabled,
   isDiagramFeatureEnabled,
   getFeatureOptionsAs,
+  INLINE_NODE_TYPES,
+  isInlineNode,
   SUPRAMARK_ADMONITION_KINDS,
 } from '@supramark/core';
 import { DiagramNode } from './DiagramNode';
@@ -39,8 +51,25 @@ import {
   resolveRendererCachePolicy,
   type RendererCachePolicy,
 } from './renderCache';
+import { SelectableBlock, SelectableInlineObject, SelectionRoot, type SelectionRootHandle } from '@supramark/rn-selection';
+import {
+  buildSelectionPlan,
+  rendererContainerTitle,
+  resolveOpaqueContainers,
+  type SupramarkSelectionHandle,
+  type SupramarkSelectionOptions,
+  type SupramarkSelectionPlan,
+} from './selection';
 
 type RenderedNode = React.ComponentProps<typeof Text>['children'];
+
+/**
+ * The document's selection model when the host passed `selection`. Rendered
+ * blocks read their binding from this context, which keeps `renderNode` — a
+ * plain function — free of an extra parameter threaded through every call
+ * site, including container renderers that call back into `renderNode`.
+ */
+const SelectionPlanContext = createContext<SupramarkSelectionPlan | null>(null);
 
 // Dev mode: __DEV__ in React Native bundles, NODE_ENV elsewhere (web/tests).
 // Deep-freeze of the shared cached AST only runs in dev so production keeps
@@ -333,6 +362,14 @@ export interface SupramarkProps {
    * - `linkUrl` is set when the image is wrapped in a link.
    */
   onImagePress?: SupramarkImagePressHandler;
+
+  /**
+   * Document text selection (long press to select, drag to extend, act from
+   * the bar). Off — and rendering unchanged — when omitted. While a selection
+   * gesture owns the touch, an enclosing host scroller should pause; see
+   * `onGestureActiveChange`.
+   */
+  selection?: SupramarkSelectionOptions;
 }
 
 export const Supramark: React.FC<SupramarkProps> = ({
@@ -349,6 +386,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
+  selection,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -513,6 +551,94 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return containerRenderers ?? {};
   }, [containerRenderers]);
 
+  // One linearize pass yields the unit stream plus the per-block bindings the
+  // rendered tree looks up by AST node identity. Built from the same document
+  // snapshot the renderer walks, so ids can never disagree with what is on
+  // screen, and no id/path convention has to be mirrored between the two sides.
+  //
+  // Each parsed snapshot carries a monotonic revision. The ref write inside the
+  // memo factory is idempotent — one document always maps to one revision — so
+  // a discarded-and-recomputed memo cannot move it, and late callbacks can be
+  // matched against the content version they belong to.
+  // Host-driven selection entries: the root's imperative commands are forwarded
+  // through a stable adapter so the host can keep the same reference across
+  // re-renders, and `onHandleReady` fires when the layer mounts or unmounts.
+  const selectionRootRef = useRef<SelectionRootHandle | null>(null);
+  const selectionHandle = useMemo<SupramarkSelectionHandle>(
+    () => ({
+      trySelectParagraphAt: (pageX, pageY) =>
+        selectionRootRef.current?.trySelectParagraphAt(pageX, pageY) ?? Promise.resolve(false),
+      clearSelection: () => selectionRootRef.current?.clearSelection(),
+      measurePageRect: () => selectionRootRef.current?.measurePageRect() ?? Promise.resolve(null),
+    }),
+    []
+  );
+
+  const planIdentityRef = useRef<{ document: ParsedDocument | null; revision: number }>({
+    document: null,
+    revision: 0,
+  });
+  const selectionEnabled = selection !== undefined;
+  // Containers the renderer draws as cards rather than readable body text: the
+  // built-in html / map cards plus every host-supplied container renderer,
+  // except names the host declared as text via `containerText`. Opaque names
+  // stay a hard boundary; everything else recurses for selection.
+  const opaqueContainers = useMemo(
+    () => resolveOpaqueContainers(mergedContainerRenderers, selection?.containerText),
+    [mergedContainerRenderers, selection?.containerText]
+  );
+  // Mirrors the renderer's own feature switches (the same functions the render
+  // branches call), so a disabled math / diagram node linearizes as the source
+  // text the user actually sees.
+  const rendersAsText = useMemo(
+    () => (node: SupramarkNode) => {
+      if (node.type === 'math_inline' || node.type === 'math_block') {
+        return !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
+      }
+      if (node.type === 'diagram') {
+        return !isDiagramFeatureEnabled(config, node.engine, 'rn:diagram-feature');
+      }
+      return false;
+    },
+    [config]
+  );
+  // Plugin options are read through a ref so a host passing a fresh inline
+  // config / containerRenderers object does NOT count as a content revision —
+  // that would clear the user's selection for nothing. Only the parsed document
+  // (content) and the host document identity re-linearize.
+  const planOptionsRef = useRef({ opaqueContainers, rendersAsText });
+  planOptionsRef.current = { opaqueContainers, rendersAsText };
+  const selectionPlan = useMemo(() => {
+    if (!selectionEnabled || parsedDocument === null) return null;
+    if (planIdentityRef.current.document !== parsedDocument) {
+      planIdentityRef.current = {
+        document: parsedDocument,
+        revision: planIdentityRef.current.revision + 1,
+      };
+    }
+    const options = planOptionsRef.current;
+    return buildSelectionPlan(parsedDocument.root, {
+      documentId: selection?.documentId,
+      revision: planIdentityRef.current.revision,
+      opaqueContainers: options.opaqueContainers,
+      rendersAsText: options.rendersAsText,
+      containerTitle: rendererContainerTitle,
+    });
+  }, [selectionEnabled, selection?.documentId, parsedDocument]);
+
+  // Read through a ref: a host passing a fresh inline callback must not re-fire
+  // the notification, so the handle it holds stays the same object across
+  // re-renders and the only transitions are mounted / unmounted.
+  const onHandleReadyRef = useRef(selection?.onHandleReady);
+  onHandleReadyRef.current = selection?.onHandleReady;
+  const selectionReady = selectionPlan !== null;
+  useEffect(() => {
+    const callback = onHandleReadyRef.current;
+    if (callback === undefined) return undefined;
+    callback(selectionReady ? selectionHandle : null);
+    return () => callback(null);
+  }, [selectionReady, selectionHandle]);
+
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
     if (errorFallback) {
@@ -533,22 +659,55 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return <Text>{markdown}</Text>;
   }
 
+  const documentView = (
+    <View style={mergedStyles.root}>
+      {renderRootNodes(
+        parsedDocument.root.children,
+        mergedStyles,
+        parsedDocument.highlighted,
+        config,
+        onOpenHtmlPage,
+        mergedContainerRenderers
+      )}
+    </View>
+  );
+
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
-      <SourceStateContext.Provider value={parsedDocument.sourceState}>
-        <ImagePressContext.Provider value={onImagePress}>
-          <View style={mergedStyles.root}>
-            {renderRootNodes(
-              parsedDocument.root.children,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              mergedContainerRenderers
+      <SelectionPlanContext.Provider value={selectionPlan}>
+        <SourceStateContext.Provider value={parsedDocument.sourceState}>
+          <ImagePressContext.Provider value={onImagePress}>
+            {selectionPlan ? (
+              <SelectionRoot
+                units={selectionPlan.units}
+                enabled={selection?.enabled !== false}
+                longPress={selection?.longPress}
+                handleRef={selectionRootRef}
+                onSelectionChange={selection?.onSelectionChange}
+                onCopy={request =>
+                  selection?.onAction?.({
+                    ...request,
+                    documentId: selectionPlan.documentId,
+                    revision: selectionPlan.revision,
+                  })
+                }
+                toolbarItems={selection?.toolbarItems}
+                renderToolbar={selection?.renderToolbar}
+                overlay={selection?.overlay}
+                handles={selection?.handles}
+                toolbar={selection?.toolbar}
+                longPressMs={selection?.longPressMs}
+                moveTolerance={selection?.moveTolerance}
+                onGestureActiveChange={selection?.onGestureActiveChange}
+              >
+                {documentView}
+              </SelectionRoot>
+            ) : (
+              documentView
             )}
-          </View>
-        </ImagePressContext.Provider>
-      </SourceStateContext.Provider>
+          </ImagePressContext.Provider>
+        </SourceStateContext.Provider>
+      </SelectionPlanContext.Provider>
     </ErrorBoundary>
   );
 };
@@ -867,6 +1026,86 @@ function MarkdownImage({
   return imageContent;
 }
 
+/**
+ * One block-level text — paragraph, heading, code, table_cell — rendered as a
+ * selectable block when the selection model has a binding for this AST node.
+ * Without selection (or without a binding: image-only paragraphs, empty cells)
+ * it falls back to the plain `<Text>` rendering byte for byte.
+ */
+function SelectableTextBlock({
+  node,
+  style,
+  children,
+}: {
+  node: SupramarkNode;
+  style?: StyleProp<TextStyle>;
+  children: RenderedNode;
+}): RenderedNode {
+  const model = useContext(SelectionPlanContext);
+  const binding = model?.bindingFor(node);
+  if (binding === undefined) {
+    return <Text style={style}>{children}</Text>;
+  }
+  return (
+    <SelectableBlock nodeId={binding.nodeId} unitIds={binding.unitIds} style={style}>
+      {children}
+    </SelectableBlock>
+  );
+}
+
+/** Wrap an opaque inline node only while the renderer participates in selection. */
+function SelectionInlineObject({ node, children }: { node: SupramarkNode; children: React.ReactNode }) {
+  // The shared plan supplies the exact atom identity, including nested inline markup.
+  const plan = useContext(SelectionPlanContext);
+  const atom = plan?.atomFor(node);
+  // Ordinary rendering keeps its existing native subtree.
+  if (!atom) return <>{children}</>;
+  return <SelectableInlineObject unitId={atom.unitId}>{children}</SelectableInlineObject>;
+}
+
+/**
+ * A tight list item: marker then text on one line. The selection units carry
+ * no marker (Markdown copy reconstructs it as `- `), so with selection on the
+ * marker moves into a sibling `<Text>` and only the text stays selectable.
+ * Without selection the legacy single-`<Text>` flow is preserved exactly.
+ */
+function ListItemLine({
+  node,
+  marker,
+  styles,
+  children,
+}: {
+  node: SupramarkNode;
+  marker: string;
+  styles: ReturnType<typeof mergeStyles>;
+  children: RenderedNode;
+}): RenderedNode {
+  const model = useContext(SelectionPlanContext);
+  const binding = model?.bindingFor(node);
+  if (binding === undefined) {
+    return (
+      <Text style={styles.paragraph}>
+        {marker}
+        {children}
+      </Text>
+    );
+  }
+  return (
+    <View style={styles.listItem}>
+      <Text style={styles.bullet}>{marker}</Text>
+      <SelectableBlock
+        nodeId={binding.nodeId}
+        unitIds={binding.unitIds}
+        // The row must constrain the outer view; Text only owns typography.
+        containerStyle={{ flex: 1 }}
+        style={[styles.paragraph, styles.listItemText, { flex: 0 }]}
+      >
+        {children}
+      </SelectableBlock>
+    </View>
+  );
+}
+
 function renderNode(
   node: SupramarkNode,
   key: number,
@@ -885,18 +1124,23 @@ function renderNode(
       if (blockImages) {
         return renderImageGallery(blockImages, key, styles);
       }
+      // A paragraph whose inline image cannot load still renders its fallback
+      // label inside the selectable block and stays registered for host-driven
+      // entries. If the platform lays out more text than the units hold, the
+      // length check in SelectableBlock drops the metrics and selection
+      // degrades to the whole block instead of using wrong offsets.
       return (
-        <Text key={key} style={styles.paragraph}>
+        <SelectableTextBlock key={key} node={node} style={styles.paragraph}>
           {renderInlineNodes(node.children, styles, highlighted, config)}
-        </Text>
+        </SelectableTextBlock>
       );
     }
     case 'heading': {
       const heading = node;
       return (
-        <Text key={key} style={headingStyle(heading.depth, styles)}>
+        <SelectableTextBlock key={key} node={heading} style={headingStyle(heading.depth, styles)}>
           {renderInlineNodes(heading.children, styles, highlighted, config)}
-        </Text>
+        </SelectableTextBlock>
       );
     }
     case 'code': {
@@ -953,10 +1197,9 @@ function renderNode(
           );
         }
         return (
-          <Text key={key} style={styles.paragraph}>
-            {marker}
+          <ListItemLine key={key} node={item} marker={marker} styles={styles}>
             {renderInlineNodes(item.children, styles, highlighted, config)}
-          </Text>
+          </ListItemLine>
         );
       }
 
@@ -1087,7 +1330,11 @@ function renderNode(
         if (!isFeatureGroupEnabled(config, ['@supramark/feature-admonition'])) {
           return (
             <View key={key} style={admonitionContainerStyle}>
-              {title ? <Text style={styles.paragraph}>{title}</Text> : null}
+              {title ? (
+                  <SelectableTextBlock node={container} style={styles.paragraph}>
+                    {title}
+                  </SelectableTextBlock>
+                ) : null}
               {renderAdmonitionContent()}
             </View>
           );
@@ -1099,7 +1346,11 @@ function renderNode(
           if (!adOptions.kinds.includes(kind)) {
             return (
               <View key={key} style={admonitionContainerStyle}>
-                {title ? <Text style={styles.paragraph}>{title}</Text> : null}
+                {title ? (
+                  <SelectableTextBlock node={container} style={styles.paragraph}>
+                    {title}
+                  </SelectableTextBlock>
+                ) : null}
                 {renderAdmonitionContent()}
               </View>
             );
@@ -1109,7 +1360,9 @@ function renderNode(
         return (
           <View key={key} style={admonitionContainerStyle}>
             {title ? (
-              <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text>
+              <SelectableTextBlock node={container} style={[styles.paragraph, { fontWeight: '600' }]}>
+                {title}
+              </SelectableTextBlock>
             ) : null}
             {renderAdmonitionContent()}
           </View>
@@ -1120,9 +1373,9 @@ function renderNode(
       return (
         <View key={key} style={blockContainerStyle}>
           {container.params && (
-            <Text style={{ fontWeight: '600', lineHeight: 20 }}>
+            <SelectableTextBlock node={container} style={{ fontWeight: '600', lineHeight: 20 }}>
               {container.name}: {container.params}
-            </Text>
+            </SelectableTextBlock>
           )}
           {container.children.map((child, index) =>
             renderNode(
@@ -1160,12 +1413,13 @@ function renderNode(
               return (
                 <View key={index} style={defItemStyle}>
                   {terms.map((term, termIndex) => (
-                    <Text
+                    <SelectableTextBlock
                       key={`term-${termIndex}`}
+                      node={term}
                       style={[styles.paragraph, { fontWeight: '600' }]}
                     >
                       {renderInlineNodes(term.children, styles, highlighted, config)}
-                    </Text>
+                    </SelectableTextBlock>
                   ))}
                   {descriptions.map((description, descriptionIndex) => (
                     <View key={`description-${descriptionIndex}`} style={defDescriptionStyle}>
@@ -1197,9 +1451,13 @@ function renderNode(
             return (
               <View key={index} style={defItemStyle}>
                 {terms.map((term, termIndex) => (
-                  <Text key={`term-${termIndex}`} style={[styles.paragraph, { fontWeight: '600' }]}>
+                  <SelectableTextBlock
+                    key={`term-${termIndex}`}
+                    node={term}
+                    style={[styles.paragraph, { fontWeight: '600' }]}
+                  >
                     {renderInlineNodes(term.children, styles, highlighted, config)}
-                  </Text>
+                  </SelectableTextBlock>
                 ))}
                 {descriptions.map((description, idx) => (
                   <View key={idx} style={defDescriptionStyle}>
@@ -1291,9 +1549,9 @@ function renderNode(
 
       return (
         <View key={key} style={cellStyle}>
-          <Text style={textStyle}>
+          <SelectableTextBlock node={cell} style={textStyle}>
             {renderInlineNodes(cell.children, styles, highlighted, config)}
-          </Text>
+          </SelectableTextBlock>
         </View>
       );
     }
@@ -1334,14 +1592,16 @@ function renderCodeBlock(
   if (!highlight) {
     return (
       <View key={key} style={styles.codeBlock}>
-        <Text style={styles.code}>{codeBlock.value}</Text>
+        <SelectableTextBlock node={codeBlock} style={styles.code}>
+          {codeBlock.value}
+        </SelectableTextBlock>
       </View>
     );
   }
 
   return (
     <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>
+      <SelectableTextBlock node={codeBlock} style={styles.code}>
         {highlight.lines.map((line, lineIndex) => (
           <Text key={lineIndex}>
             {line.tokens.map((token, tokenIndex) => (
@@ -1352,7 +1612,7 @@ function renderCodeBlock(
             {lineIndex < highlight.lines.length - 1 ? '\n' : null}
           </Text>
         ))}
-      </Text>
+      </SelectableTextBlock>
     </View>
   );
 }
@@ -1394,26 +1654,10 @@ export const BLOCK_NODE_TYPES: ReadonlySet<string> = new Set([
   'text',
 ]);
 
-// Inline node types — keep in sync with renderInlineNode's switch below: any
-// inline type handled there must be listed here, or list_item will mistake it
-// for a block and route it through renderNode.
-export const INLINE_NODE_TYPES: ReadonlySet<string> = new Set([
-  'text',
-  'strong',
-  'emphasis',
-  'inline_code',
-  'math_inline',
-  'link',
-  'image',
-  'break',
-  'delete',
-  'footnote_reference',
-  'raw',
-]);
-
-function isInlineNode(node: SupramarkNode): boolean {
-  return INLINE_NODE_TYPES.has(node.type);
-}
+// Inline node types live in @supramark/core so the renderer and the selection
+// linearizer share one list. Re-exported here because the renderer's public
+// surface has always exposed it.
+export { INLINE_NODE_TYPES, isInlineNode };
 
 // Render list_item children that mix inline and block nodes (loose / nested
 // lists). Inline runs collapse into one <Text> (the first run gets the marker);
@@ -1467,10 +1711,9 @@ function renderListItemBody(
         );
       } else {
         out.push(
-          <Text key={`li-${seq}`} style={styles.paragraph}>
-            {marker}
+          <ListItemLine key={`li-${seq}`} node={child} marker={marker} styles={styles}>
             {renderInlineNodes(child.children, styles, highlighted, config)}
-          </Text>
+          </ListItemLine>
         );
       }
       seq += 1;
@@ -1561,13 +1804,12 @@ function renderInlineNode(
       if (!isFeatureGroupEnabled(config, ['@supramark/feature-math'])) {
         return mathNode.value;
       }
+      // Loading text and SVG share one attachment slot, so following offsets never change kind.
       return (
-        <MathInline
-          key={key}
-          value={mathNode.value}
-          textStyle={styles.paragraph}
-          timeoutMs={config?.diagram?.defaultTimeoutMs}
-        />
+        <SelectionInlineObject key={key} node={node}>
+          <MathInline value={mathNode.value} textStyle={styles.paragraph}
+            timeoutMs={config?.diagram?.defaultTimeoutMs} />
+        </SelectionInlineObject>
       );
     }
     case 'link': {
@@ -1594,17 +1836,18 @@ function renderInlineNode(
       if (!hasLoadableImageUrl(imageNode.url)) {
         // Inherits the surrounding Text style; mirrors the block placeholder
         // label without breaking the inline flow.
-        return <Text key={key}>{imageFallbackLabel(imageNode)}</Text>;
+        return <SelectionInlineObject key={key} node={node}><Text>{imageFallbackLabel(imageNode)}</Text></SelectionInlineObject>;
       }
       return (
+        <SelectionInlineObject key={key} node={node}>
         <Image
-          key={key}
           source={{ uri: imageNode.url }}
           accessibilityLabel={imageNode.alt || imageNode.title || undefined}
           accessibilityElementsHidden={isDecorative}
           importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
           style={styles.inlineImage}
         />
+        </SelectionInlineObject>
       );
     }
     case 'break': {
@@ -1771,10 +2014,14 @@ function renderDisabledDiagram(
   key: number,
   styles: ReturnType<typeof mergeStyles>
 ): RenderedNode {
-  const header = `[diagram engine="${diagram.engine}" disabled]\n\n`;
+  // The disabled notice is renderer chrome, not body text: it stays outside the
+  // selectable block, whose units carry the source alone.
   return (
     <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>{header + diagram.code}</Text>
+      <Text style={styles.code}>{`[diagram engine="${diagram.engine}" disabled]`}</Text>
+      <SelectableTextBlock node={diagram} style={styles.code}>
+        {diagram.code}
+      </SelectableTextBlock>
     </View>
   );
 }
@@ -1784,10 +2031,14 @@ function renderDisabledMathBlock(
   key: number,
   styles: ReturnType<typeof mergeStyles>
 ): RenderedNode {
-  const header = '[math disabled]\n\n';
+  // The disabled notice is renderer chrome, not body text: it stays outside the
+  // selectable block, whose units carry the source alone.
   return (
     <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>{header + math.value}</Text>
+      <Text style={styles.code}>[math disabled]</Text>
+      <SelectableTextBlock node={math} style={styles.code}>
+        {math.value}
+      </SelectableTextBlock>
     </View>
   );
 }

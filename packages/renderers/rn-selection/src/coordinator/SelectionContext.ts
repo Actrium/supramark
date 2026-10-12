@@ -54,7 +54,7 @@ export interface SelectionContextValue {
   /** Update a registered block's unit ids in place (streaming markdown growth). */
   updateUnits: (nodeId: SelectionNodeId, unitIds: readonly SelectionNodeId[]) => void;
   /** Publish the line table a block laid out (`onTextLayout`). */
-  setMetrics: (nodeId: SelectionNodeId, metrics: SegmentTextMetrics) => void;
+  setMetrics: (nodeId: SelectionNodeId, metrics: SegmentTextMetrics | undefined) => void;
   /** Publish where a block's text box sits inside the block's own box. */
   setContentOffset: (nodeId: SelectionNodeId, offset: ContentOffset) => void;
   /** Items the selection toolbar offers; resolved once on the root. */

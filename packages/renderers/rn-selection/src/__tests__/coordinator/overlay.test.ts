@@ -272,3 +272,40 @@ describe('computeSelectionRects across blocks', () => {
     ]);
   });
 });
+
+describe('unmeasured attachments never paint the whole paragraph', () => {
+  const mixed: SelectionUnit[] = [
+    tUnit('m#0', 'm', 'left '),
+    {
+      kind: 'atom',
+      unitId: 'm#1',
+      nodeId: 'm',
+      label: 'math',
+      node: NODE,
+      payload: {},
+    },
+    tUnit('m#2', 'm', ' right'),
+  ];
+  const mixedRange: SelectionRange = {
+    anchor: { nodeId: 'm', unitId: 'm#0', offset: 0 },
+    focus: { nodeId: 'm', unitId: 'm#2', offset: 6 },
+  };
+
+  test('a mixed paragraph with an unmeasured atom yields no rects', () => {
+    // Without metrics the block would fall back to its whole rect, covering the
+    // attachment's native region before its layout is known.
+    const blocks = [block('m', ['m#0', 'm#1', 'm#2'], { x: 0, y: 0, w: 100, h: 20 })];
+    expect(rectsFor(blocks, mixed, mixedRange)).toEqual([]);
+  });
+
+  test('a text-only block without metrics still highlights whole', () => {
+    // The attachment guard must not change the plain-text fallback.
+    const textUnits: SelectionUnit[] = [tUnit('t#0', 't', 'hello'), brk('t#1', 't')];
+    const textRange: SelectionRange = {
+      anchor: { nodeId: 't', unitId: 't#0', offset: 0 },
+      focus: { nodeId: 't', unitId: 't#0', offset: 5 },
+    };
+    const blocks = [block('t', ['t#0'], { x: 0, y: 0, w: 10, h: 20 })];
+    expect(rectsFor(blocks, textUnits, textRange).length).toBeGreaterThan(0);
+  });
+});

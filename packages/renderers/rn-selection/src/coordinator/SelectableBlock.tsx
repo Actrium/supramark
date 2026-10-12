@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef, useCallback } from 'react';
 import {
   Platform,
   Text,
@@ -13,8 +13,11 @@ import {
 } from 'react-native';
 import { buildTextMetrics, type SegmentTextMetrics } from '../metrics';
 import type { SelectionNodeId } from '../model';
+import type { SelectionUnitIndex } from '../resolve';
 import type { ContentOffset, LayoutRect } from './registry';
 import { SelectionViewportContext } from './SelectionContext';
+import { InlineObjectLayoutContext } from './SelectableInlineObject';
+import { withInlineObjectMetrics } from './inlineMetrics';
 import { useSelectionContext } from './useDocumentSelection';
 
 declare const __DEV__: boolean | undefined;
@@ -36,22 +39,34 @@ function flattenRenderedText(node: React.ReactNode): string {
   return '';
 }
 
+/**
+ * Sum of the text this block's units hold, or `undefined` while the stream has
+ * not indexed them all yet (the block re-rendered before the root's `setUnits`
+ * effect, so there is nothing to compare against).
+ */
+function sumUnitTextLength(
+  index: SelectionUnitIndex,
+  unitIds: readonly SelectionNodeId[]
+): number | undefined {
+  let total = 0;
+  for (const unitId of unitIds) {
+    const at = index.byUnitId.get(unitId);
+    if (at === undefined) return undefined;
+    // Native attachments occupy one Text offset even though they carry no selectable text.
+    total += index.entries[at].unit.kind === 'atom' ? 1 : index.entries[at].textLength;
+  }
+  return total;
+}
+
 export interface SelectableBlockProps {
   nodeId: SelectionNodeId;
   /**
-   * VISIBLE text unit ids only — exclude the trailing block break, which the
-   * document stream owns, not this block's text. Their concatenated text must
-   * equal the plain text this block renders.
-   *
-   * This is load-bearing: every offset in this block's line metrics is an index
-   * into the text the block laid out, and every offset we resolve back to the
-   * document is computed from these units' lengths. If the two disagree by even
-   * one character — a rendered bullet, a heading mark, collapsed whitespace —
-   * every offset past that point is wrong. The `__DEV__` check below compares
-   * both the rendered subtree and the measured line table against the units.
+   * Native display units: text, visible hard breaks and inline attachment atoms.
+   * Exclude syntax markers and trailing block separators. Every atom must render
+   * through SelectableInlineObject so both platforms reserve one native offset.
    */
   unitIds: readonly SelectionNodeId[];
-  /** The text subtree; its concatenated plain text MUST equal the units' text. */
+  /** The text subtree and explicitly measured native inline attachments. */
   children?: React.ReactNode;
   /** Text styling. Put box styling (padding, background) on `containerStyle`. */
   style?: StyleProp<TextStyle>;
@@ -89,12 +104,37 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   const blockRef = useRef<View | null>(null);
   const layoutRef = useRef<LayoutRect | null>(null);
   const metricsRef = useRef<SegmentTextMetrics | null>(null);
+  // Native attachment frames and the raw line table can arrive in either order.
+  const objectLayoutsRef = useRef(new Map<string, LayoutRect>());
+  const rawMetricsRef = useRef<SegmentTextMetrics | null>(null);
   const contentOffsetRef = useRef<ContentOffset | null>(null);
 
   // Latest unitIds, read by the mount effect so its initial registration is not
   // frozen to the first render's value.
   const unitIdsRef = useRef(unitIds);
   unitIdsRef.current = unitIds;
+
+  // Recompute when either the text engine or an attachment finishes layout.
+  const publishMetrics = useCallback(() => {
+    const raw = rawMetricsRef.current;
+    if (raw === null) return;
+    const metrics = withInlineObjectMetrics(
+      raw,
+      unitIdsRef.current,
+      ctx.registry.index,
+      objectLayoutsRef.current
+    );
+    metricsRef.current = metrics ?? null;
+    ctx.setMetrics(nodeId, metrics);
+  }, [ctx, nodeId]);
+  // Keep this callback stable so measuring an attachment does not restart native layout.
+  const onObjectLayout = useCallback(
+    (id: string, rect: LayoutRect) => {
+      objectLayoutsRef.current.set(id, rect);
+      publishMetrics();
+    },
+    [publishMetrics]
+  );
 
   useEffect(() => {
     const dispose = ctx.registerBlock({
@@ -133,24 +173,23 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   // the string content this block renders. Runs after every content change, so
   // a host that renders a marker or collapses whitespace inside the block hears
   // about it at the point of the mistake rather than through mysteriously
-  // off-by-N selections later. Silent in production.
-  const renderedText = flattenRenderedText(children);
+  // off-by-N selections later. Silent in production, where the concatenation
+  // below is never built.
+  const renderedText =
+    typeof __DEV__ !== 'undefined' && __DEV__ ? flattenRenderedText(children) : '';
   useEffect(() => {
     if (typeof __DEV__ === 'undefined' || !__DEV__) return;
-    const index = ctx.registry.index;
-    let expected = 0;
-    let allKnown = true;
-    for (const unitId of unitIds) {
-      const at = index.byUnitId.get(unitId);
-      if (at === undefined) {
-        // A unit not yet in the stream: the block re-rendered before the root's
-        // `setUnits` effect. Nothing to compare against, so skip this pass.
-        allKnown = false;
-        break;
-      }
-      expected += index.entries[at].textLength;
-    }
-    if (!allKnown || expected === renderedText.length) return;
+    // Attachment placeholders are native content, not literal React string children.
+    if (
+      unitIds.some(
+        id =>
+          ctx.registry.index.entries[ctx.registry.index.byUnitId.get(id) ?? -1]?.unit.kind ===
+          'atom'
+      )
+    )
+      return;
+    const expected = sumUnitTextLength(ctx.registry.index, unitIds);
+    if (expected === undefined || expected === renderedText.length) return;
     console.warn(
       `[supramark] SelectableBlock "${nodeId}": unitIds sum to ${expected} UTF-16 units ` +
         `but the block renders ${renderedText.length} (${JSON.stringify(renderedText.slice(0, 40))}). ` +
@@ -185,8 +224,27 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
 
   const onTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) => {
     const metrics = buildTextMetrics(e.nativeEvent.lines);
-    metricsRef.current = metrics;
-    ctx.setMetrics(nodeId, metrics);
+    const expected = sumUnitTextLength(ctx.registry.index, unitIdsRef.current);
+    if (expected !== undefined && metrics.textLength !== expected) {
+      // The platform laid out different text than the model holds — a marker, a
+      // collapsed whitespace run, a fallback label. Every offset past the
+      // divergence would resolve wrongly, so drop the table: the block degrades
+      // to whole-rect hit testing and copying keeps using the units' text,
+      // never a wrong index. Dev names the node so the divergence is locatable.
+      rawMetricsRef.current = null;
+      metricsRef.current = null;
+      ctx.setMetrics(nodeId, undefined);
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn(
+          `[supramark] SelectableBlock "${nodeId}": the text engine laid out ` +
+            `${metrics.textLength} UTF-16 units but the selection units hold ${expected}. ` +
+            'Hit testing falls back to the whole block until the rendered text matches the units.'
+        );
+      }
+      return;
+    }
+    rawMetricsRef.current = metrics;
+    publishMetrics();
   };
 
   // Android can hand a nested ScrollView the native responder before the
@@ -202,18 +260,20 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
         };
 
   return (
-    <View ref={blockRef} collapsable={false} style={containerStyle} onLayout={onBlockLayout}>
-      <Text
-        style={style}
-        onLayout={onTextBoxLayout}
-        onTextLayout={onTextLayout}
-        onLongPress={onNestedLongPress}
-      >
-        {/* Cast: react-native resolves its own copy of @types/react, whose
+    <InlineObjectLayoutContext.Provider value={onObjectLayout}>
+      <View ref={blockRef} collapsable={false} style={containerStyle} onLayout={onBlockLayout}>
+        <Text
+          style={style}
+          onLayout={onTextBoxLayout}
+          onTextLayout={onTextLayout}
+          onLongPress={onNestedLongPress}
+        >
+          {/* Cast: react-native resolves its own copy of @types/react, whose
             ReactNode differs from ours by `bigint`. Structurally identical for
             everything a text block can hold. */}
-        {children as React.ComponentProps<typeof Text>['children']}
-      </Text>
-    </View>
+          {children as React.ComponentProps<typeof Text>['children']}
+        </Text>
+      </View>
+    </InlineObjectLayoutContext.Provider>
   );
 };

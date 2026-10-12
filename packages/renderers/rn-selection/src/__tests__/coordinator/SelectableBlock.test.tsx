@@ -106,6 +106,60 @@ function renderBlock(
 }
 
 describe('SelectableBlock rendering', () => {
+  test('attachment and Text layout can arrive in either order without losing right-side geometry', async () => {
+    // Native callback ordering differs between Android and iOS.
+    const { SelectableInlineObject } = await import('../../coordinator/SelectableInlineObject');
+    for (const attachmentFirst of [false, true]) {
+      // Both platforms reserve one native display offset even while an attachment shows text.
+      const units: SelectionUnitLike[] = [
+        textUnit('left', 'left '),
+        {
+          kind: 'atom',
+          nodeId: 'math',
+          unitId: 'math',
+          label: 'math',
+          node: { type: 'math_inline', value: 'x' },
+          payload: {},
+        } as SelectionUnitLike,
+        textUnit('right', ' right'),
+      ];
+      const ctx = makeContext(units);
+      act(() => {
+        renderer = create(
+          <SelectionContext.Provider value={ctx}>
+            <SelectableBlock nodeId="p1" unitIds={units.map(unit => unit.unitId)}>
+              {'left '}
+              <SelectableInlineObject unitId="math">{'x'}</SelectableInlineObject>
+              {' right'}
+            </SelectableBlock>
+          </SelectionContext.Provider>
+        );
+      });
+      const text = renderer!.root.findByType('Text');
+      const attachment = renderer!.root
+        .findAllByType('View')
+        .find(view => view.props.style?.flexDirection === 'row')!;
+      // Android Paper uses "0" for attachments; the mapping depends on offsets, not this character.
+      const layoutText = () =>
+        text.props.onTextLayout({
+          nativeEvent: { lines: [{ text: 'left 0 right', x: 0, y: 0, width: 190, height: 20 }] },
+        });
+      const layoutAttachment = () =>
+        attachment.props.onLayout({
+          nativeEvent: { layout: { x: 50, y: 0, width: 80, height: 20 } },
+        });
+      act(() => {
+        (attachmentFirst ? layoutAttachment : layoutText)();
+      });
+      expect(ctx.registry.getBlock('p1')?.metrics).toBeUndefined();
+      act(() => {
+        (attachmentFirst ? layoutText : layoutAttachment)();
+      });
+      expect(ctx.registry.getBlock('p1')?.metrics?.lines[0].charXs?.[6]).toBe(130);
+      act(() => renderer!.unmount());
+      renderer = null;
+    }
+  });
   test('renders a plain Text, not a native selection component', () => {
     // The whole point of the self-drawn direction: no vendored native view, no
     // `selectable` prop, nothing on the platform side holding selection state.
@@ -354,5 +408,39 @@ describe('SelectableBlock dev-mode text invariant', () => {
     (globalThis as { __DEV__?: boolean }).__DEV__ = true;
     const warnings = captureWarnings(() => renderBlock('hello', []));
     expect(warnings).toEqual([]);
+  });
+
+  test('a length divergence drops the published metrics and warns', () => {
+    (globalThis as { __DEV__?: boolean }).__DEV__ = true;
+    const ctx = makeContext([textUnit('p1#0', 'hello')]);
+    const warnings = captureWarnings(() => {
+      act(() => {
+        renderer = create(
+          <SelectionContext.Provider value={ctx}>
+            <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+              {'hello!'}
+            </SelectableBlock>
+          </SelectionContext.Provider>
+        );
+      });
+      const text = renderer!.root.findByType('Text');
+      // A matching layout publishes the table first.
+      act(() =>
+        text.props.onTextLayout({
+          nativeEvent: { lines: [{ text: 'hello', x: 0, y: 0, width: 50, height: 20 }] },
+        })
+      );
+      expect(ctx.registry.getBlocks()[0].metrics).toBeDefined();
+      // The platform then lays out more text than the units hold: every offset
+      // past the divergence would resolve wrongly, so the table is dropped and
+      // the block degrades to whole-rect hit testing.
+      act(() =>
+        text.props.onTextLayout({
+          nativeEvent: { lines: [{ text: 'hello!', x: 0, y: 0, width: 60, height: 20 }] },
+        })
+      );
+    });
+    expect(ctx.registry.getBlocks()[0].metrics).toBeUndefined();
+    expect(warnings.some(warning => warning.includes('laid out'))).toBe(true);
   });
 });

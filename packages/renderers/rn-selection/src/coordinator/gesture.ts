@@ -33,6 +33,13 @@ export interface SelectionGestureConfig {
   /** How long a press must be held before it selects. */
   longPressMs?: number;
   /**
+   * Whether a held press selects a word at all (default: true). `false` keeps
+   * only tap-to-clear and handle drags; the host starts selections through its
+   * own entry points (a menu item, say), so a hold must never select — not via
+   * the timer, not via the move path, and not via the touch-end fallback.
+   */
+  longPress?: boolean;
+  /**
    * How far a finger may drift during that hold before the press is abandoned.
    * Small on purpose: anything larger and a slow scroll starts selecting text.
    */
@@ -87,6 +94,7 @@ function distanceSquared(a: Point, b: Point): number {
 
 export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGesture {
   const longPressMs = deps.config?.longPressMs ?? DEFAULT_LONG_PRESS_MS;
+  const longPressEnabled = deps.config?.longPress !== false;
   const moveTolerance = deps.config?.moveTolerance ?? DEFAULT_MOVE_TOLERANCE;
   const toleranceSquared = moveTolerance * moveTolerance;
 
@@ -155,6 +163,7 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
   };
 
   const tick = (timeMs: number): void => {
+    if (!longPressEnabled) return;
     if (phase !== 'pending') return;
     if (timeMs - pressTime < longPressMs) return;
     beginWordSelection();
@@ -186,7 +195,7 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
     touchMove(point, timeMs) {
       if (phase === 'pending') {
         if (pressPoint !== null && distanceSquared(point, pressPoint) > toleranceSquared) {
-          if (timeMs - pressTime >= longPressMs && beginWordSelection()) {
+          if (longPressEnabled && timeMs - pressTime >= longPressMs && beginWordSelection()) {
             pressPoint = null;
             const at = deps.pointAt(point);
             if (at !== null) deps.store.extendTo(at);
@@ -220,10 +229,21 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
 
     touchEnd(point, timeMs) {
       if (phase === 'pending') {
+        const held = timeMs - pressTime;
         // Held long enough for the threshold to have passed but the tick never
-        // fired (a fast tap-and-hold on a busy frame): honour the press.
-        if (timeMs - pressTime >= longPressMs && beginWordSelection()) {
+        // fired (a fast tap-and-hold on a busy frame): honour the press — unless
+        // the long press is switched off, in which case a hold is not a tap.
+        if (longPressEnabled && held >= longPressMs && beginWordSelection()) {
           deps.store.commit();
+          reset();
+          return;
+        }
+        if (!longPressEnabled && held >= longPressMs) {
+          // Host-menu mode: the hold belonged to the host's long-press menu, and
+          // the matching touchEnd was swallowed by the menu overlay. A touchEnd
+          // arriving long after the press, once the menu closes, is that
+          // swallowed release falling back in — it must not tap-clear the
+          // selection the menu item just created.
           reset();
           return;
         }
