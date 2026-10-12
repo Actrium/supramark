@@ -399,6 +399,24 @@ export interface SupramarkProps {
   selection?: SupramarkSelectionOptions;
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(entry => typeof entry === 'string');
+}
+
+/**
+ * Selection-policy keys are canonical `string[]` values encoded with
+ * `JSON.stringify` in this module. Decode one back to its array, validating
+ * the shape so the recovered sets stay type-safe without asserting the
+ * parser's `any` away.
+ */
+function parsePolicyKey(key: string): string[] {
+  const value: unknown = JSON.parse(key);
+  if (!isStringArray(value)) {
+    throw new Error(`Invalid selection policy key: ${key}`);
+  }
+  return value;
+}
+
 export const Supramark: React.FC<SupramarkProps> = ({
   markdown,
   ast,
@@ -651,11 +669,11 @@ export const Supramark: React.FC<SupramarkProps> = ({
     // The ordinary render path needs no selection policy allocations.
     if (!selectionEnabled) return undefined;
     // Recover canonical sets only when their semantic contents change.
-    const opaqueContainers = new Set<string>(JSON.parse(opaqueContainersKey));
+    const opaqueContainers = new Set<string>(parsePolicyKey(opaqueContainersKey));
     // Remember which containers replace the built-in title branch.
-    const customContainers = new Set<string>(JSON.parse(customContainersKey));
+    const customContainers = new Set<string>(parsePolicyKey(customContainersKey));
     // Match every disabled diagram alias to the readable source branch.
-    const textDiagramEngines = new Set<string>(JSON.parse(textDiagramEnginesKey));
+    const textDiagramEngines = new Set<string>(parsePolicyKey(textDiagramEnginesKey));
     return {
       opaqueContainers,
       // Match disabled source rendering for inline/block math and diagram aliases.
