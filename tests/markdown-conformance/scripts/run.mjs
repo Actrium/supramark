@@ -22,7 +22,7 @@ import {
   findFirstDifference,
   htmlToSemanticTree,
 } from '../lib/semantic/html-semantics.mjs';
-import { effectiveExpected, intentionalDivergence } from '../lib/expected-overrides.mjs';
+import { effectiveExpected } from '../lib/expected-overrides.mjs';
 // Display names for CommonMark spec sections. The section keys below already
 // match the spec's own English headings, so this map is effectively the
 // identity function today; it is kept as a lookup table (rather than
@@ -111,12 +111,10 @@ function isCommonMarkCoreCase(testCase) {
   if (sourceName === 'commonmark') return true;
   if (sourceName === 'cmark-gfm') {
     return (
-      testCase.source.path === 'test/spec.txt' &&
-      !testCase.source.section.endsWith('(extension)')
+      testCase.source.path === 'test/spec.txt' && !testCase.source.section.endsWith('(extension)')
     );
   }
   return false;
-}
 }
 const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 // Gate mode decides what a non-zero exit means (see buildGate below).
@@ -232,7 +230,6 @@ if (visualEnabled) {
 const failedCases = results.filter(result => result.status === 'fail');
 const errors = results.filter(result => result.status === 'error');
 const skippedCases = results.filter(result => result.status === 'skip' || result.skipped);
-const divergenceCases = results.filter(result => result.status === 'divergence');
 const notPassed = [...failedCases, ...errors];
 const typeMismatchCount = failedCases.filter(result => result.typeDifference).length;
 const sectionSummary = summarize(results, result => result.section);
@@ -283,11 +280,10 @@ const summary = {
   sourceCommit: version.commit,
   parserBinary,
   total: results.length,
-  passed: results.length - notPassed.length - skippedCases.length - divergenceCases.length,
+  passed: results.length - notPassed.length - skippedCases.length,
   failed: failedCases.length,
   errors: errors.length,
   skipped: skippedCases.length,
-  divergences: divergenceCases.length,
   notPassed: notPassed.length,
   typeMismatches: typeMismatchCount,
   overallNotPassedCases: overallNotPassedCases.size,
@@ -360,7 +356,7 @@ if (summary.result === 'fail') {
 }
 
 console.log(
-  `${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, divergences ${summary.divergences}, not passed ${summary.notPassed}`
+  `${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, not passed ${summary.notPassed}`
 );
 if (summary.visual.enabled) {
   console.log(
@@ -522,18 +518,6 @@ function compareHtmlCase(testCase, ast, actualHtml) {
       skipped: 'ignore-sentinel',
     };
   }
-  const divergence = intentionalDivergence(testCase.id);
-  if (divergence) {
-    // A documented intentional divergence from the reference HTML (e.g. a
-    // security sanitization). Record it as `divergence` — visible, but not
-    // counted as a pass or a regression.
-    return {
-      id: testCase.id,
-      section: testCase.source.section,
-      status: 'divergence',
-      divergence: divergence.reason,
-    };
-  }
   const expectedTree = htmlToSemanticTree(expected.html);
   const actual = htmlToSemanticTree(actualHtml);
   const difference = findFirstDifference(expectedTree, actual);
@@ -570,7 +554,6 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
     `- Passed: ${summaryDocument.passed}`,
     `- Skipped (\`<IGNORE>\` without override): ${summaryDocument.skipped}`,
     `- Semantic differences: ${summaryDocument.failed}`,
-    `- Intentional divergences: ${summaryDocument.divergences}`,
     `- Execution errors: ${summaryDocument.errors}`,
     `- Render type mismatches: ${summaryDocument.typeMismatches}`,
     '',

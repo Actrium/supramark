@@ -22,13 +22,13 @@ use crate::plugins::cmark::block::reference::ReferenceMap;
 use crate::{MarkdownParser, Node};
 
 #[derive(Debug)]
-struct LinkCfg<const PREFIX: char>(fn(Option<String>, Option<String>) -> Node);
+struct LinkCfg<const PREFIX: char>(fn(&MarkdownParser, Option<String>, Option<String>) -> Node);
 impl<const PREFIX: char> MarkdownParserExt for LinkCfg<PREFIX> {}
 
 /// adds custom rule with no prefix
 pub fn add<const ENABLE_NESTED: bool>(
     md: &mut MarkdownParser,
-    f: fn(url: Option<String>, title: Option<String>) -> Node,
+    f: fn(&MarkdownParser, Option<String>, Option<String>) -> Node,
 ) {
     md.ext.insert(LinkCfg::<'\0'>(f));
     md.inline.add_rule::<LinkScanner<ENABLE_NESTED>>();
@@ -40,7 +40,7 @@ pub fn add<const ENABLE_NESTED: bool>(
 /// adds custom rule with given `PREFIX` character
 pub fn add_prefix<const PREFIX: char, const ENABLE_NESTED: bool>(
     md: &mut MarkdownParser,
-    f: fn(url: Option<String>, title: Option<String>) -> Node,
+    f: fn(&MarkdownParser, Option<String>, Option<String>) -> Node,
 ) {
     md.ext.insert(LinkCfg::<PREFIX>(f));
     md.inline
@@ -143,7 +143,7 @@ fn rule_run(
     state: &mut InlineState,
     enable_nested: bool,
     offset: usize,
-    f: fn(Option<String>, Option<String>) -> Node,
+    f: fn(&MarkdownParser, Option<String>, Option<String>) -> Node,
 ) -> Option<(Node, usize)> {
     let start = state.pos;
     let result = parse_link(state, state.pos + offset, enable_nested)?;
@@ -152,7 +152,8 @@ fn rule_run(
     // We found the end of the link, and know for a fact it's a valid link;
     // so all that's left to do is to call tokenizer.
     //
-    let old_node = std::mem::replace(&mut state.node, f(result.href, result.title));
+    let new_node = f(state.md, result.href, result.title);
+    let old_node = std::mem::replace(&mut state.node, new_node);
     let max = state.pos_max;
 
     state.link_level += 1;
@@ -368,7 +369,6 @@ fn strip_title_line_prefixes(s: &str) -> String {
     out
 }
 
-
 pub fn parse_link_title(str: &str, start: usize, max: usize) -> Option<ParseLinkFragmentResult> {
     let mut chars = str[start..max].chars();
     let mut pos = start + 1;
@@ -450,13 +450,15 @@ fn parse_link(state: &mut InlineState, pos: usize, enable_nested: bool) -> Optio
             // Always advance past the destination so the closing ")" and an
             // optional title can still be matched. micromark's "safe by
             // default" keeps the link/image but empties the destination for an
-            // unsafe protocol, rather than failing the whole construct.
+            // unsafe protocol, rather than failing the whole construct; with
+            // `allow_dangerous_protocol` the destination passes through instead.
             pos = res.pos;
-            if state
-                .md
-                .link_formatter
-                .validate_link(&href_candidate)
-                .is_some()
+            if state.md.allow_dangerous_protocol
+                || state
+                    .md
+                    .link_formatter
+                    .validate_link(&href_candidate)
+                    .is_some()
             {
                 href = Some(href_candidate);
             } else {

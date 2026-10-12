@@ -16,17 +16,26 @@
  * and nested inside a syntax extension (`{extensions: [{disable: {null: [...]}}]}`).
  * Each value is a phase→names map where the `null` phase serialises to the string
  * `"null"`; we collect from both places and flatten every phase into one list.
- * Unknown names are harmless: the parser ignores them.
+ * Unknown names are ignored by the parser but surfaced as an
+ * `unknown_disabled_construct` warning diagnostic in the AST — micromark's own
+ * fixture `text-character-reference-0031` relies on this: it disables
+ * `characterReferences` (plural), which is not a real construct name, so
+ * micromark still decodes the entity and so do we.
  */
 
 export function parserOptionsForCase(testCase) {
   const upstream = testCase.input?.upstreamOptions;
   const isMicromark = testCase.source?.name === 'micromark';
-  const allowDangerousHtml = isMicromark
-    ? upstream?.allowDangerousHtml === true
-    : true;
+  const allowDangerousHtml = isMicromark ? upstream?.allowDangerousHtml === true : true;
+  // Same source split as allowDangerousHtml: micromark sanitizes unsafe
+  // protocols (javascript:, vbscript:, data:, …) in href/src by default and an
+  // explicit `allowDangerousProtocol: true` opts a case back into passthrough;
+  // CommonMark / cmark-gfm cases carry no dangerous-protocol fixtures and the
+  // parser's product default already sanitizes, so forward `true` there.
+  const allowDangerousProtocol = isMicromark ? upstream?.allowDangerousProtocol === true : true;
   const options = {
     allowDangerousHtml,
+    allowDangerousProtocol,
     disable: collectDisable(upstream),
   };
   // micromark's CommonMark profile has no GFM bare-URL/email autolink-literal

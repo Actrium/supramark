@@ -52,6 +52,12 @@ pub struct MarkdownParser {
     /// another definition. See `ParseOptions::subsequent_indented_definitions`.
     pub subsequent_indented_definitions: bool,
 
+    /// When false (the parser's default), an unsafe protocol in a link, image,
+    /// or autolink destination collapses the URL to empty — micromark's
+    /// `allowDangerousProtocol: false` default. Set true to pass dangerous
+    /// protocols through. See `ParseOptions::allow_dangerous_protocol`.
+    pub allow_dangerous_protocol: bool,
+
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
@@ -102,6 +108,7 @@ impl Default for MarkdownParser {
             disable_character_escape: false,
             disable_label_end: false,
             subsequent_indented_definitions: false,
+            allow_dangerous_protocol: false,
         };
         block::builtin::add(&mut md);
         inline::builtin::add(&mut md);

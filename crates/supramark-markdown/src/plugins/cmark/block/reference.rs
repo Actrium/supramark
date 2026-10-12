@@ -222,8 +222,8 @@ impl BlockRule for ReferenceScanner {
         // micromark "subsequent indented definitions" deviation: when this line
         // immediately follows another definition, accept it even when indented
         // 4+ spaces (CommonMark would make it an indented code block).
-        let subsequent_def = state.md.subsequent_indented_definitions
-            && state.last_def_end_line == Some(state.line);
+        let subsequent_def =
+            state.md.subsequent_indented_definitions && state.last_def_end_line == Some(state.line);
         if !subsequent_def && state.line_indent(state.line) >= state.md.max_indent {
             return None;
         }

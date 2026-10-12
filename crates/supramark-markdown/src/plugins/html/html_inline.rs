@@ -93,7 +93,9 @@ fn normalize_raw_inline(value: &str) -> String {
     }
     for line in lines {
         out.push('\n');
-        out.push_str(line.trim_start_matches(|c: char| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{0c}')));
+        out.push_str(
+            line.trim_start_matches(|c: char| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{0c}')),
+        );
     }
     out
 }

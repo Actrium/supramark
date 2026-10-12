@@ -55,11 +55,13 @@ where
     /// numbers only increase.
     pub last_def_end_line: Option<usize>,
 
-    /// Set by a container (blockquote / list) while testing whether a
-    /// lazy-continuation candidate line instead begins a new block construct.
-    /// Matches micromark's `self.parser.lazy[line]`: a type-7 (complete-tag)
-    /// HTML block can only interrupt a paragraph on a lazy line — at the top
-    /// level (non-lazy) it stays inline paragraph text (CommonMark 0.30 §4.6).
+    /// Set while testing whether a markerless (lazy) continuation line instead
+    /// begins a new block construct — by the blockquote around its interrupt
+    /// test and by the paragraph's lazy-continuation scan (which covers list
+    /// items and nested containers). Matches micromark's `self.parser.lazy[line]`:
+    /// a type-7 (complete-tag) HTML block can only interrupt a paragraph on a
+    /// lazy line — at the top level (non-lazy) it stays inline paragraph text
+    /// (CommonMark 0.30 §4.6).
     pub in_lazy_continuation: bool,
 }
 

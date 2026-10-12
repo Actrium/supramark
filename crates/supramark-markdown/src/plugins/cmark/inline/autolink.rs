@@ -88,8 +88,11 @@ impl InlineRule for AutolinkScanner {
         };
 
         // micromark "safe by default": an unsafe protocol empties the href but
-        // the autolink is still rendered with the original text.
-        let href = if state.md.link_formatter.validate_link(&full_url).is_some() {
+        // the autolink is still rendered with the original text. With
+        // `allow_dangerous_protocol` the href passes through instead.
+        let href = if state.md.allow_dangerous_protocol
+            || state.md.link_formatter.validate_link(&full_url).is_some()
+        {
             full_url
         } else {
             String::new()

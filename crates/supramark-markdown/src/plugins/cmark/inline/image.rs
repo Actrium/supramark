@@ -43,8 +43,11 @@ impl NodeValue for Image {
 }
 
 pub fn add(md: &mut MarkdownParser) {
-    full_link::add_prefix::<'!', true>(md, |href, title| {
-        let url = href.map(|h| sanitize_image_src(&h)).unwrap_or_default();
+    full_link::add_prefix::<'!', true>(md, |md, href, title| {
+        let mut url = href.unwrap_or_default();
+        if !md.allow_dangerous_protocol {
+            url = sanitize_image_src(&url);
+        }
         Node::new(Image { url, title })
     });
 }
@@ -54,10 +57,10 @@ pub fn add(md: &mut MarkdownParser) {
 /// `https`. A colon that lands after a `/`, `?`, or `#` is part of the path,
 /// query, or hash — not a scheme — so the URL is treated as relative. Any other
 /// scheme (`irc:`, `mailto:`, `data:`, `javascript:`, …) collapses to an empty
-/// `src`, matching micromark's "safe by default" for `img[src]`.
+/// `src`. Applied when `allow_dangerous_protocol` is off (micromark's safe
+/// default for `img[src]`); with it on, the `src` passes through verbatim.
 fn sanitize_image_src(url: &str) -> String {
-    static IMAGE_PROTO_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?i)^https?$").unwrap());
+    static IMAGE_PROTO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^https?$").unwrap());
 
     let Some(colon) = url.find(':') else {
         return url.to_owned();

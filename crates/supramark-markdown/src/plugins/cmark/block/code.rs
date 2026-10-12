@@ -59,9 +59,7 @@ impl BlockRule for CodeScanner {
         // immediately after a link reference definition must not become an
         // indented code block — its leading indent is treated as `linePrefix`
         // so a following definition (or paragraph) is recognised instead.
-        if state.md.subsequent_indented_definitions
-            && state.last_def_end_line == Some(state.line)
-        {
+        if state.md.subsequent_indented_definitions && state.last_def_end_line == Some(state.line) {
             return None;
         }
 

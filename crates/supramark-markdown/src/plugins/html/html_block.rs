@@ -56,7 +56,12 @@ struct HTMLSequence {
 }
 
 impl HTMLSequence {
-    pub fn new(open: Regex, close: Regex, can_terminate_paragraph: bool, ends_at_blank: bool) -> Self {
+    pub fn new(
+        open: Regex,
+        close: Regex,
+        can_terminate_paragraph: bool,
+        ends_at_blank: bool,
+    ) -> Self {
         Self {
             open,
             close,
@@ -170,8 +175,8 @@ impl BlockRule for HtmlBlockScanner {
         // Type 7 (`only_interrupts_lazy`) may only interrupt on a lazy
         // continuation line; on a non-lazy paragraph line it stays inline
         // (CommonMark 0.30 §4.6). `state.in_lazy_continuation` is set by the
-        // enclosing container (blockquote / list) while testing a markerless
-        // continuation line.
+        // blockquote's interrupt test and by the paragraph's lazy-continuation
+        // scan (list items, nested containers) while testing a markerless line.
         if sequence.only_interrupts_lazy && !state.in_lazy_continuation {
             return None;
         }

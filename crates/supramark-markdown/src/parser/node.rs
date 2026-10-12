@@ -87,9 +87,7 @@ impl Node {
     /// This keeps the disjoint-field borrow inside `Node`; callers that need
     /// immutable metadata from the value while walking children do not need to
     /// clone that metadata solely to satisfy the borrow checker.
-    pub(crate) fn cast_and_children_mut<T: NodeValue>(
-        &mut self,
-    ) -> Option<(&T, &mut Vec<Node>)> {
+    pub(crate) fn cast_and_children_mut<T: NodeValue>(&mut self) -> Option<(&T, &mut Vec<Node>)> {
         if self.node_type.id != TypeId::of::<T>() {
             return None;
         }
