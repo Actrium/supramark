@@ -29,6 +29,21 @@ export function effectiveExpectedHtml(testCase) {
   return testCase.expected.html;
 }
 
+// Cases where Supramark intentionally diverges from the reference HTML for a
+// documented reason (e.g. a security sanitization the reference omits). The
+// conformance gate records these as `divergence` (not `pass` and not `fail`)
+// so they remain visible without counting as a regression.
+const INTENTIONAL_DIVERGENCES = {
+  'micromark-4.0.2-text-image-0033': {
+    reason:
+      'javascript: URL in <img src> is sanitized to empty (XSS protection). Supramark neutralizes dangerous protocols on img src regardless of allowDangerousHtml; micromark passes the literal src through.',
+  },
+};
+
+export function intentionalDivergence(caseId) {
+  return INTENTIONAL_DIVERGENCES[caseId] ?? null;
+}
+
 // Returns { html, semanticTypes, isIgnoreOverride, isIgnoreWithoutOverride }.
 // `html` is null only for an `<IGNORE>` case with no recorded binary override —
 // callers should auto-pass that (mirroring spec_tests.py) rather than compare.
