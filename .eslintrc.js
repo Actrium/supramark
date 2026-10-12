@@ -91,8 +91,8 @@ module.exports = {
     'crates/plantuml-little/src/render/interactive/**',
 
     // docs build outputs / caches
-    'docs/public/preview/',
-    'docs/public/preview/**',
+    'docs/public/playground/',
+    'docs/public/playground/**',
     'docs/public/typedoc/',
     'docs/public/typedoc/**',
     'docs/.vitepress/cache/',
