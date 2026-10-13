@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup Label="Microsoft.ReactNative Experimental Features">
+    <!--
+      Values used when building windows/SupramarkPlantumlNativeWinRT.sln on its own
+      (library development). When the project is consumed from a host app's
+      solution, the app's windows/ExperimentalFeatures.props is used instead
+      (imported via $(SolutionDir)) and these values do not apply.
+
+      Building this solution standalone additionally needs the RNW location to
+      be provided, because the repo does not contain node_modules:
+        msbuild windows\SupramarkPlantumlNativeWinRT.sln /p:ReactNativeWindowsDir=<app>\node_modules\react-native-windows\
+    -->
+    <RnwNewArch>true</RnwNewArch>
+    <UseExperimentalNuget>true</UseExperimentalNuget>
+    <ReactExperimentalFeaturesSet>true</ReactExperimentalFeaturesSet>
+  </PropertyGroup>
+
+</Project>

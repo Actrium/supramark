@@ -12,13 +12,24 @@
  *     target/macos-universal/release dylib)
  *   - `cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release
  *      -p supramark-plantuml-native`
+ *   - `scripts/build-windows.sh --arch x86_64|arm64` (at crate root, produces
+ *     output/windows-<arch>/{bin/supramark_plantuml_native.dll,
+ *     lib/supramark_plantuml_native.lib, include/supramark_plantuml.h})
  *
  * Then run `npm run prepare-native` (or `node scripts/prepare-native.js`).
+ * Windows artifacts are staged per architecture into windows/Frameworks/<arch>/
+ * (x64, arm64) so one package serves every platform an RNW app builds; pass
+ * `--windows-arch=x64|arm64[,...]` to stage a subset explicitly.
  * Idempotent — re-running just refreshes.
  */
 
 const fs = require('fs');
 const path = require('path');
+const {
+  WINDOWS_ARCHES,
+  parseArchSelection,
+  stageWindowsFrameworks,
+} = require('./windows-staging');
 
 // crates/plantuml-little/packages/react-native/scripts/ → 5 levels up to repo root
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..');
@@ -59,6 +70,14 @@ const NATIVE_HEADER_SRC = path.join(
   'include'
 );
 const ANDROID_JNI_INCLUDE_DEST = path.join(PKG_DIR, 'android', 'src', 'main', 'jni', 'include');
+
+// ── Windows: the DLL + import lib + header from build-windows.sh output. ────
+const CRATE_ROOT = path.resolve(REPO_ROOT, 'crates', 'plantuml-little');
+const WINDOWS_OUTPUT_DIR = path.join(CRATE_ROOT, 'output');
+const WINDOWS_FRAMEWORKS_DEST = path.join(PKG_DIR, 'windows', 'Frameworks');
+const WINDOWS_DLL_NAME = 'supramark_plantuml_native.dll';
+const WINDOWS_LIB_NAME = 'supramark_plantuml_native.lib';
+const WINDOWS_HEADER_NAME = 'supramark_plantuml.h';
 
 function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -146,9 +165,86 @@ function prepareMacOS() {
   return true;
 }
 
+// Windows args: --windows-arch=x64|arm64[,...] stages only the listed
+// architectures (default: every architecture present under output/).
+function windowsArchSelectionFromArgv(argv) {
+  const flag = argv.find((a) => a === '--windows-arch' || a.startsWith('--windows-arch='));
+  if (!flag) return null;
+  let value;
+  if (flag === '--windows-arch') {
+    const idx = argv.indexOf(flag);
+    value = argv[idx + 1];
+    if (value === undefined) {
+      console.error('ERROR: --windows-arch needs a value (x64, arm64 or a comma-separated list).');
+      process.exit(1);
+    }
+  } else {
+    value = flag.slice('--windows-arch='.length);
+  }
+  try {
+    return parseArchSelection(value);
+  } catch (err) {
+    console.error(`ERROR: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// Stage the Windows DLLs, import libs, and C ABI header, one directory per
+// architecture under windows/Frameworks/ (consumed by the RNW project's
+// $(Platform)-conditioned include/lib paths).
+function prepareWindows(requestedArches) {
+  const result = stageWindowsFrameworks({
+    outputDir: WINDOWS_OUTPUT_DIR,
+    frameworksDest: WINDOWS_FRAMEWORKS_DEST,
+    dllName: WINDOWS_DLL_NAME,
+    libName: WINDOWS_LIB_NAME,
+    headerName: WINDOWS_HEADER_NAME,
+    headerFallbackDir: NATIVE_HEADER_SRC,
+    requestedArches,
+  });
+  for (const arch of result.missing) {
+    const dir = WINDOWS_ARCHES.find((a) => a.name === arch).outputDir;
+    console.warn(`⚠  Windows ${arch}: missing ${path.relative(REPO_ROOT, path.join(WINDOWS_OUTPUT_DIR, dir))} (skip)`);
+  }
+  for (const arch of result.libsMissing) {
+    const buildArch = arch === 'x64' ? 'x86_64' : arch;
+    console.warn(
+      `⚠  Windows ${arch}: import library not staged — the RNW project will not link.` +
+        ` Re-run scripts/build-windows.sh --arch ${buildArch} (it needs lib.exe to generate supramark_plantuml_native.lib).`
+    );
+  }
+  if (result.staged.length > 0 && !result.headerStaged) {
+    console.warn(
+      '⚠  Windows: C ABI header not staged — the RNW project will not compile.' +
+        ' Expected include/supramark_plantuml.h in the build output or packages/native/include.'
+    );
+  }
+  if (result.missing.length > 0 || result.libsMissing.length > 0 ||
+      (result.staged.length > 0 && !result.headerStaged)) {
+    // Explicit architecture requests and incomplete Windows artifacts must fail
+    // even when another platform was staged successfully in the same invocation.
+    process.exitCode = 1;
+    return false;
+  }
+  if (result.staged.length === 0) {
+    console.warn(
+      `⚠  Windows: no staged architecture under ${path.relative(REPO_ROOT, WINDOWS_OUTPUT_DIR)} (skip)`
+    );
+    console.warn('   Run scripts/build-windows.sh --arch x86_64|arm64 from the crate root first.');
+    return false;
+  }
+  console.log(
+    `✓ Windows: staged ${result.staged.join(', ')} DLL/import lib${
+      result.headerStaged ? ' + header' : ''
+    } → ${path.relative(REPO_ROOT, WINDOWS_FRAMEWORKS_DEST)}/<arch>/`
+  );
+  return true;
+}
+
 const ios = prepareIOS();
 const android = prepareAndroid();
 const macos = prepareMacOS();
+const windows = prepareWindows(windowsArchSelectionFromArgv(process.argv.slice(2)));
 
 // Stage the C ABI header into the package (used by the Android CMake build;
 // iOS gets its headers from inside the xcframework).
@@ -164,7 +260,7 @@ function prepareHeader() {
 }
 const header = prepareHeader();
 
-if (!ios && !android && !macos) {
+if (!ios && !android && !macos && !windows) {
   console.error('No native artefacts found. Build the Rust crate first.');
   process.exit(1);
 }
