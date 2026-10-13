@@ -88,15 +88,22 @@ const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_
 // The micromark source gets its own profile too: every micromark case is
 // parsed with upstream options forwarded per case (allowDangerousHtml off
 // unless the case opts in — see lib/parse-options.mjs), which is not the
-// parser's shipped default profile.
+// parser's shipped default profile. The cmark-regression source gets its own
+// label as well: it parses with the GFM autolink extension off (cmark's
+// regression.txt is a pure CommonMark regression file, measured 0/27 AST
+// difference vs the extension being on) plus the cmark strict stance on the
+// lazy type-7 HTML flow interrupt (`micromarkLazyType7Interrupt: false`),
+// which neither the commonmark nor the default profile carries.
 const parserProfile =
   sourceName === 'commonmark'
     ? 'supramark-commonmark'
-    : sourceName === 'cmark-gfm'
-      ? 'supramark-cmark-gfm'
-      : sourceName === 'micromark'
-        ? 'supramark-micromark'
-        : 'supramark-default';
+    : sourceName === 'cmark-regression'
+      ? 'supramark-cmark'
+      : sourceName === 'cmark-gfm'
+        ? 'supramark-cmark-gfm'
+        : sourceName === 'micromark'
+          ? 'supramark-micromark'
+          : 'supramark-default';
 function parserArgsFor(testCase) {
   const args = ['-', ...parserOptionsArgv(testCase)];
   if (isCommonMarkCoreCase(testCase)) args.unshift('--no-gfm-autolink');
@@ -106,9 +113,15 @@ function parserArgsFor(testCase) {
 // commonmark source is CommonMark-core throughout; cmark-gfm's spec.txt
 // mixes CommonMark-core sections with GFM `(extension)` sections, and only
 // the core sections qualify — `(extension)` sections and extensions.txt are
-// GFM and keep the autolink extension on.
+// GFM and keep the autolink extension on. cmark's test/regression.txt is a
+// pure CommonMark regression file (the file cmark's own suite runs against a
+// plain CommonMark build), and the source config already declares
+// `"profile": "commonmark"`, so the whole source parses without the
+// extension too (measured: 0/27 cases produce a different AST with the
+// extension on vs off).
 function isCommonMarkCoreCase(testCase) {
   if (sourceName === 'commonmark') return true;
+  if (sourceName === 'cmark-regression') return true;
   if (sourceName === 'cmark-gfm') {
     return (
       testCase.source.path === 'test/spec.txt' && !testCase.source.section.endsWith('(extension)')
