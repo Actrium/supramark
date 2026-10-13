@@ -46,10 +46,10 @@ node tests/markdown-conformance/scripts/validate.mjs commonmark
 数据源固定到 commit `7042d9978b20fea86ca9cc98bda55f10be392e69`。这些是实现回归用例，
 不是规范性示例。该数据源保留原始换行，确保 CR+CR+LF 用例原样进入 Parser。
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/import.mjs cmark-regression
 node tests/markdown-conformance/scripts/validate.mjs cmark-regression
-node tests/markdown-conformance/scripts/run.mjs cmark-regression
+node tests/markdown-conformance/scripts/run-visual.mjs cmark-regression
 ```
 
 ## cmark-gfm 数据导入
