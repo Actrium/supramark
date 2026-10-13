@@ -29,11 +29,17 @@ afterEach(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-function writeArchFixture(archOutputDir: string, bytes: string, opts: { header?: boolean } = {}) {
+function writeArchFixture(
+  archOutputDir: string,
+  bytes: string,
+  opts: { header?: boolean; lib?: boolean } = {}
+) {
   fs.mkdirSync(path.join(outputDir, archOutputDir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(outputDir, archOutputDir, 'lib'), { recursive: true });
   fs.writeFileSync(path.join(outputDir, archOutputDir, 'bin', DLL), bytes);
-  fs.writeFileSync(path.join(outputDir, archOutputDir, 'lib', LIB), `lib-${bytes}`);
+  if (opts.lib !== false) {
+    fs.mkdirSync(path.join(outputDir, archOutputDir, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(outputDir, archOutputDir, 'lib', LIB), `lib-${bytes}`);
+  }
   if (opts.header) {
     fs.mkdirSync(path.join(outputDir, archOutputDir, 'include'), { recursive: true });
     fs.writeFileSync(path.join(outputDir, archOutputDir, 'include', HEADER), 'header-from-tree');
@@ -142,7 +148,27 @@ describe('stageWindowsFrameworks', () => {
     const result = stage();
     expect(result.staged).toEqual([]);
     expect(result.missing).toEqual([]);
+    expect(result.libsMissing).toEqual([]);
     expect(result.headerStaged).toBe(false);
+  });
+
+  it('flags a staged architecture whose import library was not built', () => {
+    writeArchFixture('windows-x86_64', 'x64-dll', { lib: false, header: true });
+    const result = stage();
+
+    expect(result.staged).toEqual(['x64']);
+    expect(result.libsMissing).toEqual(['x64']);
+    expect(fs.existsSync(path.join(frameworksDest, 'x64', 'bin', DLL))).toBe(true);
+    expect(fs.existsSync(path.join(frameworksDest, 'x64', 'lib', LIB))).toBe(false);
+  });
+
+  it('reports a missing header without leaving an empty include directory', () => {
+    writeArchFixture('windows-x86_64', 'x64-dll');
+    const result = stage();
+
+    expect(result.staged).toEqual(['x64']);
+    expect(result.headerStaged).toBe(false);
+    expect(fs.existsSync(path.join(frameworksDest, 'include'))).toBe(false);
   });
 
   it('falls back to the packaged header directory when the built tree has none', () => {

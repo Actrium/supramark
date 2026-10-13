@@ -89,9 +89,11 @@ function listAvailableArches(outputDir, dllName) {
  *        the built tree does not ship one (`packages/native/include`); optional
  * @param {string[]|null} [opts.requestedArches] architectures to stage (names from
  *        WINDOWS_ARCHES). `null`/omitted = every architecture present in `outputDir`.
- * @returns {{staged: string[], missing: string[], headerStaged: boolean}}
+ * @returns {{staged: string[], missing: string[], libsMissing: string[], headerStaged: boolean}}
  *        `staged` — architectures written; `missing` — requested architectures whose
- *        artifacts are absent; `headerStaged` — whether the C ABI header was copied.
+ *        artifacts are absent; `libsMissing` — staged architectures whose import
+ *        library was not found (the RNW project cannot link without it);
+ *        `headerStaged` — whether the C ABI header was copied.
  *
  * On success (at least one architecture staged) `frameworksDest` is rebuilt from
  * scratch, so the staged layout is exactly the requested set. When nothing can be
@@ -108,11 +110,12 @@ function stageWindowsFrameworks(opts) {
   const missing = (requested == null ? [] : requested).filter((name) => !available.includes(name));
 
   if (toStage.length === 0) {
-    return { staged: [], missing, headerStaged: false };
+    return { staged: [], missing, libsMissing: [], headerStaged: false };
   }
 
   fs.rmSync(frameworksDest, { recursive: true, force: true });
 
+  const libsMissing = [];
   let headerStaged = false;
   for (const name of toStage) {
     const arch = WINDOWS_ARCHES.find((a) => a.name === name);
@@ -126,6 +129,8 @@ function stageWindowsFrameworks(opts) {
     const libSrc = path.join(srcDir, 'lib', libName);
     if (fileExists(libSrc)) {
       fs.copyFileSync(libSrc, path.join(destDir, 'lib', libName));
+    } else {
+      libsMissing.push(name);
     }
 
     if (!headerStaged) {
@@ -142,7 +147,7 @@ function stageWindowsFrameworks(opts) {
     }
   }
 
-  return { staged: toStage, missing, headerStaged };
+  return { staged: toStage, missing, libsMissing, headerStaged };
 }
 
 module.exports = {

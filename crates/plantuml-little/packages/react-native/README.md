@@ -89,6 +89,11 @@ windows/Frameworks/x64/{bin,lib}/...                 # from output/windows-x86_6
 windows/Frameworks/arm64/{bin,lib}/...               # from output/windows-arm64
 ```
 
+Each run rebuilds `windows/Frameworks/` so that it contains exactly the staged
+architectures — without `--windows-arch` every architecture present under
+`output/` is staged; with it, only the listed ones (re-run without the flag to
+restore the others).
+
 The vcxproj selects `Frameworks\<arch>\lib\supramark_plantuml_native.lib` by
 `$(Platform)` and fails the build with an actionable message if the artifacts
 for that platform were never staged. Only `x64` and `ARM64` configurations are

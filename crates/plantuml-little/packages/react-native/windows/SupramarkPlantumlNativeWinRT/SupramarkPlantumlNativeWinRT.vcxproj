@@ -89,6 +89,7 @@
     <SupramarkPlantumlBuildScriptArch Condition="'$(Platform)'=='ARM64'">arm64</SupramarkPlantumlBuildScriptArch>
     <SupramarkPlantumlRuntimeDll>$(SupramarkPlantumlFrameworksDir)$(SupramarkPlantumlRuntimeArch)\bin\supramark_plantuml_native.dll</SupramarkPlantumlRuntimeDll>
     <SupramarkPlantumlImportLib>$(SupramarkPlantumlFrameworksDir)$(SupramarkPlantumlRuntimeArch)\lib\supramark_plantuml_native.lib</SupramarkPlantumlImportLib>
+    <SupramarkPlantumlHeader>$(SupramarkPlantumlFrameworksDir)include\supramark_plantuml.h</SupramarkPlantumlHeader>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -135,6 +136,7 @@
     </PropertyGroup>
     <Error Condition="!Exists('$(SupramarkPlantumlImportLib)')" Text="$([System.String]::Format('$(SupramarkPlantumlStagingErrorText)', '$(SupramarkPlantumlImportLib)'))" />
     <Error Condition="!Exists('$(SupramarkPlantumlRuntimeDll)')" Text="$([System.String]::Format('$(SupramarkPlantumlStagingErrorText)', '$(SupramarkPlantumlRuntimeDll)'))" />
+    <Error Condition="!Exists('$(SupramarkPlantumlHeader)')" Text="$([System.String]::Format('$(SupramarkPlantumlStagingErrorText)', '$(SupramarkPlantumlHeader)'))" />
   </Target>
   <ItemGroup>
     <ClInclude Include="ReactPackageProvider.h">

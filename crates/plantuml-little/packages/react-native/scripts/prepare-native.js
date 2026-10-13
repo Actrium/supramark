@@ -206,6 +206,19 @@ function prepareWindows(requestedArches) {
     const dir = WINDOWS_ARCHES.find((a) => a.name === arch).outputDir;
     console.warn(`⚠  Windows ${arch}: missing ${path.relative(REPO_ROOT, path.join(WINDOWS_OUTPUT_DIR, dir))} (skip)`);
   }
+  for (const arch of result.libsMissing) {
+    const buildArch = arch === 'x64' ? 'x86_64' : arch;
+    console.warn(
+      `⚠  Windows ${arch}: import library not staged — the RNW project will not link.` +
+        ` Re-run scripts/build-windows.sh --arch ${buildArch} (it needs lib.exe to generate supramark_plantuml_native.lib).`
+    );
+  }
+  if (result.staged.length > 0 && !result.headerStaged) {
+    console.warn(
+      '⚠  Windows: C ABI header not staged — the RNW project will not compile.' +
+        ' Expected include/supramark_plantuml.h in the build output or packages/native/include.'
+    );
+  }
   if (result.staged.length === 0) {
     console.warn(
       `⚠  Windows: no staged architecture under ${path.relative(REPO_ROOT, WINDOWS_OUTPUT_DIR)} (skip)`
