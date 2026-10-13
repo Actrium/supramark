@@ -5,9 +5,11 @@ import { buildTextMetrics } from '../../metrics';
 import { buildUnitIndex } from '../../resolve';
 import type { LayoutRect, RegisteredBlock } from '../../coordinator/registry';
 import {
+  blocksBounds,
   chooseBlock,
   containingBlock,
   localizePoint,
+  nearestBlockWithin,
   pointInRect,
   resolvePointToSelection,
   resolvePointToSelectionInViewport,
@@ -254,5 +256,29 @@ describe('resolvePointToSelection', () => {
     };
     expect(localizePoint(block, { x: 90, y: 15 }, index)?.offset).toBe(5);
     expect(localizePoint(block, { x: 10, y: 2 }, index)?.offset).toBe(0);
+  });
+});
+
+describe('blocksBounds and nearestBlockWithin', () => {
+  test('blocksBounds unions the measured blocks and ignores unmeasured ones', () => {
+    expect(blocksBounds(blocks())).toEqual({ x: 0, y: 0, w: 100, h: 80 });
+    const partly: RegisteredBlock[] = [
+      { nodeId: 'A', unitIds: ['A#0'], kind: 'text', rect: undefined },
+      { nodeId: 'B', unitIds: ['B#0'], kind: 'text', rect: rectB },
+    ];
+    expect(blocksBounds(partly)).toEqual({ x: 0, y: 30, w: 100, h: 20 });
+    expect(blocksBounds([])).toBeNull();
+  });
+
+  test('nearestBlockWithin keeps the gap within the distance on both axes', () => {
+    // Just below A: A itself is the nearest block.
+    expect(nearestBlockWithin(blocks(), { x: 50, y: 22 }, 12)?.nodeId).toBe('A');
+    // Inside the A/B gap, closer to B.
+    expect(nearestBlockWithin(blocks(), { x: 50, y: 28 }, 12)?.nodeId).toBe('B');
+    // Out of horizontal reach: the vertical proximity cannot rescue the point.
+    expect(nearestBlockWithin(blocks(), { x: 130, y: 10 }, 12)).toBeNull();
+    expect(nearestBlockWithin(blocks(), { x: -20, y: 10 }, 12)).toBeNull();
+    // Vertical gap larger than the distance.
+    expect(nearestBlockWithin(blocks(), { x: 50, y: 100 }, 12)).toBeNull();
   });
 });

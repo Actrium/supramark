@@ -164,7 +164,10 @@ describe('image rendering', () => {
     );
 
     const image = renderer.root.findByType('Image');
-    expect(image.parent?.type).toBe('Text');
+    // Composite selection adapters must not introduce a native view when selection is absent.
+    let nativeParent = image.parent;
+    while (nativeParent && typeof nativeParent.type !== 'string') nativeParent = nativeParent.parent;
+    expect(nativeParent?.type).toBe('Text');
     expect(image.props.style).toMatchObject({ width: 20, height: 20, resizeMode: 'cover' });
   });
 

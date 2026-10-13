@@ -62,10 +62,6 @@ AST it came from.
   a space rather than a hard break.
 - **Link titles and URLs are not escaped**, so a URL containing spaces breaks.
 - **Emphasis is ambiguous.** Nested and intra-word emphasis both emit `_`.
-- **`footnote_reference` leaks its marker** into plain text: `linearize.ts`
-  classifies it as a text unit rather than a syntax unit, so `see[^1]` copies
-  with the `[^1]` visible. Heading marks and list markers are correctly syntax
-  units and do not have this problem.
 
 The coordinator layer (`SelectionRoot`, `useDocumentSelection`, registry /
 hit-testing / selection state) and the self-drawn UI (highlight, handles,
@@ -98,7 +94,29 @@ the serialized payload and the host decides what to do with it.
 
 `SelectionRoot` also takes `renderToolbar` for hosts that want their own bar
 component, and `overlay` / `handles` / `toolbar` / `gestures` booleans for hosts
-that want to drive parts of the layer themselves.
+that want to drive parts of the layer themselves. `enabled` (default `true`) is
+the full off switch, distinct from `gestures`: it clears the selection and
+refuses every entry point — gestures, handles, toolbar actions, and a host
+driving the store — then releases the host scroll lock.
+
+### Host-driven selection coordinates
+
+`trySelectParagraphAt(pageX, pageY)` and `measurePageRect()` use RN **page**
+coordinates relative to the containing React root, matching touch events'
+`nativeEvent.pageX/pageY` and the last two values of `View.measure()`.
+The root and every candidate document must belong to the same React surface.
+Both commands measure the current native origin so host scrolling is included.
+
+For RNGH gestures, measure the exact view attached to `GestureDetector` and add
+its page origin to `event.x/y`. Do not pass raw `absoluteX/absoluteY` or a
+`measureInWindow()` result: Android content/window insets and embedded native
+surfaces can make those origins differ from RN page space. The selection root
+also measures text blocks and nested viewports in page space before converting
+them to root-local geometry.
+
+Menu and toolbar positioning has a separate contract. `SelectionToolbarHost`
+measures both its anchor and host in window space to translate between them;
+those measurements never become selection hit-test inputs.
 
 ### Nested scrollers
 
@@ -139,6 +157,45 @@ const [selectionScrollLocked, setSelectionScrollLocked] = useState(false);
 </ScrollView>;
 ```
 
+## Renderer integration
+
+`@supramark/rn` mounts this layer through its optional `selection` prop:
+
+```tsx
+<Supramark markdown={source} selection={{ documentId, enabled, onAction, toolbarItems }} />
+```
+
+- **`enabled`** gates the interaction (a still-streaming message passes `false`):
+  the current selection clears and every entry point — gestures, handles,
+  toolbar, a host driving the store — is refused, while the content subtree
+  stays mounted. Omitting `selection` entirely is the different "never built"
+  state: no store, unit index, measurement or overlay.
+- **`documentId`** names the host document instance (session / message / side /
+  fragment). `onAction` receives it together with the plan `revision`, so a late
+  callback can be checked against the content version it was raised for; a new
+  parsed snapshot clears the old selection outright (no offset migration).
+- **`containerText`** declares host container renderers whose children are
+  readable text and therefore selectable; every other host renderer is an
+  opaque card (a hard boundary), as are the built-in html / map cards. A
+  container's visible title (admonition `params` / a generic `name: params`)
+  is selectable too.
+- Disabled math / diagram features draw their raw source as readable text, so
+  it linearizes as text rather than an object; the `[math disabled]` /
+  `[diagram …]` notice stays outside the selectable block.
+
+For hosts rendering their own tree, `linearizeDocument(root, options)` returns
+`{ units, blocks }` from one traversal: pass `units` to `SelectionRoot` and wrap
+each rendered block in `SelectableBlock` with its binding's `nodeId` / `unitIds`.
+Bindings are matched by AST node identity, so unit and block ids can never drift
+apart. `blocks` covers paragraph, heading, tight list_item, code, table_cell,
+definition_term, selectable container titles and (feature-disabled) math /
+diagram source views; whether a rendered instance uses its binding stays the
+renderer's call. Options mirror what is on screen: `opaqueContainers` names
+cards whose content is not text (a hard boundary selection cannot cross —
+atom/boundary units split the document into regions), `containerTitle` supplies
+container titles as drawn, and `rendersAsText` marks nodes a disabled feature
+draws as source text.
+
 ### Text precision depends on metrics
 
 `SelectableBlock` publishes the line table React Native reports through
@@ -176,3 +233,20 @@ selection layer.
 3. Exact per-character metrics from the platform text engines.
 4. Feature selection providers for code, math, diagrams, tables, and containers.
 5. Copy actions for text, Markdown, source, SVG, PNG, and HTML.
+
+
+### Toolbars in scrolling message hosts
+
+Mount `SelectionToolbarHost` around the visible message-list area, outside its
+scrolling content. It portals the built-in toolbar into that area's coordinate
+space, so a short message cannot compress the menu or force it over the selection.
+Pass a `hostRef` and call `hostRef.current?.refresh()` from the list's `onScroll`.
+The host measures both native surfaces in window coordinates and preserves normal
+touch handling outside the toolbar buttons. `@supramark/rn` also exports this host.
+
+Inline attachments in a `SelectableBlock` must use `SelectableInlineObject` with
+the atom's `unitId`. The native text contains one attachment offset, including
+while a formula displays its loading text. The attachment publishes its measured
+edges so text on either side has independent hit regions; atoms remain hard
+selection boundaries and never enter copied text. Hard line breaks belong in
+`unitIds`, while block separators and invisible Markdown syntax do not.

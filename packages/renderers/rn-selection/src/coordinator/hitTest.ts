@@ -1,5 +1,5 @@
-import type { SelectionPoint } from '../model';
-import { offsetAtLocalPoint } from '../metrics';
+import type { SelectionPoint, SelectionRange } from '../model';
+import { offsetAtLocalPoint, offsetInsideLineX, lineAtY } from '../metrics';
 import type { SelectionUnitIndex } from '../resolve';
 import { buildSegmentSpans, segmentOffsetToPoint } from '../native/segmentAdapter';
 import { visibleBlockRect, type LayoutRect, type RegisteredBlock } from './registry';
@@ -88,6 +88,58 @@ export function chooseBlock(blocks: readonly RegisteredBlock[], p: Point): Regis
  * selection uses this stricter hit-test so pressing unregistered UI, fixture
  * text, or whitespace does not select some unrelated nearest block.
  */
+/**
+ * Union rect of every block that has a layout, or null when none does. Used to
+ * decide whether a press belongs to this root at all — measured from the
+ * blocks themselves rather than the root's own box, whose measured height can
+ * under-report overflowed content.
+ */
+export function blocksBounds(blocks: readonly RegisteredBlock[]): LayoutRect | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const block of blocks) {
+    const rect = visibleBlockRect(block);
+    if (rect === null) continue;
+    minX = Math.min(minX, rect.x);
+    minY = Math.min(minY, rect.y);
+    maxX = Math.max(maxX, rect.x + rect.w);
+    maxY = Math.max(maxY, rect.y + rect.h);
+  }
+  if (minX === Infinity) return null;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * The nearest block to a point that sits just outside it — the gap between two
+ * paragraphs, or past the end of a line — provided the gap stays within
+ * `maxDistance` in BOTH axes. A point inside a diagram, an image or any other
+ * non-text object stays farther than that from every text block and resolves
+ * to null, so starting a selection never reaches across a non-text object.
+ */
+export function nearestBlockWithin(
+  blocks: readonly RegisteredBlock[],
+  p: Point,
+  maxDistance: number
+): RegisteredBlock | null {
+  let best: RegisteredBlock | null = null;
+  let bestDistance = maxDistance;
+  for (const block of blocks) {
+    const rect = visibleBlockRect(block);
+    if (rect === null) continue;
+    const dx = horizontalGap(p, rect);
+    const dy = verticalGap(p, rect);
+    if (dx > maxDistance || dy > maxDistance) continue;
+    const distance = Math.hypot(dx, dy);
+    if (distance < bestDistance) {
+      best = block;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 export function containingBlock(
   blocks: readonly RegisteredBlock[],
   p: Point
@@ -232,4 +284,54 @@ export function resolvePointToSelectionOutsideViewports(
     p,
     index
   );
+}
+
+/** Select the text region under the press without crossing an inline attachment. */
+export function paragraphRangeAt(
+  block: RegisteredBlock,
+  point: Point,
+  index: SelectionUnitIndex
+): SelectionRange | null {
+  // A text region ends at each attachment, which occupies native layout but cannot be selected.
+  const groups: string[][] = [[]];
+  for (const id of block.unitIds) {
+    // Resolve against the current document before building a selectable region.
+    const at = index.byUnitId.get(id);
+    // A removed unit cannot be selected using a stale block binding.
+    if (at === undefined) return null;
+    // Attachments split regions without becoming text endpoints.
+    if (index.entries[at].unit.kind === 'atom') groups.push([]);
+    else groups[groups.length - 1].push(id);
+  }
+  // Multiple regions need the native line table; never guess that a right-side press meant the left.
+  if (groups.length > 1 && !block.metrics) return null;
+  // A press inside an attachment is not a press on its nearest text-side caret.
+  if (groups.length > 1 && block.metrics && block.rect) {
+    // Native line and attachment positions are local to the Text content box.
+    const origin = block.contentOffset ?? { x: 0, y: 0 };
+    const line = lineAtY(block.metrics, point.y - block.rect.y - origin.y);
+    // Only a measured line can establish attachment ownership.
+    if (line) {
+      // Use the character under the pointer, not the nearest caret on either side.
+      const offset = offsetInsideLineX(line, point.x - block.rect.x - origin.x);
+      const span = buildSegmentSpans(block, index).find(
+        span => offset >= span.start && offset < span.end
+      );
+      // Reject a press on the object itself instead of snapping it to adjacent text.
+      if (span && index.entries[index.byUnitId.get(span.unitId)!].unit.kind === 'atom') return null;
+    }
+  }
+  // Locate the text-side caret, then select only the region containing that unit.
+  const hit = groups.length > 1 ? localizePoint(block, point, index) : null;
+  const ids =
+    groups.length === 1 ? groups[0] : groups.find(group => group.includes(hit?.unitId ?? ''));
+  // Empty regions occur before leading or after trailing attachments.
+  if (!ids?.length) return null;
+  // Document-relative endpoints keep serialization independent of display placeholders.
+  const first = index.entries[index.byUnitId.get(ids[0])!];
+  const last = index.entries[index.byUnitId.get(ids[ids.length - 1])!];
+  return {
+    anchor: { nodeId: first.unit.nodeId, unitId: first.unit.unitId, offset: 0 },
+    focus: { nodeId: last.unit.nodeId, unitId: last.unit.unitId, offset: last.textLength },
+  };
 }

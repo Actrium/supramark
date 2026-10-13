@@ -303,7 +303,8 @@ export class SelectionRegistry {
    * place and bumps the version rather than re-registering, keeping the block's
    * rect and unit ids intact.
    */
-  setMetrics(nodeId: SelectionNodeId, metrics: SegmentTextMetrics): void {
+  /** Publish a block's line table, or `undefined` to drop it (see SelectableBlock). */
+  setMetrics(nodeId: SelectionNodeId, metrics: SegmentTextMetrics | undefined): void {
     const block = this.blocks.get(nodeId);
     if (!block) return;
     block.metrics = metrics;

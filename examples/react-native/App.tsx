@@ -57,6 +57,7 @@ import '@supramark/markdown-native-rn';
 
 import { DEMOS } from '../demos';
 import SelectionDemo from './SelectionDemo';
+import SelectionMarkdownDemo from './SelectionMarkdownDemo';
 
 // admonition is a ContainerFeature — its container hooks must be registered
 // explicitly. html-page / map register theirs via side-effect import in their
@@ -132,6 +133,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>('light');
   const [showSelection, setShowSelection] = useState(false);
+  const [showSelectionMarkdown, setShowSelectionMarkdown] = useState(false);
   const [smoke, setSmoke] = useState<SmokeResult[]>(
     SMOKE_SPEC.map((s) => ({ name: s.name, status: 'pending', detail: 'booting...' })),
   );
@@ -181,6 +183,10 @@ export default function App() {
     return <SelectionDemo onBack={() => setShowSelection(false)} />;
   }
 
+  if (showSelectionMarkdown) {
+    return <SelectionMarkdownDemo onBack={() => setShowSelectionMarkdown(false)} />;
+  }
+
   const containerStyle = [styles.container, isDark && { backgroundColor: themeBackground.dark }];
   const headerStyle = [styles.header, isDark && { borderBottomColor: '#30363d' }];
   const titleStyle = [styles.title, isDark && { color: '#ffffff' }];
@@ -227,6 +233,12 @@ export default function App() {
             onPress={() => setShowSelection(true)}
           >
             <Text style={themeButtonTextStyle}>Selection Demo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[themeButtonStyle, { marginTop: 8, alignSelf: 'flex-start' }]}
+            onPress={() => setShowSelectionMarkdown(true)}
+          >
+            <Text style={themeButtonTextStyle}>Selection over Markdown</Text>
           </TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={menuContentStyle}>

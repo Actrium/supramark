@@ -1,7 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import type { SupramarkRootNode } from '@supramark/core';
+import type { SupramarkCodeHighlighter, SupramarkRootNode } from '@supramark/core';
+import type { SupramarkSelectionOptions } from '../src/selection';
 
 import './support/mock-react-native';
 import './support/mock-renderer';
@@ -24,6 +25,10 @@ function codeAst(value: string, lang?: string): SupramarkRootNode {
 interface RenderOptions {
   onCopyCode?: (code: string, node: SupramarkCodeNodeLike) => void | Promise<void>;
   copyButton?: boolean;
+  /** Exercise the copy shell together with the document selection layer. */
+  selection?: SupramarkSelectionOptions;
+  /** Exercise the highlighted and plain code-content branches. */
+  codeHighlighter?: SupramarkCodeHighlighter;
 }
 
 type SupramarkCodeNodeLike = { type: 'code'; value: string; lang?: string };
@@ -215,4 +220,49 @@ describe('code block copy button (RN)', () => {
     const renderer = await renderAst(codeAst('const x = 1\n', 'ts'), { copyButton: true });
     expect(renderer.root.findAllByType('TouchableOpacity')).toHaveLength(0);
   });
+});
+
+// The merge must compose the code-copy shell and selectable body in both render branches.
+describe('code copy with document selection', () => {
+  it.each([false, true])(
+    'keeps source selectable and the copy header separate (highlight=%s)',
+    async highlighted => {
+      // Keep the source simple enough to compare plain and highlighted text exactly.
+      const source = 'const x = 1;';
+      // Record the host action without using a platform clipboard.
+      const onCopyCode = mock(() => undefined);
+      // Supply real highlight tokens to exercise the second renderCodeContent branch.
+      const codeHighlighter: SupramarkCodeHighlighter | undefined = highlighted
+        ? async () => ({ lines: [{ tokens: [{ text: source, color: '#a00' }] }] })
+        : undefined;
+      // Mount both features on the same code block, with selection chrome disabled for clarity.
+      const renderer = await renderAst(codeAst(source, 'ts'), {
+        onCopyCode,
+        codeHighlighter,
+        selection: { overlay: false, handles: false, toolbar: false },
+      });
+      // Inspect the actual bound units produced by the mounted renderer.
+      const { SelectableBlock, SelectionRoot, serializeSelectionUnits } =
+        await import('@supramark/rn-selection');
+      // The body has one selection registration; header labels and buttons have none.
+      const block = renderer.root.findByType(SelectableBlock);
+      expect(block.findAllByType('TouchableOpacity')).toHaveLength(0);
+      // Restrict serialization to this block's bindings so chrome cannot enter copied text.
+      const units = renderer.root.findByType(SelectionRoot).props.units;
+      expect(
+        serializeSelectionUnits(
+          units.filter((unit: { unitId: string }) => block.props.unitIds.includes(unit.unitId))
+        )
+      ).toBe(source);
+      // Read nested highlight Text leaves without counting the same characters twice.
+      const textLeaves = (node: ReactTestRenderer['root'] | string): string =>
+        typeof node === 'string' ? node : node.children.map(textLeaves).join('');
+      expect(textLeaves(block)).toBe(source);
+      await act(async () => renderer.root.findByType('TouchableOpacity').props.onPress());
+      expect(onCopyCode).toHaveBeenCalledTimes(1);
+      expect(onCopyCode.mock.calls[0][0]).toBe(source);
+      expect(renderer.root.findByProps({ accessibilityLabel: 'Copied code' })).toBeTruthy();
+      await act(async () => renderer.unmount());
+    }
+  );
 });

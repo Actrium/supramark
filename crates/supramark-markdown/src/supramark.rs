@@ -331,6 +331,7 @@ pub struct ParseOptions {
     /// Off by default: `[[...]]` is not CommonMark/GFM syntax, so when this is
     /// `false` (the default) parsing is byte-identical to the CommonMark/GFM
     /// profiles. Hosts that use knowledge-base Markdown opt in.
+    #[serde(default)]
     pub wikilink: bool,
     /// micromark construct names to disable, e.g. `"codeIndented"`, `"autolink"`.
     #[serde(default)]
