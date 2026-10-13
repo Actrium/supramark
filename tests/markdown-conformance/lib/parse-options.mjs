@@ -65,6 +65,15 @@ export function parserOptionsForCase(testCase) {
     // hard break), which stays the product default.
     options.mixedLineSuffixSoftBreak = true;
   }
+  // cmark keeps the type-7 HTML flow paragraph-interrupt ban absolute on
+  // markerless lazy continuation lines (cmark's regression suite, 0014:
+  // `</script>` after a list item's lazy paragraph lines continues that
+  // paragraph); micromark lets the sequence exit the container on exactly
+  // those lines. The shipped default follows micromark, so only this source
+  // turns the exemption off.
+  if (testCase.source?.name === 'cmark-regression') {
+    options.micromarkLazyType7Interrupt = false;
+  }
   return options;
 }
 

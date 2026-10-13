@@ -177,7 +177,17 @@ impl BlockRule for HtmlBlockScanner {
         // (CommonMark 0.30 §4.6). `state.in_lazy_continuation` is set by the
         // blockquote's interrupt test and by the paragraph's lazy-continuation
         // scan (list items, nested containers) while testing a markerless line.
-        if sequence.only_interrupts_lazy && !state.in_lazy_continuation {
+        //
+        // micromark additionally grants the type-7 sequence the interrupt on
+        // exactly those markerless lazy lines, letting it exit the container;
+        // cmark keeps the ban absolute there too — a lazy line continues the
+        // paragraph instead (cmark's regression suite, cmark-regression 0014:
+        // `</script>` after a list item's lazy paragraph lines stays inside
+        // the item). The shipped default follows micromark;
+        // `micromark_lazy_type7_interrupt = false` carries the cmark stance.
+        if sequence.only_interrupts_lazy
+            && (!state.in_lazy_continuation || !state.md.micromark_lazy_type7_interrupt)
+        {
             return None;
         }
         // `get_sequence` only matches type 1–6 start conditions. Type 1 names
