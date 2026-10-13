@@ -68,11 +68,26 @@ impl BlockRule for ParagraphScanner {
             // Some tags can terminate paragraph without empty line.
             let old_state_line = state.line;
             state.line = next_line;
-            if state.test_rules_at_line() {
-                state.line = old_state_line;
-                break 'outer;
+            // `line_indent < 0` means the line's first non-space character
+            // starts left of the container's content column: a markerless
+            // lazy continuation line (of a blockquote or list item). micromark
+            // lets a type-7 HTML block interrupt a paragraph on exactly these
+            // lines — exiting the container — while on regular continuation
+            // lines the type-7 sequence must stay inline (spec example 187).
+            // Set the lazy flag for the duration of the interrupt test, the
+            // same gate the blockquote uses for its own markerless check.
+            let lazy = state.line_indent(next_line) < 0;
+            if lazy {
+                state.in_lazy_continuation = true;
+            }
+            let interrupted = state.test_rules_at_line();
+            if lazy {
+                state.in_lazy_continuation = false;
             }
             state.line = old_state_line;
+            if interrupted {
+                break 'outer;
+            }
         }
 
         let (content, mapping) = state.get_lines(start_line, next_line, state.blk_indent, false);

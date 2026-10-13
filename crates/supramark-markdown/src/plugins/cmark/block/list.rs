@@ -346,11 +346,16 @@ impl BlockRule for ListScanner {
                 //
                 //     foo
                 // ~~~~~~~~
-                state.line = if state.line + 2 < state.line_max {
-                    state.line + 2
-                } else {
-                    state.line_max
-                }
+                // Skip every blank line that follows the empty item rather than
+                // exactly one, so a same-type marker after several blanks
+                // continues the (now loose) list instead of splitting it:
+                // ~~~~~~~~
+                //   *
+                //
+                //
+                //   * b
+                // ~~~~~~~~
+                state.line = state.skip_empty_lines(state.line + 1);
             } else {
                 state.line = next_line;
                 state.md.block.tokenize(state);

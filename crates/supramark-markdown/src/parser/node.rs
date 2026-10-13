@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use crate::common::sourcemap::SourcePos;
 use crate::common::TypeKey;
 use crate::parser::extset::NodeExtSet;
-use crate::parser::inline::Text;
+use crate::parser::inline::{Text, TextSpecial};
 use crate::parser::renderer::HTMLRenderer;
 use crate::plugins::cmark::inline::newline::Softbreak;
 use crate::Renderer;
@@ -87,9 +87,7 @@ impl Node {
     /// This keeps the disjoint-field borrow inside `Node`; callers that need
     /// immutable metadata from the value while walking children do not need to
     /// clone that metadata solely to satisfy the borrow checker.
-    pub(crate) fn cast_and_children_mut<T: NodeValue>(
-        &mut self,
-    ) -> Option<(&T, &mut Vec<Node>)> {
+    pub(crate) fn cast_and_children_mut<T: NodeValue>(&mut self) -> Option<(&T, &mut Vec<Node>)> {
         if self.node_type.id != TypeId::of::<T>() {
             return None;
         }
@@ -200,6 +198,10 @@ impl Node {
         self.walk(|node, _| {
             if let Some(text) = node.cast::<Text>() {
                 result.push_str(text.content.as_str());
+            } else if let Some(special) = node.cast::<TextSpecial>() {
+                // Entities and backslash escapes inside a label (e.g. an image
+                // alt) contribute their decoded content, matching micromark.
+                result.push_str(special.content.as_str());
             } else if node.is::<Softbreak>() {
                 result.push('\n');
             }

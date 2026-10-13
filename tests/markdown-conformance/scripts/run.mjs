@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { astToHtml } from '../lib/semantic/ast-semantics.mjs';
+import { parserOptionsArgv } from '../lib/parse-options.mjs';
 import { renderConformanceHtmlReport } from '../lib/reports/html-report.mjs';
 import {
   buildConformanceIssueMetadata,
@@ -56,7 +57,6 @@ const SECTION_NAMES = {
   'Textual content': 'Textual content',
 };
 
-
 const SUITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY_ROOT = path.resolve(SUITE_ROOT, '..', '..');
 const sourceName = process.argv[2];
@@ -85,14 +85,22 @@ const parserBinary = path.resolve(process.env.SUPRAMARK_MARKDOWN_BIN ?? DEFAULT_
 // Autolinks section (spec-0610/0616/0619/0620).
 // cmark-gfm runs a split config (core sections off, extension sections on),
 // so it gets its own profile label instead of hiding under the default name.
+// The micromark source gets its own profile too: every micromark case is
+// parsed with upstream options forwarded per case (allowDangerousHtml off
+// unless the case opts in — see lib/parse-options.mjs), which is not the
+// parser's shipped default profile.
 const parserProfile =
   sourceName === 'commonmark'
     ? 'supramark-commonmark'
     : sourceName === 'cmark-gfm'
       ? 'supramark-cmark-gfm'
-      : 'supramark-default';
+      : sourceName === 'micromark'
+        ? 'supramark-micromark'
+        : 'supramark-default';
 function parserArgsFor(testCase) {
-  return isCommonMarkCoreCase(testCase) ? ['--no-gfm-autolink', '-'] : ['-'];
+  const args = ['-', ...parserOptionsArgv(testCase)];
+  if (isCommonMarkCoreCase(testCase)) args.unshift('--no-gfm-autolink');
+  return args;
 }
 // Whether a case is normative CommonMark (no GFM autolink extension). The
 // commonmark source is CommonMark-core throughout; cmark-gfm's spec.txt
@@ -103,8 +111,7 @@ function isCommonMarkCoreCase(testCase) {
   if (sourceName === 'commonmark') return true;
   if (sourceName === 'cmark-gfm') {
     return (
-      testCase.source.path === 'test/spec.txt' &&
-      !testCase.source.section.endsWith('(extension)')
+      testCase.source.path === 'test/spec.txt' && !testCase.source.section.endsWith('(extension)')
     );
   }
   return false;
@@ -117,26 +124,32 @@ const failOnFailures = process.env.FAIL_ON_FAILURES !== '0';
 const gateMode = process.env.CONFORMANCE_GATE === 'absolute' ? 'absolute' : 'regression';
 const visualEnabled = process.env.VISUAL_COMPARE === '1';
 const filter = process.env.CASE_IDS
-  ? new Set(process.env.CASE_IDS.split(',').map(value => value.trim()).filter(Boolean))
+  ? new Set(
+      process.env.CASE_IDS.split(',')
+        .map(value => value.trim())
+        .filter(Boolean)
+    )
   : null;
-const fixtureDirectory = path.join(
-  REPOSITORY_ROOT,
-  'tests',
-  'cases',
-  '_fixtures',
-  sourceName
-);
+const fixtureDirectory = path.join(REPOSITORY_ROOT, 'tests', 'cases', '_fixtures', sourceName);
 const document = JSON.parse(await readFile(path.join(fixtureDirectory, 'cases.json'), 'utf8'));
 const version = JSON.parse(await readFile(path.join(fixtureDirectory, 'version.json'), 'utf8'));
 const sourceConfig = JSON.parse(
   await readFile(path.join(SUITE_ROOT, 'config', 'sources', `${sourceName}.json`), 'utf8')
 );
 const sourceDisplayName = sourceConfig.displayName ?? sourceConfig.name;
-if (sourceConfig.name !== sourceName || document.source !== sourceName || version.source !== sourceName) {
-  throw new Error(`Source mismatch: argument ${sourceName}, config ${sourceConfig.name}, cases ${document.source}, version ${version.source}`);
+if (
+  sourceConfig.name !== sourceName ||
+  document.source !== sourceName ||
+  version.source !== sourceName
+) {
+  throw new Error(
+    `Source mismatch: argument ${sourceName}, config ${sourceConfig.name}, cases ${document.source}, version ${version.source}`
+  );
 }
 if (document.profile !== sourceConfig.profile) {
-  throw new Error(`Case profile does not match source config: ${document.profile} != ${sourceConfig.profile}`);
+  throw new Error(
+    `Case profile does not match source config: ${document.profile} != ${sourceConfig.profile}`
+  );
 }
 const baselineDocument = await readOptionalJson(BASELINE_PATH);
 const selectedCases = filter
@@ -166,9 +179,8 @@ let visualExecution = {
 };
 if (visualEnabled) {
   try {
-    const { renderWithProductionWebRenderer } = await import(
-      '../lib/visual/production-web-renderer.mjs'
-    );
+    const { renderWithProductionWebRenderer } =
+      await import('../lib/visual/production-web-renderer.mjs');
     const { compareVisualCases } = await import('../lib/visual/visual-compare.mjs');
     const productionRenderer = await renderWithProductionWebRenderer({
       cases: selectedCases,
@@ -204,12 +216,14 @@ if (visualEnabled) {
       errors: selectedCases.length,
       notPassed: selectedCases.length,
       bySection: {},
-      failures: [{
-        id: `${sourceName}-visual-environment`,
-        section: 'Visual test environment',
-        status: 'error',
-        error: error.stack ?? error.message,
-      }],
+      failures: [
+        {
+          id: `${sourceName}-visual-environment`,
+          section: 'Visual test environment',
+          status: 'error',
+          error: error.stack ?? error.message,
+        },
+      ],
     };
   }
 }
@@ -294,7 +308,10 @@ const visualFailureRecords = attachEvidence(visualFailures, evidenceById);
 const issuePath = path.join(artifactDirectory, 'issue.md');
 const issueMetadataPath = path.join(artifactDirectory, 'issue-metadata.json');
 await mkdir(artifactDirectory, { recursive: true });
-await writeFile(path.join(artifactDirectory, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+await writeFile(
+  path.join(artifactDirectory, 'summary.json'),
+  `${JSON.stringify(summary, null, 2)}\n`
+);
 await writeFile(
   path.join(artifactDirectory, 'failures.json'),
   `${JSON.stringify(semanticFailureRecords, null, 2)}\n`
@@ -335,22 +352,27 @@ if (summary.result === 'fail') {
     writeFile(issueMetadataPath, JSON.stringify(issueMetadata, null, 2) + '\n'),
   ]);
 } else {
-  await Promise.all([
-    rm(issuePath, { force: true }),
-    rm(issueMetadataPath, { force: true }),
-  ]);
+  await Promise.all([rm(issuePath, { force: true }), rm(issueMetadataPath, { force: true })]);
 }
 
-console.log(`${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, not passed ${summary.notPassed}`);
+console.log(
+  `${sourceDisplayName} semantic comparison: passed ${summary.passed}/${summary.total}, skipped ${summary.skipped}, not passed ${summary.notPassed}`
+);
 if (summary.visual.enabled) {
-  console.log(`${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, skipped ${summary.visual.skipped}, not passed ${summary.visual.notPassed}`);
+  console.log(
+    `${sourceDisplayName} visual comparison: passed ${summary.visual.passed}/${summary.visual.total}, skipped ${summary.visual.skipped}, not passed ${summary.visual.notPassed}`
+  );
 } else {
-  console.log(`${sourceDisplayName} visual comparison: not run (enable with run-visual.mjs ${sourceName})`);
+  console.log(
+    `${sourceDisplayName} visual comparison: not run (enable with run-visual.mjs ${sourceName})`
+  );
 }
 console.log(`Summary: ${path.join(artifactDirectory, 'summary.md')}`);
 console.log(`HTML report: ${path.join(artifactDirectory, 'report.html')}`);
 if (summary.result === 'fail') console.log(`Issue body: ${issuePath}`);
-console.log(`gate[${summary.gate.mode}]: ${summary.gate.failed ? 'FAIL' : 'PASS'} - ${summary.gate.reason}`);
+console.log(
+  `gate[${summary.gate.mode}]: ${summary.gate.failed ? 'FAIL' : 'PASS'} - ${summary.gate.reason}`
+);
 if (summary.gate.failed && failOnFailures) process.exitCode = 1;
 
 // Decide whether this run should fail the workflow, and say why in one place.
@@ -404,9 +426,10 @@ function buildGate({ mode, baseline, notPassedCount, semanticErrorCount, visualE
     mode,
     failed: added.length > 0,
     kind: 'regression',
-    reason: added.length > 0
-      ? `${added.length} case(s) regressed against baseline: ${added.slice(0, 5).join(', ')}${added.length > 5 ? ', ...' : ''}`
-      : `no regression against baseline (${resolved.length} resolved, ${baseline.overall.persistent.length} still failing)`,
+    reason:
+      added.length > 0
+        ? `${added.length} case(s) regressed against baseline: ${added.slice(0, 5).join(', ')}${added.length > 5 ? ', ...' : ''}`
+        : `no regression against baseline (${resolved.length} resolved, ${baseline.overall.persistent.length} still failing)`,
     added,
     resolved,
     scope: baseline.scope,
@@ -558,7 +581,9 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
 
   lines.push('', '## Browser visual comparison results', '');
   if (!summaryDocument.visual.enabled) {
-    lines.push(`Visual comparison was not enabled for this run. Run \`node tests/markdown-conformance/scripts/run-visual.mjs ${sourceName}\` to enable it.`);
+    lines.push(
+      `Visual comparison was not enabled for this run. Run \`node tests/markdown-conformance/scripts/run-visual.mjs ${sourceName}\` to enable it.`
+    );
   } else {
     lines.push(
       `- Test result: **${summaryDocument.visual.result}**`,
@@ -586,7 +611,10 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
     if (visualFailures.length === 0) {
       lines.push('All visual cases passed.');
     } else {
-      lines.push('| Case | Section | Category | Diff pixels | Diff ratio | Images |', '| --- | --- | --- | ---: | ---: | --- |');
+      lines.push(
+        '| Case | Section | Category | Diff pixels | Diff ratio | Images |',
+        '| --- | --- | --- | ---: | ---: | --- |'
+      );
       for (const failure of visualFailures) {
         const images = failure.images
           ? `[expected](${failure.images.expected}) &middot; [actual](${failure.images.actual}) &middot; [diff](${failure.images.diff})`
@@ -618,7 +646,11 @@ function renderSummaryMarkdown(summaryDocument, semanticFailures, visualFailures
       }
     }
   }
-  lines.push('', 'See `summary.json`, `failures.json`, and `visual-failures.json` for the full machine-readable data.', '');
+  lines.push(
+    '',
+    'See `summary.json`, `failures.json`, and `visual-failures.json` for the full machine-readable data.',
+    ''
+  );
   return `${lines.join('\n')}\n`;
 }
 
