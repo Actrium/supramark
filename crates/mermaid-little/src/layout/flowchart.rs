@@ -768,6 +768,7 @@ fn build_layout_data(d: &FlowchartDiagram, edge_label_decluster: bool) -> Layout
         node_spacing: Some(d.node_spacing.map(f64::from).unwrap_or(50.0)),
         rank_spacing: Some(d.rank_spacing.map(f64::from).unwrap_or(50.0)),
         layout_algorithm: Some("dagre".into()),
+        html_labels: d.html_labels,
         ..Default::default()
     };
 
@@ -1554,6 +1555,22 @@ fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
     };
     let rendered = crate::render::foreign_object::replace_fa_icons(&html);
     crate::layout::label_metrics::split_label_lines(&rendered).len()
+}
+
+/// Extra height a cluster title paints beyond its first line, in pixels.
+///
+/// dagre sizes a cluster from its border nodes alone — the title never enters
+/// the compound node's dimensions — so a title that breaks onto a second line
+/// is drawn on top of the cluster's first row of nodes. The lines past the
+/// first are exactly the space the box has to grow by (and what the cluster's
+/// contents have to move down by) for the title to clear them. Single-line
+/// titles need nothing and return `0.0`, which keeps every existing layout
+/// byte-identical.
+pub(crate) fn cluster_title_leading(label: &str, is_markdown: bool) -> f64 {
+    use crate::render::foreign_object::{html_label_line_height, HTML_LABEL_FONT_SIZE};
+
+    rendered_label_lines(label, is_markdown).saturating_sub(1) as f64
+        * html_label_line_height(HTML_LABEL_FONT_SIZE)
 }
 
 /// [`strip_fa_icons`] applied to each line of the raw label, keeping the line

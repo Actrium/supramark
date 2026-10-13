@@ -3353,7 +3353,6 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     // behavior where `adjustClustersAndEdges` removes and re-adds such edges.
     let edges_reordered = reorder_cluster_edges(edges_pre, data);
     let edges = routing::refine_edges(&nodes, &edges_reordered);
-    let clusters = collect_clusters(&nodes);
 
     // Self-loop helper exposure ------------------------------------------------
     // [`expand_self_edge`] inserts two `labelRect` helper nodes plus three
@@ -3441,7 +3440,15 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
     // edges land on the rect boundary (e.g. `M192.146,104.945`) instead
     // of upstream's polygon-rounded `M192.646,105.445`, breaking
     // byte-exact parity for every fixture that connects a subroutine.
+    // A multi-line cluster title paints into space dagre never reserved for it
+    // (see `apply_cluster_title_leading`). This runs last so it also covers the
+    // self-loop helper nodes gathered above, and before the polygon re-clip
+    // below so a moved endpoint still gets that pass's exact rounding. The
+    // clusters are re-collected afterwards so their bounds describe the moved
+    // contents.
+    apply_cluster_title_leading(&mut all_nodes, &mut all_edges, data);
     reclip_polygon_intersect_endpoints(&all_nodes, &mut all_edges);
+    let clusters = collect_clusters(&all_nodes);
 
     let bounds = compute_bounds(&all_nodes, &all_edges);
 
@@ -3452,6 +3459,328 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
         bounds,
         isolated_cluster_ids: all_isolated_ids,
     })
+}
+
+/// Give every multi-line cluster title the room it paints into.
+///
+/// dagre sizes a cluster from its border nodes alone — the title never enters
+/// the compound node's dimensions — so a title that breaks onto a second line
+/// is painted straight over the cluster's first row of nodes. (Upstream 11.x
+/// has the same defect; 12.x grows the cluster with the title.) We reproduce
+/// the 12.x geometry in the shape our layout can express: the box grows by the
+/// extra lines and the cluster's contents move down by the same amount, which
+/// leaves the title's band clear.
+///
+/// Single-line titles — and every diagram without a break in a cluster title —
+/// measure `0.0`, so this is a no-op for them and their geometry is untouched.
+///
+/// Known limit: the box grows downwards and nothing below it is re-routed, so
+/// the room it can grow into is the gap between its old bottom edge and whatever
+/// sits below it. A title whose extra height exceeds that gap pushes the
+/// cluster's contents over the next rank instead of into free space — five lines
+/// under the default `rankSpacing` of 50 in a simple two-rank graph, two once
+/// the spacing is tightened. The pass warns when it sees that happen; the real
+/// fix is to size the compound node from the title before layout, which is what
+/// upstream 12.x does and what this post-pass stands in for.
+fn apply_cluster_title_leading(nodes: &mut [Node], edges: &mut [Edge], data: &LayoutData) {
+    use std::collections::HashMap;
+
+    if !diagram_has_cluster_titles(data) {
+        return;
+    }
+    // With htmlLabels off the cluster title is emitted as `<text>`/`<tspan>`,
+    // and this port paints only the first line there
+    // (`build_cluster_text_inner_tspans` takes `lines.first()`) — a pre-existing
+    // divergence from upstream, which splits the title into one outer-tspan per
+    // line. Reserve nothing: room for lines nobody draws is just a gap. Whoever
+    // fixes that divergence has to drop this early return along with it.
+    //
+    // State diagrams never set this flag — their titles always take the HTML
+    // path — so today the guard only ever fires for flowchart. A state-side
+    // htmlLabels switch would need the room reserved again.
+    if data.html_labels == Some(false) {
+        return;
+    }
+
+    // Extra height per cluster, keyed by cluster id. Empty means nothing to do.
+    // Only clusters that hold something: an empty one is demoted to a plain
+    // node at render time (`render_empty_cluster_as_node` sizes its own box
+    // from the label), so growing it here would only inflate its bounds.
+    let has_children: std::collections::HashSet<&str> = nodes
+        .iter()
+        .filter_map(|n| n.parent_id.as_deref())
+        .collect();
+    let mut extra: HashMap<String, f64> = HashMap::new();
+    for n in nodes.iter().filter(|n| n.is_group) {
+        if !has_children.contains(n.id.as_str()) {
+            continue;
+        }
+        let Some(label) = n.label.as_deref().filter(|l| !l.is_empty()) else {
+            continue;
+        };
+        let leading = crate::layout::flowchart::cluster_title_leading(
+            label,
+            n.label_type.as_deref() == Some("markdown"),
+        );
+        if leading > 0.0 {
+            extra.insert(n.id.clone(), leading);
+        }
+    }
+    if extra.is_empty() {
+        return;
+    }
+
+    // A node moves down by the extra of every cluster containing it — its
+    // ancestors, never itself (a cluster's own extra pushes its contents, not
+    // the box's position in its parent). The parent chain is a forest by
+    // construction (dagre's compound layout requires it), and the walks below
+    // assume so, like the crate's other parent-chain walks.
+    let parent: HashMap<String, String> = nodes
+        .iter()
+        .filter_map(|n| n.parent_id.as_ref().map(|p| (n.id.clone(), p.clone())))
+        .collect();
+    let node_offset = |id: &str| -> f64 {
+        let mut offset = 0.0;
+        let mut cur = parent.get(id);
+        while let Some(p) = cur {
+            offset += extra.get(p).copied().unwrap_or(0.0);
+            cur = parent.get(p);
+        }
+        offset
+    };
+
+    for n in nodes.iter_mut() {
+        let offset = node_offset(&n.id);
+        if offset != 0.0 {
+            if let Some(y) = n.y.as_mut() {
+                *y += offset;
+            }
+        }
+    }
+    for n in nodes.iter_mut().filter(|n| n.is_group) {
+        if let Some(leading) = extra.get(&n.id) {
+            if let Some(h) = n.height.as_mut() {
+                *h += leading;
+            }
+            // `y` is the box's centre, so growing the height alone would lift
+            // the top edge by half the growth. Move the centre down by half
+            // instead: the top edge stays where it was and the box extends
+            // downwards, which is the edge the title is anchored to.
+            if let Some(y) = n.y.as_mut() {
+                *y += leading / 2.0;
+            }
+        }
+    }
+
+    // An edge follows the nodes it connects: both endpoints land exactly on
+    // their moved nodes and everything between shifts by a continuous amount
+    // interpolated along the path. Judging each point by the cluster rect it
+    // happens to fall in does not work — dagre routes edges *through* cluster
+    // boundaries, so a point a hair outside the rect keeps its old y while its
+    // neighbours move a full line and the spline tears (point spacing 25/1/49
+    // instead of 25/25/25). Taking the endpoints' own shifts also leaves an
+    // edge that merely passes through a growing cluster alone (`head == tail ==
+    // 0`), which the rect rule got wrong too.
+    //
+    // This is a linear shear of the spline that was routed before the move, not
+    // a re-route at the new node positions: straight edges come out exactly
+    // right, curved ones stay smooth and end on their nodes but follow a
+    // slightly different curve than dagre would have drawn. Re-routing would
+    // mean feeding the title's height into the compound layout itself, which is
+    // what upstream 12.x does and what this post-pass stands in for.
+    // One lookup table rather than a scan per edge: every node's total shift.
+    let shift_by_id: HashMap<&str, f64> = nodes
+        .iter()
+        .map(|n| (n.id.as_str(), node_offset(&n.id)))
+        .collect();
+    let shift_of = |attach: Option<&str>| -> f64 {
+        attach
+            .and_then(|id| shift_by_id.get(id))
+            .copied()
+            .unwrap_or(0.0)
+    };
+    for e in edges.iter_mut() {
+        let Some(pts) = e.points.as_mut() else {
+            continue;
+        };
+        if pts.len() < 2 {
+            continue;
+        }
+        let head = shift_of(e.start.as_deref());
+        let tail = shift_of(e.end.as_deref());
+        if head == 0.0 && tail == 0.0 {
+            continue;
+        }
+        let last = pts.len() - 1;
+        let params = arc_length_params(pts);
+        // `refine_edges` placed the label from the pre-move spline, so read its
+        // position along that spline before the points move out from under it.
+        let label_param = match (e.label_x, e.label_y) {
+            (Some(lx), Some(ly)) => Some(param_at_point(Point { x: lx, y: ly }, pts, &params)),
+            _ => None,
+        };
+        for (i, (p, t)) in pts.iter_mut().zip(&params).enumerate() {
+            // The endpoints take their node's shift verbatim, not the
+            // interpolated value: `head + (tail - head) * 1.0 == tail` is not an
+            // IEEE identity, and an endpoint a hair off its node boundary breaks
+            // every shape-aware clip downstream.
+            p.y += if i == 0 {
+                head
+            } else if i == last {
+                tail
+            } else {
+                head + (tail - head) * t
+            };
+        }
+        if let Some(ly) = e.label_y.as_mut() {
+            if let Some(t) = label_param {
+                *ly += head + (tail - head) * t;
+            }
+        }
+    }
+
+    // Report the one case this pass cannot fix — see the doc comment: a cluster
+    // whose growth runs into something outside it. Everything needed is already
+    // in hand, and the overlap is otherwise visible only in the rendered image.
+    // `log::warn!` like the crate's other warnings: quiet under the CLI's
+    // default `error` level, so a caller sees it with `RUST_LOG=warn`.
+    //
+    // This compares layout coordinates directly, so it trusts that they are also
+    // the rendered ones. For an isolated cluster that holds because its inner
+    // root's `translate` is zero by construction (`outer_x - padding -
+    // bbox_width / 2` cancels); if that ever stops being true the warning would
+    // compare across coordinate frames.
+    //
+    // Only content the cluster actually grew into counts. Descendants sit inside
+    // it by construction; ancestors contain it, so without that check a nested
+    // cluster would always "reach into" its parent; and a neighbour in another
+    // column is never in the way however far down the box goes, so the columns
+    // have to really overlap. Of the rest, only the topmost is reported — one
+    // overlap would otherwise fire once for a cluster and again for each of its
+    // children.
+    for cluster in nodes.iter().filter(|n| n.is_group) {
+        let (Some(leading), Some(cx), Some(cy), Some(w), Some(h)) = (
+            extra.get(&cluster.id),
+            cluster.x,
+            cluster.y,
+            cluster.width,
+            cluster.height,
+        ) else {
+            continue;
+        };
+        let (left, right) = (cx - w / 2.0, cx + w / 2.0);
+        let bottom = cy + h / 2.0;
+        let mut reached: Option<(&str, f64)> = None;
+        for other in nodes.iter() {
+            if other.id == cluster.id
+                || is_descendant(&other.id, &cluster.id, &parent)
+                || is_descendant(&cluster.id, &other.id, &parent)
+            {
+                continue;
+            }
+            let (Some(ox), Some(ow), Some(oy), Some(oh)) =
+                (other.x, other.width, other.y, other.height)
+            else {
+                continue;
+            };
+            if ox + ow / 2.0 <= left || ox - ow / 2.0 >= right {
+                continue;
+            }
+            let top = oy - oh / 2.0;
+            // `top >= bottom - leading` keeps the wording honest: only content
+            // the growth itself reached counts, not an overlap that predates it.
+            let grown_from = bottom - leading;
+            if oy > cy
+                && top >= grown_from
+                && top < bottom
+                && reached.map_or(true, |(_, seen)| top < seen)
+            {
+                reached = Some((&other.id, top));
+            }
+        }
+        if let Some((id, top)) = reached {
+            log::warn!(
+                "dagre_bridge: cluster '{}' grew {leading}px for its title and now reaches into \
+                 '{id}' (bottom edge {bottom}, top edge {top}) — shorten the title or widen the \
+                 spacing",
+                cluster.id,
+            );
+        }
+    }
+}
+
+/// Diagrams whose clusters carry a title the renderer paints through the HTML
+/// label path: `flowchart` subgraphs and `stateDiagram-v2` composite states.
+/// Both lay their clusters out through this module, so both need the title's
+/// lines reserved (see `apply_cluster_title_leading`).
+fn diagram_has_cluster_titles(data: &LayoutData) -> bool {
+    data.diagram_type
+        .as_deref()
+        .map(|kind| {
+            kind.eq_ignore_ascii_case("flowchart-v2")
+                || kind.eq_ignore_ascii_case("flowchart")
+                || kind.eq_ignore_ascii_case("stateDiagram")
+        })
+        .unwrap_or(false)
+}
+
+/// Whether `id` sits inside `ancestor`'s subtree — the parent chain, walked the
+/// same way `node_offset` walks it.
+fn is_descendant(
+    id: &str,
+    ancestor: &str,
+    parent: &std::collections::HashMap<String, String>,
+) -> bool {
+    let mut current = parent.get(id);
+    while let Some(p) = current {
+        if p == ancestor {
+            return true;
+        }
+        current = parent.get(p);
+    }
+    false
+}
+
+/// Normalised arc-length parameter of every point on a path: 0 at the first
+/// point, 1 at the last. A degenerate path (every point coincident) falls back
+/// to the index ratio, so the parameters stay monotone either way.
+fn arc_length_params(pts: &[Point]) -> Vec<f64> {
+    let mut cumulative = Vec::with_capacity(pts.len());
+    let mut total = 0.0;
+    cumulative.push(0.0);
+    for w in pts.windows(2) {
+        total += ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt();
+        cumulative.push(total);
+    }
+    let last = pts.len() - 1;
+    if total <= 0.0 {
+        return (0..pts.len()).map(|i| i as f64 / last as f64).collect();
+    }
+    cumulative.iter().map(|c| c / total).collect()
+}
+
+/// Arc-length parameter of the point on the path closest to `p` — where a
+/// label sitting beside the spline reads its shift from.
+fn param_at_point(p: Point, pts: &[Point], params: &[f64]) -> f64 {
+    let mut best_distance = f64::INFINITY;
+    let mut best_param = 0.0;
+    for (i, w) in pts.windows(2).enumerate() {
+        let (a, b) = (w[0], w[1]);
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len_sq = dx * dx + dy * dy;
+        let t = if len_sq > 0.0 {
+            (((p.x - a.x) * dx + (p.y - a.y) * dy) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (qx, qy) = (a.x + dx * t, a.y + dy * t);
+        let distance = (p.x - qx).powi(2) + (p.y - qy).powi(2);
+        if distance < best_distance {
+            best_distance = distance;
+            best_param = params[i] + (params[i + 1] - params[i]) * t;
+        }
+    }
+    best_param
 }
 
 /// Re-run the upstream-faithful `intersect.polygon` (with its
@@ -3738,6 +4067,60 @@ mod tests {
     use super::*;
     use crate::layout::unified::{Edge, LayoutData, Node};
     use crate::theme::ThemeVariables;
+
+    /// A title only needs a band when it is painted as HTML: with
+    /// `htmlLabels` off the cluster title is one `<text>` line whatever it
+    /// says, so the layout must not open room for lines nobody draws.
+    #[test]
+    fn cluster_title_room_follows_html_labels() {
+        let graph = || {
+            let cluster = Node {
+                id: "S".into(),
+                label: Some("Sub<br/>title".into()),
+                is_group: true,
+                x: Some(50.0),
+                y: Some(50.0),
+                width: Some(100.0),
+                height: Some(100.0),
+                ..Node::default()
+            };
+            let child = Node {
+                id: "A".into(),
+                label: Some("A".into()),
+                parent_id: Some("S".into()),
+                x: Some(50.0),
+                y: Some(50.0),
+                width: Some(60.0),
+                height: Some(30.0),
+                ..Node::default()
+            };
+            vec![cluster, child]
+        };
+        let data = |html: bool| LayoutData {
+            diagram_type: Some("flowchart-v2".into()),
+            html_labels: Some(html),
+            ..LayoutData::default()
+        };
+        let mut edges: Vec<Edge> = Vec::new();
+
+        let mut html = graph();
+        apply_cluster_title_leading(&mut html, &mut edges, &data(true));
+        assert_eq!(
+            html[0].height,
+            Some(124.0),
+            "an HTML title opens a band for its second line"
+        );
+        assert_eq!(html[1].y, Some(74.0), "the contents move down with it");
+
+        let mut text = graph();
+        apply_cluster_title_leading(&mut text, &mut edges, &data(false));
+        assert_eq!(
+            text[0].height,
+            Some(100.0),
+            "a <text> title paints one line, so it asks for nothing"
+        );
+        assert_eq!(text[1].y, Some(50.0), "and nothing moves");
+    }
 
     fn two_node_graph() -> LayoutData {
         let mut a = Node {

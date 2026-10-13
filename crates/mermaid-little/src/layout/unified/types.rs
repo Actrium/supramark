@@ -331,6 +331,12 @@ pub struct LayoutData {
     pub markers: Vec<String>,
     pub layout_algorithm: Option<String>,
 
+    /// `config.flowchart.htmlLabels` (default true). The layout needs it
+    /// because the two spellings reserve different room: an HTML label
+    /// paints one line box per `<br/>`, a `<text>`/`<tspan>` label paints a
+    /// single line whatever the label says.
+    pub html_labels: Option<bool>,
+
     /// Diagram-family extras. Upstream uses `[key: string]: any` — we
     /// restrict to string-valued extras.
     pub extra: BTreeMap<String, String>,

@@ -456,6 +456,13 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
             continue;
         }
         if let (Some(cx), Some(cy), Some(w), Some(h)) = (n.x, n.y, n.width, n.height) {
+            // The viewBox works in the same local frame the jsdom reference
+            // does: transforms are ignored, so an isolated cluster's rect
+            // contributes its cnode-local coordinates rather than the ones its
+            // inner root's translate would put it at. Composing `outer_tx/ty`
+            // here would "fix" the frame — and change the viewBox of every
+            // existing state fixture that has one, which is a byte-exact
+            // regression against the reference the port is measured by.
             let x_left = cx - w / 2.0;
             let x_right = cx + w / 2.0;
             let y_top = cy - h / 2.0;
@@ -482,7 +489,10 @@ fn compute_viewbox(l: &StateLayout, pad: f64, title: Option<&str>) -> (f64, f64,
                         use crate::render::foreign_object::{
                             measure_html_markup_label, HtmlLabelFont,
                         };
-                        let escaped = xml_escape(label);
+                        // Same label path as flowchart cluster titles: a
+                        // `<br/>` in the title paints a real line break, so the
+                        // measurement has to see one line per painted line.
+                        let escaped = crate::render::foreign_object::string_label_to_html(label);
                         let font = HtmlLabelFont::default();
                         let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
                         g_x_min = g_x_min.min(0.0);
@@ -1069,7 +1079,11 @@ fn emit_isolated_cluster_shape(n: &Node, svg_id: &str) -> String {
 
     // Measure label dimensions (HTML markup path — upstream's createLabel +
     // getBoundingClientRect on the foreignObject's div).
-    let escaped = xml_escape(label);
+    // Composite-state titles go through the same HTML label path as flowchart
+    // subgraph titles, so a `<br/>` paints a second line instead of literal
+    // markup — and measures as two lines, which the layout now reserves room
+    // for (see `apply_cluster_title_leading`).
+    let escaped = crate::render::foreign_object::string_label_to_html(label);
     let font = HtmlLabelFont::default();
     let (lw, lh) = if escaped.is_empty() {
         (0.0, 0.0)

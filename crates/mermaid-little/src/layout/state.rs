@@ -1001,8 +1001,13 @@ fn expand_cluster_width_for_label(result: &mut crate::layout::unified::types::La
         };
 
         let font = HtmlLabelFont::default();
-        let escaped = xml_escape_minimal(label);
-        let (lw, _lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
+        // The renderer paints the title through `string_label_to_html`, so the
+        // width it needs is the width of the widest painted line. Measuring the
+        // escaped text instead counts a `<br/>` as five literal characters and
+        // widens the cluster past what the title ever draws — which also moves
+        // `outer_tx` (below) and, with it, the frame the viewBox assumes.
+        let painted = crate::render::foreign_object::string_label_to_html(label);
+        let (lw, _lh) = measure_html_markup_label(&painted, &font, 200.0, true);
         let needed = lw + LABEL_PADDING;
         let cur = n.width.unwrap_or(0.0);
         if needed > cur {
@@ -1153,24 +1158,6 @@ fn widen_cluster_with_fork_children(
             }
         }
     }
-}
-
-/// Minimal XML escape mirroring `svg_state::xml_escape` for measurement.
-/// We only need this to be consistent with the renderer's HTML markup
-/// measurement of the label; both go through `measure_html_markup_label`.
-fn xml_escape_minimal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
 
 /// Adjust the last edge point for edges ending at a stateEnd node to use

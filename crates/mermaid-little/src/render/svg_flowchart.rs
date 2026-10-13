@@ -1899,7 +1899,7 @@ fn render_cluster(
         let escaped = if is_markdown {
             crate::render::foreign_object::markdown_label_to_html(&label)
         } else {
-            xml_escape(&label)
+            crate::render::foreign_object::string_label_to_html(&label)
         };
         let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
