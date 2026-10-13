@@ -599,6 +599,7 @@ export const INLINE_NODE_TYPES: ReadonlySet<string> = new Set([
   'break',
   'delete',
   'footnote_reference',
+  'wiki_link',
   'raw',
 ]);
 

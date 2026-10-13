@@ -374,7 +374,7 @@ fn wikilink_option_enables_wikilink_parsing() {
 fn wikilink_serializes_tagged_node_omitting_absent_fields() {
     let mut options = ParseOptions::default();
     options.wikilink = true;
-    let json = serde_json::to_string(&parse_with_options("[[a|b]]\n", options)).unwrap();
+    let json = serde_json::to_string(&parse_with_options("[[a|b]]\n", options.clone())).unwrap();
     assert!(json.contains(r#""type":"wiki_link""#), "{json}");
     assert!(json.contains(r#""target":"a""#), "{json}");
     assert!(json.contains(r#""label":"b""#), "{json}");
@@ -1622,4 +1622,14 @@ fn wikilink_math_scan_handles_many_candidates_and_resets_between_runs() {
         .map(|node| node["target"].as_str().unwrap())
         .collect();
     assert_eq!(targets, ["outside", "after"]);
+}
+
+#[test]
+fn conformance_options_default_wikilink_to_disabled() {
+    let options: ParseOptions =
+        serde_json::from_str(r#"{"disable":[],"allowDangerousHtml":false}"#).unwrap();
+    assert!(!options.wikilink);
+    let ast = parse_with_options("[[Note]]", options);
+    let json = serde_json::to_value(ast).unwrap();
+    assert_eq!(json["children"][0]["children"][0]["type"], "text");
 }

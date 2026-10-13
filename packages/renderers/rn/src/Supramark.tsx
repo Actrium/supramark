@@ -653,6 +653,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     : '[]';
   // Resolve the same feature gates as the render branches before comparing policies.
   const mathAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
+  const wikiLinkAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-wikilink']);
   // Unknown engines are always enabled by core; built-in aliases are normalized below.
   const textDiagramEnginesKey = selectionEnabled
     ? JSON.stringify(
@@ -666,6 +667,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     opaqueContainersKey,
     customContainersKey,
     mathAsText,
+    wikiLinkAsText,
     textDiagramEnginesKey,
   ]);
   // Stable callbacks and sets let equivalent fresh host props retain their existing selection.
@@ -682,13 +684,14 @@ export const Supramark: React.FC<SupramarkProps> = ({
       opaqueContainers,
       // Match disabled source rendering for inline/block math and diagram aliases.
       rendersAsText: (node: SupramarkNode) =>
+        (node.type === 'wiki_link' && wikiLinkAsText) ||
         ((node.type === 'math_inline' || node.type === 'math_block') && mathAsText) ||
         (node.type === 'diagram' && textDiagramEngines.has(node.engine.toLowerCase())),
       // Only built-in render branches contribute the library's container title.
       containerTitle: (node: SupramarkContainerNode) =>
         rendererContainerTitle(node, customContainers),
     };
-  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, textDiagramEnginesKey]);
+  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, wikiLinkAsText, textDiagramEnginesKey]);
   // Build once per document/policy identity; fresh equivalent options keep unit identities intact.
   const selectionPlan = useMemo(() => {
     // The existing renderer handles loading and errors without a selection model.
