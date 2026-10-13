@@ -15,3 +15,11 @@ node_modules/
 # Android CMake external native build state
 android/.cxx/
 android/build/
+
+# Windows MSBuild output (windows/SupramarkPlantumlNativeWinRT.sln or a host sln)
+windows/**/x64/
+windows/**/ARM64/
+windows/**/obj/
+windows/**/Generated Files/
+windows/**/packages.lock.json
+windows/packages/

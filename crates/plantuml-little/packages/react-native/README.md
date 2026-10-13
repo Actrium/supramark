@@ -2,7 +2,8 @@
 
 React Native FFI wrapper around `supramark-plantuml-native` that turns PlantUML
 source into SVG. iOS uses a static XCFramework, macOS uses a universal dylib,
-and Android uses JNI with a `cargo ndk`-built `.so` per ABI.
+Android uses JNI with a `cargo ndk`-built `.so` per ABI, and Windows uses a
+C++/WinRT TurboModule linked against a Rust `cdylib` (`supramark_plantuml_native.dll`).
 
 This package side-registers a `d2` engine with `@supramark/engines/rn`
 on import.
@@ -56,6 +57,65 @@ After that:
   patch is required
 - Android: `gradlew :supramark-plantuml-native:assembleDebug` (or via the RN
   CLI) picks up the per-ABI `.so` files in `android/src/main/jniLibs/`
+- Windows (see below): `react-native autolink-windows` discovers the bundled
+  RNW project and builds it against the staged artifacts
+
+## Windows (React Native Windows)
+
+The package carries its own RNW native module project
+(`windows/SupramarkPlantumlNativeWinRT/SupramarkPlantumlNativeWinRT.vcxproj`), so
+a standard RNW app can consume it through autolinking — installing the package
+and importing its JS entry is enough (`react-native autolink-windows` adds the
+project reference and registers the package provider).
+
+Build and stage the Rust side once per architecture (Windows host, MSVC +
+CMake available):
+
+```bash
+cd crates/plantuml-little
+scripts/build-windows.sh --arch x86_64     # → output/windows-x86_64/
+scripts/build-windows.sh --arch arm64      # → output/windows-arm64/ (optional)
+cd packages/react-native
+node scripts/prepare-native.js             # stages every built arch
+# or restrict: node scripts/prepare-native.js --windows-arch=x64
+```
+
+`prepare-native.js` stages each architecture into its own directory so a single
+installed package serves every configuration an RNW app builds:
+
+```
+windows/Frameworks/include/supramark_plantuml.h      # arch-independent header
+windows/Frameworks/x64/{bin,lib}/...                 # from output/windows-x86_64
+windows/Frameworks/arm64/{bin,lib}/...               # from output/windows-arm64
+```
+
+The vcxproj selects `Frameworks\<arch>\lib\supramark_plantuml_native.lib` by
+`$(Platform)` and fails the build with an actionable message if the artifacts
+for that platform were never staged. Only `x64` and `ARM64` configurations are
+provided (the Rust artifacts are only built for those architectures); apps that
+still target Win32/x86 cannot consume this package on Windows. The runtime DLL
+is deployed with the module (`DeploymentContent` + `CopyToOutputDirectory`), so
+hosts that build the project through a project reference get
+`supramark_plantuml_native.dll` next to the module automatically.
+
+The project builds standalone via `windows/SupramarkPlantumlNativeWinRT.sln`;
+since the repo does not contain `node_modules`, pass the RNW location (and,
+outside a consuming app's solution, choose a NuGet vs source build):
+
+```powershell
+msbuild windows\SupramarkPlantumlNativeWinRT.sln /p:Configuration=Release /p:Platform=x64 `
+  /p:ReactNativeWindowsDir=<app>\node_modules\react-native-windows\
+```
+
+When built inside a consuming app's solution (autolink or a hand-wired
+`ProjectReference`), the app's `windows/ExperimentalFeatures.props` decides
+`RnwNewArch` / `UseExperimentalNuget`, exactly like other RNW native modules.
+
+The WinRT namespace is `SupramarkPlantumlNative` while the DLL is
+`SupramarkPlantumlNativeWinRT.dll` — a deliberate name mismatch (same convention
+as the `*WinRT` components in host apps) so C# hosts can reference
+`SupramarkPlantumlNative.winmd` by `HintPath` without MSBuild resolving the
+same-named native DLL by mistake.
 
 ## Notes
 

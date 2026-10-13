@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SupramarkPlantumlNativeWinRT - C++/WinRT module library wrapping the
+     supramark_plantuml_native.dll C ABI. Built as a standard RNW native
+     module so `@actrium/supramark-plantuml-native-rn` can be consumed by
+     autolinking: the ReactPackageProvider runtimeclass (ReactPackageProvider.idl)
+     is instantiated by the host, and SupramarkPlantumlModule (REACT_MODULE) is
+     registered from the compiled wrapper.
+
+     The project/DLL name intentionally carries the -WinRT suffix while the
+     metadata namespace (RootNamespace) does not: the module DLL
+     (SupramarkPlantumlNativeWinRT.dll) then has a different base name than
+     SupramarkPlantumlNative.winmd. C# hosts that reference the winmd by
+     HintPath (MSBuild ResolveAssemblyReferences prefers a same-named .dll over
+     the .winmd and breaks the projection) work with no TargetName override -
+     the same convention the spark/Fuse host uses for its *WinRT components.
+     The WinRT namespace stays SupramarkPlantumlNative.
+
+     Native artifact layout (staged by scripts/prepare-native.js):
+       ../Frameworks/include/supramark_plantuml.h          (arch-independent)
+       ../Frameworks/<arch>/lib/supramark_plantuml_native.lib
+       ../Frameworks/<arch>/bin/supramark_plantuml_native.dll
+     where <arch> is x64 or arm64, matching $(Platform). -->
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(SolutionDir)\ExperimentalFeatures.props" Condition="Exists('$(SolutionDir)\ExperimentalFeatures.props')" />
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <MinimalCoreWin>true</MinimalCoreWin>
+    <ProjectGuid>{BC0170DF-D781-48D2-B050-E53CB6CFCCB0}</ProjectGuid>
+    <ProjectName>SupramarkPlantumlNativeWinRT</ProjectName>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>SupramarkPlantumlNative</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <AppxPackage>false</AppxPackage>
+  </PropertyGroup>
+  <PropertyGroup Label="ReactNativeWindowsProps">
+    <ReactNativeWindowsDir Condition="'$(ReactNativeWindowsDir)' == ''">$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'node_modules\react-native-windows\package.json'))\node_modules\react-native-windows\</ReactNativeWindowsDir>
+    <RunAutolinkCheck>false</RunAutolinkCheck>
+  </PropertyGroup>
+  <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.WindowsSdk.Default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="ReactNativeWindowsPropertySheets">
+    <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.props" Condition="Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.props')" />
+  </ImportGroup>
+  <!-- Native artifacts staged per architecture by scripts/prepare-native.js. -->
+  <PropertyGroup>
+    <SupramarkPlantumlFrameworksDir>$(MSBuildThisFileDirectory)..\Frameworks\</SupramarkPlantumlFrameworksDir>
+    <SupramarkPlantumlRuntimeArch Condition="'$(Platform)'=='x64'">x64</SupramarkPlantumlRuntimeArch>
+    <SupramarkPlantumlRuntimeArch Condition="'$(Platform)'=='ARM64'">arm64</SupramarkPlantumlRuntimeArch>
+    <SupramarkPlantumlBuildScriptArch Condition="'$(Platform)'=='x64'">x86_64</SupramarkPlantumlBuildScriptArch>
+    <SupramarkPlantumlBuildScriptArch Condition="'$(Platform)'=='ARM64'">arm64</SupramarkPlantumlBuildScriptArch>
+    <SupramarkPlantumlRuntimeDll>$(SupramarkPlantumlFrameworksDir)$(SupramarkPlantumlRuntimeArch)\bin\supramark_plantuml_native.dll</SupramarkPlantumlRuntimeDll>
+    <SupramarkPlantumlImportLib>$(SupramarkPlantumlFrameworksDir)$(SupramarkPlantumlRuntimeArch)\lib\supramark_plantuml_native.lib</SupramarkPlantumlImportLib>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
+      <DisableSpecificWarnings>4453;28204;4100;4244</DisableSpecificWarnings>
+      <PreprocessorDefinitions>_WINRT_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalUsingDirectories>$(WindowsSDK_WindowsMetadata);$(AdditionalUsingDirectories)</AdditionalUsingDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>
+        $(MSBuildThisFileDirectory);
+        $(SupramarkPlantumlFrameworksDir)include;
+        %(AdditionalIncludeDirectories)
+      </AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>shell32.lib;user32.lib;windowsapp.lib;$(SupramarkPlantumlImportLib);%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Console</SubSystem>
+      <GenerateWindowsMetadata>true</GenerateWindowsMetadata>
+      <ModuleDefinitionFile>SupramarkPlantumlNativeWinRT.def</ModuleDefinitionFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <PropertyGroup Label="UserMacros" />
+  <!-- Fails the build with an actionable message when prepare-native.js has not
+       staged the Rust artifacts for this Platform yet (the link would otherwise
+       fail with unresolved externals, and the DLL would be missing at runtime). -->
+  <Target Name="EnsureSupramarkPlantumlRuntimeStaged" BeforeTargets="PrepareForBuild" Condition="'$(SupramarkPlantumlRuntimeArch)'!=''">
+    <PropertyGroup>
+      <SupramarkPlantumlStagingErrorText>Windows $(SupramarkPlantumlRuntimeArch) artifacts are missing. Run `scripts/build-windows.sh --arch $(SupramarkPlantumlBuildScriptArch)` in the plantuml-little crate, then `npm run prepare-native` in the @actrium/supramark-plantuml-native-rn package. Missing file: {0}</SupramarkPlantumlStagingErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(SupramarkPlantumlImportLib)')" Text="$([System.String]::Format('$(SupramarkPlantumlStagingErrorText)', '$(SupramarkPlantumlImportLib)'))" />
+    <Error Condition="!Exists('$(SupramarkPlantumlRuntimeDll)')" Text="$([System.String]::Format('$(SupramarkPlantumlStagingErrorText)', '$(SupramarkPlantumlRuntimeDll)'))" />
+  </Target>
+  <ItemGroup>
+    <ClInclude Include="ReactPackageProvider.h">
+      <DependentUpon>ReactPackageProvider.idl</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="SupramarkPlantumlModule.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="targetver.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="ReactPackageProvider.cpp">
+      <DependentUpon>ReactPackageProvider.idl</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="ReactPackageProvider.idl" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The Rust runtime dependency, deployed next to this module in the host
+         output. DeploymentContent also lets UWP/MSIX packaging pick it up from
+         project references; CopyToOutputDirectory covers unpackaged hosts. -->
+    <Content Include="$(SupramarkPlantumlRuntimeDll)" Condition="Exists('$(SupramarkPlantumlRuntimeDll)')">
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ReactNativeWindowsTargets">
+    <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.targets" Condition="Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureReactNativeWindowsTargets" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references targets in your node_modules\react-native-windows folder. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.props')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.props'))" />
+    <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.CppLib.targets'))" />
+  </Target>
+</Project>

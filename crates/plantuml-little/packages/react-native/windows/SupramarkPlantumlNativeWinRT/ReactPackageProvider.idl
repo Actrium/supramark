@@ -1,0 +1,20 @@
+/*
+ * ReactPackageProvider.idl (Windows)
+ *
+ * WinRT activation surface for the package provider. Hosts and RNW
+ * autolinking instantiate winrt::SupramarkPlantumlNative::ReactPackageProvider
+ * from this runtimeclass; the provider registers SupramarkPlantumlModule via
+ * AddAttributedModules.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT
+ */
+
+namespace SupramarkPlantumlNative
+{
+  [webhosthidden]
+  [default_interface]
+  runtimeclass ReactPackageProvider : Microsoft.ReactNative.IReactPackageProvider
+  {
+    ReactPackageProvider();
+  };
+}
