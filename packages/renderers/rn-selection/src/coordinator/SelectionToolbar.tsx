@@ -148,7 +148,9 @@ export function SelectionToolbarView({
 
   return (
     <View
-      pointerEvents="box-none"
+      pointerEvents={placement === null ? 'none' : 'box-none'}
+      accessibilityElementsHidden={placement === null}
+      importantForAccessibility={placement === null ? 'no-hide-descendants' : 'auto'}
       // Toolbar presses belong to actions, not the host's background dismissal handler.
       onTouchStart={event => event.stopPropagation()}
       onTouchEnd={event => event.stopPropagation()}

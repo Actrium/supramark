@@ -318,3 +318,31 @@ describe('SelectionToolbarHost portal', () => {
     expect(positioned.props.style.opacity).toBe(1);
   });
 });
+
+
+describe('toolbar hit testing while hidden', () => {
+  test('unmeasured and offscreen menus do not intercept touches', async () => {
+    let tree: ReactTestRenderer;
+    const render = (y: number) => (
+      <SelectionToolbarView
+        viewport={{ w: 360, h: 600 }}
+        rects={[{ x: 20, y, w: 80, h: 20 }]}
+        items={[COPY_ITEM]}
+        run={() => {}}
+      />
+    );
+    await act(async () => { tree = create(render(100)); });
+    const surface = () => tree.root.findAllByType('View')[0];
+    expect(surface().props.pointerEvents).toBe('none');
+    await act(async () => {
+      tree.root.findAllByType('View')[1].props.onLayout({
+        nativeEvent: { layout: { width: 80, height: 40 } },
+      });
+    });
+    expect(surface().props.pointerEvents).toBe('box-none');
+    await act(async () => { tree.update(render(-100)); });
+    expect(surface().props.style.opacity).toBe(0);
+    expect(surface().props.pointerEvents).toBe('none');
+    await act(async () => { tree.unmount(); });
+  });
+});
