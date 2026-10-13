@@ -87,7 +87,16 @@ impl InlineRule for AutolinkScanner {
                 .normalize_link(&("mailto:".to_owned() + url))
         };
 
-        state.md.link_formatter.validate_link(&full_url)?;
+        // micromark "safe by default": an unsafe protocol empties the href but
+        // the autolink is still rendered with the original text. With
+        // `allow_dangerous_protocol` the href passes through instead.
+        let href = if state.md.allow_dangerous_protocol
+            || state.md.link_formatter.validate_link(&full_url).is_some()
+        {
+            full_url
+        } else {
+            String::new()
+        };
 
         let content = state.md.link_formatter.normalize_link_text(url);
 
@@ -98,7 +107,7 @@ impl InlineRule for AutolinkScanner {
         });
         inner_node.srcmap = state.get_map(state.pos + 1, pos - 1);
 
-        let mut node = Node::new(Autolink { url: full_url });
+        let mut node = Node::new(Autolink { url: href });
         node.children.push(inner_node);
 
         Some((node, pos - state.pos))

@@ -19,11 +19,7 @@ pub struct GfmAutolink {
 }
 
 impl NodeValue for GfmAutolink {
-    fn to_ast_v2(
-        &self,
-        node: &Node,
-        ctx: &AstV2Ctx<'_>,
-    ) -> Option<Vec<SupramarkNode>> {
+    fn to_ast_v2(&self, node: &Node, ctx: &AstV2Ctx<'_>) -> Option<Vec<SupramarkNode>> {
         Some(vec![SupramarkNode::Link {
             url: self.url.clone(),
             title: None,
@@ -145,7 +141,11 @@ fn autolink_split(
         };
         // flush text before the match
         if m.start > text_start {
-            push_text(&mut out, &content[text_start..m.start], pos(text_start, m.start));
+            push_text(
+                &mut out,
+                &content[text_start..m.start],
+                pos(text_start, m.start),
+            );
         } else if m.start < text_start {
             // match rewinds into already-flushed text — shouldn't happen, but
             // bail to avoid corrupting the tree.
@@ -159,7 +159,11 @@ fn autolink_split(
         return None;
     }
     if text_start < bytes.len() {
-        push_text(&mut out, &content[text_start..], pos(text_start, bytes.len()));
+        push_text(
+            &mut out,
+            &content[text_start..],
+            pos(text_start, bytes.len()),
+        );
     }
     // Drop empty trailing/leading text nodes that cmark-gfm would also drop.
     out.retain(|n| !(n.cast::<Text>().is_some_and(|t| t.content.is_empty())));
@@ -175,7 +179,10 @@ fn autolink_split(
 /// these invariants, omit fragment positions instead of publishing incorrect
 /// offsets.
 enum FragmentSourceOffsets {
-    Linear { base: usize, len: usize },
+    Linear {
+        base: usize,
+        len: usize,
+    },
     Mapped {
         base: usize,
         len: usize,
@@ -299,9 +306,7 @@ fn push_link(
         info: "autolink",
     });
     inner.srcmap = pos;
-    let mut node = Node::new(GfmAutolink {
-        url: full_url,
-    });
+    let mut node = Node::new(GfmAutolink { url: full_url });
     node.srcmap = pos;
     node.children.push(inner);
     out.push(node);
@@ -802,8 +807,15 @@ mod tests {
 
     #[test]
     fn url_paren_in_path() {
-        let m = url_match(b"https://encrypted.google.com/search?q=Markup+(business)", 5).unwrap();
-        assert_eq!(m.url, "https://encrypted.google.com/search?q=Markup+(business)");
+        let m = url_match(
+            b"https://encrypted.google.com/search?q=Markup+(business)",
+            5,
+        )
+        .unwrap();
+        assert_eq!(
+            m.url,
+            "https://encrypted.google.com/search?q=Markup+(business)"
+        );
     }
 
     #[test]
@@ -883,10 +895,7 @@ mod tests {
         // `a@a@a@a` has no '.', so every '@' chain bottoms out at np==0.
         // email_match must return Skip covering the whole chain (not a
         // per-`@` None), which is what keeps the outer cursor O(n).
-        assert!(matches!(
-            email_match(b"a@a@a@a", 1),
-            EmailScan::Skip(6)
-        ));
+        assert!(matches!(email_match(b"a@a@a@a", 1), EmailScan::Skip(6)));
     }
 
     #[test]

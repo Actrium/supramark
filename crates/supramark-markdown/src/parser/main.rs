@@ -39,6 +39,38 @@ pub struct MarkdownParser {
     /// default i32::MAX, indented code blocks will set this to 4
     pub max_indent: i32,
 
+    /// Runtime disable flags for micromark constructs whose scanner is shared
+    /// with another construct, so they can't be turned off by removing a rule.
+    /// `hardBreakEscape`/`characterEscape` share `EscapeScanner`;
+    /// `labelEnd` can't be removed because `parse_link_label` matches `]` directly.
+    pub disable_hard_break_escape: bool,
+    pub disable_character_escape: bool,
+    pub disable_label_end: bool,
+
+    /// micromark "subsequent indented definitions" deviation: recognise a link
+    /// reference definition indented 4+ spaces when it immediately follows
+    /// another definition. See `ParseOptions::subsequent_indented_definitions`.
+    pub subsequent_indented_definitions: bool,
+
+    /// When false (the parser's default), an unsafe protocol in a link, image,
+    /// or autolink destination collapses the URL to empty — micromark's
+    /// `allowDangerousProtocol: false` default. Set true to pass dangerous
+    /// protocols through. See `ParseOptions::allow_dangerous_protocol`.
+    pub allow_dangerous_protocol: bool,
+
+    /// micromark's safe-URI policy for image `src` (`protocolSource` =
+    /// `/^https?$/i`). Off by default: the product AST keeps the parser-level
+    /// URL (raster `data:image/*` allowed by the LinkFormatter survives) and
+    /// leaves final URL policy to the renderer/host. See
+    /// `ParseOptions::sanitize_image_src`.
+    pub sanitize_image_src: bool,
+
+    /// micromark's hardBreakTrailing resolution: a tab anywhere in the
+    /// trailing whitespace run (line suffix) makes the break soft. Off by
+    /// default: CommonMark decides solely by the spaces immediately preceding
+    /// the newline. See `ParseOptions::mixed_line_suffix_soft_break`.
+    pub mixed_line_suffix_soft_break: bool,
+
     ruler: Ruler<TypeKey, RuleFn>,
 }
 
@@ -85,6 +117,13 @@ impl Default for MarkdownParser {
             max_nesting: 100,
             ruler: Ruler::new(),
             max_indent: i32::MAX,
+            disable_hard_break_escape: false,
+            disable_character_escape: false,
+            disable_label_end: false,
+            subsequent_indented_definitions: false,
+            allow_dangerous_protocol: false,
+            sanitize_image_src: false,
+            mixed_line_suffix_soft_break: false,
         };
         block::builtin::add(&mut md);
         inline::builtin::add(&mut md);

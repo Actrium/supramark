@@ -80,27 +80,62 @@ impl InlineRule for NewlineScanner {
             pos += 1;
         }
 
-        // '  \n' -> hardbreak
-        let mut tail_size = 0;
         let trailing_text = state.trailing_text_get();
-
-        for ch in trailing_text.chars().rev() {
-            if ch == ' ' {
-                tail_size += 1;
-            } else {
-                break;
+        let node;
+        let suffix_len;
+        if state.md.mixed_line_suffix_soft_break {
+            // micromark's hardBreakTrailing resolution: the trailing line
+            // suffix is the maximal run of spaces/tabs at the end of the
+            // preceding text. A hard break requires 2+ trailing spaces, and a
+            // tab anywhere in that suffix makes it a soft break. The whole
+            // suffix is popped so neither the spaces nor a mixed-in tab leak
+            // into the output text.
+            let mut len = 0;
+            let mut spaces = 0;
+            let mut has_tab = false;
+            for ch in trailing_text.chars().rev() {
+                match ch {
+                    ' ' => {
+                        len += 1;
+                        spaces += 1;
+                    }
+                    '\t' => {
+                        len += 1;
+                        has_tab = true;
+                    }
+                    _ => break,
+                }
             }
+            suffix_len = len;
+            node = if spaces >= 2 && !has_tab {
+                Node::new(Hardbreak)
+            } else {
+                Node::new(Softbreak)
+            };
+        } else {
+            // CommonMark (cmark): only the spaces immediately preceding the
+            // newline decide — 2+ trailing spaces make a hard break, and a
+            // tab earlier in the run is irrelevant (`a\t  \nb` is a hard
+            // break). Only those spaces are popped.
+            let mut spaces = 0;
+            for ch in trailing_text.chars().rev() {
+                if ch == ' ' {
+                    spaces += 1;
+                } else {
+                    break;
+                }
+            }
+            suffix_len = spaces;
+            node = if spaces >= 2 {
+                Node::new(Hardbreak)
+            } else {
+                Node::new(Softbreak)
+            };
         }
 
-        state.trailing_text_pop(tail_size);
+        state.trailing_text_pop(suffix_len);
 
-        let node = if tail_size >= 2 {
-            Node::new(Hardbreak)
-        } else {
-            Node::new(Softbreak)
-        };
-
-        state.pos -= tail_size; // backtrack to include tail in source maps
+        state.pos -= suffix_len; // backtrack to include the suffix in source maps
         Some((node, pos - state.pos))
     }
 }
