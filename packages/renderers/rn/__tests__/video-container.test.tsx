@@ -126,35 +126,40 @@ describe(':::video container rendering (RN)', () => {
     });
   });
 
-  test('onVideoPress prop reaches the container renderer and fires on tap', async () => {
-    const events: Array<{ src: string; poster?: string; title?: string }> = [];
-    let renderer: ReactTestRenderer | null = null;
-    await act(async () => {
-      renderer = create(
-        React.createElement(Supramark, {
-          ast: videoAst,
-          containerRenderers: { video: renderVideoContainerRN as never },
-          onVideoPress: event => events.push(event),
-        })
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const pressable = renderer!.root.findByProps({ accessibilityRole: 'button' });
-    await act(async () => {
-      pressable.props.onPress();
-    });
+  // The host callback must survive both the ordinary and selection-enabled provider trees.
+  test.each([undefined, {}])(
+    'onVideoPress reaches the renderer and fires on tap with selection=%j',
+    async selection => {
+      const events: Array<{ src: string; poster?: string; title?: string }> = [];
+      let renderer: ReactTestRenderer | null = null;
+      await act(async () => {
+        renderer = create(
+          React.createElement(Supramark, {
+            ast: videoAst,
+            containerRenderers: { video: renderVideoContainerRN as never },
+            onVideoPress: event => events.push(event),
+            selection,
+          })
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const pressable = renderer!.root.findByProps({ accessibilityRole: 'button' });
+      await act(async () => {
+        pressable.props.onPress();
+      });
 
-    expect(events).toEqual([
-      {
-        src: 'https://example.com/demo.mp4',
-        poster: 'https://example.com/cover.jpg',
-        title: 'Product demo',
-      },
-    ]);
-    expect(openUrlMock).not.toHaveBeenCalled();
-  });
+      expect(events).toEqual([
+        {
+          src: 'https://example.com/demo.mp4',
+          poster: 'https://example.com/cover.jpg',
+          title: 'Product demo',
+        },
+      ]);
+      expect(openUrlMock).not.toHaveBeenCalled();
+    }
+  );
 
   test('uses the resolved dark document styles for placeholder and error cards', async () => {
     const noPosterAst = {

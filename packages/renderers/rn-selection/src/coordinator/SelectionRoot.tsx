@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   PanResponder,
   View,
@@ -23,7 +31,10 @@ import {
 import { createSelectionGesture, DEFAULT_LONG_PRESS_MS, type SelectionGesture } from './gesture';
 import { computeHandles, hitTestHandle, type HandleEdge } from './handles';
 import {
+  blocksBounds,
   containingBlock,
+  nearestBlockWithin,
+  paragraphRangeAt,
   resolvePointToSelection,
   resolvePointToSelectionInViewport,
   resolvePointToSelectionOutsideViewports,
@@ -48,9 +59,6 @@ type NativeViewHandle = {
       pageX: number,
       pageY: number
     ) => void
-  ) => void;
-  measureInWindow?: (
-    callback: (x: number, y: number, width: number, height: number) => void
   ) => void;
   measureLayout?: (
     relativeToNativeNode: unknown,
@@ -95,10 +103,59 @@ export interface SelectionRootProps {
   toolbar?: boolean;
   /** Disable the built-in gestures; the host drives the store itself. */
   gestures?: boolean;
+  /**
+   * Whether selection may be entered at all (default: true). `false` clears the
+   * current selection and refuses every entry point — gestures, handles,
+   * toolbar actions, and a host driving the store directly. Distinct from
+   * `gestures`, which only turns off the built-in touch handling and cannot
+   * stand in for a full disable.
+   */
+  enabled?: boolean;
+  /**
+   * The built-in long-press word selection (default: true). `false` keeps
+   * tap-to-clear, handle drags and the toolbar, and leaves starting a selection
+   * to the host — a long-press menu whose "select text" item calls
+   * `handleRef.trySelectParagraphAt`. The long press then never competes with
+   * the host's own long-press gesture.
+   */
+  longPress?: boolean;
+  /**
+   * Receives imperative commands for host-driven entries (see
+   * `SelectionRootHandle`). Set through a regular prop rather than `ref` so the
+   * same code works on React 18 and 19.
+   */
+  handleRef?: React.Ref<SelectionRootHandle>;
   longPressMs?: number;
   moveTolerance?: number;
   /** Notifies an enclosing host scroller while selection or a nested viewport owns the drag. */
   onGestureActiveChange?(active: boolean): void;
+}
+
+/**
+ * Imperative commands for hosts that start or end a selection from their own
+ * UI — a long-press menu's "select text" entry, a tap on the page background.
+ * The built-in gestures stay available unless `longPress` / `gestures` say
+ * otherwise; these are additional entry points.
+ */
+export interface SelectionRootHandle {
+  /**
+   * Select the block under a press, resolved within this root's own block
+   * extent. Pass RN page coordinates (`nativeEvent.pageX/pageY`, or the last
+   * two values of `View.measure`) relative to the same React root. Do not pass
+   * `measureInWindow` coordinates or raw RNGH `absoluteX/absoluteY`.
+   * Resolves with the REAL outcome: false when
+   * selection is disabled, the root is out of reach, or nothing is selectable
+   * under the press.
+   */
+  trySelectParagraphAt(pageX: number, pageY: number): Promise<boolean>;
+  /** Clear the current selection (an outside entry, e.g. a background tap). */
+  clearSelection(): void;
+  /**
+   * This root's live RN page-space box, measured on demand (never cached), for a
+   * host that must pick ONE root among several before asking it to select —
+   * the nearest to the press wins. Null when it cannot be measured.
+   */
+  measurePageRect(): Promise<{ x: number; y: number; w: number; h: number } | null>;
 }
 
 /**
@@ -137,6 +194,9 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   handles,
   toolbar,
   gestures,
+  enabled = true,
+  longPress,
+  handleRef,
   longPressMs,
   moveTolerance,
   onGestureActiveChange,
@@ -158,6 +218,29 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const onGestureActiveChangeRef = useRef(onGestureActiveChange);
   onGestureActiveChangeRef.current = onGestureActiveChange;
+
+  // Read by callbacks that must keep a stable identity (they are part of `ctx`,
+  // whose churn would re-register every block) while still observing the
+  // current gate.
+  const interactionEnabled = enabled !== false;
+  const interactionEnabledRef = useRef(interactionEnabled);
+  interactionEnabledRef.current = interactionEnabled;
+
+  // Every host request belongs to one committed document/enablement lifetime.
+  const hostRequestGenerationRef = useRef(0);
+  // Retained handles and callbacks must refuse work after the root unmounts.
+  const mountedRef = useRef(false);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      hostRequestGenerationRef.current += 1;
+    };
+  }, []);
+  // Layout effects invalidate requests before passive document clearing can run.
+  useLayoutEffect(() => {
+    hostRequestGenerationRef.current += 1;
+  }, [units, interactionEnabled]);
 
   const items = useMemo(() => toolbarItems ?? DEFAULT_TOOLBAR_ITEMS, [toolbarItems]);
   const itemsRef = useRef(items);
@@ -197,6 +280,10 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const setViewportInteractionActive = useCallback(
     (viewportId: string, active: boolean) => {
+      // While selection is off, nothing may take the host scroll lock: there is
+      // nothing to protect, and a lock taken here would freeze the host list
+      // with no gesture able to release it (every entry point is refused).
+      if (active && !interactionEnabledRef.current) return;
       if (active) viewportInteractionsRef.current.add(viewportId);
       else viewportInteractionsRef.current.delete(viewportId);
       publishHostScrollLock();
@@ -224,6 +311,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const runToolbarItem = useCallback(
     (item: SelectionToolbarItem) => {
+      if (!interactionEnabledRef.current) return;
       const snapshot = store.getSnapshot();
       if (snapshot.range === null) return;
       onCopyRef.current?.(buildCopyRequest(item, snapshot.units, snapshot.range));
@@ -257,6 +345,14 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       const wholeBlock = () => segmentSelectionToRange(spans, 0, spans[spans.length - 1].end);
 
       const metrics = block.metrics;
+      // An unmeasured attachment region cannot safely fall back to the whole paragraph.
+      if (
+        !metrics &&
+        block.unitIds.some(
+          id => registry.index.entries[registry.index.byUnitId.get(id) ?? -1]?.unit.kind === 'atom'
+        )
+      )
+        return null;
       if (!metrics || metrics.lines.length === 0) return wholeBlock();
 
       const origin = block.contentOffset ?? { x: 0, y: 0 };
@@ -329,6 +425,17 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     [registry, store]
   );
 
+  // `gestures` only turns off the built-in touch handling; `enabled` turns
+  // selection off entirely — current selection cleared, every entry point
+  // (gestures, handles, toolbar, a host driving the store) refused, host scroll
+  // lock released. See the disabling effect further down.
+  const gestureEnabled = interactionEnabled && gestures !== false;
+  const longPressEnabled = longPress !== false;
+  // The Android Text entry shares the live gesture gates without changing context identity.
+  const nativeLongPressEnabledRef = useRef(gestureEnabled && longPressEnabled);
+  nativeLongPressEnabledRef.current = gestureEnabled && longPressEnabled;
+  const longPressDelay = longPressMs ?? DEFAULT_LONG_PRESS_MS;
+
   const gesture = useMemo<SelectionGesture>(
     () =>
       createSelectionGesture({
@@ -338,7 +445,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         handleAt,
         fixedPointForHandle,
         onPhaseChange: phase => publishGestureActivity(phase === 'extending' || phase === 'handle'),
-        config: { longPressMs, moveTolerance },
+        config: { longPressMs, moveTolerance, longPress: longPressEnabled },
       }),
     [
       store,
@@ -349,6 +456,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       publishGestureActivity,
       longPressMs,
       moveTolerance,
+      longPressEnabled,
     ]
   );
 
@@ -372,17 +480,9 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const refreshRootOrigin = useCallback(() => {
     const root = rootRef.current as NativeViewHandle | null;
-    if (root?.measure) {
-      root.measure((_x, _y, _width, _height, pageX, pageY) => {
-        if (Number.isFinite(pageX) && Number.isFinite(pageY)) {
-          originRef.current = { x: pageX, y: pageY };
-        }
-      });
-      return;
-    }
-    root?.measureInWindow?.((x, y) => {
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        originRef.current = { x, y };
+    root?.measure?.((_x, _y, _width, _height, pageX, pageY) => {
+      if (Number.isFinite(pageX) && Number.isFinite(pageY)) {
+        originRef.current = { x: pageX, y: pageY };
       }
     });
   }, []);
@@ -401,12 +501,9 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     [pointFromPage]
   );
 
-  const enabled = gestures !== false;
-  const longPressDelay = longPressMs ?? DEFAULT_LONG_PRESS_MS;
-
   const onTouchStart = useCallback(
     (e: GestureResponderEvent) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       refreshRootOrigin();
       if (gesture.isActive() || gesture.isPending()) return;
       pendingTouchCancelledRef.current = false;
@@ -420,7 +517,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       }
       gesture.touchStart(point, eventTime(e));
       clearTimer();
-      if (gesture.isPending()) {
+      if (longPressEnabled && gesture.isPending()) {
         timerRef.current = setTimeout(() => {
           timerRef.current = null;
           gesture.tick(Date.now());
@@ -436,7 +533,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       }
     },
     [
-      enabled,
+      gestureEnabled,
       refreshRootOrigin,
       gesture,
       toRootSpace,
@@ -446,6 +543,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       clearTimer,
       cancelGesture,
       longPressDelay,
+      longPressEnabled,
     ]
   );
 
@@ -453,18 +551,18 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const onResponderMove = useCallback(
     (e: GestureResponderEvent) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       refreshRootOrigin();
       const point = toRootSpace(e);
       gesture.touchMove(point, eventTime(e));
       if (!gesture.isPending()) clearTimer();
     },
-    [enabled, refreshRootOrigin, gesture, toRootSpace, clearTimer]
+    [gestureEnabled, refreshRootOrigin, gesture, toRootSpace, clearTimer]
   );
 
   const onResponderRelease = useCallback(
     (e: GestureResponderEvent) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       refreshRootOrigin();
       clearTimer();
       pendingTouchCancelledRef.current = false;
@@ -472,7 +570,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       gesture.touchEnd(point, eventTime(e));
       gestureViewportIdRef.current = undefined;
     },
-    [enabled, refreshRootOrigin, gesture, toRootSpace, clearTimer]
+    [gestureEnabled, refreshRootOrigin, gesture, toRootSpace, clearTimer]
   );
 
   const onResponderTerminate = useCallback(() => {
@@ -482,12 +580,20 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   }, [clearTimer, cancelGesture]);
 
   const onTouchCancel = useCallback(() => {
+    if (!gestureEnabled) return;
     if (gesture.isPending()) {
+      // With the long press off, no timer arms to consume the cancel flag, so
+      // leaving the phase pending would wedge it forever (and swallow the next
+      // tap-clear). A cancelled touch is not a tap: reset outright.
+      if (!longPressEnabled) {
+        cancelGesture();
+        return;
+      }
       pendingTouchCancelledRef.current = true;
       return;
     }
     onResponderTerminate();
-  }, [gesture, onResponderTerminate]);
+  }, [gestureEnabled, gesture, longPressEnabled, cancelGesture, onResponderTerminate]);
 
   const cancelPendingGesture = useCallback(() => {
     if (!gesture.isPending()) return;
@@ -498,6 +604,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const selectWordInBlock = useCallback(
     (nodeId: SelectionNodeId, localPoint: Point) => {
+      // Native Text long presses must honor both host-menu and gesture opt-outs.
+      if (!nativeLongPressEnabledRef.current) return;
       const block = registry.getBlock(nodeId);
       if (block?.rect === undefined) return;
       const contentOffset = block.contentOffset ?? { x: 0, y: 0 };
@@ -522,32 +630,156 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     [cancelGesture, clearTimer, registry, store, wordAt]
   );
 
+  // A new unit stream is a new content revision. The stored range points into a
+  // document that no longer exists, and the first-version rule is to clear it
+  // outright rather than migrate offsets (a re-parsed message, an edit, a
+  // regenerated answer). Layout-only changes — width, font, async diagram
+  // height — arrive as layout updates instead and keep the selection.
+  const lastUnitsRef = useRef(units);
+  useEffect(() => {
+    if (lastUnitsRef.current === units) return;
+    lastUnitsRef.current = units;
+    clearTimer();
+    pendingTouchCancelledRef.current = false;
+    cancelGesture();
+    store.clear();
+  }, [units, clearTimer, cancelGesture, store]);
+
+  // Disabling selection must cancel the live interaction, not merely stop new
+  // ones: clear the selection, cancel a pending long press or drag, drop nested
+  // viewport interactions, and release the host scroll lock. Any selection that
+  // still appears while disabled (a host driving the store directly) is cleared
+  // on the spot — the store is the single source of truth, so this guard lives
+  // here instead of at each call site (toolbar, gestures, Android block press).
+  useEffect(() => {
+    if (interactionEnabled) return undefined;
+    clearTimer();
+    pendingTouchCancelledRef.current = false;
+    cancelGesture();
+    store.clear();
+    viewportInteractionsRef.current.clear();
+    publishHostScrollLock();
+    return store.subscribe(() => {
+      if (store.getSnapshot().range !== null) store.clear();
+    });
+  }, [interactionEnabled, clearTimer, cancelGesture, store, publishHostScrollLock]);
+
+  // Host-driven entries (a long-press menu's "select text", a background tap)
+  // share the same store and gesture teardown as the built-in ones, so all
+  // entries stay governed by one state machine.
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      trySelectParagraphAt(pageX: number, pageY: number): Promise<boolean> {
+        // Host commands and RN touch events share page space. Measure the live
+        // page origin so a host scroll does not leave this entry using a stale origin.
+        if (!mountedRef.current || !interactionEnabledRef.current) return Promise.resolve(false);
+        // New host commands supersede older native measurements, even if callbacks reorder.
+        const requestGeneration = ++hostRequestGenerationRef.current;
+        // Stable unit ids can be reused by a replacement document; retain the actual stream.
+        const requestUnits = unitsRef.current;
+        const selectAt = (localX: number, localY: number): boolean => {
+          const point = { x: localX, y: localY };
+          const blocks = registry.getBlocks();
+          const bounds = blocksBounds(blocks);
+          if (bounds === null) return false;
+          // Ownership: within tight reach of the blocks' own extent, on BOTH
+          // axes. The union rect may span diagrams/images between blocks, so a
+          // large slack would let a press on a non-text object select text;
+          // 12 units covers only the real gaps (paragraph spacing, line ends).
+          const slack = 12;
+          if (
+            point.x < bounds.x - slack ||
+            point.x > bounds.x + bounds.w + slack ||
+            point.y < bounds.y - slack ||
+            point.y > bounds.y + bounds.h + slack
+          ) {
+            return false;
+          }
+          const block = containingBlock(blocks, point) ?? nearestBlockWithin(blocks, point, slack);
+          // Resolve the region at the actual press, including inline object boundaries.
+          const range = block === null ? null : paragraphRangeAt(block, point, registry.index);
+          if (range === null) return false;
+          clearTimer();
+          pendingTouchCancelledRef.current = false;
+          cancelGesture();
+          store.beginAt(range.anchor);
+          store.extendTo(range.focus);
+          store.commit();
+          return true;
+        };
+        const root = rootRef.current as NativeViewHandle | null;
+        // A detached root has no live page origin; never guess it from cached geometry.
+        if (!root?.measure) return Promise.resolve(false);
+        return new Promise<boolean>(resolve => {
+          root.measure?.((_x, _y, _width, _height, rootX, rootY) => {
+            // Only the current live request may publish into the current document's store.
+            if (
+              !mountedRef.current ||
+              !interactionEnabledRef.current ||
+              requestGeneration !== hostRequestGenerationRef.current ||
+              requestUnits !== unitsRef.current ||
+              rootRef.current !== root ||
+              !Number.isFinite(rootX) ||
+              !Number.isFinite(rootY)
+            ) {
+              resolve(false);
+              return;
+            }
+            resolve(selectAt(pageX - rootX, pageY - rootY));
+          });
+        });
+      },
+      clearSelection() {
+        // Clearing selection also cancels requests whose native measurement is still pending.
+        hostRequestGenerationRef.current += 1;
+        clearTimer();
+        pendingTouchCancelledRef.current = false;
+        cancelGesture();
+        store.clear();
+      },
+      async measurePageRect(): Promise<{ x: number; y: number; w: number; h: number } | null> {
+        const root = rootRef.current as NativeViewHandle | null;
+        // Only mounted native roots can participate in the host's page-space arbitration.
+        if (!root?.measure) return null;
+        return new Promise(resolve => {
+          root.measure?.((_x, _y, w, h, x, y) => {
+            resolve(
+              Number.isFinite(x) && Number.isFinite(y) && w > 0 && h > 0 ? { x, y, w, h } : null
+            );
+          });
+        });
+      },
+    }),
+    [registry, store, clearTimer, cancelGesture]
+  );
+
   const onHandleGrant = useCallback(
     (edge: HandleEdge) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       refreshRootOrigin();
       clearTimer();
       scopeGestureToHandle(edge);
       gesture.handleStart(edge, Date.now());
     },
-    [enabled, refreshRootOrigin, clearTimer, scopeGestureToHandle, gesture]
+    [gestureEnabled, refreshRootOrigin, clearTimer, scopeGestureToHandle, gesture]
   );
 
   const onHandleMove = useCallback(
     (point: Point) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       gesture.touchMove(point, Date.now());
     },
-    [enabled, gesture]
+    [gestureEnabled, gesture]
   );
 
   const onHandleRelease = useCallback(
     (point: Point) => {
-      if (!enabled) return;
+      if (!gestureEnabled) return;
       gesture.touchEnd(point, Date.now());
       gestureViewportIdRef.current = undefined;
     },
-    [enabled, gesture]
+    [gestureEnabled, gesture]
   );
 
   const onLayout = useCallback(
@@ -561,22 +793,22 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
 
   const onStartShouldSetResponderCapture = useCallback(
     (e: GestureResponderEvent) => {
-      if (!enabled) return false;
+      if (!gestureEnabled) return false;
       const point = toRootSpace(e);
       if (handleAt(point) !== null) return true;
       return gesture.isActive();
     },
-    [enabled, gesture, handleAt, toRootSpace]
+    [gestureEnabled, gesture, handleAt, toRootSpace]
   );
 
   const onStartShouldSetResponder = useCallback(
-    () => enabled && gesture.isActive(),
-    [enabled, gesture]
+    () => gestureEnabled && gesture.isActive(),
+    [gestureEnabled, gesture]
   );
 
   const onResponderTerminationRequest = useCallback(
-    () => !enabled || !gesture.isActive(),
-    [enabled, gesture]
+    () => !gestureEnabled || !gesture.isActive(),
+    [gestureEnabled, gesture]
   );
 
   const rootPanResponder = useMemo(
@@ -584,8 +816,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       PanResponder.create({
         onStartShouldSetPanResponder: onStartShouldSetResponder,
         onStartShouldSetPanResponderCapture: onStartShouldSetResponderCapture,
-        onMoveShouldSetPanResponder: () => enabled && gesture.isActive(),
-        onMoveShouldSetPanResponderCapture: () => enabled && gesture.isActive(),
+        onMoveShouldSetPanResponder: () => gestureEnabled && gesture.isActive(),
+        onMoveShouldSetPanResponderCapture: () => gestureEnabled && gesture.isActive(),
         onPanResponderGrant: onResponderGrant,
         onPanResponderMove: onResponderMove,
         onPanResponderRelease: onResponderRelease,
@@ -594,7 +826,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         onShouldBlockNativeResponder: () => gesture.isActive(),
       }),
     [
-      enabled,
+      gestureEnabled,
       gesture,
       onResponderGrant,
       onResponderMove,
@@ -634,36 +866,19 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         );
         return true;
       };
-      const measureTargetInRootWindow = (origin: Point) => {
-        if (target?.measureInWindow) {
-          target.measureInWindow((x, y, width, height) => {
-            updateMeasured(x - origin.x, y - origin.y, width, height);
+      // Measure both nodes in RN page space. This includes nested scroll offsets
+      // without mixing an Android window inset into either side of the subtraction.
+      if (target?.measure && root?.measure) {
+        root.measure((_x, _y, _width, _height, rootX, rootY) => {
+          // Invalid native geometry cannot be used as a coordinate origin.
+          if (!Number.isFinite(rootX) || !Number.isFinite(rootY)) {
+            if (!measureAgainstRoot()) updateFallback();
+            return;
+          }
+          target.measure?.((_targetX, _targetY, width, height, pageX, pageY) => {
+            updateMeasured(pageX - rootX, pageY - rootY, width, height);
           });
-          return true;
-        }
-        if (target?.measure) {
-          target.measure((_x, _y, width, height, pageX, pageY) => {
-            updateMeasured(pageX - origin.x, pageY - origin.y, width, height);
-          });
-          return true;
-        }
-        return false;
-      };
-      const afterRootMeasured = (x: number, y: number) => {
-        if (Number.isFinite(x) && Number.isFinite(y)) {
-          const origin = { x, y };
-          originRef.current = origin;
-          if (measureTargetInRootWindow(origin)) return;
-        }
-        if (!measureAgainstRoot()) updateFallback();
-      };
-      const canMeasureTargetInWindow = Boolean(target?.measureInWindow || target?.measure);
-      if (canMeasureTargetInWindow && root?.measureInWindow) {
-        root.measureInWindow((x, y) => afterRootMeasured(x, y));
-        return;
-      }
-      if (canMeasureTargetInWindow && root?.measure) {
-        root.measure((_x, _y, _width, _height, pageX, pageY) => afterRootMeasured(pageX, pageY));
+        });
         return;
       }
       if (!measureAgainstRoot()) updateFallback();
@@ -766,8 +981,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       <SelectionGestureActivityContext.Provider value={gestureActive}>
         <SelectionContext.Provider value={ctx}>
           {children}
-          {overlay !== false && <SelectionOverlay />}
-          {handles !== false && (
+          {interactionEnabled && overlay !== false && <SelectionOverlay />}
+          {interactionEnabled && handles !== false && (
             <SelectionHandles
               onHandleGrant={onHandleGrant}
               onHandleMove={onHandleMove}
@@ -776,7 +991,8 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
               toRootPoint={pointFromPage}
             />
           )}
-          {toolbar !== false &&
+          {interactionEnabled &&
+            toolbar !== false &&
             (renderToolbar ? (
               <ToolbarSlot viewport={viewport} render={renderToolbar} />
             ) : (
