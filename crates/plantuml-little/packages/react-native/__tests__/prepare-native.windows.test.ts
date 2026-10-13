@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawnSync } from 'node:child_process';
 import {
   WINDOWS_ARCHES,
   parseArchSelection,
@@ -198,5 +199,41 @@ describe('stageWindowsFrameworks', () => {
 
   it('covers every WINDOWS_ARCHES entry', () => {
     expect(WINDOWS_ARCHES.map((a: { name: string }) => a.name)).toEqual(['x64', 'arm64']);
+  });
+});
+
+
+describe('prepare-native CLI failure status', () => {
+  function runPrepare(args: string[]) {
+    const crate = path.join(tmpRoot, 'repo', 'crates', 'plantuml-little');
+    const scripts = path.join(crate, 'packages', 'react-native', 'scripts');
+    fs.mkdirSync(scripts, { recursive: true });
+    for (const name of ['prepare-native.js', 'windows-staging.js']) {
+      fs.copyFileSync(path.join(import.meta.dir, '..', 'scripts', name), path.join(scripts, name));
+    }
+    const include = path.join(crate, 'packages', 'native', 'include');
+    fs.mkdirSync(include, { recursive: true });
+    fs.writeFileSync(path.join(include, HEADER), 'header');
+    fs.cpSync(outputDir, path.join(crate, 'output'), { recursive: true });
+    return spawnSync('node', [path.join(scripts, 'prepare-native.js'), ...args], { encoding: 'utf8' });
+  }
+
+  it('fails when one explicitly requested architecture is missing', () => {
+    writeArchFixture('windows-x86_64', 'x64-dll', { header: true });
+    const result = runPrepare(['--windows-arch=x64,arm64']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Windows arm64');
+  });
+
+  it('fails when a staged DLL has no import library', () => {
+    writeArchFixture('windows-arm64', 'arm64-dll', { lib: false, header: true });
+    const result = runPrepare(['--windows-arch=arm64']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('import library not staged');
+  });
+
+  it('succeeds for a complete explicitly requested architecture', () => {
+    writeArchFixture('windows-arm64', 'arm64-dll', { header: true });
+    expect(runPrepare(['--windows-arch=arm64']).status).toBe(0);
   });
 });

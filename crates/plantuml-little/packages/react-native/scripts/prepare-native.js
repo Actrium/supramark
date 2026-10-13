@@ -219,6 +219,13 @@ function prepareWindows(requestedArches) {
         ' Expected include/supramark_plantuml.h in the build output or packages/native/include.'
     );
   }
+  if (result.missing.length > 0 || result.libsMissing.length > 0 ||
+      (result.staged.length > 0 && !result.headerStaged)) {
+    // Explicit architecture requests and incomplete Windows artifacts must fail
+    // even when another platform was staged successfully in the same invocation.
+    process.exitCode = 1;
+    return false;
+  }
   if (result.staged.length === 0) {
     console.warn(
       `⚠  Windows: no staged architecture under ${path.relative(REPO_ROOT, WINDOWS_OUTPUT_DIR)} (skip)`
