@@ -378,7 +378,10 @@ fn wikilink_serializes_tagged_node_omitting_absent_fields() {
     assert!(json.contains(r#""type":"wiki_link""#), "{json}");
     assert!(json.contains(r#""target":"a""#), "{json}");
     assert!(json.contains(r#""label":"b""#), "{json}");
-    assert!(!json.contains("section"), "absent section must not serialize: {json}");
+    assert!(
+        !json.contains("section"),
+        "absent section must not serialize: {json}"
+    );
 
     let json = serde_json::to_string(&parse_with_options("[[a]]\n", options)).unwrap();
     assert!(json.contains(r#""type":"wiki_link""#), "{json}");
@@ -1571,4 +1574,52 @@ fn public_api_maps_emphasis_spanning_an_escape_inside_a_table_cell() {
         panic!("expected text, got {:?}", &children[0]);
     };
     assert_eq!(value, "x|y");
+}
+
+#[test]
+fn wikilink_preserves_math_across_text_fragments() {
+    for source in [
+        "$a &amp; [[foo]]$",
+        r"$a \* [[foo]]$",
+        r"$a \$ [[foo]]$",
+        "$a &#0; [[foo]]$",
+        "$a &unknown; [[foo]]$",
+    ] {
+        let ast = parse_with_options(
+            source,
+            ParseOptions {
+                wikilink: true,
+                ..Default::default()
+            },
+        );
+        let json = serde_json::to_value(ast).unwrap();
+        let children = json["children"][0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1, "{source}: {children:?}");
+        assert_eq!(children[0]["type"], "math_inline", "{source}");
+    }
+}
+
+#[test]
+fn wikilink_math_scan_handles_many_candidates_and_resets_between_runs() {
+    let source = format!(
+        "${}$ [[outside]] **$text** [[after]]",
+        " [[foo]]".repeat(8000)
+    );
+    let ast = parse_with_options(
+        &source,
+        ParseOptions {
+            wikilink: true,
+            ..Default::default()
+        },
+    );
+    let json = serde_json::to_value(ast).unwrap();
+    let children = json["children"][0]["children"].as_array().unwrap();
+    assert_eq!(children[0]["type"], "math_inline");
+    assert_eq!(children[0]["value"], " [[foo]]".repeat(8000));
+    let targets: Vec<_> = children
+        .iter()
+        .filter(|node| node["type"] == "wiki_link")
+        .map(|node| node["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(targets, ["outside", "after"]);
 }
