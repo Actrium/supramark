@@ -150,6 +150,16 @@ describe('CommonMark block rendering', () => {
     expect(container.innerHTML).toContain('class="language-ruby"');
   });
 
+  // cmark (src/html.c) prepends the `language-` prefix only when the first
+  // info-string word does not already start with it, so ` ```language-r `
+  // and ` ```r ` both render `class="language-r"`.
+  test('does not double-prefix a lang that already carries language-', async () => {
+    const ast = makeRoot([{ type: 'code', lang: 'language-r', value: 'x <- 1\n' }]);
+    const container = await renderAst(ast);
+    expect(container.innerHTML).toContain('class="language-r"');
+    expect(container.innerHTML).not.toContain('language-language-');
+  });
+
   test('omits language class on fenced code without a lang', async () => {
     const ast = makeRoot([{ type: 'code', value: 'plain\n' }]);
     const container = await renderAst(ast);
