@@ -14,7 +14,9 @@ export function readFrontMatterValue(source, key) {
 }
 
 export function parseSpecExamples(source) {
-  const lines = source.match(/.*(?:\n|$)/g)?.filter(line => line.length > 0) ?? [];
+  // Split only on LF so callers that intentionally preserve source line endings
+  // retain any preceding CR bytes (including the cmark CR+CR+LF regression).
+  const lines = source.match(/[^\n]*(?:\n|$)/g)?.filter(line => line.length > 0) ?? [];
   const result = [];
   let state = 'document';
   let section = '';
@@ -90,7 +92,7 @@ export function toUnifiedCase(rawCase, sourceConfig, sectionCoverage) {
     profile: sourceConfig.profile,
     input: { markdown: rawCase.markdown },
     expected: {
-      kind: 'normative',
+      kind: sourceConfig.expectedKind ?? 'normative',
       html: rawCase.html,
       semanticTypes: sourceConfig.collectSemanticTypes(rawCase.html),
       comparison: 'semantic-html',

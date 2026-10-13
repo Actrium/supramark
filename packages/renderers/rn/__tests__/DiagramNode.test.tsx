@@ -66,6 +66,17 @@ function successfulResult(): DiagramRenderResult {
   };
 }
 
+/** A wide diagram (intrinsic 1000×500) so display width is always cap-driven. */
+function wideResult(): DiagramRenderResult {
+  return {
+    id: 'test-wide',
+    engine: 'mermaid',
+    success: true,
+    format: 'svg',
+    payload: '<svg viewBox="0 0 1000 500"></svg>',
+  };
+}
+
 function failedResult(): DiagramRenderResult {
   return {
     id: 'test-error',
@@ -337,5 +348,43 @@ describe('DiagramNode streaming defer/render', () => {
     expect(engineState.renderCalls).toBe(2);
     expect(hasTestId(restoredMermaid, 'supramark-diagram-svg')).toBe(true);
     await unmount(restoredMermaid);
+  });
+
+  // --- #211/#217: lock the diagram.maxWidth contract. Dimensions is mocked at
+  // 375 wide, so the screen-derived cap is 337.5; a configured maxWidth caps
+  // below that. SvgXml is a mocked host component, so its width prop is the
+  // resolved chartWidth. ---
+  function svgWidthOf(renderer: ReactTestRenderer): number | undefined {
+    const svg = renderer.root.findAll(node => node.type === 'SvgXml')[0];
+    return svg?.props.width as number | undefined;
+  }
+
+  test('clamps a wide diagram to the screen-derived cap when maxWidth is unset', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(wideResult());
+
+    expect(svgWidthOf(renderer)).toBe(375 * 0.9);
+    await unmount(renderer);
+  });
+
+  test('caps a wide diagram at the configured diagram.maxWidth', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete', {
+      maxWidth: 200,
+    });
+    await resolveEngine(wideResult());
+
+    expect(svgWidthOf(renderer)).toBe(200);
+    await unmount(renderer);
+  });
+
+  test('keeps the 0.6x floor under a configured maxWidth for a small intrinsic diagram', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete', {
+      maxWidth: 200,
+    });
+    // Intrinsic width 10 is far below both caps, so the floor applies.
+    await resolveEngine(successfulResult());
+
+    expect(svgWidthOf(renderer)).toBe(200 * 0.6);
+    await unmount(renderer);
   });
 });

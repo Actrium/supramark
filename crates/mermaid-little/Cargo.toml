@@ -1,6 +1,6 @@
 [package]
 name = "mermaid-little"
-version = "11.14.0-4"
+version = "11.14.0-6"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -96,7 +96,7 @@ semantic-serde = []
 
 [dependencies]
 # Unified trait/AST envelope shared by the four engines (DiagramEngine / EngineAst / RenderOutput / DiagramError).
-supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1" }
+supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1.1" }
 # Shared font metrics. The `metrics-*` Cargo features above pick
 # which `Metrics` impl `crate::font_metrics` routes through; the
 # dev-dep self-cycle below selects `metrics-ttf-parser`, which
@@ -127,9 +127,10 @@ serde_json = "1"
 # `%%{init: {...}}%%` bodies are JSON-ish: unquoted keys, single quotes,
 # trailing commas. JSON5 matches that tolerance.
 json5 = "0.4"
-# YAML frontmatter parser (JSON-schema flavoured, which is what
-# upstream `js-yaml` requests via `{ schema: JSON_SCHEMA }`).
-serde_yml = "0.0.12"
+# Maintained YAML frontmatter parser backed by unsafe-libyaml-norway.
+# Its scalar typing matches the JSON schema that upstream `js-yaml`
+# requests via `{ schema: JSON_SCHEMA }` for the values used here.
+serde_norway = "0.9.42"
 regex = "1"
 # Hierarchical directed graph layout. Pinned to a kookyleo fork until
 # dagre-rs has a published release that exposes intersectPolygon /

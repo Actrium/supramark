@@ -349,6 +349,21 @@ fn measure_edge_text_block(text: &str, font_size: f64) -> (f64, f64) {
     (max_line_w, lines.len() as f64 * line_h)
 }
 
+/// Byte length of the UTF-8 character whose lead byte is `lead`.
+///
+/// Used by the byte-oriented scanners below to step a whole character, so a
+/// `str` slice taken at the resulting offset cannot cut one in half. A
+/// continuation byte answers 1, which only matters if a caller has already
+/// lost the boundary.
+fn utf8_char_len(lead: u8) -> usize {
+    match lead {
+        0xF0..=0xF7 => 4,
+        0xE0..=0xEF => 3,
+        0xC0..=0xDF => 2,
+        _ => 1,
+    }
+}
+
 /// Measure a single line of text width, handling creole bold/italic/underline/strike markup.
 /// Java: CreoleParser splits the text into styled segments. Each segment is measured with its
 /// font style (bold, italic, etc.). The total width is the sum of all segments.
@@ -363,12 +378,11 @@ fn measure_creole_line_width(line: &str, font_size: f64) -> f64 {
     while pos < len {
         // Check for markup start
         if pos + 1 < len {
-            let two = &line[pos..pos + 2];
-            let (marker, is_bold, is_italic) = match two {
-                "**" => ("**", true, false),
-                "//" => ("//", false, true),
-                "__" => ("__", false, false), // underline: same font metrics
-                "~~" => ("~~", false, false), // strikethrough: same font metrics
+            let (marker, is_bold, is_italic) = match (bytes[pos], bytes[pos + 1]) {
+                (b'*', b'*') => ("**", true, false),
+                (b'/', b'/') => ("//", false, true),
+                (b'_', b'_') => ("__", false, false), // underline: same font metrics
+                (b'~', b'~') => ("~~", false, false), // strikethrough: same font metrics
                 _ => ("", false, false),
             };
             if !marker.is_empty() {
@@ -405,7 +419,7 @@ fn measure_creole_line_width(line: &str, font_size: f64) -> f64 {
             }
         }
         // Check for <size:N>text</size> markup
-        if line[pos..].starts_with("<size:") {
+        if bytes[pos..].starts_with(b"<size:") {
             if let Some(gt_pos) = line[pos + 6..].find('>') {
                 let size_str = &line[pos + 6..pos + 6 + gt_pos];
                 let inner_font_size = size_str.parse::<f64>().unwrap_or(font_size);
@@ -425,20 +439,25 @@ fn measure_creole_line_width(line: &str, font_size: f64) -> f64 {
             }
         }
 
-        // Regular character — accumulate until next potential markup
+        // Regular character — accumulate until next potential markup.
+        // Step whole characters: `pos` indexes `line` as a `str` below, and
+        // every marker is ASCII, so a character step never skips one.
         let seg_start = pos;
-        pos += 1;
+        pos += utf8_char_len(bytes[pos]);
         while pos < len {
             if pos + 1 < len {
-                let two = &line[pos..pos + 2];
-                if two == "**" || two == "//" || two == "__" || two == "~~" {
+                let two = (bytes[pos], bytes[pos + 1]);
+                if matches!(
+                    two,
+                    (b'*', b'*') | (b'/', b'/') | (b'_', b'_') | (b'~', b'~')
+                ) {
                     break;
                 }
             }
-            if line[pos..].starts_with("<size:") {
+            if bytes[pos..].starts_with(b"<size:") {
                 break;
             }
-            pos += 1;
+            pos += utf8_char_len(bytes[pos]);
         }
         let seg = &line[seg_start..pos];
         total_w += crate::font_metrics::text_width(seg, "SansSerif", font_size, false, false);

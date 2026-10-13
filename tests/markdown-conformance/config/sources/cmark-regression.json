@@ -1,0 +1,48 @@
+{
+  "name": "cmark-regression",
+  "displayName": "cmark regression tests",
+  "repository": "https://github.com/commonmark/cmark",
+  "version": "master-7042d997",
+  "revision": "7042d9978b20fea86ca9cc98bda55f10be392e69",
+  "input": "test/regression.txt",
+  "license": "BSD-2-Clause",
+  "profile": "commonmark",
+  "importer": "spec-fixture",
+  "lineEndings": "preserve",
+  "expectedKind": "implementation",
+  "expectedCaseCount": 27,
+  "sectionCoverage": {
+    "Regression tests": {
+      "featureIds": [
+        "@supramark/feature-core-markdown"
+      ],
+      "syntax": [
+        "implementation-regression"
+      ],
+      "candidateNodeTypes": [
+        "document",
+        "paragraph",
+        "text",
+        "heading",
+        "list",
+        "list_item",
+        "emphasis",
+        "strong",
+        "link",
+        "code",
+        "raw"
+      ],
+      "renderers": [
+        "web",
+        "react-native"
+      ]
+    }
+  },
+  "integrityChecks": [
+    {
+      "path": "test/regression.txt",
+      "upstreamId": 1,
+      "inputContains": "\r\r\n"
+    }
+  ]
+}

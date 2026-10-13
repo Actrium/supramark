@@ -42,6 +42,7 @@
       "@supramark/web": ["packages/renderers/web/src/index.ts"],
       "@supramark/web/createSupramark": ["packages/renderers/web/src/createSupramark.tsx"],
       "@supramark/rn": ["packages/renderers/rn/src/index.ts"],
+      "@supramark/rn/video-press": ["packages/renderers/rn/src/videoPressContext.ts"],
       "@supramark/rn-selection": ["packages/renderers/rn-selection/src/index.ts"],
       "@boomsi/react-native-selectable-text": [
         "packages/renderers/rn-selection/src/shims/selectable-rich-text.d.ts"
@@ -67,6 +68,7 @@
       "@supramark/feature-weather": ["packages/features/containers/weather/src/index.ts"],
       "@supramark/feature-html-page": ["packages/features/containers/html-page/src/index.ts"],
       "@supramark/feature-map": ["packages/features/containers/map/src/index.ts"],
+      "@supramark/feature-video": ["packages/features/containers/video/src/index.ts"],
       "@supramark/feature-mermaid": ["packages/features/diagrams/mermaid/src/index.ts"],
       "@supramark/feature-diagram-dot": ["packages/features/diagrams/dot/src/index.ts"],
       "@supramark/feature-diagram-echarts": ["packages/features/diagrams/echarts/src/index.ts"],

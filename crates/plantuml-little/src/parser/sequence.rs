@@ -459,7 +459,11 @@ pub fn parse_sequence_diagram_with_original(
             } else {
                 (false, trimmed)
             };
-            let lower = frag_trimmed.to_lowercase();
+            // ASCII-only folding: offsets found in `lower` are applied to
+            // `frag_trimmed` below, and `to_lowercase` can change a string's
+            // byte length (U+212A KELVIN SIGN folds to a one-byte `k`), which
+            // would carry those offsets into the middle of a character.
+            let lower = frag_trimmed.to_ascii_lowercase();
 
             // "end" closes a fragment or legacy group
             if lower == "end" {
@@ -1013,8 +1017,11 @@ fn strip_participant_keyword(s: &str) -> (Option<ParticipantKind>, &str) {
     for kw in PARTICIPANT_KEYWORDS {
         // Match `kw` followed by whitespace, so `actorFoo` is not treated as
         // kind `actor` + name `Foo`.
+        // Compare bytes: `s[..kw.len()]` panics when that index lands inside a
+        // multi-byte character, and `s` is a user-supplied name. A name of
+        // two three-byte characters is cut in half by the 5-byte `actor`.
         if s.len() > kw.len()
-            && s[..kw.len()].eq_ignore_ascii_case(kw)
+            && s.as_bytes()[..kw.len()].eq_ignore_ascii_case(kw.as_bytes())
             && s.as_bytes()[kw.len()].is_ascii_whitespace()
         {
             let kind = match *kw {

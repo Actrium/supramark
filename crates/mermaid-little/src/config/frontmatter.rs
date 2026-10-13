@@ -3,9 +3,9 @@
 //! Port of upstream `diagram-api/frontmatter.ts` (60 LoC). Mermaid
 //! uses `js-yaml` with the **JSON schema**, not the full YAML 1.2
 //! schema — that limits the surface to scalars / sequences / mappings
-//! with JSON-style typing. `serde_yml` happens to be loose enough by
-//! default that parsing via `serde_json::Value` gives us the same shape
-//! mermaid ends up with after `yaml.load(..., { schema: JSON_SCHEMA })`.
+//! with JSON-style typing. `serde_norway` gives us the same scalar shape
+//! Mermaid gets from `yaml.load(..., { schema: JSON_SCHEMA })` for the
+//! values this module surfaces.
 //!
 //! Only three keys are surfaced structurally: `title`, `displayMode`,
 //! `config`. Everything else the parser would accept is dropped —
@@ -69,7 +69,7 @@ pub fn parse_frontmatter(source: &str) -> (Option<Frontmatter>, &str) {
     // Parse the YAML body. On parse failure we still strip the block
     // (upstream would throw, but we're trying to be more tolerant) and
     // return an empty Frontmatter.
-    let fm = match serde_yml::from_str::<serde_yml::Value>(body) {
+    let fm = match serde_norway::from_str::<serde_norway::Value>(body) {
         Ok(v) => lift_metadata(&v),
         Err(_) => Frontmatter::default(),
     };
@@ -80,19 +80,19 @@ pub fn parse_frontmatter(source: &str) -> (Option<Frontmatter>, &str) {
 /// Upstream only surfaces `title`, `displayMode` and `config`. Anything
 /// else from the YAML body is intentionally dropped so that a rogue
 /// frontmatter can't inject arbitrary config values.
-fn lift_metadata(value: &serde_yml::Value) -> Frontmatter {
-    let serde_yml::Value::Mapping(map) = value else {
+fn lift_metadata(value: &serde_norway::Value) -> Frontmatter {
+    let serde_norway::Value::Mapping(map) = value else {
         return Frontmatter::default();
     };
     let mut out = Frontmatter::default();
 
-    if let Some(title) = map.get(serde_yml::Value::String("title".into())) {
+    if let Some(title) = map.get(serde_norway::Value::String("title".into())) {
         out.title = yaml_to_string(title);
     }
-    if let Some(dm) = map.get(serde_yml::Value::String("displayMode".into())) {
+    if let Some(dm) = map.get(serde_norway::Value::String("displayMode".into())) {
         out.display_mode = yaml_to_string(dm);
     }
-    if let Some(cfg) = map.get(serde_yml::Value::String("config".into())) {
+    if let Some(cfg) = map.get(serde_norway::Value::String("config".into())) {
         // Re-encode as JSON and let serde_json parse a `Config`. This
         // path tolerates both JSON-schema YAML (which is all upstream
         // supports) and the JSON the JS side would have produced —
@@ -106,11 +106,11 @@ fn lift_metadata(value: &serde_yml::Value) -> Frontmatter {
     out
 }
 
-fn yaml_to_string(v: &serde_yml::Value) -> Option<String> {
+fn yaml_to_string(v: &serde_norway::Value) -> Option<String> {
     match v {
-        serde_yml::Value::String(s) => Some(s.clone()),
-        serde_yml::Value::Number(n) => Some(n.to_string()),
-        serde_yml::Value::Bool(b) => Some(b.to_string()),
+        serde_norway::Value::String(s) => Some(s.clone()),
+        serde_norway::Value::Number(n) => Some(n.to_string()),
+        serde_norway::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
 }
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn tolerates_malformed_yaml_by_dropping_metadata() {
-        // `:` with no space and a stray tab — serde_yml rejects it.
+        // `:` with no space and a stray tab — serde_norway rejects it.
         // Upstream JS throws, we keep going with empty metadata.
         let src = "---\n\t: broken\n---\ngraph TD\n";
         let (fm, rest) = parse_frontmatter(src);
@@ -175,5 +175,26 @@ mod tests {
         let (fm, rest) = parse_frontmatter(src);
         assert!(fm.is_none());
         assert_eq!(rest, src);
+    }
+
+    #[test]
+    fn preserves_json_schema_scalar_typing() {
+        let cases = [
+            ("yes", Some("yes")),
+            ("no", Some("no")),
+            ("on", Some("on")),
+            ("off", Some("off")),
+            ("1.10", Some("1.1")),
+            ("12:34:56", Some("12:34:56")),
+            ("true", Some("true")),
+            ("null", None),
+        ];
+
+        for (scalar, expected) in cases {
+            let src = format!("---\ntitle: {scalar}\n---\nflowchart TD\nA-->B\n");
+            let (fm, rest) = parse_frontmatter(&src);
+            assert_eq!(fm.and_then(|value| value.title).as_deref(), expected);
+            assert_eq!(rest, "flowchart TD\nA-->B\n");
+        }
     }
 }

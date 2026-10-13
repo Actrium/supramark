@@ -11,6 +11,7 @@ import './support/mock-react-native';
 
 const parserState = {
   calls: 0,
+  lastRoot: null as SupramarkRootNode | null,
 };
 
 // Replace only the Rust parser package boundary so @supramark/core stays unmodified
@@ -18,28 +19,31 @@ const parserState = {
 const markdownParserModule = {
   parse: async (markdown: string): Promise<SupramarkRootNode> => {
     parserState.calls += 1;
-    if (markdown.startsWith('diagram document')) {
-      return {
-        type: 'root',
-        children: [
-          {
-            type: 'diagram',
-            engine: 'mermaid',
-            code: 'graph TD; A-->B;',
-            fence_closed: true,
-          },
-        ],
-      };
-    }
-    return {
-      type: 'root',
-      children: [
-        {
-          type: 'paragraph',
-          children: [{ type: 'text', value: markdown }],
-        },
-      ],
-    };
+    const root: SupramarkRootNode = markdown.startsWith('diagram document')
+      ? {
+          type: 'root',
+          children: [
+            {
+              type: 'diagram',
+              engine: 'mermaid',
+              code: 'graph TD; A-->B;',
+              fence_closed: true,
+            },
+          ],
+        }
+      : {
+          type: 'root',
+          children: [
+            {
+              type: 'paragraph',
+              children: [{ type: 'text', value: markdown }],
+            },
+          ],
+        };
+    // Keep the exact object handed to the document cache so tests can assert
+    // on the identity that getOrCreate retains.
+    parserState.lastRoot = root;
+    return root;
   },
 };
 mock.module('@supramark/markdown-web', () => markdownParserModule);
@@ -129,6 +133,16 @@ describe('Supramark completed-document cache', () => {
       false
     );
     await unmount(secondRenderer as unknown as ReactTestRenderer);
+  });
+
+  // #217: the root stored by getOrCreate must be the deep-frozen snapshot, so
+  // every later cache hit hands consumers a read-only AST.
+  test('stores the AST root frozen after getOrCreate', async () => {
+    const renderer = await renderDocument('frozen paragraph', 'complete');
+    expect(parserState.calls).toBe(1);
+    expect(parserState.lastRoot).not.toBeNull();
+    expect(Object.isFrozen(parserState.lastRoot)).toBe(true);
+    await unmount(renderer);
   });
 
   test('shares completed documents across equivalent inline config objects', async () => {

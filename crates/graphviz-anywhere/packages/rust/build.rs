@@ -55,10 +55,26 @@ fn emit_static_link(static_lib: &Path, link_name: &str) {
 }
 
 fn emit_static_sys_libs(target_os: &str) {
+    // Read here rather than threading it through all five call sites: every one
+    // of them already resolved `target_os` from the environment, and the libc
+    // flavour is only ever needed inside this decision.
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    // musl: the release archive is self-contained — libstdc++, expat and zlib
+    // are merged into it at build time (scripts/build-linux.sh --libc musl).
+    // A musl host has none of those as separate static libraries (they live in
+    // Alpine's g++ / expat-static / zlib-static packages, which a `cargo
+    // install` host does not have), and rustc links these targets `crt-static`
+    // so the glibc trick below — naming runtime SONAMEs — cannot apply either.
+    if target_os == "linux" && target_env == "musl" {
+        return;
+    }
+
     let libs: &[&str] = match target_os {
         // Graphviz 14.x ships C++ libraries (libstdc++), plus expat (HTML
         // labels), zlib and libm.
-        "linux" => &["stdc++", "expat", "z", "m"],
+        // Linked by SONAME below.
+        "linux" => &[],
         // Apple: libc++ for the C++ libs; expat + zlib live in the SDK. libm is
         // part of libSystem, so it needs no explicit flag.
         "macos" => &["c++", "expat", "z"],
@@ -69,6 +85,18 @@ fn emit_static_sys_libs(target_os: &str) {
     };
     for lib in libs {
         println!("cargo:rustc-link-lib=dylib={lib}");
+    }
+    if target_os == "linux" {
+        // glibc only; musl returned early above.
+        // Link the runtime SONAMEs verbatim (`-l:libexpat.so.1`) rather than
+        // `-lexpat`: the unversioned `libexpat.so` / `libz.so` / `libstdc++.so`
+        // symlinks only come with the -dev packages (or g++), which a typical
+        // `cargo install` host lacks, while the SONAME files ship with the
+        // runtime packages every desktop distro installs.
+        for soname in ["libstdc++.so.6", "libexpat.so.1", "libz.so.1"] {
+            println!("cargo:rustc-link-lib=dylib:+verbatim={soname}");
+        }
+        println!("cargo:rustc-link-lib=dylib=m");
     }
 }
 
@@ -290,30 +318,27 @@ fn try_repo_output(manifest_dir: &Path) -> bool {
     false
 }
 
-/// Last-resort, opt-in fallback: download the prebuilt library matching this
-/// crate's version from a GitHub release and link against it.
+/// Last-resort fallback: download the prebuilt library matching this crate's
+/// version from a GitHub release and link against it.
 ///
-/// graphviz-anywhere lives inside the `Actrium/supramark` monorepo and has no
-/// standalone release feed yet, so this path is **disabled by default** — the
-/// supported way to obtain the native library is a source build via
-/// `scripts/build-<platform>.sh` (picked up by `try_repo_output`) or a prebuilt
-/// drop-in under `packages/rust/prebuilt/`. Enable the download explicitly with
-/// `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1` once a matching release is published.
+/// A crates.io install ships no native library (`prebuilt/` is empty in the
+/// published package and there is no repo `output/` tree), so without this
+/// step a plain `cargo install` of any downstream binary cannot build. The
+/// `graphviz-release` workflow publishes the release assets before it
+/// publishes the crate, so the tag for `CARGO_PKG_VERSION` always exists.
 ///
 /// Configuration:
-///   * `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1` — opt in to the network fallback.
-///   * `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1`    — force it off (wins over allow).
+///   * `GRAPHVIZ_ANYWHERE_NO_DOWNLOAD=1`    — disable the network fallback
+///     (airgapped / hermetic builds).
+///   * `GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD`   — accepted for compatibility; the
+///     download is already on by default.
 ///   * `GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL` — override the release base URL
-///     (default `https://github.com/Actrium/supramark/releases/download`).
+///     (default `https://github.com/Actrium/supramark/releases/download`),
+///     e.g. to point at a mirror.
 ///   * `GRAPHVIZ_ANYWHERE_RELEASE_VERSION`  — override the tag version
 ///     (defaults to CARGO_PKG_VERSION).
 fn try_github_release() -> bool {
-    // Hard-off always wins; otherwise require explicit opt-in because no
-    // standalone release feed exists for this crate yet.
     if env::var_os("GRAPHVIZ_ANYWHERE_NO_DOWNLOAD").is_some() {
-        return false;
-    }
-    if env::var_os("GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD").is_none() {
         return false;
     }
 
@@ -378,13 +403,13 @@ fn try_github_release() -> bool {
             return false;
         }
 
-        let tar_flag = if asset.ends_with(".zip") {
-            "-xf"
-        } else {
-            "-xzf"
-        };
+        // Every asset in `target_triple_to_asset_name` is a gzipped tarball,
+        // Windows included. There used to be a `.zip` branch here that passed
+        // `tar -xf`, which cannot read a zip anyway — it advertised a fallback
+        // that could not have worked. A future zip asset needs a real unzip
+        // step, not a flag.
         let untar = Command::new("tar")
-            .arg(tar_flag)
+            .arg("-xzf")
             .arg(&archive)
             .arg("-C")
             .arg(&staging)
@@ -485,9 +510,9 @@ fn main() {
               (or .lib for Windows targets)\n\
            c) Build from source with scripts/build-<platform>.sh, then re-run\n\
                 cargo (the resulting output/ dir is picked up automatically).\n\
-           d) If a matching GitHub release is published, opt in to the network\n\
-                fallback with GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD=1 (override the\n\
-                location with GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL if needed).\
+           d) The GitHub release download runs by default; if it failed (see\n\
+                the curl error above), point GRAPHVIZ_ANYWHERE_RELEASE_BASE_URL\n\
+                at a reachable mirror, or unset GRAPHVIZ_ANYWHERE_NO_DOWNLOAD.\
          "
     );
 }

@@ -96,8 +96,9 @@ function App() {
 \`\`\`
 react-web-csr/
 ├── src/
-│   ├── App.tsx          # 主应用组件
-│   ├── App.css          # 样式文件
+│   ├── FeaturePreview.tsx       # 统一 Playground 应用
+│   ├── feature-registry.tsx     # Feature 与示例注册表
+│   ├── playground-routes.ts     # 稳定路由定义
 │   ├── main.tsx         # 入口文件
 │   └── index.css        # 全局样式
 ├── package.json

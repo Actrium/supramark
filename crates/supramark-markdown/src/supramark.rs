@@ -1,3 +1,4 @@
+use crate::common::utils::decode_entity_at_start;
 use crate::plugins::cmark::block::fence::CodeFence;
 use crate::plugins::cmark::inline::escape::is_escapable_punct;
 use crate::plugins::extra::tables::{ColumnAlignment, TableBody, TableCell, TableHead, TableRow};
@@ -406,7 +407,8 @@ fn map_markdown_fragment(
 /// document source so a node's `to_ast_v2` impl can compute positions and
 /// recurse into children without re-plumbing those arguments by hand.
 ///
-/// `source` is needed by [`map_inline_text`]: when a text run was decoded by
+/// `source` is needed by the text-run pipeline: `map_text_fragment` records
+/// each fragment's source span, and when a reassembled run was decoded by
 /// cmark (backslash escapes like `\{` → `{`), the decoded `value` no longer
 /// matches the source byte-for-byte, so math/footnote delimiter scanning must
 /// run against the raw source slice instead, where `is_escaped` and `$`
@@ -426,8 +428,22 @@ impl<'a> AstV2Ctx<'a> {
         map_children(children, self.index, self.base_offset, self.source)
     }
 
-    pub(crate) fn map_inline_text(&self, value: &str, node: &Node) -> Vec<SupramarkNode> {
-        map_inline_text(value, self.position(node), self.index, self.source)
+    /// First-pass mapping for a raw text fragment (TextScanner output).
+    ///
+    /// Deliberately does NOT scan for inline math/footnote extensions or
+    /// expand emoji shortcodes: the TextScanner splits runs at special
+    /// characters, so an escaped-punctuation run arrives as several
+    /// fragments (`see $`, `\{`, `0`, `\}`, `$ and $x$`). Scanning a
+    /// fragment in isolation pairs `$` delimiters that belong to different
+    /// spans (issue #219) and emoji expansion would desynchronize the
+    /// value↔raw byte alignment the deferred scan relies on. Fragments are
+    /// emitted as plain `Text` and scanned once, after
+    /// `rescan_adjacent_text_runs` has reassembled each contiguous run.
+    pub(crate) fn map_text_fragment(&self, value: &str, node: &Node) -> Vec<SupramarkNode> {
+        vec![SupramarkNode::Text {
+            value: value.to_owned(),
+            position: self.position(node),
+        }]
     }
 
     pub(crate) fn map_fence(&self, fence: &CodeFence, node: &Node) -> SupramarkNode {
@@ -446,7 +462,13 @@ impl<'a> AstV2Ctx<'a> {
         sections: &[Node],
         alignments: &[ColumnAlignment],
     ) -> Vec<SupramarkNode> {
-        map_table_sections(sections, alignments, self.index, self.base_offset, self.source)
+        map_table_sections(
+            sections,
+            alignments,
+            self.index,
+            self.base_offset,
+            self.source,
+        )
     }
 }
 
@@ -613,7 +635,11 @@ fn map_node(
     base_offset: usize,
     source: &str,
 ) -> Vec<SupramarkNode> {
-    let ctx = AstV2Ctx { index, base_offset, source };
+    let ctx = AstV2Ctx {
+        index,
+        base_offset,
+        source,
+    };
     if let Some(v2) = node.to_ast_v2(&ctx) {
         return v2;
     }
@@ -719,11 +745,24 @@ fn scan_inline_extensions<M: RawMap>(
 
         match next.kind {
             InlineExtensionKind::Math { content_start, end } => {
-                // Take math content from the scan string: on the slow path
-                // that is the raw source, preserving `\{` / `\}` so the TeX
-                // engine receives exactly what the author wrote.
+                // Math content is taken verbatim from the scan string: on
+                // the slow path that is the raw source, so the TeX engine
+                // receives exactly what the author wrote. Nothing is decoded
+                // here — neither backslash escapes (TeX needs `\{`) nor
+                // entities, matching micromark-extension-math, which swallows
+                // everything between the delimiters as a single mathTextData
+                // token without sub-tokenizing it, and matching MathBlock in
+                // this crate. Decoding would also let `&#10;` / `&#13;` /
+                // `&dollar;` slip past the scanner's own rules: the delimiter
+                // scan runs on the raw slice and rejects a newline inside
+                // `$…$`, so an entity that decodes to one would smuggle it in
+                // behind the guard, along with an unescaped `$`.
+                // (Footnote labels below do slice from the decoded value —
+                // they match definitions by decoded form, which is a
+                // different contract.)
+                let math_value = scan[content_start..end].to_owned();
                 nodes.push(SupramarkNode::MathInline {
-                    value: scan[content_start..end].to_owned(),
+                    value: math_value,
                     position: Some(position_from_abs(
                         index,
                         source_start + next.start,
@@ -895,7 +934,12 @@ fn sub_text_position(
     hi: usize,
 ) -> Option<SourcePosition> {
     let parent = parent?;
-    if parent.end.byte_offset.saturating_sub(parent.start.byte_offset) != value_len {
+    if parent
+        .end
+        .byte_offset
+        .saturating_sub(parent.start.byte_offset)
+        != value_len
+    {
         return None;
     }
     Some(SourcePosition {
@@ -920,7 +964,12 @@ fn ref_position(
     if open.end.byte_offset.saturating_sub(open.start.byte_offset) != open_value_len {
         return None;
     }
-    if close.end.byte_offset.saturating_sub(close.start.byte_offset) != close_value_len {
+    if close
+        .end
+        .byte_offset
+        .saturating_sub(close.start.byte_offset)
+        != close_value_len
+    {
         return None;
     }
     Some(SourcePosition {
@@ -1002,7 +1051,7 @@ fn flush_text_run(
         out.extend(map_inline_text(&value_out, position_out, index, source));
     } else {
         out.push(SupramarkNode::Text {
-            value: value_out,
+            value: replace_emoji_shortcodes(&value_out),
             position: position_out,
         });
     }
@@ -1115,10 +1164,13 @@ impl RawMap for IdentityMap {
 
 /// Offset map for the slow path, built by lock-stepping the raw source bytes
 /// against the decoded value bytes. A backslash escape `\X` (where `X` is a
-/// cmark-escapable punctuation byte) consumes 2 raw bytes → 1 value byte;
-/// every other byte is 1:1. Any mismatch (e.g. an HTML entity `&amp;` → `&`,
-/// whose decoded width does not align byte-for-byte) returns `None` so the
-/// caller falls back to a plain text node.
+/// cmark-escapable punctuation byte) consumes 2 raw bytes → 1 value byte; an
+/// HTML entity / numeric char ref consumes its raw width → decoded width;
+/// CR / CRLF line endings consume the extra raw byte(s); whitespace that
+/// cmark dropped (continuation-line indentation, trailing spaces before a
+/// newline) consumes 1+ raw bytes → 0 value bytes; every other byte is 1:1.
+/// Any other mismatch returns `None` so the caller falls back to a plain
+/// text node.
 struct RawValueMap {
     /// `points[raw_offset] = value_offset`, for `raw_offset` in `0..=raw.len()`.
     points: Vec<usize>,
@@ -1137,9 +1189,25 @@ impl RawValueMap {
         let mut vi = 0usize;
         while ri < raw_b.len() {
             points[ri] = vi;
-            if raw_b[ri] == b'\\' && ri + 1 < raw_b.len() && is_escapable_punct(raw_b[ri + 1] as char) {
+            if vi >= val_b.len() {
+                // Value exhausted: anything left must be trailing whitespace
+                // / line endings the parser stripped from the value (e.g. a
+                // paragraph run's final CRLF). The post-loop fill below maps
+                // the whole tail to `vi`.
+                if !raw_b[ri..]
+                    .iter()
+                    .all(|&b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+                {
+                    return None;
+                }
+                break;
+            }
+            if raw_b[ri] == b'\\'
+                && ri + 1 < raw_b.len()
+                && is_escapable_punct(raw_b[ri + 1] as char)
+            {
                 // cmark backslash escape: raw `\X` (2 bytes) → value `X` (1 byte).
-                if vi >= val_b.len() || val_b[vi] != raw_b[ri + 1] {
+                if val_b[vi] != raw_b[ri + 1] {
                     return None;
                 }
                 // The backslash byte and the escaped byte both precede value
@@ -1147,17 +1215,49 @@ impl RawValueMap {
                 points[ri + 1] = vi;
                 ri += 2;
                 vi += 1;
+            } else if raw_b[ri] == b'&' {
+                // HTML entity / numeric char ref: variable raw width →
+                // variable decoded width. A literal `&` (not a decodable
+                // entity) is handled 1:1 below.
+                if let Some((decoded, entity_len)) = decode_entity_at_start(&raw[ri..]) {
+                    if !value[vi..].starts_with(&decoded) {
+                        return None;
+                    }
+                    let vi_end = vi + decoded.len();
+                    for point in &mut points[ri..ri + entity_len] {
+                        *point = vi;
+                    }
+                    ri += entity_len;
+                    vi = vi_end;
+                } else if raw_b[ri] != val_b[vi] {
+                    return None;
+                } else {
+                    ri += 1;
+                    vi += 1;
+                }
+            } else if (raw_b[ri] == b' ' || raw_b[ri] == b'\t' || raw_b[ri] == b'\r')
+                && raw_b[ri] != val_b[vi]
+            {
+                // Whitespace / CR stripped from the value but present in the
+                // source span (continuation-line indentation, trailing
+                // spaces, the `\r` of a CRLF): consume as 0-width. Genuine
+                // misalignment still bails at the next byte.
+                ri += 1;
             } else {
-                // 1:1. A variable-width decoding (HTML entity, numeric char
-                // ref) diverges here or on the next byte and bails to None.
-                if vi >= val_b.len() || raw_b[ri] != val_b[vi] {
+                // 1:1. A variable-width decoding diverges here or on the
+                // next byte and bails to None.
+                if raw_b[ri] != val_b[vi] {
                     return None;
                 }
                 ri += 1;
                 vi += 1;
             }
         }
-        points[raw_b.len()] = vi;
+        // Single trailing fill: on normal exit `ri == raw.len()` so this
+        // writes only the sentinel `points[raw.len()]`; on the
+        // value-exhausted break it maps the stripped tail to `vi`
+        // (idempotent for `points[ri]`, written at the loop top).
+        points[ri..].fill(vi);
         if vi != val_b.len() {
             return None;
         }
@@ -1607,15 +1707,15 @@ fn parse_weather_data(params: Option<&str>, value: &str) -> serde_json::Value {
 
     match parsed {
         Ok(config) => {
-            copy_weather_field(&mut object, &config, "location", &["location"]);
-            copy_weather_field(&mut object, &config, "units", &["units"]);
-            copy_weather_field(
+            copy_config_field(&mut object, &config, "location", &["location"]);
+            copy_config_field(&mut object, &config, "units", &["units"]);
+            copy_config_field(
                 &mut object,
                 &config,
                 "showForecast",
                 &["showForecast", "show_forecast"],
             );
-            copy_weather_field(&mut object, &config, "days", &["days"]);
+            copy_config_field(&mut object, &config, "days", &["days"]);
         }
         Err(error) => {
             object.insert("parseError".to_owned(), serde_json::Value::String(error));
@@ -1707,7 +1807,7 @@ fn parse_weather_scalar_value(raw: &str) -> Option<serde_json::Value> {
     Some(serde_json::Value::String(unquoted.to_owned()))
 }
 
-fn copy_weather_field(
+fn copy_config_field(
     target: &mut serde_json::Map<String, serde_json::Value>,
     source: &serde_json::Map<String, serde_json::Value>,
     output_key: &str,
@@ -1718,6 +1818,125 @@ fn copy_weather_field(
             target.insert(output_key.to_owned(), value.clone());
         }
     }
+}
+
+/// Copies a config field only when its JSON value has the expected type.
+///
+/// This keeps the AST contract clean before data reaches bundled or
+/// third-party renderers. Wrong-typed values are treated like unknown fields.
+fn copy_typed_config_field(
+    target: &mut serde_json::Map<String, serde_json::Value>,
+    source: &serde_json::Map<String, serde_json::Value>,
+    output_key: &str,
+    input_keys: &[&str],
+    predicate: fn(&serde_json::Value) -> bool,
+) {
+    // Resolve aliases in priority order, matching the existing copy helper.
+    if let Some(value) = input_keys.iter().find_map(|key| source.get(*key)) {
+        // Reject null and wrong-typed values before they enter the AST.
+        if !value.is_null() && predicate(value) {
+            target.insert(output_key.to_owned(), value.clone());
+        }
+    }
+}
+
+/// Caps invalid video config retained in the AST and rendered error card.
+fn truncate_video_raw_config(value: &str) -> String {
+    // Count Unicode scalar values so truncation never splits a UTF-8 sequence.
+    const MAX_RAW_CONFIG_CHARS: usize = 1024;
+    let mut chars = value.chars();
+    let truncated: String = chars.by_ref().take(MAX_RAW_CONFIG_CHARS).collect();
+    // Append a marker only when content was actually omitted.
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+/// Parses a `:::video` container body (a JSON object) into structured data.
+///
+/// Recognized fields: src / poster / title / autoplay / loop / muted /
+/// controls / width. Unknown and wrong-typed fields are dropped. Invalid JSON
+/// or a non-object body yields `parseError` + `rawConfig` instead of failing.
+fn parse_video_data(value: &str) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+
+    let parsed = match serde_json::from_str::<serde_json::Value>(value.trim()) {
+        Ok(serde_json::Value::Object(object)) => Ok(object),
+        Ok(_) => Err("video JSON config must be an object".to_owned()),
+        Err(error) => Err(error.to_string()),
+    };
+
+    match parsed {
+        Ok(config) => {
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "src",
+                &["src"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "poster",
+                &["poster"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "title",
+                &["title"],
+                serde_json::Value::is_string,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "autoplay",
+                &["autoplay"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "loop",
+                &["loop"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "muted",
+                &["muted"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "controls",
+                &["controls"],
+                serde_json::Value::is_boolean,
+            );
+            copy_typed_config_field(
+                &mut object,
+                &config,
+                "width",
+                &["width"],
+                serde_json::Value::is_number,
+            );
+        }
+        Err(error) => {
+            object.insert("parseError".to_owned(), serde_json::Value::String(error));
+            object.insert(
+                "rawConfig".to_owned(),
+                serde_json::Value::String(truncate_video_raw_config(value)),
+            );
+        }
+    }
+
+    serde_json::Value::Object(object)
 }
 
 fn parse_map_data(value: &str) -> Option<serde_json::Value> {
@@ -1899,6 +2118,7 @@ pub(crate) fn build_extension_node(
                 "vison" => Some(parse_vison_data(&value)),
                 "html" => Some(serde_json::json!({ "html": value.clone() })),
                 "weather" => Some(parse_weather_data(open.params.as_deref(), &value)),
+                "video" => Some(parse_video_data(&value)),
                 _ => None,
             };
             SupramarkNode::Container {
@@ -2093,7 +2313,9 @@ mod tests {
         // footnote reference — the inline raw-HTML rule must not split it,
         // otherwise the embedded tag leaks into the output (XSS). cmark-gfm
         // treats the whole `[…]` as the label string and percent-encodes it.
-        let ast = parse("Hello[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: pwned\n");
+        let ast = parse(
+            "Hello[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: pwned\n",
+        );
         let SupramarkNode::Root { children, .. } = ast else {
             panic!("expected root");
         };
@@ -2211,7 +2433,9 @@ mod tests {
                 SupramarkNode::Text { value, position } => {
                     Some((value.clone(), byte_span(position)))
                 }
-                SupramarkNode::Link { children, position, .. } => {
+                SupramarkNode::Link {
+                    children, position, ..
+                } => {
                     let text = children
                         .iter()
                         .filter_map(|c| match c {
@@ -2327,7 +2551,8 @@ mod tests {
         // The `[^…<…>]` footnote reference is reassembled across an inline
         // raw-HTML split; the resulting FootnoteReference (and the text-before
         // / text-after fragments) must carry source positions, not None.
-        let ast = parse("Hi[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: x\n");
+        let ast =
+            parse("Hi[^\"><script>alert(1)</script>]\n\n[^\"><script>alert(1)</script>]: x\n");
         let SupramarkNode::Root { children, .. } = ast else {
             panic!("expected root");
         };
@@ -2441,7 +2666,10 @@ mod tests {
             let SupramarkNode::Root { children, .. } = ast else {
                 panic!("expected root for {input}");
             };
-            let SupramarkNode::List { children: items, .. } = &children[0] else {
+            let SupramarkNode::List {
+                children: items, ..
+            } = &children[0]
+            else {
                 panic!("expected list for {input}");
             };
             let SupramarkNode::ListItem { children, .. } = &items[0] else {
@@ -2467,10 +2695,16 @@ mod tests {
         let SupramarkNode::Root { children, .. } = ast else {
             panic!("expected root");
         };
-        let SupramarkNode::List { children: items, .. } = &children[0] else {
+        let SupramarkNode::List {
+            children: items, ..
+        } = &children[0]
+        else {
             panic!("expected list");
         };
-        let SupramarkNode::ListItem { checked, children, .. } = &items[0] else {
+        let SupramarkNode::ListItem {
+            checked, children, ..
+        } = &items[0]
+        else {
             panic!("expected list item");
         };
         assert!(checked.is_none(), "no-separator should not be a task item");

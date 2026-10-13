@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Data sources to run (comma-separated: commonmark,cmark-gfm,micromark; or all)"
+        description: "Data sources to run (comma-separated: commonmark,cmark-regression,cmark-gfm,micromark; or all)"
         type: string
         required: true
         default: "all"
@@ -46,14 +46,12 @@ on:
   # The issue-filing step already carries a `github.event_name !=
   # 'pull_request'` guard (dead until now), so PR runs report through the
   # check and the run artifacts, and never open or update an issue.
+  # No `paths` filter here, unlike the push trigger. `Conformance gate` below
+  # is a required check on main, and a required check that never reports
+  # leaves the pull request waiting forever. A path filter would do exactly
+  # that for any pull request outside the six paths above, so the workflow
+  # runs on every pull request and the gate always reports.
   pull_request:
-    paths:
-      - ".github/workflows/markdown-conformance.yml"
-      - "tests/cases/**"
-      - "tests/markdown-conformance/**"
-      - "crates/supramark-markdown/**"
-      - "packages/core/**"
-      - "packages/renderers/web/**"
 
 permissions:
   contents: read
@@ -287,3 +285,32 @@ jobs:
         run: |
           echo "$SOURCE_NAME has failing semantic or visual conformance cases; the report and Issue content have been generated."
           exit 1
+
+  # Single stable check name for branch protection. The matrix job names are
+  # derived from the data sources, so they change whenever a source is added,
+  # removed or renamed — pinning those in a ruleset would break on the next
+  # source change. This job depends on the whole matrix instead: `needs`
+  # aggregates to `success` only when every leg succeeded.
+  conformance-gate:
+    name: Conformance gate
+    needs: [resolve-sources, markdown-conformance]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every conformance source to pass
+        env:
+          RESOLVE_RESULT: ${{ needs.resolve-sources.result }}
+          MATRIX_RESULT: ${{ needs.markdown-conformance.result }}
+        shell: bash
+        run: |
+          echo "resolve-sources:       $RESOLVE_RESULT"
+          echo "markdown-conformance:  $MATRIX_RESULT"
+          if [ "$RESOLVE_RESULT" != "success" ]; then
+            echo "::error::Could not resolve the conformance data sources."
+            exit 1
+          fi
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::At least one conformance source did not pass; see the per-source jobs."
+            exit 1
+          fi
+          echo "All conformance sources passed."

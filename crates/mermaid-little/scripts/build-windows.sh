@@ -7,7 +7,8 @@
 # then stage the DLL + import lib + C header into output/windows-x86_64/.
 #
 # Requires:
-#   - Rust target x86_64-pc-windows-msvc: rustup target add x86_64-pc-windows-msvc
+#   - Rust target (x86_64 default; aarch64 for --arch arm64):
+#       rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
 #   - MSVC build tools (Visual Studio 2019+ or Build Tools)
 #   - Run on Windows (Git Bash / MSYS2) or CI windows-latest runner.
 #
@@ -32,12 +33,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ARCH" in
-    x86_64|amd64) ARCH="x86_64" ;;
-    arm64|aarch64) ARCH="arm64" ;;
+    x86_64|amd64) ARCH="x86_64"; RUST_ARCH="x86_64" ;;
+    arm64|aarch64) ARCH="arm64"; RUST_ARCH="aarch64" ;;
     *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
 esac
 
-RUST_TARGET="${ARCH}-pc-windows-msvc"
+# rustc has no arm64-pc-windows-msvc triple — the Windows-on-ARM target is
+# aarch64-pc-windows-msvc (same mapping as graphviz-anywhere build_helpers.rs).
+# Staged output dirs keep the windows-${ARCH} naming.
+RUST_TARGET="${RUST_ARCH}-pc-windows-msvc"
 BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build/windows-${ARCH}}"
 INSTALL_DIR="${INSTALL_DIR:-${PROJECT_ROOT}/output/windows-${ARCH}}"
 

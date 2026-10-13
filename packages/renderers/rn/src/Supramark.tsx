@@ -33,6 +33,8 @@ import { MathInline } from './MathInline';
 import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
+import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
+import { CodeBlock, CodeCopyContext } from './CodeBlock';
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -315,6 +317,22 @@ export interface SupramarkProps {
   containerRenderers?: Record<string, ContainerRendererRN>;
   codeHighlighter?: SupramarkCodeHighlighter;
   codeHighlightTheme?: string;
+  /**
+   * Copy handler for code blocks with a language info string. When provided,
+   * the header renders a copy button that calls this with the raw source.
+   *
+   * RN stays clipboard-free: the host owns the clipboard API
+   * (expo-clipboard / @react-native-clipboard / mini-program clipboard)
+   * inside this callback. Without it, no copy button is shown on RN.
+   * Language-less fences and indented code have no distinct AST flag and do
+   * not render a copy button.
+   */
+  onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
+  /**
+   * Whether to show the code-block copy button (requires onCopyCode;
+   * default: enabled).
+   */
+  copyButton?: boolean;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -323,6 +341,14 @@ export interface SupramarkProps {
    * - the host may open a new page / modal / external browser from the callback.
    */
   onOpenHtmlPage?: (node: SupramarkContainerNode) => void;
+
+  /**
+   * Callback invoked when the user taps a :::video card.
+   *
+   * The host owns playback when supplied. Otherwise the default video
+   * renderer opens http(s) sources through React Native Linking.
+   */
+  onVideoPress?: SupramarkVideoPressHandler;
 
   /**
    * Callback invoked when the user taps a block image.
@@ -346,10 +372,13 @@ export const Supramark: React.FC<SupramarkProps> = ({
   onError,
   errorFallback,
   onOpenHtmlPage,
+  onVideoPress,
   onImagePress,
   containerRenderers,
   codeHighlighter,
   codeHighlightTheme,
+  onCopyCode,
+  copyButton,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -517,6 +546,12 @@ export const Supramark: React.FC<SupramarkProps> = ({
     return containerRenderers ?? {};
   }, [containerRenderers]);
 
+  // Keep the provider identity stable for memoized code-block consumers.
+  const codeCopyContextValue = useMemo(
+    () => ({ onCopyCode, copyButton }),
+    [onCopyCode, copyButton],
+  );
+
   // Parse-error fallback: show the error info or the raw markdown
   if (parseError) {
     if (errorFallback) {
@@ -541,16 +576,20 @@ export const Supramark: React.FC<SupramarkProps> = ({
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <ImagePressContext.Provider value={onImagePress}>
-          <View style={mergedStyles.root}>
-            {renderRootNodes(
-              parsedDocument.root.children,
-              mergedStyles,
-              parsedDocument.highlighted,
-              config,
-              onOpenHtmlPage,
-              mergedContainerRenderers
-            )}
-          </View>
+          <VideoPressContext.Provider value={onVideoPress}>
+            <CodeCopyContext.Provider value={codeCopyContextValue}>
+              <View style={mergedStyles.root}>
+                {renderRootNodes(
+                  parsedDocument.root.children,
+                  mergedStyles,
+                  parsedDocument.highlighted,
+                  config,
+                  onOpenHtmlPage,
+                  mergedContainerRenderers
+                )}
+              </View>
+            </CodeCopyContext.Provider>
+          </VideoPressContext.Provider>
         </ImagePressContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>
@@ -597,6 +636,15 @@ interface BlockImageItem {
 /** Whether an image URL has a scheme RN can load (http/data/file/blob). Relative paths and empty strings are not loadable as remote sources. */
 function hasLoadableImageUrl(url: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url);
+}
+
+/**
+ * Placeholder label for an image whose bitmap cannot be shown: alt, then
+ * title, then a generic marker. Shared by the block placeholder and the
+ * inline-image fallback so the label rule stays single-sourced.
+ */
+function imageFallbackLabel(image: { alt?: string; title?: string }): string {
+  return image.alt || image.title || '[image]';
 }
 
 /**
@@ -772,32 +820,49 @@ function MarkdownImage({
   // An empty or relative URL cannot be loaded as a remote source; show the
   // placeholder up front instead of a blank 200×200 hole.
   const loadable = hasLoadableImageUrl(image.url);
-  const [failed, setFailed] = useState(false);
+  // Failure is tracked per-URL: galleries key images by index, so the same
+  // component instance can receive a different image.url on re-render. A
+  // boolean flag would keep showing the placeholder for a URL that never
+  // failed; binding the failure to the URL that produced it resets for free.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = failedUrl === image.url;
 
-  // Empty alt + no title marks the image as decorative for screen readers.
-  const isDecorative = !image.alt && !image.title;
-  const accessibilityLabel = image.alt || image.title || undefined;
+  // A TouchableOpacity becomes the accessible element for its subtree, so the
+  // label must live on the wrapper or it is easy to lose. When wrapped, the
+  // inner image/placeholder stops being individually focusable instead.
+  const wrapped = Boolean(linkUrl || onImagePress);
+  // Empty alt + no title marks the image as decorative for screen readers —
+  // but only when nothing actionable wraps it. The wrapper IS the link /
+  // press control: hiding it (accessibilityElementsHidden +
+  // no-hide-descendants) would make the control unreachable, so a decorative
+  // wrapped image instead keeps the wrapper exposed and falls back to the
+  // link URL for its accessible name.
+  const isDecorative = !image.alt && !image.title && !wrapped;
+  const accessibilityLabel = image.alt || image.title || linkUrl || undefined;
+  const accessibilityProps: {
+    accessibilityLabel?: string;
+    accessibilityElementsHidden: boolean;
+    importantForAccessibility: 'yes' | 'no-hide-descendants';
+  } = {
+    accessibilityLabel,
+    accessibilityElementsHidden: isDecorative,
+    importantForAccessibility: isDecorative ? 'no-hide-descendants' : 'yes',
+  };
+  const innerAccessibilityProps = wrapped ? { accessible: false } : accessibilityProps;
 
   const imageContent = (
     <View style={styles.imageContainer}>
       {loadable && !failed ? (
         <Image
           source={{ uri: image.url }}
-          accessibilityLabel={accessibilityLabel}
-          accessibilityElementsHidden={isDecorative}
-          importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
+          {...innerAccessibilityProps}
           style={styles.image}
-          onError={() => setFailed(true)}
+          onError={() => setFailedUrl(image.url)}
         />
       ) : (
-        <View
-          style={styles.imagePlaceholder}
-          accessibilityLabel={accessibilityLabel}
-          accessibilityElementsHidden={isDecorative}
-          importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
-        >
+        <View style={styles.imagePlaceholder} {...innerAccessibilityProps}>
           <Text style={styles.imagePlaceholderText}>
-            {image.alt || image.title || '[image]'}
+            {imageFallbackLabel(image)}
           </Text>
         </View>
       )}
@@ -826,6 +891,7 @@ function MarkdownImage({
           }
           Linking.openURL(linkUrl).catch(err => console.error('Failed to open URL:', err));
         }}
+        {...accessibilityProps}
       >
         {imageContent}
       </TouchableOpacity>
@@ -834,7 +900,11 @@ function MarkdownImage({
 
   // A standalone image is tappable only when the host supplied a press handler.
   if (onImagePress) {
-    return <TouchableOpacity onPress={handlePress}>{imageContent}</TouchableOpacity>;
+    return (
+      <TouchableOpacity onPress={handlePress} {...accessibilityProps}>
+        {imageContent}
+      </TouchableOpacity>
+    );
   }
 
   return imageContent;
@@ -874,7 +944,11 @@ function renderNode(
     }
     case 'code': {
       const codeBlock = node;
-      return renderCodeBlock(codeBlock, key, styles, highlighted);
+      return (
+        <CodeBlock key={key} node={codeBlock} styles={styles}>
+          {renderCodeContent(codeBlock, styles, highlighted)}
+        </CodeBlock>
+      );
     }
     case 'math_block': {
       const mathBlock = node;
@@ -984,7 +1058,15 @@ function renderNode(
           config,
           onOpenHtmlPage,
           renderNode: (n, k) =>
-            renderNode(n, k, styles, highlighted, config, onOpenHtmlPage, containerRenderers),
+            renderNode(
+              n,
+              k,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            ),
           renderChildren: children =>
             children.map((child, index) =>
               renderNode(
@@ -1081,9 +1163,7 @@ function renderNode(
 
         return (
           <View key={key} style={admonitionContainerStyle}>
-            {title ? (
-              <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text>
-            ) : null}
+            {title ? <Text style={[styles.paragraph, { fontWeight: '600' }]}>{title}</Text> : null}
             {renderAdmonitionContent()}
           </View>
         );
@@ -1237,7 +1317,15 @@ function renderNode(
       return (
         <View key={key} style={[styles.table, { width: screenWidth }]}>
           {table.children.map((row, index) =>
-            renderNode(row, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              row,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1247,7 +1335,15 @@ function renderNode(
       return (
         <View key={key} style={styles.tableRow}>
           {row.children.map((cell, index) =>
-            renderNode(cell, index, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              cell,
+              index,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1275,7 +1371,15 @@ function renderNode(
       return (
         <View key={key} style={styles.blockquote}>
           {quote.children.map((child, i) =>
-            renderNode(child, i, styles, highlighted, config, onOpenHtmlPage, containerRenderers)
+            renderNode(
+              child,
+              i,
+              styles,
+              highlighted,
+              config,
+              onOpenHtmlPage,
+              containerRenderers
+            )
           )}
         </View>
       );
@@ -1294,9 +1398,8 @@ function renderNode(
   }
 }
 
-function renderCodeBlock(
+function renderCodeContent(
   codeBlock: SupramarkCodeNode,
-  key: number,
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>
 ): RenderedNode {
@@ -1305,28 +1408,22 @@ function renderCodeBlock(
   );
 
   if (!highlight) {
-    return (
-      <View key={key} style={styles.codeBlock}>
-        <Text style={styles.code}>{codeBlock.value}</Text>
-      </View>
-    );
+    return <Text style={styles.code}>{codeBlock.value}</Text>;
   }
 
   return (
-    <View key={key} style={styles.codeBlock}>
-      <Text style={styles.code}>
-        {highlight.lines.map((line, lineIndex) => (
-          <Text key={lineIndex}>
-            {line.tokens.map((token, tokenIndex) => (
-              <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
-                {token.text}
-              </Text>
-            ))}
-            {lineIndex < highlight.lines.length - 1 ? '\n' : null}
-          </Text>
-        ))}
-      </Text>
-    </View>
+    <Text style={styles.code}>
+      {highlight.lines.map((line, lineIndex) => (
+        <Text key={lineIndex}>
+          {line.tokens.map((token, tokenIndex) => (
+            <Text key={tokenIndex} style={codeTokenTextStyle(token)}>
+              {token.text}
+            </Text>
+          ))}
+          {lineIndex < highlight.lines.length - 1 ? '\n' : null}
+        </Text>
+      ))}
+    </Text>
   );
 }
 
@@ -1464,7 +1561,15 @@ function renderListItemBody(
     flushInline();
     out.push(
       <View key={`li-${seq}`} style={styles.listItemIndent}>
-        {renderNode(child, 0, styles, highlighted, config, onOpenHtmlPage, containerRenderers)}
+        {renderNode(
+          child,
+          0,
+          styles,
+          highlighted,
+          config,
+          onOpenHtmlPage,
+          containerRenderers
+        )}
       </View>
     );
     seq += 1;
@@ -1508,13 +1613,7 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(
-          strongNode.children,
-          styles,
-          highlighted,
-          config,
-          'strong'
-        );
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
       }
       return (
         <Text key={key} style={styles.strong}>
@@ -1570,6 +1669,14 @@ function renderInlineNode(
       const imageNode = node;
       // Empty alt + no title marks the image as decorative for screen readers.
       const isDecorative = !imageNode.alt && !imageNode.title;
+      // Mixed-content / table / heading images go through here; the same
+      // loadability rule as the block path applies — an empty or relative src
+      // would render as a blank 20×20 hole, so show the alt text instead.
+      if (!hasLoadableImageUrl(imageNode.url)) {
+        // Inherits the surrounding Text style; mirrors the block placeholder
+        // label without breaking the inline flow.
+        return <Text key={key}>{imageFallbackLabel(imageNode)}</Text>;
+      }
       return (
         <Image
           key={key}

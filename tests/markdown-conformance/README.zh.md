@@ -40,6 +40,18 @@ node tests/markdown-conformance/scripts/validate.mjs commonmark
 
 已有本地源仓库时可使用 `--source-dir <path>`；适配器仍会校验 `origin` 和固定 commit。
 
+## cmark regression 数据导入
+
+通用 `spec-fixture` 适配器从 cmark 的 `test/regression.txt` 导入 27 条 fenced example，
+数据源固定到 commit `7042d9978b20fea86ca9cc98bda55f10be392e69`。这些是实现回归用例，
+不是规范性示例。该数据源保留原始换行，确保 CR+CR+LF 用例原样进入 Parser。
+
+```powershell
+node tests/markdown-conformance/scripts/import.mjs cmark-regression
+node tests/markdown-conformance/scripts/validate.mjs cmark-regression
+node tests/markdown-conformance/scripts/run.mjs cmark-regression
+```
+
 ## cmark-gfm 数据导入
 
 cmark-gfm 适配器合并解析 `github/cmark-gfm` 仓库 `test/spec.txt` 的 672 条 GFM
@@ -91,14 +103,14 @@ node tests/markdown-conformance/scripts/run.mjs <source-name>
 node tests/markdown-conformance/scripts/run-visual.mjs <source-name>
 ```
 
-当前可直接运行 `commonmark`、`cmark-gfm` 和 `micromark`。例如：
+当前可直接运行 `commonmark`、`cmark-regression`、`cmark-gfm` 和 `micromark`。例如：
 
 ```console
 node tests/markdown-conformance/scripts/run.mjs micromark
 node tests/markdown-conformance/scripts/run-visual.mjs micromark
 ```
 
-原有 `run-commonmark.mjs` 与 `run-commonmark-visual.mjs` 保留为兼容入口。新增数据源只需提供配置、统一用例和导入适配器，不再新增专用运行脚本。
+导入、校验、运行、视觉运行和基线更新入口均与数据源无关；新增数据源时不需要再增加专用运行脚本。
 
 可设置：
 
@@ -125,17 +137,16 @@ node tests/markdown-conformance/scripts/run-visual.mjs micromark
 `packages/renderers/web/src/Supramark.tsx` 生产 React Renderer。浏览器宿主只隔离图表引擎和
 浏览器 WASM Parser，避免重复解析；最终 DOM 来自生产 Renderer。
 
-GitHub Actions 工作流位于 `.github/workflows/commonmark-conformance.yml`。工作流先校验所选数据源，
-再通过动态 matrix 为每个数据源独立导入、验证、对照、上传报告并维护聚合 Issue。失败运行会上传完整
-中文报告并生成 `issue.md` 与 `issue-metadata.json`；启用 Issue 开关后会创建或更新聚合 Issue。Pull Request 只验证和上传产物。
+GitHub Actions 工作流位于 `.github/workflows/markdown-conformance.yml`。工作流先校验所选数据源，再通过动态 matrix 为每个数据源独立导入、验证、对照、上传报告并维护聚合 Issue。失败运行会上传完整报告并生成 `issue.md` 与 `issue-metadata.json`；启用 Issue 开关后会创建或更新聚合 Issue。Pull Request 只验证和上传产物。
 Issue 标题格式为 `[<数据源显示名>] 验证结果问题：存在未通过用例`，并自动添加 `bug` 标签；稳定标记用于更新同一数据源已有的聚合 Issue。
 
 手动运行工作流时可以配置：
 
-- `sources`：执行的数据源；支持单个名称、逗号分隔的多个名称或 `all`。例如 `micromark`、`cmark-gfm,micromark`。
+- `sources`：执行的数据源；支持单个名称、逗号分隔的多个名称或 `all`。例如 `cmark-regression`、`cmark-gfm,micromark`。
 - `create_issue`：失败后是否创建或更新聚合 Issue，默认开启。
 - `run_visual`：是否执行浏览器视觉对照；关闭时只运行语义对照，默认开启。
 - `fail_workflow`：存在未通过用例时是否将工作流标记为失败，默认开启。
+- `gate_mode`：`regression` 仅在相对基线新增失败时标红；`absolute` 在任何用例未通过时标红。
 - `issue_repository`：Issue 目标仓库，格式为 `owner/repo`；留空时使用当前仓库。
 
 push 使用仓库 Actions Variables 控制相同行为：

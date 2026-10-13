@@ -38,6 +38,8 @@ use ttf_parser::Face;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MissingGlyphFallback {
     /// Use the `.notdef` glyph (gid 0) advance. Matches Java AWT.
+    /// East Asian Wide / Fullwidth chars are the exception: they measure
+    /// 1em, as they do on the CJK slot of Java's composite logical fonts.
     Notdef,
     /// Use the space (' ') glyph advance. Matches canvas / StaticDejaVu.
     Space,
@@ -260,6 +262,15 @@ fn char_advance(face: &Face<'_>, ch: char, size: f64, fallback: MissingGlyphFall
         }
     }
     let fallback_gid = match fallback {
+        // Java AWT's logical fonts (`SansSerif`, `Monospaced`, ...) are
+        // composite: a char missing from the primary face is measured on
+        // the next fallback slot that covers it, and `.notdef` is only
+        // reached when no installed font does. For East Asian Wide /
+        // Fullwidth chars that slot is a CJK font whose advance is 1em,
+        // which is also what browsers render with. Using the Latin
+        // subset's `.notdef` (~0.6em) instead underestimates CJK labels
+        // by ~40%, making `textLength` squeeze the glyphs into each other.
+        MissingGlyphFallback::Notdef if is_east_asian_wide(ch) => return size,
         MissingGlyphFallback::Notdef => ttf_parser::GlyphId(0),
         MissingGlyphFallback::Space => face.glyph_index(' ').unwrap_or(ttf_parser::GlyphId(0)),
     };
@@ -267,6 +278,29 @@ fn char_advance(face: &Face<'_>, ch: char, size: f64, fallback: MissingGlyphFall
         return adv as f64 / upem * size;
     }
     size * 0.6
+}
+
+/// `true` for chars with Unicode East Asian Width `W` or `F` in the
+/// scripts CJK fonts cover (Hangul, Kana, Han, Yi, fullwidth forms).
+/// CJK fonts give these a uniform 1em advance.
+fn is_east_asian_wide(ch: char) -> bool {
+    matches!(ch,
+        '\u{1100}'..='\u{115F}'     // Hangul Jamo initial consonants
+        | '\u{2E80}'..='\u{303E}'   // CJK Radicals .. CJK Symbols and Punctuation
+        | '\u{3041}'..='\u{33FF}'   // Hiragana, Katakana, Bopomofo, Hangul Compat Jamo .. CJK Compat
+        | '\u{3400}'..='\u{4DBF}'   // CJK Unified Ideographs Extension A
+        | '\u{4E00}'..='\u{9FFF}'   // CJK Unified Ideographs
+        | '\u{A000}'..='\u{A4CF}'   // Yi Syllables and Radicals
+        | '\u{A960}'..='\u{A97F}'   // Hangul Jamo Extended-A
+        | '\u{AC00}'..='\u{D7A3}'   // Hangul Syllables
+        | '\u{F900}'..='\u{FAFF}'   // CJK Compatibility Ideographs
+        | '\u{FE10}'..='\u{FE19}'   // Vertical Forms
+        | '\u{FE30}'..='\u{FE6F}'   // CJK Compatibility Forms, Small Form Variants
+        | '\u{FF00}'..='\u{FF60}'   // Fullwidth ASCII variants
+        | '\u{FFE0}'..='\u{FFE6}'   // Fullwidth signs
+        | '\u{20000}'..='\u{2FFFD}' // CJK Extension B .. Compatibility Supplement
+        | '\u{30000}'..='\u{3FFFD}' // CJK Extension G and beyond
+    )
 }
 
 impl<'a> Metrics for TtfParserMetrics<'a> {
@@ -331,6 +365,41 @@ mod tests {
             (emoji - space).abs() > 0.01,
             "Notdef fallback expected; got space={space}, emoji={emoji}",
         );
+    }
+
+    #[test]
+    fn missing_east_asian_wide_glyphs_measure_one_em() {
+        // Han, Kana, Hangul and fullwidth forms are absent from the Latin
+        // subset; under the Notdef (Java AWT) policy they must measure as
+        // a CJK fallback font would (1em), not as `.notdef` (~0.6em).
+        let m = TtfParserMetrics::default_latin().expect("init");
+        for s in [
+            "\u{767B}\u{5F55}",
+            "\u{3042}\u{30A2}",
+            "\u{D55C}\u{AE00}",
+            "\u{FF21}\u{FF01}",
+        ] {
+            let w = m.measure(s, "sans-serif", 13.0, false, false).width;
+            assert!((w - 26.0).abs() < 1e-9, "{s:?}: expected 26px, got {w}");
+        }
+        let mixed = m
+            .measure("OK \u{6210}\u{529F}", "sans-serif", 13.0, false, false)
+            .width;
+        let ascii = m.measure("OK ", "sans-serif", 13.0, false, false).width;
+        assert!((mixed - ascii - 26.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn space_fallback_keeps_east_asian_wide_at_space_width() {
+        // mermaid-little's canvas-parity policy is left untouched.
+        let m = TtfParserMetrics::default_latin()
+            .expect("init")
+            .with_missing_glyph_fallback(MissingGlyphFallback::Space);
+        let space = m.measure(" ", "sans-serif", 13.0, false, false).width;
+        let han = m
+            .measure("\u{767B}", "sans-serif", 13.0, false, false)
+            .width;
+        assert!((han - space).abs() < 1e-9);
     }
 
     #[test]

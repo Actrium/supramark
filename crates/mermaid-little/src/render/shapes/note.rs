@@ -225,11 +225,16 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
 
     if !label.is_empty() {
         use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont, LabelOpts};
-        // Upstream: `\n` is pre-replaced with `<br/>` before innerHTML-assign,
-        // so jsdom textContent returns the label as a SINGLE logical line.
-        // `measure_html_markup_label` mirrors that — it strips `<br>` and any
-        // other tag, decodes entities, and returns one line-height.
-        let (fw, fh) = measure_html_markup_label(&label, &HtmlLabelFont::default(), 200.0, true);
+        // Upstream: `\n` is pre-replaced with `<br/>` before innerHTML-assign.
+        let html_label = normalize_note_html(&label);
+        // Width: the concatenated text of the source label (reference
+        // geometry). Height: one line-height per line the browser paints,
+        // measured on the `<br/>`-normalised HTML so a multi-line
+        // `note … end note` block and a literal `<br/>` note agree. The note
+        // box in `layout::state` grows by the same amount.
+        let (fw, _) = measure_html_markup_label(&label, &HtmlLabelFont::default(), 200.0, true);
+        let (_, fh) =
+            measure_html_markup_label(&html_label, &HtmlLabelFont::default(), 200.0, true);
         // Build the FO HTML body:
         // 1. Normalize all `<br>` variants to `<br/>`.
         // 2. Replace `\n` (multi-line note separator) with `<br/>`.
@@ -237,7 +242,6 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         // remain as actual HTML tags. Other chars that need escaping
         // (like `&`) can be handled below if needed, but mermaid note text
         // typically doesn't contain unencoded HTML-unsafe chars.
-        let html_label = normalize_note_html(&label);
         let opts = LabelOpts {
             extra_span_classes: "markdown-node-label",
             ..LabelOpts::default()
