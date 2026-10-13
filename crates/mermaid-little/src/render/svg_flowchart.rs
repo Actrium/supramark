@@ -3196,6 +3196,77 @@ fn cut_path_at_intersect(
     out
 }
 
+/// Land an endpoint that stopped short of `bounds` on the rect border.
+///
+/// Dagre routes a cluster-endpoint edge to the placeholder rectangle the
+/// cluster was laid out with. For an isolated cluster that placeholder is the
+/// inner pass's rendered footprint, which is larger than the rect the renderer
+/// actually draws, so the endpoint can sit outside `bounds` while the whole
+/// path misses it — `cut_path_at_intersect` returns such a path unchanged.
+/// Extending the final segment along its own direction moves the endpoint onto
+/// the border and leaves the rest of the spline alone.
+///
+/// No-op when the endpoint is already on or inside the border, or when the
+/// segment's direction never reaches it.
+///
+/// Edge labels are still positioned from the pre-snap path
+/// (`processed_edge_points`), so on an affected edge the label anchor and the
+/// drawn `d` no longer agree exactly. No fixture in the corpus moves a label as
+/// a result — the drift stays well inside the label box.
+fn snap_endpoint_to_bounds(pts: &mut [Point], bounds: &crate::layout::unified::Bounds) {
+    if pts.len() < 2 {
+        return;
+    }
+    let last = pts[pts.len() - 1];
+    if !outside_node(bounds, last) {
+        return;
+    }
+    let prev = pts[pts.len() - 2];
+    let (dx, dy) = (last.x - prev.x, last.y - prev.y);
+    if dx == 0.0 && dy == 0.0 {
+        return;
+    }
+    if let Some(hit) = ray_box_entry(bounds, last, dx, dy) {
+        pts[pts.len() - 1] = hit;
+    }
+}
+
+/// Where the ray `origin + t·(dx, dy)` (`t >= 0`) enters the axis-aligned box,
+/// or `None` when it never does (slab method).
+fn ray_box_entry(
+    bounds: &crate::layout::unified::Bounds,
+    origin: Point,
+    dx: f64,
+    dy: f64,
+) -> Option<Point> {
+    let (x0, y0) = (bounds.x, bounds.y);
+    let (x1, y1) = (bounds.x + bounds.width, bounds.y + bounds.height);
+    let mut t_enter = f64::NEG_INFINITY;
+    let mut t_exit = f64::INFINITY;
+    for (o, d, lo, hi) in [(origin.x, dx, x0, x1), (origin.y, dy, y0, y1)] {
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return None;
+            }
+            continue;
+        }
+        let (mut near, mut far) = ((lo - o) / d, (hi - o) / d);
+        if near > far {
+            std::mem::swap(&mut near, &mut far);
+        }
+        t_enter = t_enter.max(near);
+        t_exit = t_exit.min(far);
+    }
+    if t_enter > t_exit || t_exit < 0.0 {
+        return None;
+    }
+    let t = t_enter.max(0.0);
+    Some(Point {
+        x: origin.x + dx * t,
+        y: origin.y + dy * t,
+    })
+}
+
 /// Walk the rendered edges, collect unique (family, position, color)
 /// triples implied by each edge's pathStyle stroke color, and emit one
 /// `<marker>` per triple in upstream's order.
@@ -3443,6 +3514,18 @@ fn render_edge_path(
     if let Some(bounds) = cluster_bounds.get(orig_src) {
         pts.reverse();
         pts = cut_path_at_intersect(&pts, bounds);
+        pts.reverse();
+    }
+    // The clip above only acts on paths that cross the border. An isolated
+    // cluster's placeholder — the size dagre routes its edges to — is larger
+    // than the rect drawn, so some endpoints stop short of the border and the
+    // path never crosses it. Pull those onto the border.
+    if let Some(bounds) = cluster_bounds.get(orig_dst) {
+        snap_endpoint_to_bounds(&mut pts, bounds);
+    }
+    if let Some(bounds) = cluster_bounds.get(orig_src) {
+        pts.reverse();
+        snap_endpoint_to_bounds(&mut pts, bounds);
         pts.reverse();
     }
 
@@ -5167,6 +5250,128 @@ mod tests {
         let l = fcl::layout(&d, &th, false).unwrap();
         let svg = render(&d, &l, &th, "t").unwrap();
         assert!(svg.contains(r#"aria-roledescription="flowchart-v2""#));
+    }
+
+    #[test]
+    fn snap_endpoint_pulls_a_short_endpoint_onto_the_border() {
+        // Regression (issue #255): dagre routes a cluster-endpoint edge to the
+        // oversized placeholder an isolated cluster enters the outer pass with,
+        // so the endpoint stops short of the rect the renderer actually draws.
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Approaching from the right, travelling left: lands on the right border.
+        let mut pts = vec![Point { x: 360.0, y: 100.0 }, Point { x: 340.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+
+        // Approaching from below, travelling up: lands on the bottom border.
+        let mut pts = vec![Point { x: 200.0, y: 250.0 }, Point { x: 200.0, y: 230.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 200.0).abs() < 1e-9 && (pts[1].y - 150.0).abs() < 1e-9,
+            "expected (200, 150), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn snap_endpoint_leaves_unreachable_and_on_border_paths_alone() {
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Travelling away from the box: the ray never reaches it.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 360.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert_eq!(pts[1].x, 360.0);
+
+        // Already on the border: left where it is.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 300.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn cluster_endpoint_edges_land_on_the_drawn_cluster_rect() {
+        // End-to-end guard for issue #255: every edge aimed at the subgraph used
+        // to stop on the oversized placeholder, leaving the right-hand arrows
+        // floating ~86px clear of the rect.
+        let src = "flowchart TB\n\
+            subgraph g[\"gate\"]\n a[\"if: always()\"]\n b[\"result != success\"]\n end\n\
+            n0[\"rust\"] --> g\n n1[\"test\"] --> g\n n2[\"typescript\"] --> g\n\
+            n3[\"web\"] --> g\n n4[\"webrtc\"] --> g\n n5[\"identity\"] --> g\n\
+            n6[\"cjk\"] --> g\n n7[\"csharp\"] --> g\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        // The cluster rect lives in the inner root group's frame, so its
+        // absolute position is that group's translate plus the rect's own
+        // (8, 8) origin.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let root = root_re.captures(&svg).expect("isolated cluster root group");
+        let tx: f64 = root[1].parse().unwrap();
+        let ty: f64 = root[2].parse().unwrap();
+
+        let rect_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        // This guard reads the first root group and the first cluster rect, so
+        // hold the input to exactly one of each.
+        let mut rect_matches = rect_re.captures_iter(&svg);
+        let rect = rect_matches.next().expect("cluster rect");
+        assert!(
+            rect_matches.next().is_none(),
+            "guard assumes a single cluster rect"
+        );
+        let x0 = tx + rect[1].parse::<f64>().unwrap();
+        let y0 = ty + rect[2].parse::<f64>().unwrap();
+        let x1 = x0 + rect[3].parse::<f64>().unwrap();
+        let y1 = y0 + rect[4].parse::<f64>().unwrap();
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_[^"]*""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let mut checked = 0;
+        for cap in path_re.captures_iter(&svg) {
+            let last = num_re
+                .captures_iter(&cap[1])
+                .last()
+                .expect("edge path has at least one point");
+            let ex: f64 = last[1].parse().unwrap();
+            let ey: f64 = last[2].parse().unwrap();
+            let dist = (ex - x0)
+                .abs()
+                .min((ex - x1).abs())
+                .min((ey - y0).abs())
+                .min((ey - y1).abs());
+            // The emitted path is pulled back by the arrow marker offset
+            // (~3.4-3.9px) before it is written out, so a landing endpoint sits
+            // a few px clear of the border rather than exactly on it.
+            assert!(
+                dist < 6.0,
+                "edge endpoint ({ex}, {ey}) sits {dist}px off the cluster rect"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 8, "expected all 8 cluster-endpoint edges");
     }
 
     #[test]

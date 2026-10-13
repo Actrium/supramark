@@ -8,3 +8,4 @@
 # reason and must be covered by a focused test.
 
 flowchart	edge-label-horizontal-padding	Mermaid 11.14.0 keeps flowchart edge-label backgrounds flush with text (`.edgeLabel p { padding: 0; }`); mermaid-little adds 4px left/right padding for readability.
+flowchart	cluster-endpoint-edge-landing	Upstream's jsdom reference sizes an isolated subgraph's outer placeholder from a bbox union that ignores node transforms, so edges aimed at the cluster are routed to a rectangle larger than the one drawn and their arrows stop short of the border; mermaid-little snaps those endpoints onto the drawn rect (Chromium rendering upstream mermaid 11.14.0 lands them on the border too). 30 endpoints across 24 fixtures — covered by render::svg_flowchart::tests::cluster_endpoint_edges_land_on_the_drawn_cluster_rect.
