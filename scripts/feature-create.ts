@@ -37,7 +37,14 @@ interface ExtensionTypeConfig {
   syntaxFamily: string;
 }
 
-const EXTENSION_TYPES: Record<string, ExtensionTypeConfig> = {
+/** The extension families this scaffolder can generate. */
+type ExtensionType = 'container' | 'input';
+
+function isExtensionType(value: string): value is ExtensionType {
+  return value in EXTENSION_TYPES;
+}
+
+const EXTENSION_TYPES: Record<ExtensionType, ExtensionTypeConfig> = {
   container: {
     label: 'Container (:::)',
     description: 'Block-level container extension, e.g. :::map, :::note, :::html',
@@ -58,7 +65,7 @@ interface CreateConfig {
   id: string;
   name: string;
   containerName: string;
-  extensionType: string;
+  extensionType: ExtensionType;
   version: string;
   author: string;
   description: string;
@@ -556,7 +563,7 @@ function capitalize(str: string): string {
 interface CliOptions {
   name: string | null;
   containerName: string | null;
-  extensionType: string | null;
+  extensionType: ExtensionType | null;
   version: string;
   author: string;
   description: string;
@@ -588,6 +595,11 @@ function parseArgs(): CliOptions {
       options.containerName = nextArg;
       i++;
     } else if ((arg === '--type' || arg === '-t') && nextArg) {
+      if (!isExtensionType(nextArg)) {
+        throw new Error(
+          `Unknown extension type "${nextArg}". Expected one of: ${Object.keys(EXTENSION_TYPES).join(', ')}.`
+        );
+      }
       options.extensionType = nextArg;
       i++;
     } else if ((arg === '--version' || arg === '-v') && nextArg) {
@@ -662,7 +674,7 @@ async function main(): Promise<void> {
 
     let name: string = cliOptions.name!;
     let containerName: string = cliOptions.containerName!;
-    let extensionType: string = cliOptions.extensionType!;
+    let extensionType: ExtensionType = cliOptions.extensionType!;
     const version: string = cliOptions.version;
     const author: string = cliOptions.author;
     let description: string = cliOptions.description;
@@ -673,7 +685,7 @@ async function main(): Promise<void> {
 
     if (isInteractive) {
       if (!extensionType) {
-        const options: SelectOption[] = [
+        const options: Array<SelectOption & { value: ExtensionType }> = [
           {
             value: 'container',
             label: 'Container (:::)',
@@ -686,7 +698,7 @@ async function main(): Promise<void> {
           },
         ];
         const selected = await selectMenu('Select extension type:', options);
-        extensionType = selected || options[0].value;
+        extensionType = selected && isExtensionType(selected) ? selected : options[0].value;
       }
 
       const extConfig = EXTENSION_TYPES[extensionType]!;

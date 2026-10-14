@@ -63,7 +63,7 @@ interface ParsedFeature {
     ast: {
       type?: string;
       hasSelector?: boolean;
-      interface?: {
+      interface: {
         required?: string[];
         fields?: Record<string, unknown>;
       };
@@ -88,12 +88,12 @@ const RULES: Record<string, LintRule> = {
   'metadata-name-required': {
     severity: 'error',
     message: 'Feature name must not be empty',
-    check: feature => Boolean(feature.metadata?.name) && feature.metadata.name.length > 0,
+    check: feature => (feature.metadata?.name?.length ?? 0) > 0,
   },
   'metadata-description-required': {
     severity: 'warning',
     message: 'Feature description must not be empty',
-    check: feature => Boolean(feature.metadata?.description) && feature.metadata.description.length > 0,
+    check: feature => (feature.metadata?.description?.length ?? 0) > 0,
   },
   'metadata-license-required': {
     severity: 'warning',
@@ -108,7 +108,7 @@ const RULES: Record<string, LintRule> = {
   'ast-type-required': {
     severity: 'error',
     message: 'AST node type must be defined',
-    check: feature => Boolean(feature.syntax?.ast?.type) && feature.syntax.ast.type.length > 0,
+    check: feature => (feature.syntax?.ast?.type?.length ?? 0) > 0,
   },
   'ast-interface-required-nonempty': {
     severity: 'warning',
@@ -393,12 +393,14 @@ class FeatureLinter {
       if (braceCount === 0) {
         const fieldsStr = sourceCode.substring(startIndex, endIndex - 1);
         feature.syntax.ast.interface.fields = {};
+        // Held in a local so the narrowing survives into the forEach below.
+        const fields = feature.syntax.ast.interface.fields;
 
         const fieldNames = fieldsStr.match(/(\w+):\s*{/g);
         if (fieldNames) {
           fieldNames.forEach(match => {
             const name = match.match(/(\w+):/)![1];
-            feature.syntax.ast.interface.fields[name] = {};
+            fields[name] = {};
           });
         }
       }
