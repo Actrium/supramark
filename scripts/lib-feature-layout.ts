@@ -20,6 +20,13 @@ export interface FeaturePackageInfo {
   shortName: string;
   dir: string;
   relativeDir: string;
+  /**
+   * The feature object the package exports from its entry point, e.g.
+   * `weatherFeature`. Undefined when that entry exports no such value, or more
+   * than one — callers that need it (scripts/features-gen-bundle.ts) must fail
+   * loudly rather than guess.
+   */
+  exportName?: string;
   metadata?: {
     id?: string;
     name?: string;
@@ -186,6 +193,58 @@ function safeReadJson(filePath: string): PackageJson | null {
   }
 }
 
+/**
+ * The name of the value a feature package exports from its entry point, e.g.
+ * `weatherFeature` from `@supramark/feature-weather`.
+ *
+ * Read statically rather than by importing the entry: entry points re-export
+ * both `./runtime.web.js` and `./runtime.rn.js`, and importing the RN runtime
+ * outside React Native hangs (admonition, weather) or throws (video).
+ *
+ * Returns undefined unless exactly one exported value is named `*Feature`, so a
+ * non-conforming or ambiguous package surfaces as a failure, never as a guess.
+ */
+function readFeatureExportName(featureDir: string): string | undefined {
+  const entry = path.join(featureDir, 'src', 'index.ts');
+  if (!fs.existsSync(entry)) return undefined;
+
+  try {
+    const source = fs.readFileSync(entry, 'utf-8');
+    const names = new Set<string>();
+
+    // `export { a, b as c } from './feature.js'`, possibly spread over lines.
+    // `export type { ... }` does not match — type-only exports are not values.
+    for (const block of source.matchAll(/export\s*\{([^}]*)\}/g)) {
+      for (const exported of block[1]!.split(',')) {
+        const text = exported.trim();
+        if (!text || text.startsWith('type ')) continue;
+        const name = text
+          .split(/\s+as\s+/)
+          .pop()!
+          .trim();
+        // Skip anything that is not a bare identifier: a comment inside the
+        // brace block would otherwise ride along with the name after it.
+        if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+        names.add(name);
+      }
+    }
+
+    // `export const xFeature = ...`
+    for (const declaration of source.matchAll(
+      /export\s+(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g
+    )) {
+      names.add(declaration[1]!);
+    }
+
+    const featureNames = [...names].filter(name => name.endsWith('Feature'));
+    return featureNames.length === 1 ? featureNames[0] : undefined;
+  } catch {
+    // A caller that needs this name fails loudly on undefined; an unreadable
+    // entry point must not take down every consumer of discoverFeaturePackages.
+    return undefined;
+  }
+}
+
 export function discoverFeaturePackages(): FeaturePackageInfo[] {
   const results: FeaturePackageInfo[] = [];
 
@@ -237,6 +296,7 @@ export function discoverFeaturePackages(): FeaturePackageInfo[] {
             shortName,
             dir: fullPath,
             relativeDir: relativeDir.replace(/\\/g, '/'),
+            exportName: readFeatureExportName(fullPath),
             metadata,
           });
         } else {

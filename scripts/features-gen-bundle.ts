@@ -14,11 +14,23 @@ function generateBundle(platform: 'web' | 'rn') {
   const imports: string[] = [];
   const list: string[] = [];
 
-  allFeatures.forEach((f) => {
-    imports.push(
-      `import { ${f.exportName || f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature'} } from '${f.name}';`
-    );
-    list.push(f.exportName || f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature');
+  // The export name comes from the package's own entry point, never from the
+  // package name: `@supramark/feature-card-vison` exports `visonFeature`, so a
+  // `<camelShortName>Feature` guess writes an import that does not exist.
+  const unresolved = allFeatures.filter(f => !f.exportName);
+  if (unresolved.length > 0) {
+    console.error('[feature:bundle] Cannot resolve the feature export for:');
+    for (const feature of unresolved) {
+      console.error(
+        `  ${feature.shortName} (${feature.name}) — its src/index.ts must export exactly one value named *Feature.`
+      );
+    }
+    process.exit(1);
+  }
+
+  allFeatures.forEach(f => {
+    imports.push(`import { ${f.exportName} } from '${f.name}';`);
+    list.push(f.exportName!);
   });
 
   const content = `/* AUTO-GENERATED. DO NOT EDIT. */
