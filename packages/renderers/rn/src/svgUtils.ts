@@ -284,15 +284,44 @@ export function normalizeSvg(xml: string): string {
     const w = Number(fo.match(/\bwidth="([^"]*)"/)?.[1] ?? 0);
     const h = Number(fo.match(/\bheight="([^"]*)"/)?.[1] ?? 0);
     if (!w || !h) return '';
-    // Convert <br> and block-level closing tags (</p>/</div>) to spaces first
-    // as line/block boundaries to avoid lines running together; then strip
-    // remaining tags and take all plain text inside the foreignObject (not
-    // limited to <p> — venn labels use <span>).
-    const html = fo.replace(/<br\s*\/?>/gi, ' ').replace(/<\/(p|div|li|h[1-6])>/gi, ' ');
-    const text = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    // Convert <br> and block-level closing tags (</p>/</div>) to newlines: they
+    // mark line boundaries, and collapsing them into spaces made
+    // `Sub<br/>title` and `Sub title` render identically. Inline whitespace
+    // still collapses to one space, but the newline survives — `[^\S\n]`
+    // excludes it, where the plain `\s+` this replaces would have eaten it and
+    // undone the conversion above.
+    const html = fo.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '\n');
+    const text = html
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\S\n]+/g, ' ')
+      .replace(/\n{2,}/g, '\n')
+      .trim();
+    // Every newline here is a painted line, so a pretty-printed foreignObject
+    // would gain blank ones. Mermaid's generator and this repo's renderer both
+    // emit label HTML on a single line, and `\n{2,}` plus the trim above absorb
+    // the common cases — but a source that indents its label markup would need
+    // that rethought.
     if (!text) return '';
     const x = w / 2;
-    const y = h * 0.7;
+    // One <tspan> per line: react-native-svg draws a <text> as a single line and
+    // does not break on newlines. A single line keeps the plain text it had
+    // before, so nothing about one-line labels changes. The foreignObject's
+    // height covers every painted line, so dividing it by the line count gives
+    // the line box — for one line that is exactly the `h * 0.7` baseline this
+    // used to hardcode.
+    const lines = text.split('\n');
+    const lineHeight = h / lines.length;
+    const y = lineHeight * 0.7;
+    const label =
+      lines.length === 1
+        ? text
+        : lines
+            .map((line, i) =>
+              i === 0
+                ? `<tspan x="${x}">${line}</tspan>`
+                : `<tspan x="${x}" dy="${lineHeight}">${line}</tspan>`,
+            )
+            .join('');
     // Prefer the label's own text color, read only from a style="..." attribute (never the
     // visible label text) and only a real `color` property — the (?:^|;) boundary keeps
     // `background-color` from matching. Last match wins, i.e. the innermost span's color.
@@ -302,7 +331,7 @@ export function normalizeSvg(xml: string): string {
       const decl = sm[1].match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
       if (decl) labelFill = sanitizeCssValue(decl[1].replace(/\s*!important\s*$/i, '').trim());
     }
-    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: 16px">${text}</text>`;
+    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: 16px">${label}</text>`;
   });
 
   // 6. Protect <text>, strip the xml header/comments + whitespace between

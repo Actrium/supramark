@@ -91,13 +91,16 @@ test('normalizeSvg removes an empty foreignObject (width=0 or no text)', () => {
   expect(out).not.toContain('<text');
 });
 
-test('normalizeSvg joins multiple <p> texts inside a foreignObject into a single text', () => {
+// Each <p> is its own line, so it becomes its own <tspan>: react-native-svg
+// draws a <text> as a single line and does not break on newlines.
+test('normalizeSvg splits multiple <p> texts inside a foreignObject into lines', () => {
   const input =
     '<svg><foreignObject width="20" height="16">' +
     '<div><p>line1</p><p>line2</p></div>' +
     '</foreignObject></svg>';
   const out = normalizeSvg(input);
-  expect(out).toContain('>line1 line2<');
+  expect(out).toContain('<tspan x="10">line1</tspan>');
+  expect(out).toContain('<tspan x="10" dy="8">line2</tspan>');
 });
 
 // ============================================================================
@@ -219,14 +222,29 @@ test('normalizeSvg also extracts <span> text inside a foreignObject', () => {
   expect(out).toContain('>vennLabel<');
 });
 
-// <br/> is a line boundary; it must be converted to a space before tags are stripped, otherwise Line1<br/>Line2 becomes Line1Line2.
-test('normalizeSvg converts <br/> inside a foreignObject to a space to avoid lines running together', () => {
+// <br/> is a line boundary; it becomes a newline before tags are stripped, so it
+// must not be collapsed into a space first — otherwise Line1<br/>Line2 becomes
+// Line1Line2, and `Sub<br/>title` is indistinguishable from `Sub title`.
+test('normalizeSvg converts <br/> inside a foreignObject to a line break', () => {
   const input =
     '<svg><foreignObject width="40" height="32">' +
     '<div xmlns="x"><span class="nodeLabel"><p>Line1<br/>Line2</p></span></div></foreignObject></svg>';
   const out = normalizeSvg(input);
-  expect(out).toContain('>Line1 Line2<');
+  expect(out).toContain('<tspan x="20">Line1</tspan>');
+  expect(out).toContain('<tspan x="20" dy="16">Line2</tspan>');
   expect(out).not.toContain('>Line1Line2<');
+  expect(out).not.toContain('>Line1 Line2<');
+});
+
+// A one-line label keeps the plain text it has always had: no <tspan>, and the
+// same `h * 0.7` baseline (for one line, h / 1 is h).
+test('normalizeSvg leaves a single-line foreignObject as plain text', () => {
+  const input =
+    '<svg><foreignObject width="40" height="16">' +
+    '<div xmlns="x"><span class="nodeLabel"><p>Only line</p></span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  expect(out).toContain('>Only line</text>');
+  expect(out).not.toContain('<tspan');
 });
 
 // A bare d2 <text> (no style, no fill) must also get a default color fallback, otherwise it defaults to black.
