@@ -2459,9 +2459,17 @@ fn render_isolated_cluster_inner_root(
     }
     out.push_str(unified_shell::close_layer());
 
-    // Build cluster_bounds for edge clipping: non-isolated sub-clusters
-    // that are descendants of cnode.id. Their bounds (from l.clusters)
-    // are already in the inner dagre coordinate frame.
+    // Build cluster_bounds for edge clipping: sub-clusters that are
+    // descendants of cnode.id. Their bounds (from l.clusters) are already in
+    // the inner dagre coordinate frame.
+    //
+    // An isolated sub-cluster draws its own contents in its own inner root, so
+    // it contributes no bounds of its own — except that an edge *between two
+    // sibling isolated sub-clusters* (B1 --> B2) is emitted here, in the
+    // parent's edgePaths, with the sub-clusters themselves as endpoints. Those
+    // bounds are lifted out of the sub-cluster's own frame by the translate its
+    // inner root carries, which for a nested isolated cluster is already
+    // relative to the parent's inner frame.
     let inner_cluster_bounds: std::collections::HashMap<String, crate::layout::unified::Bounds> = l
         .clusters
         .iter()
@@ -2473,10 +2481,15 @@ fn render_isolated_cluster_inner_root(
             if !is_descendant_of(&c.id, &cnode.id, l) {
                 return None;
             }
-            if l.isolated_cluster_ids.contains(&c.id) {
-                return None;
+            if !l.isolated_cluster_ids.contains(&c.id) {
+                return Some((c.id.clone(), *b));
             }
-            Some((c.id.clone(), *b))
+            let sub = l.nodes.iter().find(|n| n.id == c.id && n.is_group)?;
+            let (tx, ty) = isolated_cluster_translate(sub);
+            let mut lifted = *b;
+            lifted.x += tx;
+            lifted.y += ty;
+            Some((c.id.clone(), lifted))
         })
         .collect();
 
@@ -5372,6 +5385,103 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, 8, "expected all 8 cluster-endpoint edges");
+    }
+
+    /// Absolute rect of every cluster in the SVG. A root group's translate
+    /// accumulates through nesting, so a nested sub-cluster's rect is lifted by
+    /// the sum of the translates along its chain.
+    fn absolute_cluster_rects(svg: &str) -> Vec<(String, f64, f64, f64, f64)> {
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let cluster_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*id="([^"]+)"[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        let clusters: Vec<(usize, String, f64, f64, f64, f64)> = cluster_re
+            .captures_iter(svg)
+            .map(|c| {
+                (
+                    c.get(0).unwrap().start(),
+                    c[1].to_string(),
+                    c[2].parse().unwrap(),
+                    c[3].parse().unwrap(),
+                    c[4].parse().unwrap(),
+                    c[5].parse().unwrap(),
+                )
+            })
+            .collect();
+
+        let tag_re = regex::Regex::new(r"<g\b[^>]*>|</g>").unwrap();
+        let mut stack: Vec<(f64, f64)> = vec![(0.0, 0.0)];
+        let mut out = Vec::new();
+        let mut next = 0;
+        for tag in tag_re.find_iter(svg) {
+            while next < clusters.len() && clusters[next].0 < tag.start() {
+                let (_, id, x, y, w, h) = &clusters[next];
+                let (px, py) = *stack.last().unwrap();
+                let (x0, y0) = (px + x, py + y);
+                out.push((id.clone(), x0, y0, x0 + w, y0 + h));
+                next += 1;
+            }
+            let t = tag.as_str();
+            if t.starts_with("</g") {
+                if stack.len() > 1 {
+                    stack.pop();
+                }
+            } else if let Some(m) = root_re.captures(t) {
+                let (px, py) = *stack.last().unwrap();
+                stack.push((
+                    px + m[1].parse::<f64>().unwrap(),
+                    py + m[2].parse::<f64>().unwrap(),
+                ));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sibling_isolated_subcluster_edges_land_on_their_rects() {
+        // Regression guard for the nested case: an edge between two sibling
+        // isolated sub-clusters is emitted in the parent's edgePaths with the
+        // clusters themselves as endpoints, so the clip map has to carry their
+        // rects, lifted out of each sub-cluster's own frame.
+        let src = "flowchart LR\n\
+            subgraph TOP\n direction TB\n\
+            subgraph B1\n i1 --> f1\n end\n\
+            subgraph B2\n i2 --> f2\n end\n\
+            end\n\
+            A --> TOP --> B\n B1 --> B2\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        let rects = absolute_cluster_rects(&svg);
+        assert!(rects.len() >= 3, "expected TOP/B1/B2, got {}", rects.len());
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_B1_B2_0""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let cap = path_re.captures(&svg).expect("B1 --> B2 edge");
+        let nums: Vec<_> = num_re.captures_iter(&cap[1]).collect();
+        for (label, idx) in [("start", 0), ("end", nums.len() - 1)] {
+            let px: f64 = nums[idx][1].parse().unwrap();
+            let py: f64 = nums[idx][2].parse().unwrap();
+            let dist = rects
+                .iter()
+                .map(|(_, x0, y0, x1, y1)| {
+                    (px - x0)
+                        .abs()
+                        .min((px - x1).abs())
+                        .min((py - y0).abs())
+                        .min((py - y1).abs())
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                dist < 6.0,
+                "{label} of B1 --> B2 sits {dist}px off every cluster rect"
+            );
+        }
     }
 
     #[test]
