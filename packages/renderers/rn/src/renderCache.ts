@@ -6,10 +6,13 @@ export interface RendererCachePolicy {
   maxSize: number;
   ttl?: number;
   /**
-   * Optional total-byte cap. When set, the cache evicts oldest entries until
+   * Resolved total-byte cap. When set, the cache evicts oldest entries until
    * the summed `sizeCalculator` output fits, in addition to the entry-count
-   * `maxSize` bound. `undefined` or `0` disables the byte bound (an explicit
-   * `0` is the documented opt-out; leaving it unset applies the 8 MB default).
+   * `maxSize` bound. On a resolved policy `undefined` means "no byte bound";
+   * it only results from an explicitly configured non-positive or non-finite
+   * value. An unset host-config value is not "no bound": it falls through the
+   * layers and ends at the 8 MB default when none of them configures one (see
+   * `RendererCachePolicyInput` for the input-side semantics).
    *
    * Warning: `maxBytes: 0` means NO byte cap — it is not "cache disabled" and
    * not a memory limit. The byte bound only trims how much can be retained;
@@ -24,6 +27,13 @@ export interface RendererCachePolicyInput {
   enabled?: boolean;
   maxSize?: number;
   ttl?: number;
+  /**
+   * Host-facing byte cap. Semantics differ from the resolved
+   * `RendererCachePolicy.maxBytes`: an unset (`undefined`) value means "not
+   * configured" — it falls through to the next layer and only becomes the
+   * 8 MB default when no layer configures one — while an explicit `0` (or any
+   * non-positive / non-finite value) opts OUT of the byte bound.
+   */
   maxBytes?: number;
 }
 
@@ -154,23 +164,55 @@ export class AsyncRendererCache<T> {
 // estimator (it is proportional to payload, not to the bound).
 const rendererCaches = new Map<string, AsyncRendererCache<unknown>>();
 
-/** Resolves an engine override on top of the diagram-wide cache policy. */
-export function resolveRendererCachePolicy(
+/**
+ * Normalizes one raw maxBytes value into the resolved byte cap: a positive
+ * finite number is kept, anything else (explicit `0`, negative, NaN,
+ * Infinity) means "no byte cap" (undefined). This mirrors ttl resolution and
+ * `LRUCache.reconfigure`, so a host can disable the byte bound with
+ * `maxBytes: 0` instead of being silently bumped back to the default.
+ */
+function normalizeMaxBytes(raw: number): number | undefined {
+  return Number.isFinite(raw) && raw > 0 ? raw : undefined;
+}
+
+/**
+ * Resolves maxBytes across an override/fallback INPUT pair. Unset on both
+ * sides applies the 8 MB default; an explicit value on either side (including
+ * an explicit `0` → no byte cap) resolves via `normalizeMaxBytes`. The unset
+ * check happens BEFORE normalization so "not configured" and "explicitly no
+ * cap" stay distinguishable until this final step (issue #231).
+ */
+function resolveMaxBytes(
+  override: number | undefined,
+  fallback: number | undefined
+): number | undefined {
+  const raw = override ?? fallback;
+  return raw === undefined ? DEFAULT_CACHE_MAX_BYTES : normalizeMaxBytes(raw);
+}
+
+/**
+ * Resolves the policy fields that survive a second fold. `enabled` / `maxSize`
+ * / `ttl` normalise idempotently, so folding them twice (diagram fallback,
+ * then engine override) is safe. `maxBytes` is deliberately absent from this
+ * type: it is NOT idempotent across a fold, because a resolved policy's
+ * `undefined` means "no byte bound" while an input's `undefined` means "not
+ * configured" (see `resolveDiagramCachePolicy`).
+ */
+interface ResolvedCommonPolicyFields {
+  enabled: boolean;
+  maxSize: number;
+  ttl?: number;
+}
+
+function resolveCommonPolicyFields(
   override: RendererCachePolicyInput | undefined,
   fallback: RendererCachePolicyInput | undefined
-): RendererCachePolicy {
-  const enabled = override?.enabled ?? fallback?.enabled ?? false;
+): ResolvedCommonPolicyFields {
   const configuredMaxSize = override?.maxSize ?? fallback?.maxSize ?? DEFAULT_CACHE_MAX_SIZE;
   const configuredTtl = override?.ttl ?? fallback?.ttl;
-  // Distinguish "not configured" (→ default 8 MB cap) from an explicit zero or
-  // invalid value (→ undefined, no byte cap). This mirrors ttl resolution and
-  // LRUCache.reconfigure, so a host can disable the byte bound with maxBytes: 0
-  // instead of being silently bumped back to the default. Without this, the 0
-  // case was indistinguishable from "unset", which both fell through to 8 MB.
-  const rawMaxBytes = override?.maxBytes ?? fallback?.maxBytes;
 
   return {
-    enabled,
+    enabled: override?.enabled ?? fallback?.enabled ?? false,
     maxSize: Number.isFinite(configuredMaxSize)
       ? Math.max(0, Math.floor(configuredMaxSize))
       : DEFAULT_CACHE_MAX_SIZE,
@@ -178,26 +220,46 @@ export function resolveRendererCachePolicy(
       configuredTtl !== undefined && Number.isFinite(configuredTtl) && configuredTtl > 0
         ? configuredTtl
         : undefined,
-    maxBytes:
-      rawMaxBytes === undefined
-        ? DEFAULT_CACHE_MAX_BYTES
-        : Number.isFinite(rawMaxBytes) && rawMaxBytes > 0
-          ? rawMaxBytes
-          : undefined,
   };
 }
 
-/** Resolves engine > diagram default > global cache precedence. */
+/** Resolves an engine override on top of the diagram-wide cache policy. */
+export function resolveRendererCachePolicy(
+  override: RendererCachePolicyInput | undefined,
+  fallback: RendererCachePolicyInput | undefined
+): RendererCachePolicy {
+  return {
+    ...resolveCommonPolicyFields(override, fallback),
+    maxBytes: resolveMaxBytes(override?.maxBytes, fallback?.maxBytes),
+  };
+}
+
+/**
+ * Resolves engine > diagram default > global cache precedence.
+ *
+ * enabled/maxSize/ttl fold through the two-step resolution because their
+ * normalization is idempotent over already-resolved values, and
+ * `resolveCommonPolicyFields` returns a value with no maxBytes field for them
+ * to carry along. maxBytes deliberately does not ride that fold: a resolved
+ * policy's `undefined` means "no byte cap" while an input's `undefined` means
+ * "not configured", so feeding a resolved value back in as an input would
+ * silently restore the 8 MB default (issue #231). It is resolved directly
+ * across the raw input layers instead: engine > diagram > 8 MB default
+ * (globalCache carries no maxBytes).
+ */
 export function resolveDiagramCachePolicy(
   enginePolicy: RendererCachePolicyInput | undefined,
   diagramPolicy: RendererCachePolicyInput | undefined,
   globalCache: boolean | undefined
 ): RendererCachePolicy {
-  const diagramFallback = resolveRendererCachePolicy(
+  const diagramFallback = resolveCommonPolicyFields(
     diagramPolicy,
     globalCache === undefined ? undefined : { enabled: globalCache }
   );
-  return resolveRendererCachePolicy(enginePolicy, diagramFallback);
+  return {
+    ...resolveCommonPolicyFields(enginePolicy, diagramFallback),
+    maxBytes: resolveMaxBytes(enginePolicy?.maxBytes, diagramPolicy?.maxBytes),
+  };
 }
 
 /**

@@ -188,7 +188,13 @@ export interface SupramarkDiagramEngineConfig {
   cache?: {
     enabled?: boolean;
     maxSize?: number;
-    /** Maximum estimated resident bytes for this engine's runtime cache. */
+    /**
+     * Maximum estimated resident bytes for this engine's runtime cache. `0`
+     * (or any non-positive / non-finite value) disables the byte bound — it
+     * is NOT "cache disabled": the cache keeps storing entries, it just stops
+     * evicting by bytes. Use `enabled: false` or `maxSize: 0` to disable
+     * caching entirely. Honored by @supramark/rn only.
+     */
     maxBytes?: number;
     ttl?: number;
   };
@@ -221,7 +227,21 @@ export interface SupramarkDiagramConfig {
   defaultCache?: {
     enabled?: boolean;
     maxSize?: number;
-    /** Maximum estimated resident bytes for a runtime cache. */
+    /**
+     * Maximum estimated resident bytes for a runtime cache. `0` (or any
+     * non-positive / non-finite value) disables the byte bound — it is NOT
+     * "cache disabled": the cache keeps storing entries, it just stops
+     * evicting by bytes. Use `enabled: false` or `maxSize: 0` to disable
+     * caching entirely. Honored by @supramark/rn only.
+     *
+     * Scope: this value bounds the shared parsed-document cache only while
+     * document-level caching is on — `enabled: true` here or
+     * `options.cache: true`. With document-level caching off, that cache takes
+     * its bound from the enabled engines instead: the strictest resolved bound
+     * among them, where an engine that enables caching without its own
+     * maxBytes contributes the 8 MB default. `engines[].cache.maxBytes` also
+     * overrides this value for that engine's own diagram cache.
+     */
     maxBytes?: number;
     ttl?: number;
   };
