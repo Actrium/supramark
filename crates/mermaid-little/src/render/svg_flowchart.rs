@@ -2485,6 +2485,19 @@ fn render_isolated_cluster_inner_root(
                 return Some((c.id.clone(), *b));
             }
             let sub = l.nodes.iter().find(|n| n.id == c.id && n.is_group)?;
+            // The renderer places this sub-cluster's root group by outer_tx/
+            // outer_ty. Without them `isolated_cluster_translate` falls back to
+            // the inner-pass coordinates, which are in the wrong frame — skip
+            // the entry rather than lift the rect by a wrong offset and let the
+            // snap act on it.
+            if !sub.extra.contains_key("outer_tx") || !sub.extra.contains_key("outer_ty") {
+                log::debug!(
+                    "svg_flowchart: nested isolated cluster '{}' has no outer translate; \
+                     leaving its rect out of the clip map",
+                    c.id
+                );
+                return None;
+            }
             let (tx, ty) = isolated_cluster_translate(sub);
             let mut lifted = *b;
             lifted.x += tx;
