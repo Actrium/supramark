@@ -320,6 +320,160 @@ fn flowchart_134_isolated_cluster_has_browser_aligned_bounds() {
     let vb = viewbox(&svg);
     assert!(vb[2] > 1.0, "{rel} width should be non-empty: {vb:?}");
     assert!(vb[3] > 1.0, "{rel} height should be non-empty: {vb:?}");
+
+    // Regression guard: the viewBox used to be computed without the isolated
+    // cluster's inner-root translate, so the cluster — and everything below its
+    // row — landed outside the viewport (clipped by browsers, painted outside
+    // the host view on React Native). Every drawn cluster rect must sit inside.
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(!rects.is_empty(), "{rel} should emit cluster rects");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "{rel}: cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+    // The viewport tracks the drawing: the outermost cluster plus 8px padding.
+    assert!(
+        (vb[2] - 570.027).abs() < 0.5 && (vb[3] - 350.668).abs() < 0.5,
+        "{rel}: viewBox drifted to {vb:?}"
+    );
+}
+
+#[test]
+fn flowchart_isolated_cluster_below_the_node_row_stays_inside_the_viewbox() {
+    // The shape from the chat report: dagre places the subgraph below the node
+    // row, so the cluster is laid out recursively (isolated) and drawn inside a
+    // translated inner root. Computing the viewBox without that translate used to
+    // leave the cluster — and everything below its row — outside the viewport.
+    let svg = mermaid_little::convert_with_id(
+        "flowchart TB\n\
+         subgraph g[\"gate\"]\n     a[\"if: always()\"]\n     b[\"result != success\"]\n   end\n\
+         n0[\"rust\"] --> g\n   n1[\"test\"] --> g\n",
+        "t-isolated-cluster",
+    )
+    .expect("render isolated cluster");
+
+    let vb = viewbox(&svg);
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(!rects.is_empty(), "expected a cluster rect, got none");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+}
+
+#[test]
+fn flowchart_nested_isolated_clusters_stay_inside_the_viewbox() {
+    // Nested isolated clusters carry their placement in the parent's inner frame
+    // (dagre_bridge `outer_tx/outer_ty`), which the viewBox union has to compose
+    // the same way the inner-root emission does.
+    let svg = mermaid_little::convert_with_id(
+        "flowchart TB\n\
+         subgraph outer[\"outer\"]\n\
+           subgraph inner[\"inner\"]\n     n0[\"a\"]\n   end\n\
+           n1[\"b\"]\n\
+         end\n\
+         n2[\"c\"] --> outer\n",
+        "t-nested-cluster",
+    )
+    .expect("render nested clusters");
+
+    let vb = viewbox(&svg);
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(rects.len() >= 2, "expected both clusters, got {rects:?}");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "nested cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+}
+
+/// Every cluster `<rect>`, in viewBox coordinates: the scan composes the
+/// `translate(...)` of each enclosing `<g>` (isolated clusters are drawn inside
+/// their own translated inner root) and only counts rects whose nearest
+/// ancestor `<g>` carries a `cluster` class.
+fn cluster_rects_in_viewbox_coords(svg: &str) -> Vec<(f64, f64, f64, f64)> {
+    let tag_re =
+        regex::Regex::new(r#"<(\/?)([A-Za-z][\w:.-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>"#)
+            .expect("tag regex");
+    let translate_re = regex::Regex::new(r#"translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)"#)
+        .expect("translate regex");
+    let attr_re = |attrs: &str, name: &str| -> Option<f64> {
+        regex::Regex::new(&format!(r#"\b{name}="([-\d.]+)""#))
+            .ok()?
+            .captures(attrs)?
+            .get(1)?
+            .as_str()
+            .parse::<f64>()
+            .ok()
+    };
+
+    let mut rects = Vec::new();
+    // Frame: (accumulated translate, translate of the nearest cluster ancestor).
+    let mut stack: Vec<((f64, f64), Option<(f64, f64)>)> = vec![((0.0, 0.0), None)];
+    for caps in tag_re.captures_iter(svg) {
+        let closing = &caps[1];
+        let name = caps[2].to_ascii_lowercase();
+        let attrs = &caps[3];
+        let self_closing = !caps[4].is_empty();
+
+        if !closing.is_empty() {
+            if stack.len() > 1 {
+                stack.pop();
+            }
+            continue;
+        }
+
+        let (parent_t, parent_cluster) = *stack.last().expect("stack frame");
+        let extra = translate_re
+            .captures(attrs)
+            .map(|c| {
+                (
+                    c[1].parse::<f64>().unwrap_or(0.0),
+                    c[2].parse::<f64>().unwrap_or(0.0),
+                )
+            })
+            .unwrap_or((0.0, 0.0));
+        let acc = (parent_t.0 + extra.0, parent_t.1 + extra.1);
+        let is_cluster =
+            attrs.contains(r#"class="cluster"#) || attrs.contains(r#"class="cluster "#);
+        let cluster_frame = if is_cluster {
+            Some(acc)
+        } else {
+            parent_cluster
+        };
+
+        if name == "rect" {
+            if let Some((cx, cy)) = cluster_frame {
+                if let (Some(x), Some(y), Some(w), Some(h)) = (
+                    attr_re(attrs, "x"),
+                    attr_re(attrs, "y"),
+                    attr_re(attrs, "width"),
+                    attr_re(attrs, "height"),
+                ) {
+                    rects.push((cx + x, cy + y, w, h));
+                }
+            }
+        }
+
+        if !self_closing {
+            stack.push((acc, cluster_frame));
+        }
+    }
+    rects
 }
 
 #[test]

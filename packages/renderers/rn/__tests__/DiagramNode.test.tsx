@@ -101,6 +101,28 @@ function normalizationFailureResult(): DiagramRenderResult {
   };
 }
 
+/** A very tall diagram, so the aspect-derived height exceeds the height budget. */
+function tallResult(): DiagramRenderResult {
+  return {
+    id: 'test-tall',
+    engine: 'mermaid',
+    success: true,
+    format: 'svg',
+    payload: '<svg viewBox="0 0 100 10000"></svg>',
+  };
+}
+
+/** An SVG carrying neither a viewBox nor width/height attributes. */
+function sizelessResult(): DiagramRenderResult {
+  return {
+    id: 'test-sizeless',
+    engine: 'mermaid',
+    success: true,
+    format: 'svg',
+    payload: '<svg></svg>',
+  };
+}
+
 // create / update must be wrapped in act so effects flush synchronously; the
 // extra microtask wait lets setState inside useEffect complete within the
 // act boundary, avoiding act warnings.
@@ -350,20 +372,60 @@ describe('DiagramNode streaming defer/render', () => {
     await unmount(restoredMermaid);
   });
 
-  // --- #211/#217: lock the diagram.maxWidth contract. Dimensions is mocked at
-  // 375 wide, so the screen-derived cap is 337.5; a configured maxWidth caps
-  // below that. SvgXml is a mocked host component, so its width prop is the
-  // resolved chartWidth. ---
-  function svgWidthOf(renderer: ReactTestRenderer): number | undefined {
-    const svg = renderer.root.findAll(node => node.type === 'SvgXml')[0];
-    return svg?.props.width as number | undefined;
+  // --- #211/#217: lock the diagram width contract. The diagram declares the
+  // SVG's intrinsic width so a shrink-wrapped parent (a bubble with only a max
+  // width) still expands, and the container caps it through maxWidth:'100%';
+  // the window/screen size takes no part. Dimensions is mocked at 375 wide —
+  // none of the expectations below may depend on it. ---
+  function diagramBoxNode(renderer: ReactTestRenderer) {
+    return renderer.root.findAllByProps({
+      testID: 'supramark-diagram-svg',
+    })[0];
   }
 
-  test('clamps a wide diagram to the screen-derived cap when maxWidth is unset', async () => {
+  function diagramBoxStyle(renderer: ReactTestRenderer): Record<string, unknown> {
+    const style = diagramBoxNode(renderer)?.props.style as
+      | Record<string, unknown>
+      | Record<string, unknown>[];
+    // StyleSheet.create is an identity mock, so the style array holds plain objects.
+    return Object.assign({}, ...(Array.isArray(style) ? style : [style]));
+  }
+
+  /** Simulates the native layout reporting the width the container granted. */
+  async function grantWidth(
+    renderer: ReactTestRenderer,
+    width: number
+  ): Promise<void> {
+    const box = diagramBoxNode(renderer);
+    await act(async () => {
+      box.props.onLayout({
+        nativeEvent: { layout: { x: 0, y: 0, width, height: 0 } },
+      });
+      await Promise.resolve();
+    });
+  }
+
+  test('declares the intrinsic width and leaves the final width to the container', async () => {
     const renderer = await renderWithState(createDiagramNode(true), 'complete');
     await resolveEngine(wideResult());
 
-    expect(svgWidthOf(renderer)).toBe(375 * 0.9);
+    const style = diagramBoxStyle(renderer);
+    expect(style.width).toBe(1000);
+    // 1000 / 2 — the height follows the width so the box matches the drawing.
+    expect(style.height).toBe(500);
+    expect(style.maxWidth).toBe('100%');
+    await unmount(renderer);
+  });
+
+  test('derives the box height from the width the container grants', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(wideResult());
+    // Yoga derives an `aspectRatio` height from the declared 1000 while the
+    // container clamps the box to 250, which would leave the surplus as blank
+    // space below the drawing; the granted width has to drive the height.
+    await grantWidth(renderer, 250);
+
+    expect(diagramBoxStyle(renderer).height).toBe(125);
     await unmount(renderer);
   });
 
@@ -373,18 +435,68 @@ describe('DiagramNode streaming defer/render', () => {
     });
     await resolveEngine(wideResult());
 
-    expect(svgWidthOf(renderer)).toBe(200);
+    const style = diagramBoxStyle(renderer);
+    expect(style.width).toBe(200);
+    expect(style.height).toBe(100);
+    expect(style.maxWidth).toBe('100%');
     await unmount(renderer);
   });
 
-  test('keeps the 0.6x floor under a configured maxWidth for a small intrinsic diagram', async () => {
+  test('renders a small diagram at its intrinsic size instead of upscaling it', async () => {
     const renderer = await renderWithState(createDiagramNode(true), 'complete', {
       maxWidth: 200,
     });
-    // Intrinsic width 10 is far below both caps, so the floor applies.
+    // Intrinsic 10 stays untouched: previous releases upscaled it to a 0.6×
+    // floor of the display cap.
     await resolveEngine(successfulResult());
 
-    expect(svgWidthOf(renderer)).toBe(200 * 0.6);
+    const style = diagramBoxStyle(renderer);
+    expect(style.width).toBe(10);
+    expect(style.height).toBe(10);
+    await unmount(renderer);
+  });
+
+  test('trims a tall diagram width so its aspect-derived height stays in budget', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(tallResult());
+
+    const style = diagramBoxStyle(renderer);
+    // 500 × 100 / 10000 = 5 wide, and 5 / 0.01 = 500 tall.
+    expect(style.width).toBe(5);
+    expect(style.height).toBe(500);
+    await unmount(renderer);
+  });
+
+  test('falls back to a fixed size for an SVG that exposes no intrinsic size', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(sizelessResult());
+
+    const style = diagramBoxStyle(renderer);
+    // Never width:'100%': it resolves to 0 inside a shrink-wrapped bubble and
+    // would collapse it (the host has a regression test for exactly that).
+    expect(style.width).toBe(300);
+    expect(style.height).toBe(300);
+    await unmount(renderer);
+  });
+
+  test('scales the svg to the box instead of to a fixed pixel size', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(wideResult());
+
+    const svg = renderer.root.findAll(node => node.type === 'SvgXml')[0];
+    expect(svg?.props.width).toBe('100%');
+    expect(svg?.props.height).toBe('100%');
+    await unmount(renderer);
+  });
+
+  test('does not clip the diagram box', async () => {
+    const renderer = await renderWithState(createDiagramNode(true), 'complete');
+    await resolveEngine(wideResult());
+
+    // Engines emit viewBoxes that do not cover their own drawing (upstream
+    // Mermaid does this for clustered flowcharts), so clipping to the viewport
+    // would truncate the diagram. Browsers clip; RN hosts show it whole.
+    expect(diagramBoxStyle(renderer).overflow).toBeUndefined();
     await unmount(renderer);
   });
 });
