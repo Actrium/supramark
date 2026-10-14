@@ -1038,16 +1038,23 @@ function MarkdownImage({
 
   // A TouchableOpacity becomes the accessible element for its subtree, so the
   // label must live on the wrapper or it is easy to lose. When wrapped, the
-  // inner image/placeholder stops being individually focusable instead.
+  // inner subtree is pruned from the Android traversal instead (see
+  // innerAccessibilityProps below).
   const wrapped = Boolean(linkUrl || onImagePress);
   // Empty alt + no title marks the image as decorative for screen readers —
   // but only when nothing actionable wraps it. The wrapper IS the link /
   // press control: hiding it (accessibilityElementsHidden +
   // no-hide-descendants) would make the control unreachable, so a decorative
   // wrapped image instead keeps the wrapper exposed and falls back to the
-  // link URL for its accessible name.
+  // link URL for its accessible name. The label chain ends with the shared
+  // imageFallbackLabel so a press wrapper around an unlabeled, linkless
+  // image still has an accessible name: without that term the chain would
+  // end at `undefined` and, the inner image being `accessible={false}`, the
+  // screen reader would have nothing to synthesize a name from (WCAG 4.1.2).
+  // For an unwrapped image the fallback term is inert: no alt/title makes
+  // the image decorative, and a hidden element is never read.
   const isDecorative = !image.alt && !image.title && !wrapped;
-  const accessibilityLabel = image.alt || image.title || linkUrl || undefined;
+  const accessibilityLabel = image.alt || image.title || linkUrl || imageFallbackLabel(image);
   const accessibilityProps: {
     accessibilityLabel?: string;
     accessibilityElementsHidden: boolean;
@@ -1057,7 +1064,18 @@ function MarkdownImage({
     accessibilityElementsHidden: isDecorative,
     importantForAccessibility: isDecorative ? 'no-hide-descendants' : 'yes',
   };
-  const innerAccessibilityProps = wrapped ? { accessible: false } : accessibilityProps;
+  // `accessible={false}` alone is not enough on Android: it maps only to
+  // View.setFocusable(), and TalkBack still traverses by
+  // importantForAccessibility and readable content, so the placeholder's
+  // <Text> child would keep receiving focus and be announced a second time
+  // inside the wrapper. 'no-hide-descendants' prunes the whole inner subtree;
+  // the label already lives on the wrapper. iOS keeps its existing behavior.
+  const innerAccessibilityProps = wrapped
+    ? {
+        accessible: false as const,
+        importantForAccessibility: 'no-hide-descendants' as const,
+      }
+    : accessibilityProps;
 
   const imageContent = (
     <View style={styles.imageContainer}>
@@ -1872,10 +1890,11 @@ function renderInlineNodes(
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
   config?: SupramarkConfig,
-  parentType?: string
+  parentType?: string,
+  linkUrl?: string
 ): RenderedNode {
   return nodes.map((node, index) =>
-    renderInlineNode(node, index, styles, highlighted, config, parentType)
+    renderInlineNode(node, index, styles, highlighted, config, parentType, linkUrl)
   );
 }
 
@@ -1885,7 +1904,8 @@ function renderInlineNode(
   styles: ReturnType<typeof mergeStyles>,
   highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
   config?: SupramarkConfig,
-  parentType?: string
+  parentType?: string,
+  linkUrl?: string
 ): RenderedNode {
   switch (node.type) {
     case 'text': {
@@ -1902,11 +1922,11 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong');
+        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong', linkUrl);
       }
       return (
         <Text key={key} style={styles.strong}>
-          {renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong')}
+          {renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong', linkUrl)}
         </Text>
       );
     }
@@ -1914,7 +1934,7 @@ function renderInlineNode(
       const emphasisNode = node;
       return (
         <Text key={key} style={styles.emphasis}>
-          {renderInlineNodes(emphasisNode.children, styles, highlighted, config)}
+          {renderInlineNodes(emphasisNode.children, styles, highlighted, config, undefined, linkUrl)}
         </Text>
       );
     }
@@ -1949,27 +1969,63 @@ function renderInlineNode(
             Linking.openURL(linkNode.url).catch(err => console.error('Failed to open URL:', err));
           }}
         >
-          {renderInlineNodes(linkNode.children, styles, highlighted, config)}
+          {renderInlineNodes(linkNode.children, styles, highlighted, config, undefined, linkNode.url)}
         </Text>
       );
     }
     case 'image': {
       const imageNode = node;
       // Empty alt + no title marks the image as decorative for screen readers.
-      const isDecorative = !imageNode.alt && !imageNode.title;
+      // Mirrors the block path's rule that nothing actionable may wrap it:
+      // inline nodes have no press wrapper, but a link does wrap them
+      // (`linkUrl` is fed by the link recursion). Hiding a decorative image
+      // inside a link would leave the link without a readable name (WCAG
+      // 4.1.2), so a linked inline image stays exposed and is named by alt,
+      // then title, then the link URL, exactly as the block path names a
+      // wrapped image. Whether that name reaches a screen reader is a separate
+      // question — the props note below is about it. A linked *unloadable*
+      // image is the one cell without that chain: it exposes the fallback
+      // <Text> instead, and its name is whatever that text says.
+      const isDecorative = !imageNode.alt && !imageNode.title && !linkUrl;
+      // Not decorative ⇒ at least one of alt / title / linkUrl is a non-empty
+      // string, so this chain always yields a name. The block path needs its
+      // extra imageFallbackLabel term only because a press wrapper can exist
+      // without any link URL.
+      const accessibilityLabel = isDecorative
+        ? undefined
+        : imageNode.alt || imageNode.title || linkUrl;
+      // These props only matter once the node has a native view of its own;
+      // the host's `selection` mode is what gives it one, by wrapping it in a
+      // <View> (see the selection variant test in image.test.tsx). Which
+      // platform then acts on them is up to RN's own text containers, so no
+      // claim is made here: in the default configuration an inline node stays
+      // inside the paragraph, and its content is announced — or not — as part
+      // of that paragraph's text.
       // Mixed-content / table / heading images go through here; the same
       // loadability rule as the block path applies — an empty or relative src
       // would render as a blank 20×20 hole, so show the alt text instead.
       if (!hasLoadableImageUrl(imageNode.url)) {
         // Inherits the surrounding Text style; mirrors the block placeholder
-        // label without breaking the inline flow.
-        return <SelectionInlineObject key={key} node={node}><Text>{imageFallbackLabel(imageNode)}</Text></SelectionInlineObject>;
+        // label without breaking the inline flow. The decorative flags match
+        // the block placeholder too (#217 wanted the visible label; this only
+        // adds muting), so `![](relative.png)` no longer flips between muted
+        // in block position and announced inline.
+        return (
+          <SelectionInlineObject key={key} node={node}>
+            <Text
+              accessibilityElementsHidden={isDecorative}
+              importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
+            >
+              {imageFallbackLabel(imageNode)}
+            </Text>
+          </SelectionInlineObject>
+        );
       }
       return (
         <SelectionInlineObject key={key} node={node}>
         <Image
           source={{ uri: imageNode.url }}
-          accessibilityLabel={imageNode.alt || imageNode.title || undefined}
+          accessibilityLabel={accessibilityLabel}
           accessibilityElementsHidden={isDecorative}
           importantForAccessibility={isDecorative ? 'no-hide-descendants' : 'yes'}
           style={styles.inlineImage}
@@ -1984,7 +2040,7 @@ function renderInlineNode(
       const deleteNode = node;
       return (
         <Text key={key} style={styles.delete}>
-          {renderInlineNodes(deleteNode.children, styles, highlighted, config)}
+          {renderInlineNodes(deleteNode.children, styles, highlighted, config, undefined, linkUrl)}
         </Text>
       );
     }
