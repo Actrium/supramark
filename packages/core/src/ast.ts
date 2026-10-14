@@ -217,7 +217,9 @@ export interface SupramarkDiagramConfig {
    * Units are RN dp, and the value is a cap, not a target: the diagram renders
    * at its intrinsic width (never upscaled), narrowed by the container it is
    * rendered into and by this cap, whichever is smaller. Hosts pass it only to
-   * keep diagrams below what the container itself allows.
+   * keep diagrams below what the container itself allows. Display height is
+   * capped at 500 dp by trimming the width, so the aspect ratio stays exact;
+   * SVGs without intrinsic dimensions fall back to 300 dp.
    */
   maxWidth?: number;
 
