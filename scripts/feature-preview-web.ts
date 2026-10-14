@@ -20,7 +20,11 @@ import {
   log,
   colors,
 } from './lib-feature-layout';
-import { playgroundPathForFeature } from '../examples/react-web-csr/src/playground-routes';
+import {
+  PLAYGROUND_ROUTES,
+  playgroundPathForFeature,
+  playgroundRouteStatus,
+} from '../examples/react-web-csr/src/playground-routes';
 
 const CSR_DIR = path.resolve(__dirname, '..', 'examples/react-web-csr');
 
@@ -64,6 +68,27 @@ ${colors.blue}Examples:${colors.reset}
   }
 
   closeRL();
+
+  // Feature discovery scans every `@supramark/feature-*` package, so the
+  // selection can name a package the playground never routed. Report that
+  // here rather than letting the path builder throw a stack trace.
+  const status = playgroundRouteStatus(selected.shortName);
+
+  if (status.kind === 'excluded') {
+    log(`\n"${selected.shortName}" has no playground page.\n`, 'yellow');
+    log(`  ${status.reason}\n`, 'gray');
+    log(`  Previewable features: ${PLAYGROUND_ROUTES.map(r => r.feature).join(', ')}\n`, 'gray');
+    process.exit(1);
+  }
+
+  if (status.kind === 'unregistered') {
+    log(`\n"${selected.shortName}" is not registered as a playground route.\n`, 'red');
+    log(
+      '  Add it to PLAYGROUND_ROUTES (or PLAYGROUND_EXCLUDED_FEATURES) in examples/react-web-csr/src/playground-routes.ts.\n',
+      'gray'
+    );
+    process.exit(1);
+  }
 
   log(`\nStarting preview for: ${selected.shortName}\n`, 'green');
 
