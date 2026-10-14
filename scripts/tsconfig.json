@@ -2,13 +2,17 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "./dist",
-    "rootDir": ".",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    // These scripts run under bun, which accepts ESM syntax, `import.meta` and
+    // top-level await. NodeNext resolved them as CommonJS instead — the repo
+    // root has no "type": "module" — and rejected all three (TS1470/TS1309),
+    // so the config reported errors on correct code.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // Type-check only. Nothing compiles this config, and the emit settings it
+    // used to carry (outDir/rootDir/declaration) only produced TS6059 for the
+    // packages these scripts import — no file of theirs is under scripts/.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
