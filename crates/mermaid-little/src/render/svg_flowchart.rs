@@ -3521,25 +3521,44 @@ fn render_edge_path(
         .get("orig_start")
         .map(|s| s.as_str())
         .unwrap_or_else(|| e.start.as_deref().unwrap_or(""));
+    // A cyclic-special segment (one third of an expanded self-edge) inherits its
+    // user edge's orig_start/orig_end, but its real dagre endpoints are the
+    // invisible helper labelRects `expand_self_edge` places outside the cluster
+    // — only the outer segments end on the cluster itself. Both the clip and the
+    // snap below key off orig_*, so a segment counts as cluster-attached only on
+    // an end dagre actually routed to the cluster. Acting on a helper either
+    // tears the loop open (snap) or cuts it short (clip).
+    let synthetic_segment = e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment");
+    let dst_on_cluster = !synthetic_segment || e.end.as_deref() == Some(orig_dst);
+    let src_on_cluster = !synthetic_segment || e.start.as_deref() == Some(orig_src);
+
     if let Some(bounds) = cluster_bounds.get(orig_dst) {
-        pts = cut_path_at_intersect(&pts, bounds);
+        if dst_on_cluster {
+            pts = cut_path_at_intersect(&pts, bounds);
+        }
     }
     if let Some(bounds) = cluster_bounds.get(orig_src) {
-        pts.reverse();
-        pts = cut_path_at_intersect(&pts, bounds);
-        pts.reverse();
+        if src_on_cluster {
+            pts.reverse();
+            pts = cut_path_at_intersect(&pts, bounds);
+            pts.reverse();
+        }
     }
     // The clip above only acts on paths that cross the border. An isolated
     // cluster's placeholder — the size dagre routes its edges to — is larger
     // than the rect drawn, so some endpoints stop short of the border and the
     // path never crosses it. Pull those onto the border.
     if let Some(bounds) = cluster_bounds.get(orig_dst) {
-        snap_endpoint_to_bounds(&mut pts, bounds);
+        if dst_on_cluster {
+            snap_endpoint_to_bounds(&mut pts, bounds);
+        }
     }
     if let Some(bounds) = cluster_bounds.get(orig_src) {
-        pts.reverse();
-        snap_endpoint_to_bounds(&mut pts, bounds);
-        pts.reverse();
+        if src_on_cluster {
+            pts.reverse();
+            snap_endpoint_to_bounds(&mut pts, bounds);
+            pts.reverse();
+        }
     }
 
     // Apply marker visual offsets to get the rendered path points.
@@ -5413,28 +5432,36 @@ mod tests {
             .collect();
 
         let tag_re = regex::Regex::new(r"<g\b[^>]*>|</g>").unwrap();
-        let mut stack: Vec<(f64, f64)> = vec![(0.0, 0.0)];
+        // One entry per open <g>: `Some(acc on entry)` for a root group,
+        // `None` for anything else. `acc` is the sum of the root translates
+        // currently in scope.
+        let mut stack: Vec<Option<(f64, f64)>> = Vec::new();
+        let mut acc = (0.0_f64, 0.0_f64);
         let mut out = Vec::new();
         let mut next = 0;
         for tag in tag_re.find_iter(svg) {
             while next < clusters.len() && clusters[next].0 < tag.start() {
                 let (_, id, x, y, w, h) = &clusters[next];
-                let (px, py) = *stack.last().unwrap();
-                let (x0, y0) = (px + x, py + y);
+                let (x0, y0) = (acc.0 + x, acc.1 + y);
                 out.push((id.clone(), x0, y0, x0 + w, y0 + h));
                 next += 1;
             }
             let t = tag.as_str();
             if t.starts_with("</g") {
-                if stack.len() > 1 {
-                    stack.pop();
+                // Only a root group restores the accumulator; a plain <g>
+                // (clusters / edgePaths / nodes / label) closing must not touch
+                // it, or the stack falls out of step with the real nesting.
+                if let Some(Some(prev)) = stack.pop() {
+                    acc = prev;
                 }
             } else if let Some(m) = root_re.captures(t) {
-                let (px, py) = *stack.last().unwrap();
-                stack.push((
-                    px + m[1].parse::<f64>().unwrap(),
-                    py + m[2].parse::<f64>().unwrap(),
-                ));
+                stack.push(Some(acc));
+                acc = (
+                    acc.0 + m[1].parse::<f64>().unwrap(),
+                    acc.1 + m[2].parse::<f64>().unwrap(),
+                );
+            } else {
+                stack.push(None);
             }
         }
         out
@@ -5460,13 +5487,25 @@ mod tests {
         let rects = absolute_cluster_rects(&svg);
         assert!(rects.len() >= 3, "expected TOP/B1/B2, got {}", rects.len());
 
+        // The edge is emitted inside the outer (TOP) root group, so its
+        // coordinates are relative to that frame; lift them by that group's
+        // translate before comparing against the absolute rects.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let outer = root_re.captures(&svg).expect("outer root group");
+        let (otx, oty) = (
+            outer[1].parse::<f64>().unwrap(),
+            outer[2].parse::<f64>().unwrap(),
+        );
+
         let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_B1_B2_0""#).unwrap();
         let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
         let cap = path_re.captures(&svg).expect("B1 --> B2 edge");
         let nums: Vec<_> = num_re.captures_iter(&cap[1]).collect();
         for (label, idx) in [("start", 0), ("end", nums.len() - 1)] {
-            let px: f64 = nums[idx][1].parse().unwrap();
-            let py: f64 = nums[idx][2].parse().unwrap();
+            let px: f64 = nums[idx][1].parse::<f64>().unwrap() + otx;
+            let py: f64 = nums[idx][2].parse::<f64>().unwrap() + oty;
             let dist = rects
                 .iter()
                 .map(|(_, x0, y0, x1, y1)| {
