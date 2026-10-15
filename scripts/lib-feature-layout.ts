@@ -194,6 +194,23 @@ function safeReadJson(filePath: string): PackageJson | null {
 }
 
 /**
+ * Remove comments from the body of an `export { ... }` block before it is
+ * split on commas. Only identifiers, `as` aliases, commas and comments are
+ * legal inside the braces, so stripping comments cannot corrupt real syntax;
+ * leaving them in glues a comment to the name after it, and the whole comma
+ * segment then fails the identifier check below — silently dropping that
+ * export (e.g. `// Compatibility exports` in containers/admonition used to
+ * take `registerAdmonitionContainer` down with it).
+ *
+ * Single pass, longest-alternative-first: `/* ... *\/` is matched before
+ * `//`, so a `//` inside a block comment never opens a line comment, and a
+ * `/*` inside a line comment never opens a block comment.
+ */
+function stripExportBodyComments(body: string): string {
+  return body.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+}
+
+/**
  * The name of the value a feature package exports from its entry point, e.g.
  * `weatherFeature` from `@supramark/feature-weather`.
  *
@@ -204,7 +221,7 @@ function safeReadJson(filePath: string): PackageJson | null {
  * Returns undefined unless exactly one exported value is named `*Feature`, so a
  * non-conforming or ambiguous package surfaces as a failure, never as a guess.
  */
-function readFeatureExportName(featureDir: string): string | undefined {
+export function readFeatureExportName(featureDir: string): string | undefined {
   const entry = path.join(featureDir, 'src', 'index.ts');
   if (!fs.existsSync(entry)) return undefined;
 
@@ -215,15 +232,15 @@ function readFeatureExportName(featureDir: string): string | undefined {
     // `export { a, b as c } from './feature.js'`, possibly spread over lines.
     // `export type { ... }` does not match — type-only exports are not values.
     for (const block of source.matchAll(/export\s*\{([^}]*)\}/g)) {
-      for (const exported of block[1]!.split(',')) {
+      for (const exported of stripExportBodyComments(block[1]!).split(',')) {
         const text = exported.trim();
         if (!text || text.startsWith('type ')) continue;
         const name = text
           .split(/\s+as\s+/)
           .pop()!
           .trim();
-        // Skip anything that is not a bare identifier: a comment inside the
-        // brace block would otherwise ride along with the name after it.
+        // Skip anything that is not a bare identifier (leftovers from syntax
+        // this parser does not understand); only plain names can match below.
         if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
         names.add(name);
       }
