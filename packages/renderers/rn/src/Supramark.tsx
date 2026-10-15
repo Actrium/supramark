@@ -1242,7 +1242,7 @@ function renderNode(
       // degrades to the whole block instead of using wrong offsets.
       return (
         <SelectableTextBlock key={key} node={node} style={styles.paragraph}>
-          {renderInlineNodes(node.children, styles, highlighted, config)}
+          {renderInlineNodes({ nodes: node.children, styles, highlighted, config })}
         </SelectableTextBlock>
       );
     }
@@ -1250,7 +1250,7 @@ function renderNode(
       const heading = node;
       return (
         <SelectableTextBlock key={key} node={heading} style={headingStyle(heading.depth, styles)}>
-          {renderInlineNodes(heading.children, styles, highlighted, config)}
+          {renderInlineNodes({ nodes: heading.children, styles, highlighted, config })}
         </SelectableTextBlock>
       );
     }
@@ -1313,7 +1313,7 @@ function renderNode(
         }
         return (
           <ListItemLine key={key} node={item} marker={marker} styles={styles}>
-            {renderInlineNodes(item.children, styles, highlighted, config)}
+            {renderInlineNodes({ nodes: item.children, styles, highlighted, config })}
           </ListItemLine>
         );
       }
@@ -1541,7 +1541,7 @@ function renderNode(
                       node={term}
                       style={[styles.paragraph, { fontWeight: '600' }]}
                     >
-                      {renderInlineNodes(term.children, styles, highlighted, config)}
+                      {renderInlineNodes({ nodes: term.children, styles, highlighted, config })}
                     </SelectableTextBlock>
                   ))}
                   {descriptions.map((description, descriptionIndex) => (
@@ -1579,7 +1579,7 @@ function renderNode(
                     node={term}
                     style={[styles.paragraph, { fontWeight: '600' }]}
                   >
-                    {renderInlineNodes(term.children, styles, highlighted, config)}
+                    {renderInlineNodes({ nodes: term.children, styles, highlighted, config })}
                   </SelectableTextBlock>
                 ))}
                 {descriptions.map((description, idx) => (
@@ -1689,7 +1689,7 @@ function renderNode(
       return (
         <View key={key} style={cellStyle}>
           <SelectableTextBlock node={cell} style={textStyle}>
-            {renderInlineNodes(cell.children, styles, highlighted, config)}
+            {renderInlineNodes({ nodes: cell.children, styles, highlighted, config })}
           </SelectableTextBlock>
         </View>
       );
@@ -1826,7 +1826,7 @@ function renderListItemBody(
     out.push(
       <Text key={`li-${seq}`} style={styles.paragraph}>
         {prefix}
-        {inlineBuf.map((n, i) => renderInlineNode(n, i, styles, highlighted, config))}
+        {inlineBuf.map((n, i) => renderInlineNode({ node: n, key: i, styles, highlighted, config }))}
       </Text>
     );
     seq += 1;
@@ -1855,7 +1855,7 @@ function renderListItemBody(
       } else {
         out.push(
           <ListItemLine key={`li-${seq}`} node={child} marker={marker} styles={styles}>
-            {renderInlineNodes(child.children, styles, highlighted, config)}
+            {renderInlineNodes({ nodes: child.children, styles, highlighted, config })}
           </ListItemLine>
         );
       }
@@ -1885,28 +1885,31 @@ function renderListItemBody(
   return out;
 }
 
-function renderInlineNodes(
-  nodes: SupramarkNode[],
-  styles: ReturnType<typeof mergeStyles>,
-  highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig,
-  parentType?: string,
-  linkUrl?: string
-): RenderedNode {
-  return nodes.map((node, index) =>
-    renderInlineNode(node, index, styles, highlighted, config, parentType, linkUrl)
-  );
+// Inline rendering context, passed as a single object: `parentType` and
+// `linkUrl` are both `string | undefined`, so positional parameters would let
+// a call site swap them without a type error.
+interface InlineRenderContext {
+  styles: ReturnType<typeof mergeStyles>;
+  highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>;
+  config?: SupramarkConfig;
+  parentType?: string;
+  linkUrl?: string;
 }
 
-function renderInlineNode(
-  node: SupramarkNode,
-  key: number,
-  styles: ReturnType<typeof mergeStyles>,
-  highlighted: ReadonlyMap<string, SupramarkCodeHighlightResult>,
-  config?: SupramarkConfig,
-  parentType?: string,
-  linkUrl?: string
-): RenderedNode {
+function renderInlineNodes(args: InlineRenderContext & { nodes: SupramarkNode[] }): RenderedNode {
+  const { nodes, ...ctx } = args;
+  return nodes.map((node, index) => renderInlineNode({ ...ctx, node, key: index }));
+}
+
+function renderInlineNode({
+  node,
+  key,
+  styles,
+  highlighted,
+  config,
+  parentType,
+  linkUrl,
+}: InlineRenderContext & { node: SupramarkNode; key: number }): RenderedNode {
   switch (node.type) {
     case 'text': {
       const textNode = node;
@@ -1922,11 +1925,25 @@ function renderInlineNode(
       // the same config from yielding structurally different output per
       // platform.
       if (parentType === 'strong' && config?.options?.flattenNestedStrong === true) {
-        return renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong', linkUrl);
+        return renderInlineNodes({
+          nodes: strongNode.children,
+          styles,
+          highlighted,
+          config,
+          parentType: 'strong',
+          linkUrl,
+        });
       }
       return (
         <Text key={key} style={styles.strong}>
-          {renderInlineNodes(strongNode.children, styles, highlighted, config, 'strong', linkUrl)}
+          {renderInlineNodes({
+            nodes: strongNode.children,
+            styles,
+            highlighted,
+            config,
+            parentType: 'strong',
+            linkUrl,
+          })}
         </Text>
       );
     }
@@ -1934,7 +1951,13 @@ function renderInlineNode(
       const emphasisNode = node;
       return (
         <Text key={key} style={styles.emphasis}>
-          {renderInlineNodes(emphasisNode.children, styles, highlighted, config, undefined, linkUrl)}
+          {renderInlineNodes({
+            nodes: emphasisNode.children,
+            styles,
+            highlighted,
+            config,
+            linkUrl,
+          })}
         </Text>
       );
     }
@@ -1969,7 +1992,13 @@ function renderInlineNode(
             Linking.openURL(linkNode.url).catch(err => console.error('Failed to open URL:', err));
           }}
         >
-          {renderInlineNodes(linkNode.children, styles, highlighted, config, undefined, linkNode.url)}
+          {renderInlineNodes({
+            nodes: linkNode.children,
+            styles,
+            highlighted,
+            config,
+            linkUrl: linkNode.url,
+          })}
         </Text>
       );
     }
@@ -2040,7 +2069,13 @@ function renderInlineNode(
       const deleteNode = node;
       return (
         <Text key={key} style={styles.delete}>
-          {renderInlineNodes(deleteNode.children, styles, highlighted, config, undefined, linkUrl)}
+          {renderInlineNodes({
+            nodes: deleteNode.children,
+            styles,
+            highlighted,
+            config,
+            linkUrl,
+          })}
         </Text>
       );
     }
