@@ -43,6 +43,18 @@ use crate::font_metrics::text_width;
 /// `<foreignObject>` labels. The generated SVG root declares
 /// `font-size:16px`, and the label `<div>` declares `line-height: 1.5`.
 pub const HTML_LABEL_FONT_SIZE: f64 = 16.0;
+
+/// Upstream `flowchart.wrappingWidth` default: the `max-width` (and, once
+/// clamped, the `width`) of every flowchart label `<div>`, and the budget the
+/// text wraps inside. See [`clamp_html_label`].
+pub const HTML_LABEL_WRAPPING_WIDTH: f64 = 200.0;
+
+/// Horizontal padding mermaid-little adds to flowchart edge-label backgrounds.
+/// A deliberate readability deviation from upstream (see
+/// `tests/known_alignment_warnings.txt`); it sits outside `max-width`, so
+/// layout and render both have to account for it.
+pub const HTML_LABEL_EDGE_PADDING_X: f64 = 4.0;
+
 pub const HTML_LABEL_LINE_HEIGHT_RATIO: f64 = 1.5;
 
 pub fn html_label_line_height(font_size_px: f64) -> f64 {
@@ -262,6 +274,16 @@ pub struct LabelOpts<'a> {
     /// callers may opt into a small non-upstream visual readability
     /// enhancement while keeping the default byte-exact path unchanged.
     pub horizontal_padding: f64,
+    /// Whether the browser clamped this label to [`Self::max_width`], and the
+    /// emitter should therefore use upstream's wrapping style
+    /// (`display: table; white-space: break-spaces; width: Npx;`) instead of
+    /// `display: table-cell; white-space: nowrap;`.
+    ///
+    /// Set by the caller that measured the label through
+    /// [`measure_html_markup_label_clamped`] — never inferred from the width,
+    /// because a label whose shim width happens to *equal* the budget was
+    /// never clamped (see issue #254's review).
+    pub clamped: bool,
 }
 
 impl<'a> Default for LabelOpts<'a> {
@@ -278,6 +300,7 @@ impl<'a> Default for LabelOpts<'a> {
             wrap_in_p: true,
             is_node: true,
             horizontal_padding: 0.0,
+            clamped: false,
         }
     }
 }
@@ -386,6 +409,18 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
         w = fmt_num(width),
         h = fmt_num(height),
     ));
+    // A label the browser clamped to its wrap budget was measured through
+    // `measure_html_markup_label_clamped`, and upstream `addHtmlSpan`
+    // re-styles its div to match (`bbox.width === width` →
+    // `display: table; white-space: break-spaces; width: Npx;`). The div then
+    // wraps its text inside N instead of being squeezed to N while `nowrap`
+    // paints the overflow outside the box — issue #254.
+    //
+    // The flag is threaded in by that measurement rather than inferred from
+    // `width == max_width`: a label whose shim width happens to land exactly
+    // on the budget (reachable — the metrics are 1/128 px) is *not* clamped,
+    // and upstream emits `nowrap` for it.
+    let clamped = opts.clamped;
     // <div>. Style attribute order: when there are text style properties
     // (from style/classDef), they PRECEDE the standard display/white-space/
     // line-height block. Upstream applies them via `applyStyle(div,
@@ -394,7 +429,11 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
     if let Some(prefix) = opts.div_style_prefix {
         div_style.push_str(prefix);
     }
-    div_style.push_str("display: table-cell; white-space: nowrap; line-height: 1.5;");
+    if clamped {
+        div_style.push_str("display: table; white-space: break-spaces; line-height: 1.5;");
+    } else {
+        div_style.push_str("display: table-cell; white-space: nowrap; line-height: 1.5;");
+    }
     if !text.is_empty() && opts.horizontal_padding > 0.0 {
         div_style.push_str(&format!(
             " padding: 0 {}px;",
@@ -406,6 +445,11 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
             " max-width: {}px; text-align: center;",
             fmt_num(opts.max_width)
         ));
+    }
+    if clamped {
+        // Upstream sets `width` last, after max-width (d3 mutates the style
+        // object in insertion order).
+        div_style.push_str(&format!(" width: {}px;", fmt_num(opts.max_width)));
     }
     out.push_str(&format!(
         r#"<div style="{ds}" xmlns="http://www.w3.org/1999/xhtml""#,
@@ -466,8 +510,8 @@ pub fn foreign_object_body(text: &str, width: f64, height: f64, opts: &LabelOpts
 /// here and emit the same HTML so shape paths that don't go through
 /// `svg_flowchart`'s markdown branch (e.g. the diamond polygon) still
 /// produce byte-exact output.
-pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, 0.0, &[])
+pub fn shape_label_block(escaped_label: &str, font: &HtmlLabelFont<'_>, clamp: bool) -> String {
+    shape_label_block_inner(escaped_label, font, 0.0, 0.0, &[], clamp)
 }
 
 /// Variant of [`shape_label_block`] that threads the node's inline
@@ -481,8 +525,9 @@ pub fn shape_label_block_with_styles(
     escaped_label: &str,
     font: &HtmlLabelFont<'_>,
     css_styles: &[String],
+    clamp: bool,
 ) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, 0.0, css_styles)
+    shape_label_block_inner(escaped_label, font, 0.0, 0.0, css_styles, clamp)
 }
 
 /// Variant of [`shape_label_block`] that adds a vertical offset to the outer
@@ -493,8 +538,9 @@ pub fn shape_label_block_with_y_offset(
     escaped_label: &str,
     font: &HtmlLabelFont<'_>,
     y_offset: f64,
+    clamp: bool,
 ) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, y_offset, &[])
+    shape_label_block_inner(escaped_label, font, 0.0, y_offset, &[], clamp)
 }
 
 /// Combined `with_y_offset` + `with_styles` variant.
@@ -503,8 +549,9 @@ pub fn shape_label_block_with_y_offset_and_styles(
     font: &HtmlLabelFont<'_>,
     y_offset: f64,
     css_styles: &[String],
+    clamp: bool,
 ) -> String {
-    shape_label_block_inner(escaped_label, font, 0.0, y_offset, css_styles)
+    shape_label_block_inner(escaped_label, font, 0.0, y_offset, css_styles, clamp)
 }
 
 /// Variant of [`shape_label_block`] that adds an arbitrary x/y offset
@@ -518,8 +565,9 @@ pub fn shape_label_block_with_xy_offset_and_styles(
     x_offset: f64,
     y_offset: f64,
     css_styles: &[String],
+    clamp: bool,
 ) -> String {
-    shape_label_block_inner(escaped_label, font, x_offset, y_offset, css_styles)
+    shape_label_block_inner(escaped_label, font, x_offset, y_offset, css_styles, clamp)
 }
 
 fn shape_label_block_inner(
@@ -528,10 +576,22 @@ fn shape_label_block_inner(
     x_offset: f64,
     y_offset: f64,
     css_styles: &[String],
+    clamp: bool,
 ) -> String {
     if escaped_label.is_empty() {
         return String::new();
     }
+    // Label box under the diagram's policy: a clamped label reports the box a
+    // browser paints after wrapping it inside the wrapping width, and the
+    // flag travels into `LabelOpts` so the `<div>` gets the matching style.
+    let measure = |html: &str| -> (f64, f64, bool) {
+        if clamp {
+            measure_html_markup_label_clamped(html, font, HTML_LABEL_WRAPPING_WIDTH)
+        } else {
+            let (w, h) = measure_html_markup_label(html, font, HTML_LABEL_WRAPPING_WIDTH, true);
+            (w, h, false)
+        }
+    };
     // Replace FontAwesome icon references (fa:fa-car → <i class="fa fa-car"></i>).
     // Applied after xml_escape since the FA pattern uses no XML-special chars.
     let processed = replace_fa_icons(escaped_label);
@@ -598,12 +658,14 @@ fn shape_label_block_inner(
         // escape inside the named-entity body. So the round-trip is safe
         // for the markdown patterns we handle here.
         let html = markdown_label_to_html(&processed);
-        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
+        let (w, h, clamped) = measure(&html);
         let base = LabelOpts {
             extra_span_classes: "markdown-node-label",
             ..LabelOpts::default()
         };
-        let opts = apply_style_overrides(base, w, h, x_offset, y_offset, &lbl_style, &div_prefix);
+        let mut opts =
+            apply_style_overrides(base, w, h, x_offset, y_offset, &lbl_style, &div_prefix);
+        opts.clamped = clamped;
         return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with embedded `<br>` family tags must be re-emitted
@@ -619,8 +681,8 @@ fn shape_label_block_inner(
     // disables soft-wrap on `<br/>`).
     if has_escaped_br(&processed) {
         let html = restore_escaped_br(&processed);
-        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        let opts = apply_style_overrides(
+        let (w, h, clamped) = measure(&html);
+        let mut opts = apply_style_overrides(
             LabelOpts::default(),
             w,
             h,
@@ -629,6 +691,7 @@ fn shape_label_block_inner(
             &lbl_style,
             &div_prefix,
         );
+        opts.clamped = clamped;
         return render_node_label(&html, w, h, &opts);
     }
     // Plain string labels with a literal `\n` need the same `<br/>` rewrite
@@ -641,8 +704,8 @@ fn shape_label_block_inner(
     // two lines tall as the browser paints it.
     if processed.contains('\n') {
         let html: String = processed.split('\n').collect::<Vec<&str>>().join("<br/>");
-        let (w, h) = measure_html_markup_label(&html, font, 200.0, true);
-        let opts = apply_style_overrides(
+        let (w, h, clamped) = measure(&html);
+        let mut opts = apply_style_overrides(
             LabelOpts::default(),
             w,
             h,
@@ -651,6 +714,7 @@ fn shape_label_block_inner(
             &lbl_style,
             &div_prefix,
         );
+        opts.clamped = clamped;
         return render_node_label(&html, w, h, &opts);
     }
     // After `replace_fa_icons`, FA references like `fa:fa-code` become
@@ -660,8 +724,8 @@ fn shape_label_block_inner(
     // here) and route to `measure_html_markup_label` which strips
     // tags via the textContent rule.
     if processed.contains("<i ") {
-        let (w, h) = measure_html_markup_label(&processed, font, 200.0, true);
-        let opts = apply_style_overrides(
+        let (w, h, clamped) = measure(&processed);
+        let mut opts = apply_style_overrides(
             LabelOpts::default(),
             w,
             h,
@@ -670,10 +734,16 @@ fn shape_label_block_inner(
             &lbl_style,
             &div_prefix,
         );
+        opts.clamped = clamped;
         return render_node_label(&processed, w, h, &opts);
     }
-    let (w, h) = measure_html_label(&processed, font, 200.0, true);
-    let opts = apply_style_overrides(
+    let (w, h, clamped) = if clamp {
+        measure_html_label_clamped(&processed, font, HTML_LABEL_WRAPPING_WIDTH)
+    } else {
+        let (w, h) = measure_html_label(&processed, font, HTML_LABEL_WRAPPING_WIDTH, true);
+        (w, h, false)
+    };
+    let mut opts = apply_style_overrides(
         LabelOpts::default(),
         w,
         h,
@@ -682,6 +752,7 @@ fn shape_label_block_inner(
         &lbl_style,
         &div_prefix,
     );
+    opts.clamped = clamped;
     render_node_label(&processed, w, h, &opts)
 }
 
@@ -873,8 +944,161 @@ pub fn measure_html_label(
     let concatenated: String = stripped.split('\n').collect();
     let concat_w = text_width(&concatenated, family, size, bold, false);
     let lh = html_label_line_height(size);
-    let _ = (max_width_px, wrap_enabled); // currently unused; reserved.
+    let _ = (max_width_px, wrap_enabled); // wrapping is modelled by the *_clamped variants
     (concat_w, lh * lines as f64)
+}
+
+/// The `max-width` clamp a browser applies to a label `<div>`, and the wrap
+/// upstream mermaid performs once it sees the clamp — issue #254.
+///
+/// Upstream `addHtmlSpan` measures the label div in a real DOM, so a div
+/// carrying `max-width: Npx` (the flowchart `wrappingWidth`, 200 by default)
+/// shrinks to `min(content width, N)`. When the measured bbox width equals `N`
+/// it declares the label clamped and re-styles the div
+/// (`display: table; white-space: break-spaces; width: Npx;`), which makes the
+/// browser wrap the text inside `N` and grows the label to one line box per
+/// painted line. Node boxes and label positions are then computed from that
+/// wrapped box.
+///
+/// Headless measurement has no layout engine, so it must model both steps
+/// itself: the shrink-to-fit width is the widest *painted line* (not the
+/// concatenated text), and any line wider than `N` is re-wrapped to `N`.
+///
+/// The returned box is what the browser paints, which is not always `N` wide:
+/// a `display: table` box never shrinks below its min-content width, so a word
+/// wider than the budget (no break opportunity inside it — `overflow-wrap:
+/// normal`) pushes the whole label — and the foreignObject the upstream
+/// measurement feeds — wider than `N`. Upstream re-measures after the style
+/// switch, so it reports that wider box too.
+///
+/// Only diagrams whose *layout* also reserves this box may measure through
+/// here — see [`measure_html_markup_label_clamped`]. The shim under-measures
+/// CJK, so the width estimate floors each glyph at the browser's rendered
+/// width ([`crate::layout::label_metrics::cjk_aware_label_width`]): without it
+/// a CJK label a browser clamps would be measured as fitting and stay
+/// mis-aligned, which is the very symptom this fixes.
+///
+/// Returns `Some((width, height of the wrapped block))` when the browser would
+/// clamp, `None` when the label fits and nothing changes.
+pub fn clamp_html_label(
+    text: &str,
+    font: &HtmlLabelFont<'_>,
+    max_width_px: f64,
+    wrap_enabled: bool,
+) -> Option<(f64, f64)> {
+    if !wrap_enabled || !max_width_px.is_finite() || max_width_px <= 0.0 {
+        return None;
+    }
+    let (family, size, bold) = font.resolve();
+    // Glyph floors, so the estimate tracks the real painted width rather than
+    // the shim's under-measurement. Gated on the label actually containing a
+    // wide glyph, exactly like the other `cjk_aware_label_width` consumers, so
+    // pure-Latin labels keep the shim's byte-exact geometry.
+    let width_of = |s: &str| {
+        use crate::layout::label_metrics::{is_wide_glyph, painted_line_width};
+        let shim = text_width(s, family, size, bold, false);
+        if s.chars().any(is_wide_glyph) {
+            painted_line_width(s, shim, size, &|ch| {
+                text_width(&ch.to_string(), family, size, bold, false)
+            })
+        } else {
+            shim
+        }
+    };
+    let painted: Vec<String> = crate::layout::label_metrics::split_label_lines(text)
+        .iter()
+        .map(|line| html_text_content(line))
+        .collect();
+    // Upstream compares the measured bbox against the wrap budget and takes
+    // the clamped branch on equality; the browser's shrink-to-fit width is the
+    // widest line, so that is what the comparison has to use.
+    if !painted.iter().any(|line| width_of(line) >= max_width_px) {
+        return None;
+    }
+    let mut wrapped = 0usize;
+    // Min-content width of the whole label: the widest run the browser cannot
+    // break, which is what `width: Npx` clamps against.
+    let mut widest_segment = 0.0f64;
+    for line in &painted {
+        let segments =
+            crate::layout::label_metrics::wrap_line_to_width(line, max_width_px, &width_of);
+        wrapped += segments.len();
+        for segment in segments {
+            // A line holding one unbreakable run is that run's min-content
+            // width; shorter lines were broken at a space and cannot drive the
+            // table's min-content width up on their own.
+            let trimmed = crate::layout::label_metrics::trim_trailing_breakable_spaces(segment);
+            widest_segment = widest_segment.max(width_of(trimmed));
+        }
+    }
+    Some((
+        max_width_px.max(widest_segment),
+        html_label_line_height(size) * wrapped as f64,
+    ))
+}
+
+/// Measure an HTML label the way a diagram whose *layout* clamps does: the
+/// shim box, replaced by the browser's clamped box when the label overflows the
+/// wrapping width. Returns `(width, height, clamped)`; `clamped` belongs on
+/// [`LabelOpts::clamped`] so the emitted `<div>` gets upstream's wrapping
+/// style.
+///
+/// Only call this where the box was reserved the same way — flowchart node and
+/// edge labels today (`layout::flowchart`). Diagrams whose layout still sizes
+/// from the un-clamped text must keep [`measure_html_markup_label`], or their
+/// labels wrap into boxes that were never grown for them.
+pub fn measure_html_markup_label_clamped(
+    text: &str,
+    font: &HtmlLabelFont<'_>,
+    max_width_px: f64,
+) -> (f64, f64, bool) {
+    match clamp_html_label(text, font, max_width_px, true) {
+        Some((w, h)) => (w, h, true),
+        None => {
+            let (w, h) = measure_html_markup_label(text, font, max_width_px, true);
+            (w, h, false)
+        }
+    }
+}
+
+/// Measure a node's HTML label under a diagram's clamp policy: `true` selects
+/// the box the browser paints after clamping the label to the wrapping width,
+/// `false` the plain shim measurement.
+///
+/// Every caller that has to agree with the emitted label — the viewBox passes
+/// and the `font-size` / `bold` post-process passes above all — must reach this
+/// decision the same way. Getting it wrong is silent: a clamped measurement on
+/// a label that was *not* clamped makes the post-process needles miss, so the
+/// geometry patch is dropped while the `<div>` keeps its `font-size: 30px
+/// !important` and the text paints at a size nothing reserved room for.
+pub fn measure_node_label_box(
+    text: &str,
+    font: &HtmlLabelFont<'_>,
+    max_width_px: f64,
+    clamp: bool,
+) -> (f64, f64, bool) {
+    if clamp {
+        measure_html_markup_label_clamped(text, font, max_width_px)
+    } else {
+        let (w, h) = measure_html_markup_label(text, font, max_width_px, true);
+        (w, h, false)
+    }
+}
+
+/// [`measure_html_markup_label_clamped`] for `xml_escape`d shape labels — see
+/// [`measure_html_label`] for the differences.
+pub fn measure_html_label_clamped(
+    text: &str,
+    font: &HtmlLabelFont<'_>,
+    max_width_px: f64,
+) -> (f64, f64, bool) {
+    match clamp_html_label(text, font, max_width_px, true) {
+        Some((w, h)) => (w, h, true),
+        None => {
+            let (w, h) = measure_html_label(text, font, max_width_px, true);
+            (w, h, false)
+        }
+    }
 }
 
 /// Strip paired markdown inline emphasis markers (`**bold**`, `*italic*`,
@@ -1317,6 +1541,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clamp_fires_on_the_widest_painted_line_not_the_concatenation() {
+        let font = HtmlLabelFont::default();
+        let max = HTML_LABEL_WRAPPING_WIDTH;
+        // Two lines that fit side by side in no browser: concatenated they
+        // measure past the budget (~260 px), each line is well under it
+        // (~130 px). A concatenation test would clamp here; a browser would
+        // not.
+        let markup = "aaaaaaaaaaaaaaa<br/>bbbbbbbbbbbbbbb";
+        assert!(clamp_html_label(markup, &font, max, true).is_none());
+        // A single line past the budget clamps, and the block grows to the
+        // wrapped line count (24 px per line at the label font size).
+        let long = format!("<p>{}<br/>x</p>", "word ".repeat(60));
+        let (w, h) = clamp_html_label(&long, &font, max, true).expect("clamped");
+        assert_eq!(w, max);
+        assert!(h > 2.0 * html_label_line_height(HTML_LABEL_FONT_SIZE));
+        // `wrap_enabled = false` is upstream's `width === Infinity` case.
+        assert!(clamp_html_label(&long, &font, max, false).is_none());
+    }
+
+    #[test]
+    fn narrow_glyphs_do_not_make_a_label_look_over_budget() {
+        let font = HtmlLabelFont::default();
+        // 22 `i`s (~4.4 px each in the shim) plus one ideograph: a browser
+        // paints ~116 px and leaves it alone. Billing every glyph a flat
+        // 0.56em would report 213 px and clamp it — the box would then grow
+        // for text that never wraps.
+        let markup = format!("<p>{}\u{4E2D}</p>", "i".repeat(22));
+        assert!(
+            clamp_html_label(&markup, &font, HTML_LABEL_WRAPPING_WIDTH, true).is_none(),
+            "narrow-dense label must not be clamped"
+        );
+        // The same label with enough ideographs to genuinely overflow does
+        // clamp.
+        let wide = format!("<p>{}</p>", "\u{4E2D}".repeat(15));
+        assert!(clamp_html_label(&wide, &font, HTML_LABEL_WRAPPING_WIDTH, true).is_some());
+    }
+
+    #[test]
+    fn clamped_width_never_goes_below_the_widest_unbreakable_run() {
+        let font = HtmlLabelFont::default();
+        let max = HTML_LABEL_WRAPPING_WIDTH;
+        // A word with no break opportunity: `display: table` cannot shrink
+        // below its min-content width, so the browser paints (and upstream
+        // reports) the word's own width — a box fixed at the budget would clip
+        // the text instead.
+        let word = "W".repeat(40);
+        let (w, h) =
+            clamp_html_label(&format!("<p>{word}</p>"), &font, max, true).expect("clamped");
+        assert!(w > max, "width {w} must follow the unbreakable run");
+        assert_eq!(h, html_label_line_height(HTML_LABEL_FONT_SIZE));
+        // Widest *run*, not widest line: a line of several words stays at the
+        // budget even though it is wider than any single word.
+        let (w, _) = clamp_html_label(&format!("<p>{}</p>", "word ".repeat(60)), &font, max, true)
+            .expect("clamped");
+        assert_eq!(w, max);
+    }
+
+    #[test]
     fn node_label_byte_exact_flowchart_style() {
         // Reproduce one of the labels from
         // tests/reference/ext_fixtures/demos/flowchart/02.svg — the
@@ -1555,20 +1837,28 @@ mod tests {
         // the canonical `<br/>` tag so the rendered foreignObject contains
         // a real line break and the width sums all segments as a single
         // text-content line (cypress/67, cypress/200, demos/06, demos/07).
-        let got = shape_label_block("Multi&lt;br/&gt;Line", &HtmlLabelFont::default());
+        let got = shape_label_block("Multi&lt;br/&gt;Line", &HtmlLabelFont::default(), false);
         // Final `<p>` body must carry the live `<br/>` tag, not the entity.
         assert!(
             got.contains("<p>Multi<br/>Line</p>"),
             "expected `<p>Multi<br/>Line</p>` body, got {got}"
         );
         // `<br>` and `<br />` variants normalise the same way.
-        let got2 = shape_label_block("A&lt;br&gt;B&lt;br /&gt;C", &HtmlLabelFont::default());
+        let got2 = shape_label_block(
+            "A&lt;br&gt;B&lt;br /&gt;C",
+            &HtmlLabelFont::default(),
+            false,
+        );
         assert!(
             got2.contains("<p>A<br/>B<br/>C</p>"),
             "expected canonical <br/> form, got {got2}"
         );
         // Non-br escaped tags must NOT be restored — only `<br>` family.
-        let got3 = shape_label_block("a&lt;span&gt;b&lt;/span&gt;c", &HtmlLabelFont::default());
+        let got3 = shape_label_block(
+            "a&lt;span&gt;b&lt;/span&gt;c",
+            &HtmlLabelFont::default(),
+            false,
+        );
         assert!(
             got3.contains("&lt;span&gt;"),
             "non-br escaped tags must remain escaped, got {got3}"

@@ -121,12 +121,8 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         // Apply FA icon substitution before measuring: fa:fa-car → <i ...></i> (zero width).
         let for_measure = crate::render::foreign_object::replace_fa_icons(&label_content);
         let font = crate::render::foreign_object::HtmlLabelFont::default();
-        let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
-            &for_measure,
-            &font,
-            200.0,
-            true,
-        );
+        let (lw, lh, clamped) =
+            crate::render::shapes::types::measure_node_label(node, &for_measure, &font, false);
         // Label-specific CSS (color:, font-*) from `style` directives:
         //   - group_style → <g class="label" style="..."> (raw hex)
         //   - label_style → <span style="..."> (raw hex)
@@ -135,6 +131,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         let lbl_style = build_label_style(css);
         let div_prefix = build_div_style_prefix(css);
         let opts = crate::render::foreign_object::LabelOpts {
+            clamped,
             extra_span_classes: if is_markdown {
                 "markdown-node-label"
             } else {

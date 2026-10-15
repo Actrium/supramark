@@ -463,6 +463,398 @@ function polyBBox(pointsAttr) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+// ---------- HTML label clamp (issue #254) ----------
+//
+// A browser lays an HTML label <div> out as `min(content width, max-width)` —
+// the content width being the *widest painted line* — and upstream
+// `addHtmlSpan` reacts to `bbox.width === max-width` by re-styling that div to
+// `display: table; white-space: break-spaces; width: Npx;`, which wraps the
+// text inside N and grows the box to one line box per painted line. jsdom has
+// no layout engine, so the shim models both steps itself.
+//
+// The clamp runs in the label's *rendered* font — `font-size: 16px` and
+// `font-family: "trebuchet ms",…` inherited from the generated SVG root — not
+// in the 14 px / sans-serif default `resolveFont` falls back to. That default
+// is what measured a clamped label at its un-clamped width in the first
+// place: mermaid then positioned the label for the wide box the browser never
+// paints. Keep this in step with the Rust side
+// (`foreign_object::clamp_html_label` + `HTML_LABEL_FONT_SIZE`); a decision
+// the two disagree about shows up as a byte-exact diff.
+//
+// Scoped to flowchart node and edge labels: the one surface whose Rust *layout*
+// and renderer both implement the clamp. Other families route labels through
+// the same measurement and emission helpers but still size their boxes from
+// the un-clamped text, so modelling the clamp for them here would put the
+// harness at odds with the renderer — widen this gate together with them.
+const LABEL_CLAMP_FAMILY = '"trebuchet ms",verdana,arial,sans-serif';
+const LABEL_CLAMP_SIZE = 16;
+const LABEL_CLAMP_LINE_HEIGHT_RATIO = 1.5;
+
+// East Asian Wide / Fullwidth code points — the width-2 set
+// `unicode_width::UnicodeWidthChar::width` reports on the Rust side, which is
+// where a line may break inside a word and where the per-glyph width floor
+// applies. Generated from the Unicode EastAsianWidth property (W + F).
+const WIDE_RANGES = [
+  [0x1100, 0x115F],
+  [0x231A, 0x231B],
+  [0x2329, 0x232A],
+  [0x23E9, 0x23EC],
+  [0x23F0, 0x23F0],
+  [0x23F3, 0x23F3],
+  [0x25FD, 0x25FE],
+  [0x2614, 0x2615],
+  [0x2648, 0x2653],
+  [0x267F, 0x267F],
+  [0x2693, 0x2693],
+  [0x26A1, 0x26A1],
+  [0x26AA, 0x26AB],
+  [0x26BD, 0x26BE],
+  [0x26C4, 0x26C5],
+  [0x26CE, 0x26CE],
+  [0x26D4, 0x26D4],
+  [0x26EA, 0x26EA],
+  [0x26F2, 0x26F3],
+  [0x26F5, 0x26F5],
+  [0x26FA, 0x26FA],
+  [0x26FD, 0x26FD],
+  [0x2705, 0x2705],
+  [0x270A, 0x270B],
+  [0x2728, 0x2728],
+  [0x274C, 0x274C],
+  [0x274E, 0x274E],
+  [0x2753, 0x2755],
+  [0x2757, 0x2757],
+  [0x2795, 0x2797],
+  [0x27B0, 0x27B0],
+  [0x27BF, 0x27BF],
+  [0x2B1B, 0x2B1C],
+  [0x2B50, 0x2B50],
+  [0x2B55, 0x2B55],
+  [0x2E80, 0x2E99],
+  [0x2E9B, 0x2EF3],
+  [0x2F00, 0x2FD5],
+  [0x2FF0, 0x2FFB],
+  [0x3000, 0x303E],
+  [0x3041, 0x3096],
+  [0x3099, 0x30FF],
+  [0x3105, 0x312F],
+  [0x3131, 0x318E],
+  [0x3190, 0x31E3],
+  [0x31F0, 0x321E],
+  [0x3220, 0x3247],
+  [0x3250, 0x4DBF],
+  [0x4E00, 0xA48C],
+  [0xA490, 0xA4C6],
+  [0xA960, 0xA97C],
+  [0xAC00, 0xD7A3],
+  [0xF900, 0xFAFF],
+  [0xFE10, 0xFE19],
+  [0xFE30, 0xFE52],
+  [0xFE54, 0xFE66],
+  [0xFE68, 0xFE6B],
+  [0xFF01, 0xFF60],
+  [0xFFE0, 0xFFE6],
+  [0x16FE0, 0x16FE4],
+  [0x16FF0, 0x16FF1],
+  [0x17000, 0x187F7],
+  [0x18800, 0x18CD5],
+  [0x18D00, 0x18D08],
+  [0x1AFF0, 0x1AFF3],
+  [0x1AFF5, 0x1AFFB],
+  [0x1AFFD, 0x1AFFE],
+  [0x1B000, 0x1B122],
+  [0x1B132, 0x1B132],
+  [0x1B150, 0x1B152],
+  [0x1B155, 0x1B155],
+  [0x1B164, 0x1B167],
+  [0x1B170, 0x1B2FB],
+  [0x1F004, 0x1F004],
+  [0x1F0CF, 0x1F0CF],
+  [0x1F18E, 0x1F18E],
+  [0x1F191, 0x1F19A],
+  [0x1F200, 0x1F202],
+  [0x1F210, 0x1F23B],
+  [0x1F240, 0x1F248],
+  [0x1F250, 0x1F251],
+  [0x1F260, 0x1F265],
+  [0x1F300, 0x1F320],
+  [0x1F32D, 0x1F335],
+  [0x1F337, 0x1F37C],
+  [0x1F37E, 0x1F393],
+  [0x1F3A0, 0x1F3CA],
+  [0x1F3CF, 0x1F3D3],
+  [0x1F3E0, 0x1F3F0],
+  [0x1F3F4, 0x1F3F4],
+  [0x1F3F8, 0x1F43E],
+  [0x1F440, 0x1F440],
+  [0x1F442, 0x1F4FC],
+  [0x1F4FF, 0x1F53D],
+  [0x1F54B, 0x1F54E],
+  [0x1F550, 0x1F567],
+  [0x1F57A, 0x1F57A],
+  [0x1F595, 0x1F596],
+  [0x1F5A4, 0x1F5A4],
+  [0x1F5FB, 0x1F64F],
+  [0x1F680, 0x1F6C5],
+  [0x1F6CC, 0x1F6CC],
+  [0x1F6D0, 0x1F6D2],
+  [0x1F6D5, 0x1F6D7],
+  [0x1F6DC, 0x1F6DF],
+  [0x1F6EB, 0x1F6EC],
+  [0x1F6F4, 0x1F6FC],
+  [0x1F7E0, 0x1F7EB],
+  [0x1F7F0, 0x1F7F0],
+  [0x1F90C, 0x1F93A],
+  [0x1F93C, 0x1F945],
+  [0x1F947, 0x1F9FF],
+  [0x1FA70, 0x1FA7C],
+  [0x1FA80, 0x1FA88],
+  [0x1FA90, 0x1FABD],
+  [0x1FABF, 0x1FAC5],
+  [0x1FACE, 0x1FADB],
+  [0x1FAE0, 0x1FAE8],
+  [0x1FAF0, 0x1FAF8],
+  [0x20000, 0x2FFFD],
+  [0x30000, 0x3FFFD],
+];
+const WIDE_GLYPH = new RegExp(
+  // A character class: `\u{4e00}-\u{a48c}` outside one is three characters,
+  // not a range.
+  `[${WIDE_RANGES.map(([a, b]) =>
+    a === b ? `\\u{${a.toString(16)}}` : `\\u{${a.toString(16)}}-\\u{${b.toString(16)}}`,
+  ).join('')}]`,
+  'u',
+);
+const isWideGlyph = (ch) => WIDE_GLYPH.test(ch);
+const hasWideGlyph = (text) => {
+  for (const ch of text) if (isWideGlyph(ch)) return true;
+  return false;
+};
+
+// Rust `char::is_whitespace` (the White_Space property) minus the no-break
+// spaces, which `break-spaces` never breaks at. Not JS `\s`: that also matches
+// U+FEFF, which Rust treats as an ordinary painted glyph.
+const RUST_WHITESPACE =
+  /[\t\n\x0B\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/;
+const isBreakableSpace = (ch) => RUST_WHITESPACE.test(ch) && ch !== '\u00A0' && ch !== '\u202F';
+
+/// `s` without its trailing breakable spaces — mirror of
+/// `label_metrics::trim_trailing_breakable_spaces`.
+function trimTrailingBreakableSpaces(s) {
+  let end = s.length;
+  while (end > 0) {
+    const ch = String.fromCodePoint(s.codePointAt(end - 1));
+    if (!isBreakableSpace(ch)) break;
+    end -= ch.length;
+  }
+  return s.slice(0, end);
+}
+
+/// Width estimate the clamp decides on — mirror of
+/// `foreign_object::clamp_html_label`'s `width_of`: the shim width, floored per
+/// glyph (1em for wide glyphs, 0.56em otherwise) when the text holds any wide
+/// glyph. The shim under-measures CJK to ~40 %, so without the floor a CJK
+/// label a browser clamps would look like it fits and stay mis-aligned.
+const labelClampWidthOf = (text, size = LABEL_CLAMP_SIZE, bold = false) => {
+  const shim = textWidth(text, LABEL_CLAMP_FAMILY, size, bold);
+  if (!hasWideGlyph(text)) return shim;
+  // Top up each *wide* glyph to the 1em a browser paints it at; narrow glyphs
+  // keep the shim's own width (billing them a flat 0.56em over-estimates `i`,
+  // `l`, `.` and would clamp labels a browser leaves alone). Mirror of
+  // `label_metrics::painted_line_width`.
+  let deficit = 0;
+  for (const ch of text) {
+    if (!isWideGlyph(ch)) continue;
+    const glyphShim = textWidth(ch, LABEL_CLAMP_FAMILY, size, bold);
+    if (size > glyphShim) deficit += size - glyphShim;
+  }
+  return shim + deficit;
+};
+
+/// The font a label is finally painted in: the inline `font-size` /
+/// `font-weight` declared on it or an ancestor, on top of the browser default
+/// the generated SVG root sets (`16px`). Mirrors the Rust side, where the clamp
+/// and the `font_size` / `bold` post-process passes all resolve the node's
+/// styles — deciding at any other size reports a different line count than the
+/// label the browser wraps.
+function clampFont(el) {
+  let size = LABEL_CLAMP_SIZE;
+  let bold = false;
+  let sizeSet = false;
+  let weightSet = false;
+  for (let node = el; node && node.nodeType === 1; node = node.parentNode) {
+    const styleSize = node.style?.fontSize ?? node.getAttribute?.('font-size') ?? null;
+    if (!sizeSet && styleSize) {
+      const m = /([0-9.]+)/.exec(String(styleSize));
+      if (m) {
+        size = parseFloat(m[1]);
+        sizeSet = true;
+      }
+    }
+    const weight = node.style?.fontWeight ?? node.getAttribute?.('font-weight') ?? null;
+    if (!weightSet && weight) {
+      const v = String(weight).trim().toLowerCase();
+      bold = v === 'bold' || v === 'bolder' || (parseInt(v, 10) >= 700);
+      weightSet = true;
+    }
+    if (sizeSet && weightSet) break;
+  }
+  return { size, bold };
+}
+
+/// Greedy `white-space: break-spaces` line breaking — the mirror of
+/// `label_metrics::wrap_line_to_width`: segments are a word, one wide glyph
+/// or a whitespace run (plus the whitespace that follows it), and a word
+/// wider than the budget keeps a line to itself instead of being broken.
+function wrapLineToWidth(line, maxWidth, size = LABEL_CLAMP_SIZE, bold = false) {
+  const segments = [];
+  let i = 0;
+  while (i < line.length) {
+    const start = i;
+    const ch = String.fromCodePoint(line.codePointAt(i));
+    i += ch.length;
+    if (!isBreakableSpace(ch) && !isWideGlyph(ch)) {
+      while (i < line.length) {
+        const c = String.fromCodePoint(line.codePointAt(i));
+        if (isBreakableSpace(c) || isWideGlyph(c)) break;
+        i += c.length;
+      }
+    }
+    while (i < line.length && isBreakableSpace(line[i])) i += 1;
+    segments.push([start, i]);
+  }
+  const lines = [];
+  let lineStart = 0;
+  let width = 0;
+  for (const [start, end] of segments) {
+    const w = labelClampWidthOf(line.slice(start, end), size, bold);
+    if (width > 0 && width + w > maxWidth) {
+      lines.push(line.slice(lineStart, start));
+      lineStart = start;
+      width = 0;
+    }
+    width += w;
+  }
+  lines.push(line.slice(lineStart));
+  return lines;
+}
+
+/// Painted lines of a label element: `<br>` (any spelling) and `<p>` block
+/// boundaries end a line, and a break at the end of a block opens no new one
+/// — the DOM-side mirror of `label_metrics::split_label_lines`. A no-break
+/// space is a painted glyph, so `a<br/>&nbsp;` is two lines.
+function paintedLabelLines(el) {
+  const lines = [];
+  let block = [];
+  let current = '';
+  const isBlank = (s) => s.replace(/\u00A0/g, '\u0000').trim() === '';
+  const endBlock = () => {
+    if (block.length > 1 && isBlank(block[block.length - 1])) block.pop();
+    if (!(block.length === 1 && isBlank(block[0]))) lines.push(...block);
+    block = [];
+  };
+  const walk = (node) => {
+    for (const child of node.childNodes ?? []) {
+      if (child.nodeType === 3) {
+        current += child.nodeValue ?? '';
+        continue;
+      }
+      if (child.nodeType !== 1) continue;
+      const tag = (child.tagName ?? '').toLowerCase();
+      if (tag === 'br') {
+        block.push(current);
+        current = '';
+        continue;
+      }
+      if (tag === 'p') {
+        block.push(current);
+        current = '';
+        endBlock();
+        walk(child);
+        block.push(current);
+        current = '';
+        endBlock();
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(el);
+  block.push(current);
+  endBlock();
+  return lines.length ? lines : [''];
+}
+
+/// Whether the fixture being rendered is a flowchart — the family whose Rust
+/// renderer implements the clamp. Mermaid selects the flowchart loader for
+/// `flowchart` and for its `graph` alias, on the first line that is not a
+/// directive comment (frontmatter blocks are stripped first).
+function isFlowchartSource(source) {
+  const body = String(source).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%%')) continue;
+    return /^(flowchart|graph)\b/.test(line);
+  }
+  return false;
+}
+
+/// Set per render by `renderOne` — see `labelClampBox`.
+let __labelClampEnabled = false;
+
+/// Whether the browser clamps this label, and the box it paints once it does.
+/// `null` means the label fits inside its `max-width` and nothing changes.
+function labelClampBox(el) {
+  if (!__labelClampEnabled) return null;
+  const style = el.getAttribute?.('style') ?? '';
+  const m = /(?:^|;)\s*max-width:\s*([\d.]+)px/.exec(style);
+  if (!m) return null;
+  const maxWidth = parseFloat(m[1]);
+  if (!(maxWidth > 0)) return null;
+  const { size, bold } = clampFont(el);
+  const painted = paintedLabelLines(el);
+  if (!painted.some((line) => labelClampWidthOf(line, size, bold) >= maxWidth)) return null;
+  const lineHeight = size * LABEL_CLAMP_LINE_HEIGHT_RATIO;
+  // Upstream measures the div twice. Before the style switch it is
+  // `table-cell; nowrap; max-width: N`, so the browser reports
+  // `min(widest line, N)` — and it is that equality with `N` that makes
+  // upstream switch the style. Model both steps: the second measurement is
+  // what ends up in the SVG, but a shim that only reported it would never let
+  // the switch happen (the equal-width test fails as soon as an unbreakable run
+  // pushes the final width past the budget).
+  const alreadyWrapped = /display:\s*table\s*;/.test(style);
+  if (!alreadyWrapped) {
+    const widest = painted.reduce((w, line) => Math.max(w, labelClampWidthOf(line, size, bold)), 0);
+    return {
+      x: 0,
+      y: 0,
+      width: Math.min(widest, maxWidth),
+      height: lineHeight * painted.length,
+    };
+  }
+  let wrapped = 0;
+  let widestRun = 0;
+  for (const line of painted) {
+    const wrappedLines = wrapLineToWidth(line, maxWidth, size, bold);
+    wrapped += wrappedLines.length;
+    for (const segment of wrappedLines) {
+      // `display: table` never shrinks below its min-content width, so a run
+      // with no break opportunity inside it widens the whole label — and the
+      // foreignObject upstream measures from it — past the budget.
+      widestRun = Math.max(
+        widestRun,
+        labelClampWidthOf(trimTrailingBreakableSpaces(segment), size, bold),
+      );
+    }
+  }
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(maxWidth, widestRun),
+    height: lineHeight * wrapped,
+  };
+}
+
 function intrinsicBox(el) {
   // Per-tag bbox without descending. For <g>, returns null so the
   // caller recurses into children.
@@ -518,6 +910,10 @@ function intrinsicBox(el) {
     return null; // recurse
   }
   // HTML in foreignObject, or anything else measurable via textContent.
+  // A label the browser would clamp to its `max-width` reports the wrapped
+  // box instead (see `labelClampBox`).
+  const clamped = labelClampBox(el);
+  if (clamped) return clamped;
   const { size, family, bold } = resolveFont(el);
   const { width, height } = measureTextBlock(el.textContent ?? '', family, size, bold);
   return { x: 0, y: 0, width, height };
@@ -647,6 +1043,7 @@ async function renderOne(source, id) {
     // makes single-file and batch runs produce the same bytes for
     // the same fixture regardless of the surrounding batch slice.
     __rngState = 0x12345678;
+    __labelClampEnabled = isFlowchartSource(source);
     const { svg } = await Promise.race([mermaid.render(id, source), timeout]);
     return normaliseSvg(svg);
   } finally {

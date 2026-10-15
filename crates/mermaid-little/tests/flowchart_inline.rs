@@ -574,3 +574,150 @@ fn dump_fixture_168_clusters() {
         eprintln!("\nEdge path fragment:\n{}", &got[start..end]);
     }
 }
+
+/// Issue #254: a label the browser clamps to `flowchart.wrappingWidth` has to
+/// be measured, laid out and emitted as the *wrapped* box.
+///
+/// Upstream measures the label `<div>` in a real DOM, where `max-width: 200px`
+/// shrinks it to 200 px; it then re-styles the div to
+/// `display: table; white-space: break-spaces; width: 200px`, which wraps the
+/// text inside 200 px, and sizes the node from that box. Measuring the
+/// un-clamped text instead reserves a 614.91 px node for a label the browser
+/// paints 200 px wide, flush with the box's left edge — its over-wide lines
+/// poking out of the border.
+#[test]
+fn clamped_html_label_matches_the_browser_box() {
+    // `wide` label, one line longer than the 200 px wrapping width:
+    //   python_codegen / unittest + protoc <mao yan> /
+    //   compileall <wu> legacy import <xie lou> / python -m build
+    // `narrow` stays inside the budget and must keep the un-clamped box.
+    let source = concat!(
+        "flowchart TD\n",
+        "    wide[\"python_codegen<br/>unittest + protoc \u{5192}\u{70DF}<br/>",
+        "compileall \u{65E0} legacy import \u{6CC4}\u{6F0F}<br/>python -m build\"]\n",
+        "    narrow[\"webrtc<br/>\u{771F}\u{5B9E} RTC \u{573A}\u{666F}\"]\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "issue-254").expect("render");
+    // The clamped node: 200 px label + 2 x 30 px label padding, five painted
+    // lines at line-height 24.
+    assert!(
+        svg.contains(r#"<foreignObject width="200" height="120" overflow="visible">"#),
+        "clamped label must be the wrapped 200 x 120 box"
+    );
+    assert!(
+        svg.contains(
+            r#"<div style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;""#
+        ),
+        "clamped label div must switch to the wrapping style"
+    );
+    assert!(
+        svg.contains(r#"x="-130" y="-75" width="260" height="150""#),
+        "node box must be sized from the wrapped label"
+    );
+    assert!(
+        !svg.contains(r#"<foreignObject width="614.9"#),
+        "the un-clamped label width must not reach the node box"
+    );
+    // The label that fits keeps `nowrap` and its measured width.
+    assert!(
+        svg.contains(r#"<div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;""#),
+        "labels inside the budget must keep the un-clamped style"
+    );
+}
+
+/// A subgraph title is an HTML label upstream never gives a `max-width`, so the
+/// browser never wraps it. Measuring it through the clamp made the viewBox
+/// narrower than the label the renderer paints, clipping a long title on both
+/// sides.
+#[test]
+fn cluster_labels_stay_unclamped() {
+    use mermaid_little::render::foreign_object::{
+        measure_html_markup_label, HtmlLabelFont, HTML_LABEL_WRAPPING_WIDTH,
+    };
+    // A title well past the wrapping width.
+    let title = "a very long subgraph title that goes past the two hundred pixel wrapping budget";
+    let source = format!("flowchart TD\n    subgraph SG[\"{title}\"]\n    a --> b\n    end\n");
+    let d = fcp::parse(&source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "cluster-clamp").expect("render");
+
+    assert!(
+        !svg.contains("break-spaces"),
+        "cluster labels must keep the un-clamped `nowrap` style"
+    );
+    let markup = mermaid_little::render::foreign_object::string_label_to_html(title);
+    let (label_w, _) = measure_html_markup_label(
+        &markup,
+        &HtmlLabelFont::default(),
+        HTML_LABEL_WRAPPING_WIDTH,
+        true,
+    );
+    assert!(label_w > HTML_LABEL_WRAPPING_WIDTH, "fixture must overflow");
+    let label_fo = format!(
+        r#"<foreignObject width="{}""#,
+        mermaid_little::render::shapes::types::fmt_num(label_w)
+    );
+    assert!(
+        svg.contains(&label_fo),
+        "the emitted label must be the un-clamped box ({label_w})"
+    );
+    // And the viewBox has to cover it.
+    let vb = viewbox(&svg);
+    assert!(
+        vb[2] >= label_w,
+        "viewBox width {} must cover the {} px label",
+        vb[2],
+        label_w
+    );
+}
+
+/// The `font-size` / `bold` post-process passes rewrite the label's
+/// foreignObject numbers by literal needle replacement, so they must resolve
+/// the clamp exactly as the measurement that produced those numbers did. A
+/// demoted empty cluster is not clamped: measuring it clamped made every needle
+/// miss, silently dropping the patch while the `<div>` kept its
+/// `font-size: 30px !important`.
+#[test]
+fn postprocess_patches_match_the_unclamped_label_it_emitted() {
+    use mermaid_little::render::foreign_object::{
+        measure_html_markup_label, HtmlLabelFont, HTML_LABEL_WRAPPING_WIDTH,
+    };
+    let title = "a very long subgraph title that goes past the two hundred pixel wrapping budget";
+    let source = format!(
+        "flowchart TD\n    subgraph SG[\"{title}\"]\n    end\n    classDef big font-size:30px\n    class SG big\n"
+    );
+    let d = fcp::parse(&source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "cluster-fontsize").expect("render");
+
+    assert!(
+        svg.contains("font-size: 30px !important"),
+        "fixture must carry the size override"
+    );
+    let markup = mermaid_little::render::foreign_object::string_label_to_html(title);
+    let sized = HtmlLabelFont {
+        font_family: None,
+        font_size_px: Some(30.0),
+        bold: None,
+    };
+    let (w30, _) = measure_html_markup_label(&markup, &sized, HTML_LABEL_WRAPPING_WIDTH, true);
+    assert!(
+        svg.contains(&format!(
+            r#"<foreignObject width="{}""#,
+            mermaid_little::render::shapes::types::fmt_num(w30)
+        )),
+        "the post-process patch must land on the 30 px geometry ({w30})"
+    );
+    // The label `<g>` carries the size override, i.e. the pass ran and its
+    // needle for the group matched. (Its translate stays at the default-font
+    // centre — pre-existing behaviour, byte-identical to HEAD.)
+    assert!(
+        svg.contains(r#"<g class="label" style="font-size:30px !important""#),
+        "the pass must also stamp the size on the label group"
+    );
+}

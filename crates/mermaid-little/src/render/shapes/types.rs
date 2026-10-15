@@ -257,6 +257,57 @@ pub fn measure_label(label: &str, font_family: &str, font_size: f64, bold: bool)
     (max_w, h)
 }
 
+/// Measure a node's HTML label the way its diagram does, and report whether
+/// the browser clamped it.
+///
+/// Flowchart nodes carry `Node::clamp_html_label`: their layout reserved the
+/// box a browser paints after clamping the label to `flowchart.wrappingWidth`,
+/// so the emitted label has to be measured the same way (issue #254). Every
+/// other family keeps the shim measurement — clamping their labels without
+/// clamping their boxes would wrap text into a box sized for one line.
+///
+/// `escaped_label` routes through `measure_html_label` (the `xml_escape`d
+/// shape spelling, with its markdown-marker and `\n` handling); otherwise the
+/// text is markup and goes through `measure_html_markup_label`. Both shim
+/// functions agree on the clamp, so the parameter only picks the un-clamped
+/// fallback.
+pub fn measure_node_label(
+    node: &crate::layout::unified::types::Node,
+    text: &str,
+    font: &crate::render::foreign_object::HtmlLabelFont<'_>,
+    escaped_label: bool,
+) -> (f64, f64, bool) {
+    use crate::render::foreign_object::{
+        measure_html_label, measure_html_label_clamped, measure_html_markup_label,
+        measure_html_markup_label_clamped, HTML_LABEL_WRAPPING_WIDTH,
+    };
+    let max_width = HTML_LABEL_WRAPPING_WIDTH;
+    if node.clamp_html_label {
+        // Decide the clamp in the font the label is finally rendered in — the
+        // inline `font-size` / `font-weight` of its styles, exactly what
+        // `font_size_postprocess_node_svg` / `bold_postprocess_node_svg`
+        // re-measure with — so shape, layout and post-process agree on whether
+        // the browser wraps this label.
+        let css = node.css_styles.as_deref().unwrap_or(&[]);
+        let resolved = crate::render::foreign_object::HtmlLabelFont {
+            font_family: None,
+            font_size_px: crate::layout::flowchart::styles_font_size_px_pub(css),
+            bold: crate::layout::flowchart::styles_have_bold(css).then_some(true),
+        };
+        return if escaped_label {
+            measure_html_label_clamped(text, &resolved, max_width)
+        } else {
+            measure_html_markup_label_clamped(text, &resolved, max_width)
+        };
+    }
+    let (w, h) = if escaped_label {
+        measure_html_label(text, font, max_width, true)
+    } else {
+        measure_html_markup_label(text, font, max_width, true)
+    };
+    (w, h, false)
+}
+
 /// Emit a standard polygon-shaped node block. Shared by every shape
 /// whose geometry is a closed polygon (hexagon, lean_left/right,
 /// trapezoid variants, diamond, choice, …) so that attribute order
@@ -306,6 +357,7 @@ pub fn emit_polygon_node(node: &crate::layout::unified::types::Node, pts: &[(f64
                 &xml_escape_label(&label),
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }
@@ -376,6 +428,7 @@ pub fn emit_polygon_node_with_transform(
                 &xml_escape_label(&label),
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }
