@@ -1067,6 +1067,18 @@ fn compute_viewbox_browser(
         if is_cyclic_helper_from_anchor_rewrite(n, l) {
             continue;
         }
+        // Isolated clusters are painted inside a translated inner root (see
+        // the dedicated loop below): n.x/y are inner-layout numbers, so this
+        // box sits where nothing is drawn. Its label measurement is equally
+        // meaningless here — this loop centres the label vertically, while
+        // render_cluster paints the cluster label inside the rect's top edge
+        // (label_ty = ry). Skipping isolated clusters is safe: the second
+        // loop grows the bounds with the cluster rect at its composed
+        // position, and a label painted on that rect's inner top edge is
+        // covered by the rect itself.
+        if l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
 
         let cx = n.x.unwrap_or(0.0);
         let cy = n.y.unwrap_or(0.0);
