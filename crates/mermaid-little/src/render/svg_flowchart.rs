@@ -2158,6 +2158,21 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
     }
 }
 
+/// The `outer_tx`/`outer_ty` translate recorded by the layout engine, parsed.
+///
+/// The two keys are written as a pair and name one `translate(tx, ty)`, so
+/// they are treated as one unit: `None` means at least one component is
+/// missing from `extra` or is not a valid number — exactly the condition
+/// under which `isolated_cluster_translate` substitutes its inner-pass
+/// fallback. Callers that cannot tolerate that fallback (e.g. lifting a
+/// nested cluster's rect between frames) branch on this instead of
+/// re-testing key presence.
+fn parsed_outer_translate(cnode: &UNode) -> Option<(f64, f64)> {
+    let tx = cnode.extra.get("outer_tx")?.parse::<f64>().ok()?;
+    let ty = cnode.extra.get("outer_ty")?.parse::<f64>().ok()?;
+    Some((tx, ty))
+}
+
 /// The `translate(tx, ty)` an isolated cluster's inner root group carries.
 ///
 /// Single source of truth: `render_isolated_cluster_inner_root` emits exactly
@@ -2166,28 +2181,16 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
 /// resolve collisions that do not exist on screen.
 fn isolated_cluster_translate(cnode: &UNode) -> (f64, f64) {
     // Prefer the pre-computed outer translate from the layout engine.
-    let tx = cnode
-        .extra
-        .get("outer_tx")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            // Fallback: classic formula using inner dagre coords.
-            let cx = cnode.x.unwrap_or(0.0);
-            let w = cnode.width.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cx - padding - w / 2.0
-        });
-    let ty = cnode
-        .extra
-        .get("outer_ty")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            let cy = cnode.y.unwrap_or(0.0);
-            let h = cnode.height.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cy - h / 2.0 - padding
-        });
-    (tx, ty)
+    if let Some(t) = parsed_outer_translate(cnode) {
+        return t;
+    }
+    // Fallback: classic formula using inner dagre coords.
+    let cx = cnode.x.unwrap_or(0.0);
+    let w = cnode.width.unwrap_or(0.0);
+    let padding = cnode.padding.unwrap_or(8.0);
+    let cy = cnode.y.unwrap_or(0.0);
+    let h = cnode.height.unwrap_or(0.0);
+    (cx - padding - w / 2.0, cy - h / 2.0 - padding)
 }
 
 /// Isolated-cluster ancestors of `node_id`, outermost first.
@@ -2486,19 +2489,24 @@ fn render_isolated_cluster_inner_root(
             }
             let sub = l.nodes.iter().find(|n| n.id == c.id && n.is_group)?;
             // The renderer places this sub-cluster's root group by outer_tx/
-            // outer_ty. Without them `isolated_cluster_translate` falls back to
-            // the inner-pass coordinates, which are in the wrong frame — skip
-            // the entry rather than lift the rect by a wrong offset and let the
-            // snap act on it.
-            if !sub.extra.contains_key("outer_tx") || !sub.extra.contains_key("outer_ty") {
-                log::debug!(
-                    "svg_flowchart: nested isolated cluster '{}' has no outer translate; \
-                     leaving its rect out of the clip map",
-                    c.id
-                );
-                return None;
-            }
-            let (tx, ty) = isolated_cluster_translate(sub);
+            // outer_ty. When either is missing or unparsable,
+            // `isolated_cluster_translate` falls back to the inner-pass
+            // coordinates, which are in the wrong frame — skip the entry
+            // rather than lift the rect by a wrong offset and let the snap
+            // act on it. Branching on `parsed_outer_translate` itself keeps
+            // this test identical to the fallback condition it guards
+            // against.
+            let (tx, ty) = match parsed_outer_translate(sub) {
+                Some(t) => t,
+                None => {
+                    log::debug!(
+                        "svg_flowchart: nested isolated cluster '{}' has no usable outer \
+                         translate; leaving its rect out of the clip map",
+                        c.id
+                    );
+                    return None;
+                }
+            };
             let mut lifted = *b;
             lifted.x += tx;
             lifted.y += ty;
@@ -3544,34 +3552,38 @@ fn render_edge_path(
     let synthetic_segment = e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment");
     let dst_on_cluster = !synthetic_segment || e.end.as_deref() == Some(orig_dst);
     let src_on_cluster = !synthetic_segment || e.start.as_deref() == Some(orig_src);
+    // Resolve each cluster-attached endpoint's drawn rect once so the clip
+    // and the snap below act on the same target.
+    let dst_bounds = if dst_on_cluster {
+        cluster_bounds.get(orig_dst)
+    } else {
+        None
+    };
+    let src_bounds = if src_on_cluster {
+        cluster_bounds.get(orig_src)
+    } else {
+        None
+    };
 
-    if let Some(bounds) = cluster_bounds.get(orig_dst) {
-        if dst_on_cluster {
-            pts = cut_path_at_intersect(&pts, bounds);
-        }
+    if let Some(bounds) = dst_bounds {
+        pts = cut_path_at_intersect(&pts, bounds);
     }
-    if let Some(bounds) = cluster_bounds.get(orig_src) {
-        if src_on_cluster {
-            pts.reverse();
-            pts = cut_path_at_intersect(&pts, bounds);
-            pts.reverse();
-        }
+    if let Some(bounds) = src_bounds {
+        pts.reverse();
+        pts = cut_path_at_intersect(&pts, bounds);
+        pts.reverse();
     }
     // The clip above only acts on paths that cross the border. An isolated
     // cluster's placeholder — the size dagre routes its edges to — is larger
     // than the rect drawn, so some endpoints stop short of the border and the
     // path never crosses it. Pull those onto the border.
-    if let Some(bounds) = cluster_bounds.get(orig_dst) {
-        if dst_on_cluster {
-            snap_endpoint_to_bounds(&mut pts, bounds);
-        }
+    if let Some(bounds) = dst_bounds {
+        snap_endpoint_to_bounds(&mut pts, bounds);
     }
-    if let Some(bounds) = cluster_bounds.get(orig_src) {
-        if src_on_cluster {
-            pts.reverse();
-            snap_endpoint_to_bounds(&mut pts, bounds);
-            pts.reverse();
-        }
+    if let Some(bounds) = src_bounds {
+        pts.reverse();
+        snap_endpoint_to_bounds(&mut pts, bounds);
+        pts.reverse();
     }
 
     // Apply marker visual offsets to get the rendered path points.
