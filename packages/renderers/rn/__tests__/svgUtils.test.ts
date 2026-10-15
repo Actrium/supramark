@@ -1,3 +1,5 @@
+// cjk-allow-file: label fixtures quote real diagram text (CJK glyphs are the
+// data under test — their width is what pushes a line past the wrapping width)
 import { describe, test, expect } from 'bun:test';
 import { normalizeSvg, normalizeSvgLight, stripRootSvgSize } from '../src/svgUtils';
 
@@ -91,13 +93,14 @@ test('normalizeSvg removes an empty foreignObject (width=0 or no text)', () => {
   expect(out).not.toContain('<text');
 });
 
-test('normalizeSvg joins multiple <p> texts inside a foreignObject into a single text', () => {
+test('normalizeSvg keeps multiple <p> texts inside a foreignObject as separate lines', () => {
   const input =
-    '<svg><foreignObject width="20" height="16">' +
+    '<svg><foreignObject width="20" height="32">' +
     '<div><p>line1</p><p>line2</p></div>' +
     '</foreignObject></svg>';
   const out = normalizeSvg(input);
-  expect(out).toContain('>line1 line2<');
+  expect(out).toContain('<tspan x="10">line1</tspan>');
+  expect(out).toContain('<tspan x="10" dy="16">line2</tspan>');
 });
 
 // ============================================================================
@@ -145,7 +148,7 @@ test('normalizeSvg inlineColors converts double quotes in CSS values to single q
 // normalizeSvg — doesn't break existing structure
 // ============================================================================
 
-test('normalizeSvg does not accidentally strip a rect\'s class/style attributes (safe-regex regression)', () => {
+test("normalizeSvg does not accidentally strip a rect's class/style attributes (safe-regex regression)", () => {
   // The original />[^<]+</ regex would treat rect's class attribute string as raw text and corrupt it, breaking class-based CSS matching.
   const input =
     '<svg><style>.label-container{fill:#ECECFF}</style>' +
@@ -219,14 +222,50 @@ test('normalizeSvg also extracts <span> text inside a foreignObject', () => {
   expect(out).toContain('>vennLabel<');
 });
 
-// <br/> is a line boundary; it must be converted to a space before tags are stripped, otherwise Line1<br/>Line2 becomes Line1Line2.
-test('normalizeSvg converts <br/> inside a foreignObject to a space to avoid lines running together', () => {
+// <br/> is a painted line boundary: react-native-svg draws one line per
+// <text>, so each line becomes its own <tspan> — collapsing them into a space
+// made `Line1<br/>Line2` and `Line1 Line2` render identically.
+test('normalizeSvg keeps <br/> inside a foreignObject as separate lines', () => {
   const input =
     '<svg><foreignObject width="40" height="32">' +
     '<div xmlns="x"><span class="nodeLabel"><p>Line1<br/>Line2</p></span></div></foreignObject></svg>';
   const out = normalizeSvg(input);
-  expect(out).toContain('>Line1 Line2<');
+  expect(out).toContain('<tspan x="20">Line1</tspan>');
+  expect(out).toContain('<tspan x="20" dy="16">Line2</tspan>');
   expect(out).not.toContain('>Line1Line2<');
+});
+
+// A label the engine sized *smaller* than its own text — the flowchart
+// `wrappingWidth` clamp (mermaid-little#254): the browser wraps it with
+// `white-space: break-spaces` + `max-width`, so this renderer has to wrap it
+// too, or the text overflows the node box.
+test('normalizeSvg soft-wraps a clamped label to the foreignObject width', () => {
+  // The issue's own repro: 4 painted lines, the third one 223 px at 16 px in a
+  // 200 px box, and a 120 px tall box for the 5 lines the engine wrapped.
+  const input =
+    '<svg><foreignObject width="200" height="120">' +
+    '<div><span class="nodeLabel"><p>python_codegen<br/>unittest + protoc 冒烟<br/>' +
+    'compileall 无 legacy import 泄漏<br/>python -m build</p></span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const tspans = out.match(/<tspan[^>]*>[^<]*<\/tspan>/g) ?? [];
+  expect(tspans).toHaveLength(5);
+  // 120 px / 5 painted lines, so the first baseline sits at 24 * 0.7.
+  expect(out).toContain('y="16.799999999999997"');
+  expect(tspans[2]).toContain('compileall 无 legacy');
+  expect(tspans[3]).toContain('import 泄漏');
+  expect(out).toMatch(/dy="24"/);
+});
+
+// A label that fits its box is left alone: the engine measured it with real
+// font metrics, and this module only estimates them, so re-wrapping on the
+// estimate would break lines the engine deliberately left whole.
+test('normalizeSvg does not re-wrap a label that fits its box', () => {
+  const input =
+    '<svg><foreignObject width="200" height="24">' +
+    '<div><span class="nodeLabel"><p>iiiiiiiiiiiiiiiiiiiiii</p></span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  expect(out).toContain('>iiiiiiiiiiiiiiiiiiiiii<');
+  expect(out).not.toContain('<tspan');
 });
 
 // A bare d2 <text> (no style, no fill) must also get a default color fallback, otherwise it defaults to black.
@@ -247,7 +286,7 @@ test('normalizeSvg matches the compound selector rect.divider', () => {
 
 // color: only sets the text color in CSS semantics and has no effect on a rect's fill.
 // .box{fill:blue;color:red} should produce fill=blue for a rect and must not be overridden by color:red.
-test('normalizeSvg color: does not affect a rect\'s fill (only applies to text)', () => {
+test("normalizeSvg color: does not affect a rect's fill (only applies to text)", () => {
   const input =
     '<svg><style>.box{fill:blue;color:red}</style><rect class="box" width="1" height="1"/></svg>';
   const out = normalizeSvg(input);
@@ -307,7 +346,7 @@ test('normalizeSvg does not substring-match .label against a class="edgeLabel" a
 });
 
 // A self-closing <g class="x"/> has no </g>, so its class must not be pushed onto the stack and leak to later sibling elements.
-test('normalizeSvg does not leak a self-closing <g/>\'s class to sibling elements', () => {
+test("normalizeSvg does not leak a self-closing <g/>'s class to sibling elements", () => {
   // The self-closing g carries class="node"; the rect right after it sits in
   // a different g (with an empty class).
   // If the self-closing g were mistakenly pushed onto the stack, the rect

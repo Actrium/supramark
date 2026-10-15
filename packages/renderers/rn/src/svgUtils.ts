@@ -74,7 +74,10 @@ function parseCssRules(cssText: string): CssRule[] {
       decls[mapped] = value;
     }
     if (Object.keys(decls).length === 0) continue;
-    for (const sel of selectorGroup.split(',').map(s => s.trim()).filter(Boolean)) {
+    for (const sel of selectorGroup
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)) {
       const selector = parseSelector(sel);
       if (selector.length === 0) continue;
       rules.push({ selector, decls });
@@ -119,7 +122,12 @@ function parseSelector(sel: string): SelectorPart[] {
  * strings, avoiding String.includes substring matches that would wrongly hit
  * .node on "nodes" or .label on "edgeLabel".
  */
-function ruleMatches(rule: CssRule, tag: string, classes: string[], ancestorClasses: string[][]): boolean {
+function ruleMatches(
+  rule: CssRule,
+  tag: string,
+  classes: string[],
+  ancestorClasses: string[][]
+): boolean {
   const parts = rule.selector;
   const self = parts[parts.length - 1];
   if (self.tag && self.tag !== tag) return false;
@@ -162,6 +170,116 @@ const SHAPE_TAGS = /^(rect|path|circle|ellipse|polygon|line|polyline|text)$/;
  * 4. Strips the xml header/comments + whitespace between tags, protecting
  *    text inside text/foreignObject from being mistakenly removed.
  */
+// ============================================================================
+// Label line layout — soft wrapping for foreignObject labels
+//
+// The engine emits HTML labels the way a browser lays them out: a `<div>` with
+// `max-width`/`width` from `flowchart.wrappingWidth` and
+// `white-space: break-spaces`, which wraps every painted line inside that box
+// (mermaid-little#254). react-native-svg has no CSS layout, so this module
+// flattens the label into `<text>`/`<tspan>` and has to do the wrapping itself:
+// without it a label the engine correctly sized to 200 px draws its source
+// lines at full length and overflows the node box.
+//
+// Widths are estimated, not measured — RN cannot measure text from a string
+// transform. The estimate mirrors the engine's own (`label_metrics::
+// painted_line_width`: ~1em for the wide glyphs a browser paints full-width,
+// ~0.56em for the rest), so the line count here matches the line count the
+// engine reserved height for.
+// ============================================================================
+
+/** Advance width of `ch` in the 16 px label font, in px. */
+function glyphWidth(ch: string, fontSize: number): number {
+  const cp = ch.codePointAt(0) ?? 0;
+  const wide =
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+    (cp >= 0x2e80 && cp <= 0xa4cf) || // CJK radicals .. Yi
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+    (cp >= 0xfe30 && cp <= 0xfe6b) || // CJK compatibility forms
+    (cp >= 0xff00 && cp <= 0xff60) || // fullwidth forms
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1faff) || // emoji
+    (cp >= 0x20000 && cp <= 0x3fffd); // CJK extensions B+
+  return wide ? fontSize : fontSize * 0.56;
+}
+
+function estimateTextWidth(text: string, fontSize: number): number {
+  let width = 0;
+  for (const ch of text) width += glyphWidth(ch, fontSize);
+  return width;
+}
+
+/** Whitespace the label may break at — `char::is_whitespace` minus the
+ *  no-break spaces, which `break-spaces` never breaks at. */
+function isBreakableSpace(ch: string): boolean {
+  return (
+    /[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/.test(ch) &&
+    ch !== '\u00A0' &&
+    ch !== '\u202F'
+  );
+}
+
+/**
+ * Greedy `white-space: break-spaces` wrapping of one painted line: a break
+ * opportunity sits after every run of breakable whitespace and between any two
+ * wide glyphs, and a single word wider than the box keeps a line to itself
+ * instead of being broken (`overflow-wrap: normal`).
+ */
+function wrapLabelLine(line: string, maxWidth: number, fontSize: number): string[] {
+  const chars = [...line];
+  const segments: [number, number][] = [];
+  let i = 0;
+  while (i < chars.length) {
+    const start = i;
+    const ch = chars[i];
+    i += 1;
+    if (!isBreakableSpace(ch) && glyphWidth(ch, fontSize) >= fontSize) {
+      // one wide glyph: breakable on either side
+    } else if (!isBreakableSpace(ch)) {
+      while (
+        i < chars.length &&
+        !isBreakableSpace(chars[i]) &&
+        glyphWidth(chars[i], fontSize) < fontSize
+      ) {
+        i += 1;
+      }
+    }
+    while (i < chars.length && isBreakableSpace(chars[i])) i += 1;
+    segments.push([start, i]);
+  }
+
+  const lines: string[] = [];
+  let from = 0;
+  let width = 0;
+  for (const [start, end] of segments) {
+    const w = estimateTextWidth(chars.slice(start, end).join(''), fontSize);
+    if (width > 0 && width + w > maxWidth) {
+      lines.push(chars.slice(from, start).join(''));
+      from = start;
+      width = 0;
+    }
+    width += w;
+  }
+  lines.push(chars.slice(from).join(''));
+  return lines;
+}
+
+/**
+ * The label's own hard line breaks: `<br>` (any spelling) and block boundaries
+ * end a painted line; inline whitespace collapses but the breaks survive.
+ */
+function labelHardLines(markup: string): string[] {
+  return markup
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+    .split('\n');
+}
+
 export function normalizeSvg(xml: string): string {
   // 1. Parse the CSS rules from all <style> tags, preserving source order.
   const cssRules: CssRule[] = [];
@@ -195,13 +313,21 @@ export function normalizeSvg(xml: string): string {
         // otherwise its class would leak to sibling elements and the
         // subsequent </g> pop would be misaligned.
         if (selfClose) return full;
-        const gClasses = attrs.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/).filter(Boolean) ?? [];
+        const gClasses =
+          attrs
+            .match(/\bclass="([^"]*)"/)?.[1]
+            .split(/\s+/)
+            .filter(Boolean) ?? [];
         ancestorClasses.push(gClasses);
         return full;
       }
       if (!SHAPE_TAGS.test(lower)) return full;
 
-      const classes = attrs.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/).filter(Boolean) ?? [];
+      const classes =
+        attrs
+          .match(/\bclass="([^"]*)"/)?.[1]
+          .split(/\s+/)
+          .filter(Boolean) ?? [];
       // Merge decls from all matching rules in source order (later overrides earlier).
       const merged: CssDecls = {};
       for (const rule of cssRules) {
@@ -221,9 +347,15 @@ export function normalizeSvg(xml: string): string {
       const extra =
         (fill && !/(?:^|\s)fill=/.test(attrs) ? ` fill="${sanitizeCssValue(fill)}"` : '') +
         (stroke && !/(?:^|\s)stroke=/.test(attrs) ? ` stroke="${sanitizeCssValue(stroke)}"` : '') +
-        (strokeWidth && !/(?:^|\s)stroke-width=/.test(attrs) ? ` stroke-width="${sanitizeCssValue(strokeWidth)}"` : '') +
-        (fontFamily && !/(?:^|\s)font-family=/.test(attrs) ? ` font-family="${sanitizeCssValue(fontFamily)}"` : '') +
-        (fontSize && !/(?:^|\s)font-size=/.test(attrs) ? ` font-size="${sanitizeCssValue(fontSize)}"` : '');
+        (strokeWidth && !/(?:^|\s)stroke-width=/.test(attrs)
+          ? ` stroke-width="${sanitizeCssValue(strokeWidth)}"`
+          : '') +
+        (fontFamily && !/(?:^|\s)font-family=/.test(attrs)
+          ? ` font-family="${sanitizeCssValue(fontFamily)}"`
+          : '') +
+        (fontSize && !/(?:^|\s)font-size=/.test(attrs)
+          ? ` font-size="${sanitizeCssValue(fontSize)}"`
+          : '');
       return `<${tag}${attrs}${extra}${selfClose}>`;
     }
   );
@@ -259,7 +391,8 @@ export function normalizeSvg(xml: string): string {
     let style = styleMatch[1];
     // Only fill in the default when it's missing from both style and attributes.
     if (!/fill:/.test(style) && !hasFillAttr) style += `; fill: ${defaultTextFill}`;
-    if (!/font-family:/.test(style) && !hasFontFamilyAttr) style += `; font-family: ${defaultFontFamily}`;
+    if (!/font-family:/.test(style) && !hasFontFamilyAttr)
+      style += `; font-family: ${defaultFontFamily}`;
     if (!/font-size:/.test(style) && !hasFontSizeAttr) style += `; font-size: 16px`;
     // Function replacer: a literal string would let $& / $` / $' / $n inside the new style
     // value be interpreted as replacement patterns and corrupt it (as stripRootSvgSize does).
@@ -280,19 +413,48 @@ export function normalizeSvg(xml: string): string {
   //    determined by the parent <g> transform, and the converted <text>
   //    inherits the same parent transform, so the position is unchanged.
   //    A foreignObject with width=0 or no text is simply removed.
-  out = out.replace(/<foreignObject\b[^>]*>[\s\S]*?<\/foreignObject>/gi, (fo) => {
+  out = out.replace(/<foreignObject\b[^>]*>[\s\S]*?<\/foreignObject>/gi, fo => {
     const w = Number(fo.match(/\bwidth="([^"]*)"/)?.[1] ?? 0);
     const h = Number(fo.match(/\bheight="([^"]*)"/)?.[1] ?? 0);
     if (!w || !h) return '';
-    // Convert <br> and block-level closing tags (</p>/</div>) to spaces first
-    // as line/block boundaries to avoid lines running together; then strip
-    // remaining tags and take all plain text inside the foreignObject (not
-    // limited to <p> — venn labels use <span>).
-    const html = fo.replace(/<br\s*\/?>/gi, ' ').replace(/<\/(p|div|li|h[1-6])>/gi, ' ');
-    const text = html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    if (!text) return '';
+    // Painted lines: `<br>` and block-level closing tags (</p>/</div>) end a
+    // line, and each of those lines is soft-wrapped to the foreignObject's own
+    // width — the box the engine sized from `flowchart.wrappingWidth`, which a
+    // browser would wrap with `white-space: break-spaces` and this renderer has
+    // to wrap itself. Plain text inside the foreignObject is taken regardless
+    // of element (not limited to <p> — venn labels use <span>).
+    const fontSize = 16;
+    const hardLines = labelHardLines(fo);
+    if (hardLines.every(line => !line)) return '';
+    // The box height says how many lines the engine painted (one line box per
+    // painted line, `font-size * 1.5` each). Only when the box is taller than
+    // the source's own hard breaks did the engine soft-wrap something, and only
+    // then may this renderer re-wrap: a label that fits was measured with the
+    // real font metrics the engine has and this estimate does not, so
+    // re-wrapping it on the estimate alone would break lines the engine left
+    // whole.
+    const paintedLines = Math.max(1, Math.round(h / (fontSize * 1.5)));
+    const lines =
+      paintedLines > hardLines.length
+        ? hardLines.flatMap(line => wrapLabelLine(line, w, fontSize))
+        : hardLines;
+    if (lines.every(line => !line)) return '';
     const x = w / 2;
-    const y = h * 0.7;
+    // One <tspan> per painted line: react-native-svg draws a <text> as a
+    // single line and neither breaks on newlines nor wraps. The foreignObject's
+    // height covers every painted line, so dividing it by the line count gives
+    // the line box — for one line that is exactly the `h * 0.7` baseline this
+    // used to hardcode.
+    const lineHeight = h / lines.length;
+    const y = lineHeight * 0.7;
+    const label =
+      lines.length === 1
+        ? lines[0]
+        : lines
+            .map(
+              (line, i) => `<tspan x="${x}"${i > 0 ? ` dy="${lineHeight}"` : ''}>${line}</tspan>`
+            )
+            .join('');
     // Prefer the label's own text color, read only from a style="..." attribute (never the
     // visible label text) and only a real `color` property — the (?:^|;) boundary keeps
     // `background-color` from matching. Last match wins, i.e. the innermost span's color.
@@ -302,7 +464,7 @@ export function normalizeSvg(xml: string): string {
       const decl = sm[1].match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
       if (decl) labelFill = sanitizeCssValue(decl[1].replace(/\s*!important\s*$/i, '').trim());
     }
-    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: 16px">${text}</text>`;
+    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill: ${labelFill}; font-family: ${defaultFontFamily}; font-size: ${fontSize}px">${label}</text>`;
   });
 
   // 6. Protect <text>, strip the xml header/comments + whitespace between
