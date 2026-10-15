@@ -782,6 +782,49 @@ describe('image rendering', () => {
     });
   }
 
+  // The flattenNestedStrong branch recurses through its own path in
+  // renderInlineNode's strong case, so the link URL has to survive that hop
+  // too — a missed pass-through would silently take the name away again.
+  it('carries the link URL through the flattenNestedStrong branch', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'see ' },
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [
+            {
+              type: 'strong',
+              children: [
+                {
+                  type: 'strong',
+                  children: [{ type: 'image', url: 'https://example.com/icon.png', alt: '' }],
+                },
+              ],
+            },
+          ],
+        },
+        { type: 'text', value: ' now' },
+      ]),
+      undefined,
+      { options: { flattenNestedStrong: true } }
+    );
+
+    // The flatten branch actually ran: the nested strong collapses into a
+    // single bold <Text> instead of rendering bold-on-bold.
+    const strongTexts = renderer.root
+      .findAllByType('Text')
+      .filter(
+        text => (text.props.style as { fontWeight?: string } | undefined)?.fontWeight === '700'
+      );
+    expect(strongTexts).toHaveLength(1);
+
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessibilityLabel).toBe('https://example.com/article');
+    expect(image.props.accessibilityElementsHidden).toBe(false);
+    expect(image.props.importantForAccessibility).toBe('yes');
+  });
+
   it('prefers alt over the link URL for a linked inline image', async () => {
     const renderer = await renderAst(
       imageAst([
