@@ -76,11 +76,14 @@ const reasonless = PLAYGROUND_EXCLUDED_FEATURES.filter(entry => entry.reason.tri
 // `from '@supramark/feature-x'` reads as an import; `phantomRegistered` below
 // turns that into a precise failure.
 //
-// Type-only imports need no handling: the registry maps node types to runtime
-// components, so a feature reachable only through `import type` cannot register
-// one — that fails the build outright. And should a future reorganization ever
-// slip past that, the symptom is still a loud routedButUnregistered pointing at
-// the registry, never silently wrong data.
+// Type-only imports are matched too: the pattern keys on `from '<pkg>'` and does
+// not tell `import` from `import type`, so the registry set is a superset of the
+// value imports rather than an exact census. A superset can only over-report
+// (phantomRegistered below catches bogus names), never drop a real import. What
+// keeps a type-only entry from passing for a real registration happens before
+// this script runs: the registry maps node types to runtime components, so
+// registering one requires a value import, and TypeScript rejects using an
+// import-type-only binding as one.
 const registrySource = readFileSync(REGISTRY_FILE, 'utf8');
 const registered = new Set(
   [...registrySource.matchAll(/from ['"]@supramark\/feature-([a-z0-9-]+)['"]/g)].map(
