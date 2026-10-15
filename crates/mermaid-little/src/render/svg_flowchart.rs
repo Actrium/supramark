@@ -573,6 +573,17 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     );
     out = out.replace(&needle_tx, &replace_tx);
 
+    // The transform needle above only matches when the shape emitted the
+    // default-font numbers. A clamped label already carries the resolved-size
+    // geometry (that is what the clamp measured), so stamp the size on its
+    // `<g>` independently of the number rewrite.
+    let g_needle = r##"<g class="label" style="" "##;
+    let g_replace = format!(
+        r##"<g class="label" style="font-size:{fs}px !important" "##,
+        fs = fmt_num(font_size_px)
+    );
+    out = out.replace(g_needle, &g_replace);
+
     // 3. Inline font-size on the inner `<div>` and `<span>`. A clamped label
     //    carries upstream's wrapping style instead of `nowrap`, so both
     //    spellings get the prefix — the shape emitted whichever its

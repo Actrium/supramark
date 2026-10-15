@@ -728,10 +728,12 @@ fn postprocess_patches_match_the_unclamped_label_it_emitted() {
 /// stays `nowrap` and a CSS-aware host paints the larger text out of the box.
 #[test]
 fn styled_polygon_label_clamps_in_the_rendered_font() {
+    // The label has to overflow *only* at 30 px (~169 px at 16 px, ~317 px at
+    // 30 px): one that overflows in both domains passes even without the fix.
     let source = concat!(
         "flowchart TD\n",
         "    classDef big font-size:30px\n",
-        "    a{{\"a longer label that overflows at thirty px\"}}:::big\n",
+        "    a{{\"fits at sixteen px\"}}:::big\n",
     );
     let d = fcp::parse(source).expect("parse");
     let th = theme::get_theme("default");
@@ -747,6 +749,13 @@ fn styled_polygon_label_clamps_in_the_rendered_font() {
     assert!(
         svg.contains(r#"<foreignObject width="200""#),
         "the box must be the wrapping width"
+    );
+    // The size pass's number needles only match default-font geometry, which a
+    // clamped label no longer emits — the label group still has to carry the
+    // size.
+    assert!(
+        svg.contains(r#"<g class="label" style="font-size:30px !important""#),
+        "the label group must keep the size stamp"
     );
 }
 

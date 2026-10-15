@@ -584,16 +584,17 @@ fn shape_label_block_inner(
     // Label box under the diagram's policy: a clamped label reports the box a
     // browser paints after wrapping it inside the wrapping width, and the
     // flag travels into `LabelOpts` so the `<div>` gets the matching style.
+    // Decide the clamp in the font the label is finally painted in (its inline
+    // `font-size` / `font-weight`) — the same resolution
+    // `shapes::types::measure_node_label` and the layout use. A shape whose
+    // label only overflows at that size must still switch the `<div>` to the
+    // wrapping style, or a CSS-aware host paints the larger text out of a box
+    // sized for the smaller one. (The un-clamped fallbacks below keep the
+    // caller's font, the domain their measurements have always used.)
+    let clamp_font = || crate::layout::flowchart::resolved_label_font_from_styles(css_styles);
     let measure = |html: &str| -> (f64, f64, bool) {
         if clamp {
-            // Decide the clamp in the font the label is finally painted in (its
-            // inline `font-size` / `font-weight`) — the same resolution
-            // `shapes::types::measure_node_label` and the layout use. A polygon
-            // shape whose label only overflows at that size must still switch
-            // the `<div>` to the wrapping style, or a CSS-aware host paints the
-            // larger text out of a box sized for the smaller one.
-            let resolved = crate::layout::flowchart::resolved_label_font_from_styles(css_styles);
-            measure_html_markup_label_clamped(html, &resolved, HTML_LABEL_WRAPPING_WIDTH)
+            measure_html_markup_label_clamped(html, &clamp_font(), HTML_LABEL_WRAPPING_WIDTH)
         } else {
             let (w, h) = measure_html_markup_label(html, font, HTML_LABEL_WRAPPING_WIDTH, true);
             (w, h, false)
@@ -745,7 +746,7 @@ fn shape_label_block_inner(
         return render_node_label(&processed, w, h, &opts);
     }
     let (w, h, clamped) = if clamp {
-        measure_html_label_clamped(&processed, font, HTML_LABEL_WRAPPING_WIDTH)
+        measure_html_label_clamped(&processed, &clamp_font(), HTML_LABEL_WRAPPING_WIDTH)
     } else {
         let (w, h) = measure_html_label(&processed, font, HTML_LABEL_WRAPPING_WIDTH, true);
         (w, h, false)
