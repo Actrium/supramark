@@ -721,3 +721,87 @@ fn postprocess_patches_match_the_unclamped_label_it_emitted() {
         "the pass must also stamp the size on the label group"
     );
 }
+
+/// A label that only overflows at its own inline `font-size` must still clamp:
+/// the shape emitters have to decide the clamp in the same font domain the
+/// layout reserved the box in, or the layout wraps it while the emitted `<div>`
+/// stays `nowrap` and a CSS-aware host paints the larger text out of the box.
+#[test]
+fn styled_polygon_label_clamps_in_the_rendered_font() {
+    let source = concat!(
+        "flowchart TD\n",
+        "    classDef big font-size:30px\n",
+        "    a{{\"a longer label that overflows at thirty px\"}}:::big\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "styled-polygon").expect("render");
+
+    // The size pass prefixes the div; the clamp has to have switched it to the
+    // wrapping style underneath that prefix.
+    assert!(
+        svg.contains("font-size: 30px !important; display: table; white-space: break-spaces;"),
+        "a label clamped at 30 px must carry the wrapping style"
+    );
+    assert!(
+        svg.contains(r#"<foreignObject width="200""#),
+        "the box must be the wrapping width"
+    );
+}
+
+/// `diamond_br_postprocess` rewrites the polygon to the size dagre laid out. It
+/// recomputes the numbers it searches for, so with a styled node it has to use
+/// the same font the shape drew with — otherwise the needle misses and the
+/// polygon keeps the drawn size while every edge endpoint was intersected
+/// against the laid-out one.
+#[test]
+fn diamond_br_postprocess_matches_a_styled_drawing() {
+    let source = concat!(
+        "flowchart TD\n",
+        "    classDef big font-size:30px\n",
+        "    a{\"diamond<br/>a longer label that overflows at thirty px\"}:::big\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "styled-diamond").expect("render");
+
+    // 455 is the diamond size `measure_vertex_box` laid out for this label; the
+    // shape draws 496.54 when the post-process cannot find its needles.
+    assert!(
+        svg.contains(r#"points="227.5,0 455,-227.5 227.5,-455 0,-227.5""#),
+        "the polygon must be the laid-out diamond, not the drawn one"
+    );
+}
+
+/// A KaTeX label is measured from the *rendered* math, so the clamp — which
+/// measures the label's HTML — must not replace that box with the `$$..$$`
+/// source's (the renderer emits the KaTeX geometry).
+#[cfg(feature = "katex")]
+#[test]
+fn katex_node_label_keeps_the_rendered_math_box() {
+    let source = "flowchart TD\n    a[\"$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$\"]\n";
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "katex-clamp").expect("render");
+
+    let rect_w: f64 = svg
+        .split(r#"<rect class="basic label-container" style="" x=""#)
+        .nth(1)
+        .and_then(|rest| rest.split("width=\"").nth(1))
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|w| w.parse().ok())
+        .expect("node rect");
+    let fo_w: f64 = svg
+        .split("<foreignObject width=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|w| w.parse().ok())
+        .expect("label foreignObject");
+    assert!(
+        rect_w >= fo_w,
+        "the node box ({rect_w}) must contain the rendered KaTeX label ({fo_w})"
+    );
+}

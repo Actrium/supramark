@@ -586,7 +586,14 @@ fn shape_label_block_inner(
     // flag travels into `LabelOpts` so the `<div>` gets the matching style.
     let measure = |html: &str| -> (f64, f64, bool) {
         if clamp {
-            measure_html_markup_label_clamped(html, font, HTML_LABEL_WRAPPING_WIDTH)
+            // Decide the clamp in the font the label is finally painted in (its
+            // inline `font-size` / `font-weight`) — the same resolution
+            // `shapes::types::measure_node_label` and the layout use. A polygon
+            // shape whose label only overflows at that size must still switch
+            // the `<div>` to the wrapping style, or a CSS-aware host paints the
+            // larger text out of a box sized for the smaller one.
+            let resolved = crate::layout::flowchart::resolved_label_font_from_styles(css_styles);
+            measure_html_markup_label_clamped(html, &resolved, HTML_LABEL_WRAPPING_WIDTH)
         } else {
             let (w, h) = measure_html_markup_label(html, font, HTML_LABEL_WRAPPING_WIDTH, true);
             (w, h, false)

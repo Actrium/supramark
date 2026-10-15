@@ -1262,14 +1262,17 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     // detour the bbox is computed from the raw `$$..$$` source text and
     // gets the node sized as if the LaTeX were a plain string — much wider
     // than the rendered KaTeX result.
-    let (tw, th) = if crate::render::foreign_object::contains_katex_marker(&measure_label) {
-        let font = crate::render::foreign_object::HtmlLabelFont::default();
-        match crate::render::foreign_object::try_render_katex_label(&measure_label, &font) {
-            Some((_, w, h)) => (w, h),
-            None => measure(&measure_label, is_bold, font_size_px),
-        }
-    } else {
-        measure(&measure_label, is_bold, font_size_px)
+    let katex_box =
+        crate::render::foreign_object::contains_katex_marker(&measure_label).then(|| {
+            crate::render::foreign_object::try_render_katex_label(
+                &measure_label,
+                &crate::render::foreign_object::HtmlLabelFont::default(),
+            )
+        });
+    let katex_rendered = matches!(katex_box, Some(Some(_)));
+    let (tw, th) = match katex_box {
+        Some(Some((_, w, h))) => (w, h),
+        _ => measure(&measure_label, is_bold, font_size_px),
     };
     // A label the browser clamps to `flowchart.wrappingWidth` wraps inside it,
     // and the node box is built from that wrapped box (upstream measures the
@@ -1284,19 +1287,25 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     // `bold_postprocess_node_svg`), so a 30 px label is reserved at 30 px
     // wrapped line heights instead of wrapping further in the browser and
     // spilling out of the box.
-    let clamp_font = crate::render::foreign_object::HtmlLabelFont {
-        font_family: None,
-        font_size_px,
-        bold: if is_bold { Some(true) } else { None },
-    };
-    let (tw, th) = match crate::render::foreign_object::clamp_html_label(
-        &rendered_label_markup(&label, is_markdown),
-        &clamp_font,
-        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
-        true,
-    ) {
-        Some(clamped) => clamped,
-        None => (tw, th),
+    //
+    // KaTeX labels are exempt: their box came from the *rendered* math, not
+    // from the `$$..$$` source this clamp would measure, and the renderer emits
+    // that KaTeX geometry (`shapes/rect.rs` early-returns before its own
+    // measurement). Clamping the source here would reserve a box the label
+    // never paints into — `measure_edge_label` takes the same early exit.
+    let (tw, th) = if katex_rendered {
+        (tw, th)
+    } else {
+        let clamp_font = resolved_label_font(font_size_px, is_bold);
+        match crate::render::foreign_object::clamp_html_label(
+            &rendered_label_markup(&label, is_markdown),
+            &clamp_font,
+            crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+            true,
+        ) {
+            Some(clamped) => clamped,
+            None => (tw, th),
+        }
     };
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
@@ -1799,6 +1808,11 @@ fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64,
         crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
         true,
     ) {
+        // The padding is part of the box this label paints (upstream's
+        // `max-width` is a content-box property, so it sits outside it), and
+        // dagre has to reserve the painted width. The un-clamped path below
+        // returns the bare measurement because its padding is added where the
+        // viewBox is computed instead.
         return (
             cw + crate::render::foreign_object::HTML_LABEL_EDGE_PADDING_X * 2.0,
             ch,
@@ -1979,6 +1993,35 @@ fn stroke_descriptor(s: EdgeStroke) -> (&'static str, &'static str) {
 /// Keeping the helper inside this module so the layout-side measurement
 /// and the render-side post-processor share a single parser, avoiding
 /// drift between resolved widths and emitted SVG numbers.
+/// The font a node's HTML label is finally rendered in: the inline `font-size` /
+/// `font-weight` its styles resolve to, on top of the browser defaults the
+/// generated SVG root declares (`font-size: 16px`, trebuchet).
+///
+/// The clamp, the shape label emitters and the `font_size` / `bold`
+/// post-process passes all have to resolve it the same way — a label wrapped in
+/// one domain and painted in another is exactly the mismatch issue #254 is
+/// about.
+pub fn resolved_label_font<'a>(
+    font_size_px: Option<f64>,
+    is_bold: bool,
+) -> crate::render::foreign_object::HtmlLabelFont<'a> {
+    crate::render::foreign_object::HtmlLabelFont {
+        font_family: None,
+        font_size_px,
+        bold: is_bold.then_some(true),
+    }
+}
+
+/// [`resolved_label_font`] for a node's raw inline `style` declarations.
+pub fn resolved_label_font_from_styles<'a>(
+    css_styles: &[String],
+) -> crate::render::foreign_object::HtmlLabelFont<'a> {
+    resolved_label_font(
+        styles_font_size_px(css_styles),
+        styles_have_bold(css_styles),
+    )
+}
+
 pub fn styles_font_size_px_pub(styles: &[String]) -> Option<f64> {
     styles_font_size_px(styles)
 }

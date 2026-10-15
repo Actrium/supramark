@@ -289,11 +289,7 @@ pub fn measure_node_label(
         // re-measure with — so shape, layout and post-process agree on whether
         // the browser wraps this label.
         let css = node.css_styles.as_deref().unwrap_or(&[]);
-        let resolved = crate::render::foreign_object::HtmlLabelFont {
-            font_family: None,
-            font_size_px: crate::layout::flowchart::styles_font_size_px_pub(css),
-            bold: crate::layout::flowchart::styles_have_bold(css).then_some(true),
-        };
+        let resolved = crate::layout::flowchart::resolved_label_font_from_styles(css);
         return if escaped_label {
             measure_html_label_clamped(text, &resolved, max_width)
         } else {

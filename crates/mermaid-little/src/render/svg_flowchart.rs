@@ -158,7 +158,6 @@ fn node_styles_have_bold(styles: &[String]) -> bool {
 /// `measure_vertex_box(v, is_bold=true)`, so we only need to rewrite the
 /// label-level numbers here.
 fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
-    use crate::render::foreign_object::HtmlLabelFont;
     use crate::render::shapes::types::{fmt_num, xml_escape};
 
     let shape = node.shape.as_deref().unwrap_or("rect");
@@ -190,20 +189,22 @@ fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
     let escaped = xml_escape(label);
     // Mirror exactly what `shapes::diamond` measured, clamp included, so the
     // numbers we look for are the numbers it wrote.
+    // `shapes::diamond` measures through `measure_node_label`, which resolves
+    // the node's own `font-size` / `font-weight`; recompute in that same domain
+    // or the needles miss for a styled node and the polygon keeps the size the
+    // shape drew instead of the one dagre laid out.
+    let shape_font = crate::layout::flowchart::resolved_label_font_from_styles(
+        node.css_styles.as_deref().unwrap_or(&[]),
+    );
     let (wrong_w, wrong_h) = if node.clamp_html_label {
         let (w, h, _) = crate::render::foreign_object::measure_html_label_clamped(
             &escaped,
-            &HtmlLabelFont::default(),
+            &shape_font,
             crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
         );
         (w, h)
     } else {
-        crate::render::foreign_object::measure_html_label(
-            &escaped,
-            &HtmlLabelFont::default(),
-            200.0,
-            true,
-        )
+        crate::render::foreign_object::measure_html_label(&escaped, &shape_font, 200.0, true)
     };
     let p = node.padding.unwrap_or(15.0);
     let s_wrong = (wrong_w + p) + (wrong_h + p);

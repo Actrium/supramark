@@ -256,6 +256,18 @@ test('normalizeSvg soft-wraps a clamped label to the foreignObject width', () =>
   expect(out).toMatch(/dy="24"/);
 });
 
+// A break at the end of a block opens no new line, but a *pair* of breaks does
+// paint an empty one — the box height counts it, so it must survive.
+test('normalizeSvg keeps an empty line between two <br/> breaks', () => {
+  const input =
+    '<svg><foreignObject width="40" height="72">' +
+    '<div><span class="nodeLabel"><p>A<br/><br/>B</p></span></div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  const tspans = out.match(/<tspan[^>]*>[^<]*<\/tspan>/g) ?? [];
+  expect(tspans).toHaveLength(3);
+  expect(tspans[1]).toBe('<tspan x="20" dy="24"></tspan>');
+});
+
 // A label that fits its box is left alone: the engine measured it with real
 // font metrics, and this module only estimates them, so re-wrapping on the
 // estimate would break lines the engine deliberately left whole.
