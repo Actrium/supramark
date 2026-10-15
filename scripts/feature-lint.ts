@@ -115,7 +115,7 @@ const RULES: Record<string, LintRule> = {
     strictSeverity: 'error',
     message: 'AST interface.required should not contain only type',
     check: feature => {
-      const required = feature.syntax?.ast?.interface?.required;
+      const required = feature.syntax?.ast?.interface.required;
       if (feature.syntax?.ast?.hasSelector) {
         return true;
       }
@@ -126,8 +126,8 @@ const RULES: Record<string, LintRule> = {
     severity: 'warning',
     message: 'AST interface.fields should define all required fields',
     check: feature => {
-      const required = feature.syntax?.ast?.interface?.required || [];
-      const fields = feature.syntax?.ast?.interface?.fields || {};
+      const required = feature.syntax?.ast?.interface.required || [];
+      const fields = feature.syntax?.ast?.interface.fields || {};
       return required.every(field => field in fields);
     },
   },

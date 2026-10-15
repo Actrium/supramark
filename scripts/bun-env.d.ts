@@ -21,7 +21,8 @@ declare const Bun: {
     command: string[],
     options?: { cwd?: string; stdout?: 'pipe' | 'inherit'; stderr?: 'pipe' | 'inherit' }
   ): {
-    exitCode: number;
+    /** Exit code, or null when the process was killed by a signal. */
+    exitCode: number | null;
     success: boolean;
     stdout: { toString(): string };
     stderr: { toString(): string };
