@@ -41,7 +41,9 @@ interface ExtensionTypeConfig {
 type ExtensionType = 'container' | 'input';
 
 function isExtensionType(value: string): value is ExtensionType {
-  return value in EXTENSION_TYPES;
+  // `in` walks the prototype chain, so `--type toString` would pass this guard
+  // and later read a config that does not exist. Only own keys are types.
+  return Object.hasOwn(EXTENSION_TYPES, value);
 }
 
 const EXTENSION_TYPES: Record<ExtensionType, ExtensionTypeConfig> = {

@@ -93,8 +93,10 @@ jobs:
       # scripts/ is type-checked nowhere else in CI and never gets built, so its
       # config had drifted into reporting errors on correct code — see the
       # comments in scripts/tsconfig.json. Runs in the Lint job, a required
-      # status check, so the gate blocks a merge.
+      # status check, so the gate blocks a merge. Like the CJK check below, it
+      # runs even when eslint failed, so a type error is named on its own.
       - name: Type-check scripts
+        if: always()
         run: bun run lint:scripts
 
       # Deliberately its own step rather than only riding inside `bun run lint`,
