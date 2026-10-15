@@ -13,10 +13,12 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
+  discoverFeaturePackages,
   findFeaturePackageByShortName,
-  selectFeature,
+  selectMenu,
   closeRL,
   type FeaturePackageInfo,
+  type SelectOption,
   log,
   colors,
 } from './lib-feature-layout';
@@ -54,11 +56,33 @@ ${colors.blue}Examples:${colors.reset}
   let selected: FeaturePackageInfo | null = null;
 
   if (!argFeature) {
-    selected = await selectFeature('Select feature to preview:');
-    if (!selected) {
+    // The shared selectFeature() lists every discovered package and offers no
+    // way to mark the ones without a playground page, so the menu is built
+    // here instead: the playground route table decides what is previewable,
+    // and the label says so before the user commits to a package that would
+    // be rejected below.
+    const discovered = discoverFeaturePackages();
+    const options: SelectOption[] = discovered.map(pkg => {
+      const status = playgroundRouteStatus(pkg.shortName);
+      const statusNote =
+        status.kind === 'excluded'
+          ? 'no playground page'
+          : status.kind === 'unregistered'
+            ? 'not routed in the playground'
+            : undefined;
+      return {
+        value: pkg.shortName,
+        label: pkg.shortName,
+        description: statusNote ?? pkg.metadata?.description,
+      };
+    });
+    const choice = await selectMenu('Select feature to preview:', options);
+    if (!choice) {
       log('\nCancelled.\n', 'yellow');
       process.exit(1);
     }
+    // The lookup cannot miss: every option's value is a shortName from `discovered`.
+    selected = discovered.find(pkg => pkg.shortName === choice)!;
   } else {
     selected = findFeaturePackageByShortName(argFeature);
     if (!selected) {
