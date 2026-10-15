@@ -195,19 +195,25 @@ function safeReadJson(filePath: string): PackageJson | null {
 
 /**
  * Remove comments from the body of an `export { ... }` block before it is
- * split on commas. Only identifiers, `as` aliases, commas and comments are
- * legal inside the braces, so stripping comments cannot corrupt real syntax;
+ * split on commas. Only identifiers, `as` aliases, string-literal aliases
+ * (ES2022 arbitrary module export names), commas and comments are legal
+ * inside the braces, so stripping comments cannot corrupt real syntax;
  * leaving them in glues a comment to the name after it, and the whole comma
  * segment then fails the identifier check below — silently dropping that
  * export (e.g. `// Compatibility exports` in containers/admonition used to
  * take `registerAdmonitionContainer` down with it).
  *
- * Single pass, longest-alternative-first: `/* ... *\/` is matched before
- * `//`, so a `//` inside a block comment never opens a line comment, and a
+ * Single pass, longest-alternative-first: a string literal is kept as-is, so
+ * `//` or `/*` inside quotes (e.g. `x as 'a//b'`) is never treated as a
+ * comment; a `//` inside a block comment never opens a line comment; and a
  * `/*` inside a line comment never opens a block comment.
  */
 function stripExportBodyComments(body: string): string {
-  return body.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  return body.replace(
+    /('(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*")|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+    (match: string, stringLiteral: string | undefined) =>
+      stringLiteral !== undefined ? match : ''
+  );
 }
 
 /**
@@ -221,7 +227,7 @@ function stripExportBodyComments(body: string): string {
  * Returns undefined unless exactly one exported value is named `*Feature`, so a
  * non-conforming or ambiguous package surfaces as a failure, never as a guess.
  */
-export function readFeatureExportName(featureDir: string): string | undefined {
+function readFeatureExportName(featureDir: string): string | undefined {
   const entry = path.join(featureDir, 'src', 'index.ts');
   if (!fs.existsSync(entry)) return undefined;
 
@@ -231,7 +237,11 @@ export function readFeatureExportName(featureDir: string): string | undefined {
 
     // `export { a, b as c } from './feature.js'`, possibly spread over lines.
     // `export type { ... }` does not match — type-only exports are not values.
-    for (const block of source.matchAll(/export\s*\{([^}]*)\}/g)) {
+    // The brace body is matched string-aware so a `}` inside a string-literal
+    // alias (`x as 'a}b'`) does not end the block early.
+    for (const block of source.matchAll(
+      /export\s*\{((?:'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"|[^}])*)\}/g
+    )) {
       for (const exported of stripExportBodyComments(block[1]!).split(',')) {
         const text = exported.trim();
         if (!text || text.startsWith('type ')) continue;
