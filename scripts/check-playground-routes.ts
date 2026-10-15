@@ -67,14 +67,25 @@ const reasonless = PLAYGROUND_EXCLUDED_FEATURES.filter(entry => entry.reason.tri
 // The registry is read as source rather than imported: importing it pulls React
 // and all 17 feature packages (plus their runtimes) into this script.
 //
-// The pattern is deliberately loose — it matches `from '<pkg>'` anywhere in the
-// file so prettier-style multi-line imports still resolve, and so subpath
-// imports (`@supramark/feature-weather/runtime.web`) do not. The cost is that a
-// comment or string containing `from '@supramark/feature-x'` reads as an
-// import; `phantomRegistered` below turns that into a precise failure.
+// The pattern is deliberately loose — it matches `from '<pkg>'` with either
+// quote style anywhere in the file, so prettier-style multi-line imports still
+// resolve, and so subpath imports (`@supramark/feature-weather/runtime.web`) do
+// not. Prettier enforces single quotes here, but a hand-written double-quoted
+// import should still count: a missed one would surface as a confusing
+// routedButUnregistered report. The cost is that a comment or string containing
+// `from '@supramark/feature-x'` reads as an import; `phantomRegistered` below
+// turns that into a precise failure.
+//
+// Type-only imports need no handling: the registry maps node types to runtime
+// components, so a feature reachable only through `import type` cannot register
+// one — that fails the build outright. And should a future reorganization ever
+// slip past that, the symptom is still a loud routedButUnregistered pointing at
+// the registry, never silently wrong data.
 const registrySource = readFileSync(REGISTRY_FILE, 'utf8');
 const registered = new Set(
-  [...registrySource.matchAll(/from '@supramark\/feature-([a-z0-9-]+)'/g)].map(match => match[1]!)
+  [...registrySource.matchAll(/from ['"]@supramark\/feature-([a-z0-9-]+)['"]/g)].map(
+    match => match[1]!
+  )
 );
 const routedButUnregistered = [...routed].filter(name => !registered.has(name));
 const registeredButUnrouted = [...registered].filter(
