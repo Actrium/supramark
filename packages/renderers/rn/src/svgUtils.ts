@@ -284,23 +284,28 @@ export function normalizeSvg(xml: string): string {
     const w = Number(fo.match(/\bwidth="([^"]*)"/)?.[1] ?? 0);
     const h = Number(fo.match(/\bheight="([^"]*)"/)?.[1] ?? 0);
     if (!w || !h) return '';
-    // Convert <br> and block-level closing tags (</p>/</div>) to newlines: they
-    // mark line boundaries, and collapsing them into spaces made
-    // `Sub<br/>title` and `Sub title` render identically. Inline whitespace
-    // still collapses to one space, but the newline survives — `[^\S\n]`
-    // excludes it, where the plain `\s+` this replaces would have eaten it and
-    // undone the conversion above.
-    const html = fo.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '\n');
+    // Collapse structural whitespace before marking line boundaries: the
+    // renderer emits label HTML on a single line, and a pretty-printed
+    // foreignObject must not gain a phantom line per indent. Then convert
+    // <br> and block-level closing tags (</p>/</div>) to newlines: they mark
+    // line boundaries, and collapsing them into spaces made
+    // `Sub<br/>title` and `Sub title` render identically.
+    const html = fo
+      .replace(/\s+/g, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6])>/gi, '\n');
+    // Every newline here is a painted line, matching the Rust side's
+    // `split_label_lines`: an interior empty line stays (`a<br/><br/>b`
+    // paints three lines and the foreignObject's height covers three line
+    // boxes, so dropping the middle one would stretch lineHeight to h/2); a
+    // trailing break opens no line (`a<br/>` is one line, and the
+    // `</p>`-converted newline is structural), so trailing newlines go; a
+    // leading break paints an empty first line (`<br/>a` is two), so a
+    // leading newline stays.
     const text = html
       .replace(/<[^>]+>/g, '')
-      .replace(/[^\S\n]+/g, ' ')
-      .replace(/\n{2,}/g, '\n')
-      .trim();
-    // Every newline here is a painted line, so a pretty-printed foreignObject
-    // would gain blank ones. Mermaid's generator and this repo's renderer both
-    // emit label HTML on a single line, and `\n{2,}` plus the trim above absorb
-    // the common cases — but a source that indents its label markup would need
-    // that rethought.
+      .replace(/[\n ]+$/, '')
+      .replace(/^ +/, '');
     if (!text) return '';
     const x = w / 2;
     // One <tspan> per line: react-native-svg draws a <text> as a single line and

@@ -3482,6 +3482,14 @@ pub fn layout(data: &LayoutData, _theme: &ThemeVariables) -> Result<LayoutResult
 /// the spacing is tightened. The pass warns when it sees that happen; the real
 /// fix is to size the compound node from the title before layout, which is what
 /// upstream 12.x does and what this post-pass stands in for.
+///
+/// Known limit: only the titled cluster's own box grows. When a titled cluster
+/// is nested inside another cluster, the parent's frame is not re-sized to
+/// follow, so the grown child can cross the parent's bottom edge — and the
+/// warning below deliberately skips ancestors, so the crossing is neither
+/// fixed nor reported. Re-sizing the parent means re-deriving the compound
+/// bounds bottom-up through the isolated-cluster coordinate frames; until
+/// that exists, keep multi-line titles on flat clusters.
 fn apply_cluster_title_leading(nodes: &mut [Node], edges: &mut [Edge], data: &LayoutData) {
     use std::collections::HashMap;
 
@@ -4040,26 +4048,13 @@ fn measure_cluster_label_width(cluster_id: &str, data: &LayoutData) -> f64 {
         _ => return 0.0,
     };
     let font = HtmlLabelFont::default();
-    let escaped = xml_escape_minimal(label);
-    let (lw, _lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
+    // The renderer paints the title through `string_label_to_html`, so measure
+    // the same markup. Measuring the escaped text instead counts a `<br/>` as
+    // five literal characters and widens the cluster's bbox past what the
+    // title ever paints — the same fix `state.rs`'s width pass needed.
+    let painted = crate::render::foreign_object::string_label_to_html(label);
+    let (lw, _lh) = measure_html_markup_label(&painted, &font, 200.0, true);
     lw
-}
-
-/// Minimal XML escape for label measurement. Mirrors
-/// `state.rs::xml_escape_minimal` and `shapes/types.rs::xml_escape`.
-fn xml_escape_minimal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -4120,6 +4115,51 @@ mod tests {
             "a <text> title paints one line, so it asks for nothing"
         );
         assert_eq!(text[1].y, Some(50.0), "and nothing moves");
+    }
+
+    /// The cluster-title render paths emit the label markup as-is — unlike
+    /// node labels they never run `replace_fa_icons` — so an `fa:` reference
+    /// in a title paints as literal text and needs its band like any other
+    /// second line. Counting the icon-replaced markup instead (an icon-only
+    /// line is blank markup and drops out) would reserve nothing and drop the
+    /// literal line onto the first row of nodes.
+    #[test]
+    fn cluster_title_counts_fa_lines_as_painted_text() {
+        let mut nodes = vec![
+            Node {
+                id: "S".into(),
+                label: Some("Sub<br/>fa:fa-car".into()),
+                is_group: true,
+                x: Some(50.0),
+                y: Some(50.0),
+                width: Some(100.0),
+                height: Some(100.0),
+                ..Node::default()
+            },
+            Node {
+                id: "A".into(),
+                label: Some("A".into()),
+                parent_id: Some("S".into()),
+                x: Some(50.0),
+                y: Some(50.0),
+                width: Some(60.0),
+                height: Some(30.0),
+                ..Node::default()
+            },
+        ];
+        let data = LayoutData {
+            diagram_type: Some("flowchart-v2".into()),
+            html_labels: Some(true),
+            ..LayoutData::default()
+        };
+        let mut edges: Vec<Edge> = Vec::new();
+        apply_cluster_title_leading(&mut nodes, &mut edges, &data);
+        assert_eq!(
+            nodes[0].height,
+            Some(124.0),
+            "the literal `fa:fa-car` line paints, so the title band covers it"
+        );
+        assert_eq!(nodes[1].y, Some(74.0), "the contents move down with it");
     }
 
     fn two_node_graph() -> LayoutData {

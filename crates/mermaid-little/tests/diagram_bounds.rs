@@ -686,6 +686,46 @@ fn flowchart_cluster_title_lines_get_their_own_band() {
         two.rect_y + two.title_h,
         two.node_top,
     );
+
+    // The line break itself paints no width: measured the way the renderer
+    // paints it, a two-line title takes up exactly the horizontal room of the
+    // two lines concatenated. The isolated-cluster width pass used to measure
+    // the *escaped* label instead — `<br/>` counted as five literal
+    // characters — so the cluster's bbox came out wider than any line the
+    // title ever paints, and a sibling next to the cluster is pushed that
+    // much further right. The title here is longer than the cluster's content
+    // so the label, not the node, drives the bbox width (with `Sub<br/>title`
+    // the node is wider and the canvas proves nothing about the label
+    // measurement); the untitled cluster gives the content-driven baseline.
+    let canvas_w = |title: Option<&str>, id: &str| {
+        let title = title.map_or(String::new(), |t| format!(" [\"{t}\"]"));
+        viewbox(
+            &convert_with_id(
+                &format!("flowchart TB\n    subgraph S{title}\n        A\n    end\n    B\n"),
+                id,
+            )
+            .expect("render cluster with sibling"),
+        )[2]
+    };
+    let bare = canvas_w(None, "cluster-title-bare");
+    let concatenated = canvas_w(
+        Some("A rather longcluster title indeed"),
+        "cluster-title-concat",
+    );
+    let broken = canvas_w(
+        Some("A rather long<br/>cluster title indeed"),
+        "cluster-title-break",
+    );
+    assert!(
+        concatenated > bare,
+        "the concatenated title must out-measure the content, or the equality \
+         below compares two content-sized canvases and proves nothing: \
+         {concatenated} vs {bare}",
+    );
+    assert_eq!(
+        broken, concatenated,
+        "a line break adds no width: the canvas is as wide as the concatenated title"
+    );
 }
 
 /// The band a title needs is a property of the lines it paints, so a title

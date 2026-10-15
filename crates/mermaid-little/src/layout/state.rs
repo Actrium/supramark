@@ -1001,11 +1001,15 @@ fn expand_cluster_width_for_label(result: &mut crate::layout::unified::types::La
         };
 
         let font = HtmlLabelFont::default();
-        // The renderer paints the title through `string_label_to_html`, so the
-        // width it needs is the width of the widest painted line. Measuring the
-        // escaped text instead counts a `<br/>` as five literal characters and
-        // widens the cluster past what the title ever draws — which also moves
-        // `outer_tx` (below) and, with it, the frame the viewBox assumes.
+        // The renderer paints the title through `string_label_to_html`, so
+        // measure the same markup. The measured width is the *concatenated*
+        // line text, not the widest painted line — the reference geometry
+        // measures the label div unwrapped, so that over-estimate is the
+        // reference semantics. What matters here is that the `<br/>` no longer
+        // counts as five literal characters the way measuring the escaped text
+        // did: that widened the cluster past what the title ever draws, which
+        // also moved `outer_tx` (below) and, with it, the frame the viewBox
+        // assumes.
         let painted = crate::render::foreign_object::string_label_to_html(label);
         let (lw, _lh) = measure_html_markup_label(&painted, &font, 200.0, true);
         let needed = lw + LABEL_PADDING;

@@ -1569,8 +1569,20 @@ fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
 pub(crate) fn cluster_title_leading(label: &str, is_markdown: bool) -> f64 {
     use crate::render::foreign_object::{html_label_line_height, HTML_LABEL_FONT_SIZE};
 
-    rendered_label_lines(label, is_markdown).saturating_sub(1) as f64
-        * html_label_line_height(HTML_LABEL_FONT_SIZE)
+    // Unlike node labels, the cluster-title render paths (`render_cluster`,
+    // state's composite title) emit the label markup as-is, with no
+    // `replace_fa_icons` — so count the lines of that same markup, not
+    // `rendered_label_lines`. An icon reference in a title paints as literal
+    // text: `Sub<br/>fa:fa-car` is two painted lines, and counting it as one
+    // (the icon-only line is blank markup once replaced) under-reserves the
+    // band and drops the second line onto the first row of nodes.
+    let html = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let lines = crate::layout::label_metrics::split_label_lines(&html).len();
+    lines.saturating_sub(1) as f64 * html_label_line_height(HTML_LABEL_FONT_SIZE)
 }
 
 /// [`strip_fa_icons`] applied to each line of the raw label, keeping the line
