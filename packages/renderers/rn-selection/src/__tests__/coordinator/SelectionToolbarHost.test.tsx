@@ -63,12 +63,16 @@ const heldMeasures: Array<{
   answer: (x: number, y: number, w: number, h: number) => void;
   rect: [number, number, number, number];
 }> = [];
+// Every native measurement the portal issues, so a republish with unchanged
+// geometry can be held to zero round-trips.
+let nativeMeasures = 0;
 
 function createNodeMock(element: { type: unknown; props: Record<string, unknown> }) {
   if (element.type !== 'View') return null;
   const isHost = element.props.testID === 'toolbar-host';
   return {
     measureInWindow: (answer: (x: number, y: number, w: number, h: number) => void) => {
+      nativeMeasures += 1;
       const frame = isHost ? hostWindowRect : anchorWindowRect;
       if (measureMode === 'hold') heldMeasures.push({ answer, rect: [frame.x, frame.y, frame.w, frame.h] });
       else answer(frame.x, frame.y, frame.w, frame.h);
@@ -105,6 +109,7 @@ afterEach(() => {
   renderer = null;
   measureMode = 'auto';
   heldMeasures.length = 0;
+  nativeMeasures = 0;
   hostWindowRect = { x: 0, y: 50, w: 360, h: 600 };
   anchorWindowRect = { x: 100, y: 200, w: 20, h: 20 };
 });
@@ -316,6 +321,26 @@ describe('SelectionToolbarHost portal', () => {
     expect(positioned.props.style.left).toBe(48);
     expect(positioned.props.style.width).toBe(344);
     expect(positioned.props.style.opacity).toBe(1);
+  });
+
+  test('an unchanged republish spends no native measurement', async () => {
+    const harness = await mountHostedSelection();
+    await selectAll(harness);
+    await feedMenuLayout(64, 36);
+    expect(renderer!.root.findAllByType('TouchableOpacity')).toHaveLength(1);
+
+    const before = nativeMeasures;
+    // A registry bump that leaves every selection rect where it was — a sibling
+    // block's layout, a streaming re-measure. The publish effect re-runs, but
+    // identical geometry must not spend a host and an anchor round-trip. Host
+    // scrolling keeps its own path through `hostRef.refresh()`.
+    await act(async () => {
+      harness.context().updateLayout('p1', { x: 0, y: 0, w: 20, h: 20 });
+    });
+
+    expect(nativeMeasures).toBe(before);
+    // The bar itself is untouched: same geometry, no remount.
+    expect(hostedToolbarView().props.rects).toEqual([{ x: 100, y: 150, w: 20, h: 20 }]);
   });
 });
 
