@@ -309,7 +309,7 @@ function labelHardLines(markup: string): string[] {
   // Only `<br>` (attributes allowed, as `is_br_tag_body` accepts them) and
   // `<p>`/`</p>` are boundaries; every other tag is transparent — `</div>` and
   // friends must not end a line.
-  const TOKEN = /(<br(?:\s[^>]*)?\/?>|<\/?p(?:\s[^>]*)?\/?>|\n)/i;
+  const TOKEN = /(<br(?:\s[^>]*)?\/*>|<\/?p(?:\s[^>]*)?\/*>|\n)/i;
   const lines: string[] = [];
   let block: string[] = [];
   let segment = '';
@@ -319,17 +319,19 @@ function labelHardLines(markup: string): string[] {
     if (!(block.length === 1 && blank(block[0]))) lines.push(...block);
     block = [];
   };
-  for (const token of markup.split(TOKEN)) {
-    if (/^<\/?p(?:\s[^>]*)?\/?>$/i.test(token)) {
+  // `split` with one capture group alternates text / delimiter, so the parity of
+  // the index says which is which — a delimiter can never be mistaken for a text
+  // element (or the reverse), however the regex is later edited.
+  const parts = markup.split(TOKEN);
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (i % 2 === 1) {
       block.push(segment);
       segment = '';
-      endBlock();
-    } else if (TOKEN.test(token)) {
-      block.push(segment);
-      segment = '';
+      // `<br>` and a source `\n` end a line; a `<p>` boundary also ends a block.
+      if (!/^<br/i.test(part) && part !== '\n') endBlock();
     } else {
-      // Inline whitespace collapses; `<br>`-style breaks never reach here.
-      segment += token.replace(/<[^>]+>/g, '').replace(/[^\S\n]+/g, ' ');
+      segment += part.replace(/<[^>]+>/g, '').replace(/[^\S\n]+/g, ' ');
     }
   }
   block.push(segment);

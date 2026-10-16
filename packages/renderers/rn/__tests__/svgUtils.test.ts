@@ -304,8 +304,13 @@ test('normalizeSvg paints the same hard lines the engine reserved', () => {
     // whole `<p …>` / `</p>` token is.
     ['<p><pre>code</pre></p>', 1],
     ['line1<br/><pre>code</pre>', 2],
-    ['<p>tagged in <path d="M0 0"/>label</p>', 1],
-    ['<p>a<polygon points="0,0"/></p>', 1],
+    ['<p><path d="M0 0"/>label</p>', 1],
+    ['<p><polygon points="0,0"/>label</p>', 1],
+    ['line1<br/><path d="M0 0"/>label', 2],
+    // Multiple trailing slashes are still the tag, as `is_p_tag_body` /
+    // `is_br_tag_body` trim them all.
+    ['a<p//>b', 2],
+    ['a<br//>b', 2],
     // `<p/>` and `</p/>` are still p tags to the engine.
     ['one<p/>two', 2],
     ['one</p/>two', 2],
