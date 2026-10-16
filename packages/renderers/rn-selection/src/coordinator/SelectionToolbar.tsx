@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect, useMemo } from 'react';
+import React, { useState, useContext, useEffect, useMemo, useRef } from 'react';
 import { Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
 import { ToolbarPortalContext } from './ToolbarPortalContext';
 import type { LocalRect } from '../metrics';
@@ -78,7 +78,14 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   const rects = useMemo(() => liveRects, [rectsKey]);
   // Publish the same selection into the host's visible area instead of the small bubble.
   const portal = useContext(ToolbarPortalContext);
-  const id = useMemo(() => Symbol(`selection-toolbar-${++toolbarIdSeq}`), []);
+  // Lazy ref init, not a memo: the id is created exactly once and never
+  // recomputed, so the shared counter is not advanced from a render pass React
+  // may throw away (StrictMode, a discarded concurrent render).
+  const idRef = useRef<symbol | null>(null);
+  if (idRef.current === null) {
+    idRef.current = Symbol(`selection-toolbar-${++toolbarIdSeq}`);
+  }
+  const id = idRef.current;
   const visible = snapshot.phase === 'selected' && rects.length > 0 && toolbarItems.length > 0;
   useEffect(() => {
     // Standalone roots retain their local toolbar when no application host is mounted.
