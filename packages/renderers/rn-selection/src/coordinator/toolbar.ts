@@ -159,6 +159,10 @@ export function computeToolbarPlacement(
   const below = obstacleBottom + gap;
   let side: ToolbarSide;
   let y: number;
+  // The anchored rect is clamped into the viewport, so `obstacleTop <= anchor.y`
+  // and the second half can only fail when a caller passes `margin > gap` — with
+  // the defaults it is always true. Kept because that failure is real: the bar
+  // would otherwise sit above while overhanging the bottom margin.
   if (above >= margin && above + size.h <= viewport.h - margin) {
     side = 'above';
     y = above;

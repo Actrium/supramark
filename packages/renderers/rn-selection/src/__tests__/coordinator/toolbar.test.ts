@@ -38,6 +38,20 @@ describe('computeToolbarPlacement', () => {
     expect(computeToolbarPlacement([], BAR, SCREEN)).toBeNull();
   });
 
+  test('a margin larger than the gap can veto the above placement', () => {
+    // The anchored rect is clamped into the viewport, so with the default
+    // margin === gap the "fully fits above" guard can never fail; this case
+    // pins the branch it exists for. Here the bar would fit above
+    // (obstacleTop - gap - BAR.h = 732 >= margin) but only by overhanging the
+    // bottom margin: without the guard it lands at 732, past SCREEN.h - margin.
+    const placement = computeToolbarPlacement([{ x: 20, y: 780, w: 100, h: 10 }], BAR, SCREEN, {
+      margin: 40,
+    });
+
+    expect(placement?.side).toBe('above');
+    expect(placement?.y).toBe(SCREEN.h - 40 - BAR.h);
+  });
+
   test('sits above the selection by default', () => {
     const placement = computeToolbarPlacement([{ x: 100, y: 300, w: 100, h: 20 }], BAR, SCREEN);
     expect(placement).toEqual({

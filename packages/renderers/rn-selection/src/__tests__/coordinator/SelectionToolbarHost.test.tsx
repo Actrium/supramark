@@ -331,9 +331,12 @@ describe('SelectionToolbarHost portal', () => {
 
     const before = nativeMeasures;
     // A registry bump that leaves every selection rect where it was — a sibling
-    // block's layout, a streaming re-measure. The publish effect re-runs, but
-    // identical geometry must not spend a host and an anchor round-trip. Host
-    // scrolling keeps its own path through `hostRef.refresh()`.
+    // block's layout, a streaming re-measure. The toolbar re-renders, but the
+    // publish effect must not run again: the geometry key keeps `rects` stable,
+    // so no host and anchor round-trip is spent. That holds while the other
+    // publish dependencies stay stable too — a host passing a fresh
+    // `toolbarItems` array on every render would republish and re-measure.
+    // Host scrolling keeps its own path through `hostRef.refresh()`.
     await act(async () => {
       harness.context().updateLayout('p1', { x: 0, y: 0, w: 20, h: 20 });
     });
