@@ -144,7 +144,13 @@ pub fn parse_with_original(source: &str, original_source: Option<&str>) -> Resul
                 let cd = chronology::parse_chronology_diagram(source)?;
                 Ok(Diagram::Chronology(cd))
             }
-            DiagramHint::Project => Err(crate::Error::UnsupportedReleasePage),
+            // v1.2026.3 renders @startproject as Gantt v2 (was: "not supported"
+            // page on v1.2026.2). Reuse the gantt pipeline — Project shares the
+            // task/lasts syntax (see temp/jar-probe/project.svg probe).
+            DiagramHint::Project => {
+                let gd = gantt::parse_gantt_diagram(source)?;
+                Ok(Diagram::Gantt(gd))
+            }
             DiagramHint::Hcl => {
                 let hd = hcl::parse_hcl_diagram(source)?;
                 Ok(Diagram::Hcl(hd))
