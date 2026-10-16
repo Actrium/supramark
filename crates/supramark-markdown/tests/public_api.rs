@@ -331,6 +331,96 @@ fn gfm_autolink_option_disables_bare_url_linkification() {
     assert_eq!(value, "https://example.com");
 }
 
+#[test]
+fn wikilink_option_enables_wikilink_parsing() {
+    // Inverted mirror of the gfm_autolink gate above: WikiLink is OFF by
+    // default (`[[...]]` is not CommonMark/GFM syntax), and the option turns
+    // it on. Default parsing must stay byte-identical to the CommonMark/GFM
+    // profiles.
+    let default_ast = parse("[[Project Plan]]\n");
+    let SupramarkNode::Root { children, .. } = default_ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    assert!(
+        matches!(&children[0], SupramarkNode::Text { value, .. } if value == "[[Project Plan]]"),
+        "default options must leave [[...]] as text, got {:?}",
+        children[0]
+    );
+
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let ast = parse_with_options("[[Project Plan]]\n", options);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    assert!(
+        matches!(
+            &children[0],
+            SupramarkNode::WikiLink { target, section: None, label: None, .. }
+                if target == "Project Plan"
+        ),
+        "option on should produce a wiki_link, got {:?}",
+        children[0]
+    );
+}
+
+#[test]
+fn wikilink_serializes_tagged_node_omitting_absent_fields() {
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let json = serde_json::to_string(&parse_with_options("[[a|b]]\n", options.clone())).unwrap();
+    assert!(json.contains(r#""type":"wiki_link""#), "{json}");
+    assert!(json.contains(r#""target":"a""#), "{json}");
+    assert!(json.contains(r#""label":"b""#), "{json}");
+    assert!(
+        !json.contains("section"),
+        "absent section must not serialize: {json}"
+    );
+
+    let json = serde_json::to_string(&parse_with_options("[[a]]\n", options)).unwrap();
+    assert!(json.contains(r#""type":"wiki_link""#), "{json}");
+    assert!(
+        !json.contains("label") && !json.contains("section"),
+        "absent label/section must not serialize: {json}"
+    );
+}
+
+#[test]
+fn wikilink_option_defers_to_inline_math() {
+    // Regression for the PR-208 review: with the wikilink option on, `$[[foo]]$`
+    // must stay one math_inline — the WikiLink scanner declines a `[[` that
+    // sits inside an open math span so the text post-pass still claims `$…$`.
+    let mut options = ParseOptions::default();
+    options.wikilink = true;
+    let ast = parse_with_options("pre $[[foo]]$ post\n", options);
+    let SupramarkNode::Root { children, .. } = ast else {
+        panic!("expected root");
+    };
+    let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+        panic!("expected paragraph");
+    };
+    let math = children
+        .iter()
+        .find_map(|n| match n {
+            SupramarkNode::MathInline { value, .. } => Some(value.clone()),
+            _ => None,
+        })
+        .expect("math_inline must survive the wikilink option");
+    assert_eq!(math, "[[foo]]");
+    assert!(
+        children
+            .iter()
+            .all(|n| !matches!(n, SupramarkNode::WikiLink { .. })),
+        "no wiki_link inside a math span: {children:?}"
+    );
+}
+
 // GFM strikethrough (cmark-gfm 0.29 conformance, extensions-0018). Both `~x~`
 // and `~~x~~` produce a single <del>; runs of 3+ tildes and mismatched lengths
 // stay literal. See issue #144.
@@ -1484,4 +1574,62 @@ fn public_api_maps_emphasis_spanning_an_escape_inside_a_table_cell() {
         panic!("expected text, got {:?}", &children[0]);
     };
     assert_eq!(value, "x|y");
+}
+
+#[test]
+fn wikilink_preserves_math_across_text_fragments() {
+    for source in [
+        "$a &amp; [[foo]]$",
+        r"$a \* [[foo]]$",
+        r"$a \$ [[foo]]$",
+        "$a &#0; [[foo]]$",
+        "$a &unknown; [[foo]]$",
+    ] {
+        let ast = parse_with_options(
+            source,
+            ParseOptions {
+                wikilink: true,
+                ..Default::default()
+            },
+        );
+        let json = serde_json::to_value(ast).unwrap();
+        let children = json["children"][0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1, "{source}: {children:?}");
+        assert_eq!(children[0]["type"], "math_inline", "{source}");
+    }
+}
+
+#[test]
+fn wikilink_math_scan_handles_many_candidates_and_resets_between_runs() {
+    let source = format!(
+        "${}$ [[outside]] **$text** [[after]]",
+        " [[foo]]".repeat(8000)
+    );
+    let ast = parse_with_options(
+        &source,
+        ParseOptions {
+            wikilink: true,
+            ..Default::default()
+        },
+    );
+    let json = serde_json::to_value(ast).unwrap();
+    let children = json["children"][0]["children"].as_array().unwrap();
+    assert_eq!(children[0]["type"], "math_inline");
+    assert_eq!(children[0]["value"], " [[foo]]".repeat(8000));
+    let targets: Vec<_> = children
+        .iter()
+        .filter(|node| node["type"] == "wiki_link")
+        .map(|node| node["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(targets, ["outside", "after"]);
+}
+
+#[test]
+fn conformance_options_default_wikilink_to_disabled() {
+    let options: ParseOptions =
+        serde_json::from_str(r#"{"disable":[],"allowDangerousHtml":false}"#).unwrap();
+    assert!(!options.wikilink);
+    let ast = parse_with_options("[[Note]]", options);
+    let json = serde_json::to_value(ast).unwrap();
+    assert_eq!(json["children"][0]["children"][0]["type"], "text");
 }

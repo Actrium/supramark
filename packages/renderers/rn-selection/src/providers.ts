@@ -60,6 +60,7 @@ export function inferDefaultBehavior(node: SupramarkNode): SelectionBehavior {
     case 'emphasis':
     case 'inline_code':
     case 'link':
+    case 'wiki_link':
     case 'delete':
     case 'break':
     case 'code':

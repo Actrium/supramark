@@ -15,3 +15,4 @@ pub mod linkify;
 pub mod math;
 pub mod strikethrough;
 pub mod tables;
+pub mod wikilink;

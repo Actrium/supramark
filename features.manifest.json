@@ -43,6 +43,13 @@
       "cargoFeatures": ["footnote"],
       "tsPackages": ["@supramark/feature-footnote"]
     },
+    "wikilink": {
+      "kind": "markdown",
+      "description": "WikiLink syntax ([[target]], [[target|label]], [[target#section]]).",
+      "dependsOn": ["commonmark"],
+      "cargoFeatures": [],
+      "tsPackages": ["@supramark/feature-wikilink"]
+    },
     "definition_list": {
       "kind": "markdown",
       "description": "Definition list syntax.",

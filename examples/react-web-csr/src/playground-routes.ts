@@ -18,6 +18,7 @@ export const PLAYGROUND_ROUTES = [
   { feature: 'plantuml', slug: 'plantuml' },
   { feature: 'video', slug: 'video' },
   { feature: 'weather', slug: 'weather' },
+  { feature: 'wikilink', slug: 'wikilink' },
 ] as const;
 
 const routeByFeature = new Map<string, string>(

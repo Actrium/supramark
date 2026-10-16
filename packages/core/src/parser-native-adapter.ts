@@ -28,9 +28,24 @@
  */
 export type NativeParseJsonFn = (source: string) => Promise<string>;
 
+export type NativeParserOptions = {
+  wikilink?: boolean;
+};
+
+export type NativeParseJsonWithOptionsFn = (
+  source: string,
+  options: NativeParserOptions
+) => Promise<string>;
+
 export interface NativeParserAdapter {
   /** Parse the Markdown source text and return an AST v2 JSON string. */
   parseJson: NativeParseJsonFn;
+  /**
+   * Optional: parse with parser flags (e.g. `wikilink`). Adapters backed by a
+   * native build without this entry cannot honor parser options; `parse()` in
+   * `plugin.ts` then throws instead of silently dropping the syntax.
+   */
+  parseJsonWithOptions?: NativeParseJsonWithOptionsFn;
   /** Optional: return the native library version, for diagnostics. */
   getVersion?: () => Promise<string>;
 }

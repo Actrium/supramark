@@ -227,6 +227,20 @@ function linearizeNode(
         `](${link.url}${title})`
       );
     }
+    case 'wiki_link': {
+      const target = node.section != null ? `${node.target}#${node.section}` : node.target;
+      const source = `[[${target}${node.label != null ? `|${node.label}` : ''}]]`;
+      const display = node.label ?? (node.section != null ? `${node.target} > ${node.section}` : node.target);
+      return [{
+        kind: 'text',
+        unitId: makeUnitId(nodeId, 0),
+        nodeId,
+        text: options.rendersAsText?.(node) ? source : display,
+        node,
+        payload: { markdown: source, source },
+        sourceRange: getSourceRange(node),
+      }];
+    }
     case 'inline_code': {
       const code = node;
       const markdown = '`' + code.value + '`';

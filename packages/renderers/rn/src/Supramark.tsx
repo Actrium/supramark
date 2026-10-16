@@ -24,6 +24,7 @@ import type {
   SupramarkDefinitionDescriptionNode,
   SupramarkDiagramConfig,
   SupramarkConfig,
+  SupramarkWikiLinkNode,
   SupramarkCodeHighlightResult,
   SupramarkCodeHighlighter,
   SupramarkSourceState,
@@ -444,13 +445,16 @@ export const Supramark: React.FC<SupramarkProps> = ({
     estimateParsedDocumentBytes
   );
   const codeHighlightEnabled = isFeatureGroupEnabled(config, ['@supramark/feature-code-highlight']);
+  // Parse derives a parser flag from config: enabling @supramark/feature-wikilink
+  // turns on wikilink parsing and wiki_link nodes land in the cached AST, so the
+  // flag must fingerprint the cache key. Feature options (e.g. resolveWikiLink)
+  // only affect rendering, not the cached AST.
+  const wikilinkParseEnabled = config ? isFeatureEnabled(config, '@supramark/feature-wikilink') : false;
   // Completed documents can share parsing/highlighting only when every input is equivalent.
-  // Config is intentionally omitted because parse currently derives no plugins or AST transforms
-  // from it; add the relevant config fingerprint here if that parse contract ever changes.
   const documentCacheKey = useMemo(
     () =>
-      `${markdown}\u0000${codeHighlightEnabled ? 'highlight' : 'plain'}\u0000${codeHighlightTheme ?? ''}\u0000${getCodeHighlighterId(codeHighlighter)}`,
-    [markdown, codeHighlightEnabled, codeHighlighter, codeHighlightTheme]
+      `${markdown}\u0000${wikilinkParseEnabled ? 'wikilink' : 'plain'}\u0000${codeHighlightEnabled ? 'highlight' : 'plain'}\u0000${codeHighlightTheme ?? ''}\u0000${getCodeHighlighterId(codeHighlighter)}`,
+    [markdown, wikilinkParseEnabled, codeHighlightEnabled, codeHighlighter, codeHighlightTheme]
   );
   // The AST and its source state must advance together so a stale open fence
   // is never marked complete.
@@ -649,6 +653,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     : '[]';
   // Resolve the same feature gates as the render branches before comparing policies.
   const mathAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-math']);
+  const wikiLinkAsText = selectionEnabled && !isFeatureGroupEnabled(config, ['@supramark/feature-wikilink']);
   // Unknown engines are always enabled by core; built-in aliases are normalized below.
   const textDiagramEnginesKey = selectionEnabled
     ? JSON.stringify(
@@ -662,6 +667,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
     opaqueContainersKey,
     customContainersKey,
     mathAsText,
+    wikiLinkAsText,
     textDiagramEnginesKey,
   ]);
   // Stable callbacks and sets let equivalent fresh host props retain their existing selection.
@@ -678,13 +684,14 @@ export const Supramark: React.FC<SupramarkProps> = ({
       opaqueContainers,
       // Match disabled source rendering for inline/block math and diagram aliases.
       rendersAsText: (node: SupramarkNode) =>
+        (node.type === 'wiki_link' && wikiLinkAsText) ||
         ((node.type === 'math_inline' || node.type === 'math_block') && mathAsText) ||
         (node.type === 'diagram' && textDiagramEngines.has(node.engine.toLowerCase())),
       // Only built-in render branches contribute the library's container title.
       containerTitle: (node: SupramarkContainerNode) =>
         rendererContainerTitle(node, customContainers),
     };
-  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, textDiagramEnginesKey]);
+  }, [selectionEnabled, opaqueContainersKey, customContainersKey, mathAsText, wikiLinkAsText, textDiagramEnginesKey]);
   // Build once per document/policy identity; fresh equivalent options keep unit identities intact.
   const selectionPlan = useMemo(() => {
     // The existing renderer handles loading and errors without a selection model.
@@ -1784,6 +1791,14 @@ export const BLOCK_NODE_TYPES: ReadonlySet<string> = new Set([
 // surface has always exposed it.
 export { INLINE_NODE_TYPES, isInlineNode };
 
+// Rebuild the literal `[[target#section|label]]` source form for a wiki_link
+// node when the feature is disabled in config (parser produced wiki_link
+// nodes, renderer falls back to the source text).
+function rebuildWikiLinkSource(node: SupramarkWikiLinkNode): string {
+  const target = node.section != null ? `${node.target}#${node.section}` : node.target;
+  return `[[${target}${node.label != null ? `|${node.label}` : ''}]]`;
+}
+
 // Render list_item children that mix inline and block nodes (loose / nested
 // lists). Inline runs collapse into one <Text> (the first run gets the marker);
 // block nodes (paragraph, nested list) go through renderNode instead of being
@@ -1997,6 +2012,46 @@ function renderInlineNode(
       return (
         <Text key={key} style={styles.inlineCode}>
           [{label}]
+        </Text>
+      );
+    }
+    case 'wiki_link': {
+      const wikiLinkNode = node;
+      if (!isFeatureGroupEnabled(config, ['@supramark/feature-wikilink'])) {
+        return rebuildWikiLinkSource(wikiLinkNode);
+      }
+      const display =
+        wikiLinkNode.label ??
+        (wikiLinkNode.section != null
+          ? `${wikiLinkNode.target} > ${wikiLinkNode.section}`
+          : wikiLinkNode.target);
+      const options =
+        getFeatureOptionsAs<{
+          resolveWikiLink?: (node: {
+            target: string;
+            section?: string;
+            label?: string;
+          }) => string | null | undefined;
+        }>(config, '@supramark/feature-wikilink') ?? {};
+      const href = options.resolveWikiLink?.(wikiLinkNode);
+      // A missing/null resolver renders styled but non-navigable (no onPress),
+      // mirroring the web <a> without href.
+      if (href == null) {
+        return (
+          <Text key={key} style={styles.link}>
+            {display}
+          </Text>
+        );
+      }
+      return (
+        <Text
+          key={key}
+          style={styles.link}
+          onPress={() => {
+            Linking.openURL(href).catch(err => console.error('Failed to open URL:', err));
+          }}
+        >
+          {display}
         </Text>
       );
     }

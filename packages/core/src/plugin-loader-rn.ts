@@ -16,6 +16,8 @@ import { getNativeParserAdapter } from './parser-native-adapter.js';
 type RustMarkdownModule = {
   parse?: (source: string) => unknown;
   parseJson?: (source: string) => string | Promise<string>;
+  parseWithOptions?: (source: string, options: { wikilink?: boolean }) => unknown;
+  parseJsonWithOptions?: (source: string, options: { wikilink?: boolean }) => string | Promise<string>;
 };
 
 // Must share the async Promise<RustMarkdownModule> contract with the web loader
@@ -27,7 +29,12 @@ export async function loadRustMarkdownModule(): Promise<RustMarkdownModule> {
   // throw a clear error instead of silently falling back to wasm.
   const nativeAdapter = getNativeParserAdapter();
   if (nativeAdapter) {
-    return { parseJson: nativeAdapter.parseJson };
+    return {
+      parseJson: nativeAdapter.parseJson,
+      ...(nativeAdapter.parseJsonWithOptions
+        ? { parseJsonWithOptions: nativeAdapter.parseJsonWithOptions }
+        : {}),
+    };
   }
 
   throw new Error(

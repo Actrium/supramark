@@ -127,7 +127,20 @@ export function computeToolbarPlacement(
   viewport: Size,
   options: ToolbarPlacementOptions = {}
 ): ToolbarPlacement | null {
-  const anchor = unionRect(rects);
+  // Only visible selection geometry can anchor a reachable toolbar after outer scrolling.
+  const visible = rects
+    .map(rect => {
+      const x = Math.max(0, rect.x);
+      const y = Math.max(0, rect.y);
+      return {
+        x,
+        y,
+        w: Math.min(viewport.w, rect.x + rect.w) - x,
+        h: Math.min(viewport.h, rect.y + rect.h) - y,
+      };
+    })
+    .filter(rect => rect.w > 0 && rect.h > 0);
+  const anchor = unionRect(visible);
   if (anchor === null) return null;
 
   const gap = options.gap ?? TOOLBAR_GAP;
@@ -146,7 +159,7 @@ export function computeToolbarPlacement(
   const below = obstacleBottom + gap;
   let side: ToolbarSide;
   let y: number;
-  if (above >= margin) {
+  if (above >= margin && above + size.h <= viewport.h - margin) {
     side = 'above';
     y = above;
   } else if (below + size.h <= viewport.h - margin) {

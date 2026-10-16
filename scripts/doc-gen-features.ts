@@ -17,6 +17,7 @@ const FEATURES = [
   'definition-list',
   'emoji',
   'footnote',
+  'wikilink',
 ];
 
 const docsDir = path.join(projectRoot, 'docs/features');

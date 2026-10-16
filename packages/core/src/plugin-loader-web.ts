@@ -11,6 +11,8 @@
 type RustMarkdownModule = {
   parse?: (source: string) => unknown;
   parseJson?: (source: string) => string | Promise<string>;
+  parseWithOptions?: (source: string, options: { wikilink?: boolean }) => unknown;
+  parseJsonWithOptions?: (source: string, options: { wikilink?: boolean }) => string | Promise<string>;
 };
 
 // Node package subpath: only attempted at server runtime; must not be statically
