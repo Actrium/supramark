@@ -299,16 +299,17 @@ function wrapLabelLine(line: string, maxWidth: number, fontSize: number): string
  * engine reserved height for:
  *
  * - `<br>` in any spelling and a source `\n` end a painted line;
- * - `</p>` / `</div>` / `</li>` / `</h1-6>` end a *block*, and a break at the
- *   end of a block opens no new line — one blank per block, which is why
- *   `A<br/><br/>` paints two lines while `A</p></div>` paints one;
+ * - `<p>` / `</p>` end a *block* (every other tag is transparent — `</div>`
+ *   and friends must not end a line), and a break at the end of a block opens
+ *   no new line — one blank per block, which is why `A<br/><br/>` paints two
+ *   lines while `A</p></div>` paints one;
  * - a block with no text and no break paints nothing.
  */
 function labelHardLines(markup: string): string[] {
   // Only `<br>` (attributes allowed, as `is_br_tag_body` accepts them) and
   // `<p>`/`</p>` are boundaries; every other tag is transparent — `</div>` and
   // friends must not end a line.
-  const TOKEN = /(<br(?:\s[^>]*)?\/?>|<\/?p(?:\s[^>]*)?>|\n)/i;
+  const TOKEN = /(<br(?:\s[^>]*)?\/?>|<\/?p(?:\s[^>]*)?\/?>|\n)/i;
   const lines: string[] = [];
   let block: string[] = [];
   let segment = '';
@@ -319,7 +320,7 @@ function labelHardLines(markup: string): string[] {
     block = [];
   };
   for (const token of markup.split(TOKEN)) {
-    if (/^<p/i.test(token) || /^<\/p/i.test(token)) {
+    if (/^<\/?p(?:\s[^>]*)?\/?>$/i.test(token)) {
       block.push(segment);
       segment = '';
       endBlock();
@@ -473,8 +474,8 @@ export function normalizeSvg(xml: string): string {
     const w = Number(fo.match(/\bwidth="([^"]*)"/)?.[1] ?? 0);
     const h = Number(fo.match(/\bheight="([^"]*)"/)?.[1] ?? 0);
     if (!w || !h) return '';
-    // Painted lines: `<br>` and block-level closing tags (</p>/</div>) end a
-    // line, and each of those lines is soft-wrapped to the foreignObject's own
+    // Painted lines: `<br>` and the `<p>` block boundaries end a line (every
+    // other tag is transparent), and each of those lines is soft-wrapped to the foreignObject's own
     // width — the box the engine sized from `flowchart.wrappingWidth`, which a
     // browser would wrap with `white-space: break-spaces` and this renderer has
     // to wrap itself. Plain text inside the foreignObject is taken regardless
