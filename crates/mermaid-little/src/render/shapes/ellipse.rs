@@ -41,6 +41,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
                 &xml_escape_label(&label),
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }

@@ -3701,7 +3701,7 @@ fn apply_cluster_title_leading(nodes: &mut [Node], edges: &mut [Edge], data: &La
             if oy > cy
                 && top >= grown_from
                 && top < bottom
-                && reached.map_or(true, |(_, seen)| top < seen)
+                && reached.is_none_or(|(_, seen)| top < seen)
             {
                 reached = Some((&other.id, top));
             }

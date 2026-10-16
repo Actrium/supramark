@@ -37,7 +37,8 @@ use crate::theme::ThemeVariables;
 /// especially for short labels like `Pass` / `Fail`. Keep node labels and
 /// other diagram families byte-oriented; flowchart edge labels deliberately
 /// get a small symmetric horizontal cushion.
-const FLOWCHART_EDGE_LABEL_PADDING_X: f64 = 4.0;
+const FLOWCHART_EDGE_LABEL_PADDING_X: f64 =
+    crate::render::foreign_object::HTML_LABEL_EDGE_PADDING_X;
 
 /// Compute the viewBox matching the upstream jsdom `getBBox()` shim.
 ///
@@ -157,7 +158,6 @@ fn node_styles_have_bold(styles: &[String]) -> bool {
 /// `measure_vertex_box(v, is_bold=true)`, so we only need to rewrite the
 /// label-level numbers here.
 fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
-    use crate::render::foreign_object::HtmlLabelFont;
     use crate::render::shapes::types::{fmt_num, xml_escape};
 
     let shape = node.shape.as_deref().unwrap_or("rect");
@@ -187,12 +187,25 @@ fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
     // entities remain as plain text and inflate the width. We need to
     // recompute (s_wrong) so we can find-and-replace the literal numbers.
     let escaped = xml_escape(label);
-    let (wrong_w, wrong_h) = crate::render::foreign_object::measure_html_label(
-        &escaped,
-        &HtmlLabelFont::default(),
-        200.0,
-        true,
+    // Mirror exactly what `shapes::diamond` measured, clamp included, so the
+    // numbers we look for are the numbers it wrote.
+    // `shapes::diamond` measures through `measure_node_label`, which resolves
+    // the node's own `font-size` / `font-weight`; recompute in that same domain
+    // or the needles miss for a styled node and the polygon keeps the size the
+    // shape drew instead of the one dagre laid out.
+    let shape_font = crate::layout::flowchart::resolved_label_font_from_styles(
+        node.css_styles.as_deref().unwrap_or(&[]),
     );
+    let (wrong_w, wrong_h) = if node.clamp_html_label {
+        let (w, h, _) = crate::render::foreign_object::measure_html_label_clamped(
+            &escaped,
+            &shape_font,
+            crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        );
+        (w, h)
+    } else {
+        crate::render::foreign_object::measure_html_label(&escaped, &shape_font, 200.0, true)
+    };
     let p = node.padding.unwrap_or(15.0);
     let s_wrong = (wrong_w + p) + (wrong_h + p);
     let half_wrong = s_wrong / 2.0;
@@ -424,22 +437,22 @@ fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
         crate::render::foreign_object::string_label_to_html(label)
     };
     let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
-    let (lw_norm, _lh_norm) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_norm, _lh_norm, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &HtmlLabelFont::default(),
         200.0,
-        true,
+        node.clamp_html_label,
     );
     let bold_font = HtmlLabelFont {
         font_family: None,
         font_size_px: None,
         bold: Some(true),
     };
-    let (lw_bold, _lh_bold) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_bold, _lh_bold, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &bold_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     if (lw_bold - lw_norm).abs() < 1e-9 {
         // Bold metrics happen to match (e.g. font lacks bold variant).
@@ -512,22 +525,22 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
         font_size_px: None,
         bold: if bold { Some(true) } else { None },
     };
-    let (lw_default, lh_default) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_default, lh_default, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &default_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     let sized_font = HtmlLabelFont {
         font_family: None,
         font_size_px: Some(font_size_px),
         bold: if bold { Some(true) } else { None },
     };
-    let (lw_sized, lh_sized) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_sized, lh_sized, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &sized_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     if (lw_sized - lw_default).abs() < 1e-9 && (lh_sized - lh_default).abs() < 1e-9 {
         return svg.to_string();
@@ -560,13 +573,37 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     );
     out = out.replace(&needle_tx, &replace_tx);
 
-    // 3. Inline font-size on the inner `<div>` and `<span>`.
-    let div_needle = r#"<div style="display: table-cell;"#;
-    let div_replace = format!(
-        r#"<div style="font-size: {fs}px !important; display: table-cell;"#,
+    // The transform needle above only matches when the shape emitted the
+    // default-font numbers. A clamped label already carries the resolved-size
+    // geometry (that is what the clamp measured), so stamp the size on its
+    // `<g>` independently of the number rewrite.
+    let g_needle = r##"<g class="label" style="" "##;
+    let g_replace = format!(
+        r##"<g class="label" style="font-size:{fs}px !important" "##,
         fs = fmt_num(font_size_px)
     );
-    out = out.replace(div_needle, &div_replace);
+    out = out.replace(g_needle, &g_replace);
+
+    // 3. Inline font-size on the inner `<div>` and `<span>`. A clamped label
+    //    carries upstream's wrapping style instead of `nowrap`, so both
+    //    spellings get the prefix — the shape emitted whichever its
+    //    measurement picked, and the size override applies to either.
+    for (needle, rest) in [
+        (
+            r#"<div style="display: table-cell;"#,
+            "display: table-cell;",
+        ),
+        (
+            r#"<div style="display: table; white-space: break-spaces;"#,
+            "display: table; white-space: break-spaces;",
+        ),
+    ] {
+        let replace = format!(
+            r#"<div style="font-size: {fs}px !important; {rest}"#,
+            fs = fmt_num(font_size_px)
+        );
+        out = out.replace(needle, &replace);
+    }
     let span_needle = r#"<span class="nodeLabel ">"#;
     let span_replace = format!(
         r#"<span style="font-size:{fs}px !important" class="nodeLabel ">"#,
@@ -587,7 +624,8 @@ fn compute_viewbox(
     title: Option<&str>,
 ) -> (f64, f64, f64, f64, f64) {
     use crate::render::foreign_object::{
-        measure_html_label, measure_html_markup_label, HtmlLabelFont,
+        measure_html_label, measure_html_markup_label, measure_html_markup_label_clamped,
+        HtmlLabelFont,
     };
 
     let mut min_x = f64::INFINITY;
@@ -782,8 +820,7 @@ fn compute_viewbox(
                         } else {
                             font.clone()
                         };
-                        let (lw, lh) =
-                            measure_html_markup_label(&processed, &label_font, 200.0, true);
+                        let (lw, lh) = measure_node_label_for_viewbox(n, &processed, &label_font);
                         expand(
                             &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh,
                         );
@@ -841,10 +878,10 @@ fn compute_viewbox(
                 match crate::render::foreign_object::try_render_katex_label(&processed, &label_font)
                 {
                     Some((_, w, h)) => (w, h),
-                    None => measure_html_markup_label(&processed, &label_font, 200.0, true),
+                    None => measure_node_label_for_viewbox(n, &processed, &label_font),
                 }
             } else {
-                measure_html_markup_label(&processed, &label_font, 200.0, true)
+                measure_node_label_for_viewbox(n, &processed, &label_font)
             };
             expand(
                 &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh,
@@ -948,7 +985,8 @@ fn compute_viewbox(
             // replace_fa_icons converts `fa:fa-car` → `<i class="fa fa-car"></i>`
             // which measure_html_markup_label strips as a zero-width HTML tag.
             let processed = crate::render::foreign_object::replace_fa_icons(label_text);
-            measure_html_markup_label(&processed, &font, 200.0, true)
+            let (w, h, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
+            (w, h)
         };
         // foreignObject x=0, y=0 (no transform applied)
         expand(
@@ -1009,6 +1047,28 @@ fn compute_viewbox(
 /// can therefore pass byte fixtures while clipping labels and bottom nodes in
 /// Chrome/Safari. This function unions the same high-level geometry the
 /// renderer emits, but in browser coordinates.
+/// Measure a flowchart node's HTML label the way the viewBox needs it: through
+/// the clamp when the node's label is clamped (non-cluster nodes — issue #254),
+/// and with the plain shim measurement otherwise.
+///
+/// Clusters are the case that matters here: their labels carry no `max-width`
+/// (upstream never wraps them), so measuring them as clamped computes a viewBox
+/// narrower than the label the renderer actually paints, and a long subgraph
+/// title gets clipped on both sides.
+fn measure_node_label_for_viewbox(
+    node: &UNode,
+    markup: &str,
+    font: &crate::render::foreign_object::HtmlLabelFont<'_>,
+) -> (f64, f64) {
+    let (w, h, _) = crate::render::foreign_object::measure_node_label_box(
+        markup,
+        font,
+        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        node.clamp_html_label,
+    );
+    (w, h)
+}
+
 fn compute_viewbox_browser(
     l: &FlowchartLayout,
     padding: f64,
@@ -1016,7 +1076,7 @@ fn compute_viewbox_browser(
     adjustments: &EdgeLabelAdjustments,
 ) -> (f64, f64, f64, f64, f64) {
     use crate::render::foreign_object::{
-        measure_html_markup_label, replace_fa_icons, HtmlLabelFont,
+        measure_html_markup_label_clamped, replace_fa_icons, HtmlLabelFont,
     };
 
     struct BrowserBounds {
@@ -1099,10 +1159,10 @@ fn compute_viewbox_browser(
                 match crate::render::foreign_object::try_render_katex_label(&processed, &label_font)
                 {
                     Some((_, w, h)) => (w, h),
-                    None => measure_html_markup_label(&processed, &label_font, 200.0, true),
+                    None => measure_node_label_for_viewbox(n, &processed, &label_font),
                 }
             } else {
-                measure_html_markup_label(&processed, &label_font, 200.0, true)
+                measure_node_label_for_viewbox(n, &processed, &label_font)
             };
             bounds.expand_box(cx - lw / 2.0, cy - lh / 2.0, lw, lh);
         }
@@ -1161,7 +1221,7 @@ fn compute_viewbox_browser(
             continue;
         }
         let processed = replace_fa_icons(label_text);
-        let (lw, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
+        let (lw, lh, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
         let lw = lw + FLOWCHART_EDGE_LABEL_PADDING_X * 2.0;
         let (lx, ly) = adjustments
             .get(&e.id)
@@ -3616,8 +3676,9 @@ fn render_edge_label(
     decluster: bool,
 ) -> String {
     use crate::render::foreign_object::{
-        markdown_label_to_html, measure_html_markup_label, render_edge_label as fo_edge,
+        markdown_label_to_html, measure_html_markup_label_clamped, render_edge_label as fo_edge,
         replace_fa_icons, string_label_to_html, HtmlLabelFont, LabelOpts,
+        HTML_LABEL_WRAPPING_WIDTH,
     };
     use crate::render::shapes::types::{build_div_style_prefix, build_label_style};
     let label_text = e.label.clone().unwrap_or_default();
@@ -3649,22 +3710,30 @@ fn render_edge_label(
     // pipeline and emit an edge label with `wrap_in_p: false` so the
     // inner `<span class="edgeLabel ">` directly carries the KaTeX
     // `<div>…</div>` markup, matching the reference SVG.
-    let (w, h, katex_html) = if !is_empty
+    let (w, h, katex_html, clamped) = if !is_empty
         && crate::render::foreign_object::contains_katex_marker(&processed)
     {
         let font = HtmlLabelFont::default();
         match crate::render::foreign_object::try_render_katex_label(&processed, &font) {
-            Some((html, w, h)) => (w, h, Some(html)),
+            Some((html, w, h)) => (w, h, Some(html), false),
             None => {
-                let (w, h) = measure_html_markup_label(&processed, &font, 200.0, true);
-                (w, h, None)
+                let (w, h, clamped) =
+                    measure_html_markup_label_clamped(&processed, &font, HTML_LABEL_WRAPPING_WIDTH);
+                (w, h, None, clamped)
             }
         }
     } else if is_empty {
-        (0.0, 0.0, None)
+        (0.0, 0.0, None, false)
     } else {
-        let (w, h) = measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true);
-        (w, h, None)
+        // Edge labels are clamped exactly like node labels: the layout reserved
+        // the clamped box (`measure_edge_label`) and the emitted `<div>` has to
+        // wrap inside the same budget — issue #254.
+        let (w, h, clamped) = measure_html_markup_label_clamped(
+            &processed,
+            &HtmlLabelFont::default(),
+            HTML_LABEL_WRAPPING_WIDTH,
+        );
+        (w, h, None, clamped)
     };
     // Opt-in decluster: dagre reserved rank space for the CJK-floored label
     // width (stored on the edge at layout time, see `build_edge`). Emit the
@@ -3730,6 +3799,7 @@ fn render_edge_label(
         .map(|styles| build_label_style(styles))
         .unwrap_or_default();
     let opts = LabelOpts {
+        clamped,
         data_id: Some(&e.id),
         group_style: None,
         wrap_in_p: !is_empty && katex_html.is_none(),
@@ -4823,7 +4893,7 @@ impl EdgeLabelAdjustments {
 /// algorithm. Returns an empty map when the option is off.
 fn build_edge_label_adjustments(l: &FlowchartLayout, opts: &RenderOptions) -> EdgeLabelAdjustments {
     use crate::render::foreign_object::{
-        measure_html_markup_label, replace_fa_icons, HtmlLabelFont,
+        measure_html_markup_label_clamped, replace_fa_icons, HtmlLabelFont,
     };
     if !opts.edge_label_decluster {
         return EdgeLabelAdjustments::default();
@@ -4893,7 +4963,7 @@ fn build_edge_label_adjustments(l: &FlowchartLayout, opts: &RenderOptions) -> Ed
             continue;
         }
         let processed = replace_fa_icons(label_text);
-        let (lw_m, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
+        let (lw_m, lh, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
         // Floor the width over the marker-free plain text (tags / entities
         // stripped), not the raw markup — otherwise `<br/>`, `**` and `&amp;`
         // are billed ~0.56em each and the collision box widens past the real
