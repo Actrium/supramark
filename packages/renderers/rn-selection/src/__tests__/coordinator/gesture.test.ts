@@ -67,6 +67,24 @@ function harness(overrides: Partial<SelectionGestureDeps> = {}): Harness {
 }
 
 describe('long press', () => {
+  test('handle motion preserves the grab offset through both entry paths', () => {
+    // Both responders must keep the caret on its original line after a one-point move.
+    for (const dedicated of [false, true]) {
+      // The handle is below the first-line caret, including an off-centre horizontal grab.
+      const { store, gesture } = harness({
+        handleAt: () => 'end',
+        handlePoint: () => ({ x: 100, y: 10 }),
+        pointAt: p => point(p.y < 20 ? 10 : 20),
+      });
+      store.setRange({ anchor: point(0), focus: point(10) });
+      // Native grant and bubbling touchStart can both report this same touch.
+      if (dedicated) gesture.handleStart('end', 0, { x: 103, y: 26 });
+      else gesture.touchStart({ x: 103, y: 26 }, 0);
+      gesture.handleStart('end', 0, { x: 103, y: 26 });
+      gesture.touchMove({ x: 103, y: 27 }, 1);
+      expect(store.calls).toEqual(['beginAt:0', 'extendTo:10']);
+    }
+  });
   test('a held press selects the word under the finger and commits', () => {
     const { store, gesture } = harness();
     gesture.touchStart({ x: 10, y: 0 }, 0);

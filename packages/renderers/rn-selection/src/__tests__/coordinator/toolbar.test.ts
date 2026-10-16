@@ -27,8 +27,29 @@ describe('unionRect', () => {
 });
 
 describe('computeToolbarPlacement', () => {
+  test('hides offscreen selections and keeps partially visible selections reachable', () => {
+    expect(computeToolbarPlacement([{ x: 20, y: 900, w: 100, h: 20 }], BAR, SCREEN)).toBeNull();
+    // The selected message can extend above the list even though its last line is visible.
+    const placement = computeToolbarPlacement([{ x: 20, y: -200, w: 100, h: 240 }], BAR, SCREEN);
+    expect(placement?.side).toBe('below');
+    expect(placement?.y).toBe(48);
+  });
   test('no selection means no bar', () => {
     expect(computeToolbarPlacement([], BAR, SCREEN)).toBeNull();
+  });
+
+  test('a margin larger than the gap can veto the above placement', () => {
+    // The anchored rect is clamped into the viewport, so with the default
+    // margin === gap the "fully fits above" guard can never fail; this case
+    // pins the branch it exists for. Here the bar would fit above
+    // (obstacleTop - gap - BAR.h = 732 >= margin) but only by overhanging the
+    // bottom margin: without the guard it lands at 732, past SCREEN.h - margin.
+    const placement = computeToolbarPlacement([{ x: 20, y: 780, w: 100, h: 10 }], BAR, SCREEN, {
+      margin: 40,
+    });
+
+    expect(placement?.side).toBe('above');
+    expect(placement?.y).toBe(SCREEN.h - 40 - BAR.h);
   });
 
   test('sits above the selection by default', () => {

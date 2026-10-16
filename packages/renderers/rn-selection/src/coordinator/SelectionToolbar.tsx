@@ -1,18 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useContext, useEffect, useMemo, useRef } from 'react';
 import { Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
+import { ToolbarPortalContext } from './ToolbarPortalContext';
 import type { LocalRect } from '../metrics';
 import { computeHandles, HANDLE_TOUCH_RADIUS } from './handles';
-import { computeToolbarPlacement, type Size } from './toolbar';
+import {
+  computeToolbarPlacement,
+  TOOLBAR_MARGIN,
+  type Size,
+  type SelectionToolbarItem,
+} from './toolbar';
 import { useSelectionRects } from './SelectionOverlay';
 import { useSelectionContext, useSelectionSnapshot } from './useDocumentSelection';
 
 export interface SelectionToolbarProps {
   /** Visible area in `SelectionRoot` space, used to keep the bar on screen. */
   viewport: Size;
+  /** Native document root used to place the toolbar in a host portal. */
+  anchor?: React.RefObject<View | null>;
   backgroundColor?: string;
   textColor?: string;
   zIndex?: number;
 }
+
+// Unique descriptions keep the host's portal frame keys distinct per publisher.
+let toolbarIdSeq = 0;
 
 function handleTouchAvoidRects(rects: readonly LocalRect[]): LocalRect[] {
   const handles = computeHandles(rects);
@@ -44,15 +55,102 @@ function handleTouchAvoidRects(rects: readonly LocalRect[]): LocalRect[] {
  */
 export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   viewport,
+  anchor,
   backgroundColor = '#2b2b2b',
   textColor = '#ffffff',
   zIndex = 12,
 }) => {
   const { store, toolbarItems, runToolbarItem } = useSelectionContext();
   const snapshot = useSelectionSnapshot(store);
-  const rects = useSelectionRects();
-  const [size, setSize] = useState<Size | null>(null);
+  const liveRects = useSelectionRects();
+  // `useSelectionRects` derives a fresh array on every render, so publishing it
+  // directly would make any render — a registry bump from a sibling block, a
+  // streaming re-measure, a host re-render — count as a geometry change and cost
+  // a host-plus-anchor native measurement. Key the published value on its own
+  // geometry instead, and leave window-position follow to `hostRef.refresh()`.
+  const rectsKey = liveRects
+    .map(
+      rect =>
+        `${rect.x},${rect.y},${rect.w},${rect.h},${rect.startHandleVisible ? 1 : 0}${rect.endHandleVisible ? 1 : 0}`
+    )
+    .join(';');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the geometry key IS the dependency
+  const rects = useMemo(() => liveRects, [rectsKey]);
+  // Publish the same selection into the host's visible area instead of the small bubble.
+  const portal = useContext(ToolbarPortalContext);
+  // Lazy ref init, not a memo: the id is created exactly once and never
+  // recomputed, so the shared counter is not advanced from a render pass React
+  // may throw away (StrictMode, a discarded concurrent render).
+  const idRef = useRef<symbol | null>(null);
+  if (idRef.current === null) {
+    idRef.current = Symbol(`selection-toolbar-${++toolbarIdSeq}`);
+  }
+  const id = idRef.current;
+  const visible = snapshot.phase === 'selected' && rects.length > 0 && toolbarItems.length > 0;
+  useEffect(() => {
+    // Standalone roots retain their local toolbar when no application host is mounted.
+    if (!portal || !anchor) return;
+    portal.set(
+      id,
+      visible
+        ? {
+            anchor,
+            rects,
+            items: toolbarItems,
+            run: runToolbarItem,
+            backgroundColor,
+            textColor,
+            zIndex,
+          }
+        : null
+    );
+    return () => portal.set(id, null);
+  }, [
+    portal,
+    anchor,
+    id,
+    visible,
+    rects,
+    toolbarItems,
+    runToolbarItem,
+    backgroundColor,
+    textColor,
+    zIndex,
+  ]);
+  if (!visible || (portal && anchor)) return null;
+  return (
+    <SelectionToolbarView
+      viewport={viewport}
+      rects={rects}
+      items={toolbarItems}
+      run={runToolbarItem}
+      backgroundColor={backgroundColor}
+      textColor={textColor}
+      zIndex={zIndex}
+    />
+  );
+};
 
+/** Measure menu content against the host width, independently of its final horizontal position. */
+export function SelectionToolbarView({
+  viewport,
+  rects,
+  items,
+  run,
+  backgroundColor = '#2b2b2b',
+  textColor = '#ffffff',
+  zIndex = 12,
+}: {
+  viewport: Size;
+  rects: readonly LocalRect[];
+  items: readonly SelectionToolbarItem[];
+  run(item: SelectionToolbarItem): void;
+  backgroundColor?: string;
+  textColor?: string;
+  zIndex?: number;
+}) {
+  // The native intrinsic width determines placement; a bubble never constrains this measurement.
+  const [size, setSize] = useState<Size | null>(null);
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     // Only react to real changes: setting state from every layout pass would
@@ -62,7 +160,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
     );
   };
 
-  if (snapshot.phase !== 'selected' || rects.length === 0 || toolbarItems.length === 0) return null;
+  // An empty action list has no visual or touch surface.
+  if (items.length === 0 || rects.length === 0) return null;
 
   // First pass: render off-screen to measure, then position on the next frame.
   const placement =
@@ -74,30 +173,50 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
 
   return (
     <View
-      onLayout={onLayout}
+      pointerEvents={placement === null ? 'none' : 'box-none'}
+      accessibilityElementsHidden={placement === null}
+      importantForAccessibility={placement === null ? 'no-hide-descendants' : 'auto'}
+      // Toolbar presses belong to actions, not the host's background dismissal handler.
+      onTouchStart={event => event.stopPropagation()}
+      onTouchEnd={event => event.stopPropagation()}
       style={{
         position: 'absolute',
         left: placement?.x ?? 0,
         top: placement?.y ?? 0,
-        opacity: placement === null ? 0 : 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor,
-        borderRadius: 8,
-        paddingHorizontal: 4,
+        // Same margin the placement clamps against: a bar wider than this would
+        // break the invariant that it always fits between both margins.
+        width: Math.max(0, viewport.w - 2 * TOOLBAR_MARGIN),
         zIndex,
+        opacity: placement === null ? 0 : 1,
       }}
     >
-      {toolbarItems.map(item => (
-        <TouchableOpacity
-          key={item.id}
-          accessibilityRole="button"
-          onPress={() => runToolbarItem(item)}
-          style={{ paddingHorizontal: 12, paddingVertical: 8 }}
-        >
-          <Text style={{ color: textColor, fontSize: 14 }}>{item.title}</Text>
-        </TouchableOpacity>
-      ))}
+      <View
+        onLayout={onLayout}
+        style={{
+          alignSelf: 'flex-start',
+          maxWidth: Math.max(0, viewport.w - 2 * TOOLBAR_MARGIN),
+          flexWrap: 'wrap',
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor,
+          borderRadius: 8,
+          paddingHorizontal: 4,
+          zIndex,
+        }}
+      >
+        {items.map(item => (
+          <TouchableOpacity
+            key={item.id}
+            accessibilityRole="button"
+            onPress={() => run(item)}
+            style={{ paddingHorizontal: 12, paddingVertical: 8, flexShrink: 0 }}
+          >
+            <Text numberOfLines={1} style={{ color: textColor, fontSize: 14 }}>
+              {item.title}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
-};
+}
