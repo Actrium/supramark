@@ -135,6 +135,14 @@ function lintFeature(feature: FeaturePackageInfo): LintResult {
 
   // ========== Common checks (all kinds) ==========
 
+  // The bundle generator (scripts/features-gen-bundle.ts) fails loudly when it
+  // cannot resolve the feature object from the entry point; surface the same
+  // problem at lint time instead of at `features:sync` time.
+  if (!feature.exportName) {
+    result.errors.push('src/index.ts must export exactly one value named *Feature');
+    result.passed = false;
+  }
+
   // Check that feature.ts exists
   if (!fs.existsSync(featureFile)) {
     result.errors.push('Missing src/feature.ts');

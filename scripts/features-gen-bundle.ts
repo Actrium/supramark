@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { discoverFeaturePackages } from './lib-feature-layout';
+import { discoverFeaturePackages, type FeaturePackageInfo } from './lib-feature-layout';
 
 const repoRoot = process.cwd();
 
@@ -14,11 +14,27 @@ function generateBundle(platform: 'web' | 'rn') {
   const imports: string[] = [];
   const list: string[] = [];
 
-  allFeatures.forEach((f) => {
-    imports.push(
-      `import { ${f.exportName || f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature'} } from '${f.name}';`
-    );
-    list.push(f.exportName || f.shortName.replace(/-./g, x => x[1].toUpperCase()) + 'Feature');
+  // The export name comes from the package's own entry point, never from the
+  // package name: `@supramark/feature-card-vison` exports `visonFeature`, so a
+  // `<camelShortName>Feature` guess writes an import that does not exist.
+  // Narrowing once here keeps the consumers below free of non-null assertions.
+  const resolved = allFeatures.filter(
+    (f): f is FeaturePackageInfo & { exportName: string } => f.exportName !== undefined
+  );
+  if (resolved.length !== allFeatures.length) {
+    console.error('[feature:bundle] Cannot resolve the feature export for:');
+    for (const feature of allFeatures) {
+      if (feature.exportName !== undefined) continue;
+      console.error(
+        `  ${feature.shortName} (${feature.name}) — its src/index.ts must export exactly one value named *Feature.`
+      );
+    }
+    process.exit(1);
+  }
+
+  resolved.forEach(f => {
+    imports.push(`import { ${f.exportName} } from '${f.name}';`);
+    list.push(f.exportName);
   });
 
   const content = `/* AUTO-GENERATED. DO NOT EDIT. */

@@ -20,6 +20,13 @@ export interface FeaturePackageInfo {
   shortName: string;
   dir: string;
   relativeDir: string;
+  /**
+   * The feature object the package exports from its entry point, e.g.
+   * `weatherFeature`. Undefined when that entry exports no such value, or more
+   * than one — callers that need it (scripts/features-gen-bundle.ts) must fail
+   * loudly rather than guess.
+   */
+  exportName?: string;
   metadata?: {
     id?: string;
     name?: string;
@@ -186,6 +193,85 @@ function safeReadJson(filePath: string): PackageJson | null {
   }
 }
 
+/**
+ * Remove comments from the body of an `export { ... }` block before it is
+ * split on commas. Only identifiers, `as` aliases, string-literal aliases
+ * (ES2022 arbitrary module export names), commas and comments are legal
+ * inside the braces, so stripping comments cannot corrupt real syntax;
+ * leaving them in glues a comment to the name after it, and the whole comma
+ * segment then fails the identifier check below — silently dropping that
+ * export (e.g. `// Compatibility exports` in containers/admonition used to
+ * take `registerAdmonitionContainer` down with it).
+ *
+ * Single pass, longest-alternative-first: a string literal is kept as-is, so
+ * `//` or `/*` inside quotes (e.g. `x as 'a//b'`) is never treated as a
+ * comment; a `//` inside a block comment never opens a line comment; and a
+ * `/*` inside a line comment never opens a block comment.
+ */
+function stripExportBodyComments(body: string): string {
+  return body.replace(
+    /('(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*")|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+    (match: string, stringLiteral: string | undefined) =>
+      stringLiteral !== undefined ? match : ''
+  );
+}
+
+/**
+ * The name of the value a feature package exports from its entry point, e.g.
+ * `weatherFeature` from `@supramark/feature-weather`.
+ *
+ * Read statically rather than by importing the entry: entry points re-export
+ * both `./runtime.web.js` and `./runtime.rn.js`, and importing the RN runtime
+ * outside React Native hangs (admonition, weather) or throws (video).
+ *
+ * Returns undefined unless exactly one exported value is named `*Feature`, so a
+ * non-conforming or ambiguous package surfaces as a failure, never as a guess.
+ */
+function readFeatureExportName(featureDir: string): string | undefined {
+  const entry = path.join(featureDir, 'src', 'index.ts');
+  if (!fs.existsSync(entry)) return undefined;
+
+  try {
+    const source = fs.readFileSync(entry, 'utf-8');
+    const names = new Set<string>();
+
+    // `export { a, b as c } from './feature.js'`, possibly spread over lines.
+    // `export type { ... }` does not match — type-only exports are not values.
+    // The brace body is matched string-aware so a `}` inside a string-literal
+    // alias (`x as 'a}b'`) does not end the block early.
+    for (const block of source.matchAll(
+      /export\s*\{((?:'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"|[^}])*)\}/g
+    )) {
+      for (const exported of stripExportBodyComments(block[1]!).split(',')) {
+        const text = exported.trim();
+        if (!text || text.startsWith('type ')) continue;
+        const name = text
+          .split(/\s+as\s+/)
+          .pop()!
+          .trim();
+        // Skip anything that is not a bare identifier (leftovers from syntax
+        // this parser does not understand); only plain names can match below.
+        if (!/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+        names.add(name);
+      }
+    }
+
+    // `export const xFeature = ...`
+    for (const declaration of source.matchAll(
+      /export\s+(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g
+    )) {
+      names.add(declaration[1]!);
+    }
+
+    const featureNames = [...names].filter(name => name.endsWith('Feature'));
+    return featureNames.length === 1 ? featureNames[0] : undefined;
+  } catch {
+    // A caller that needs this name fails loudly on undefined; an unreadable
+    // entry point must not take down every consumer of discoverFeaturePackages.
+    return undefined;
+  }
+}
+
 export function discoverFeaturePackages(): FeaturePackageInfo[] {
   const results: FeaturePackageInfo[] = [];
 
@@ -237,6 +323,7 @@ export function discoverFeaturePackages(): FeaturePackageInfo[] {
             shortName,
             dir: fullPath,
             relativeDir: relativeDir.replace(/\\/g, '/'),
+            exportName: readFeatureExportName(fullPath),
             metadata,
           });
         } else {
