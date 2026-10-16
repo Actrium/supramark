@@ -3,7 +3,12 @@ import { Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-nati
 import { ToolbarPortalContext } from './ToolbarPortalContext';
 import type { LocalRect } from '../metrics';
 import { computeHandles, HANDLE_TOUCH_RADIUS } from './handles';
-import { computeToolbarPlacement, type Size, type SelectionToolbarItem } from './toolbar';
+import {
+  computeToolbarPlacement,
+  TOOLBAR_MARGIN,
+  type Size,
+  type SelectionToolbarItem,
+} from './toolbar';
 import { useSelectionRects } from './SelectionOverlay';
 import { useSelectionContext, useSelectionSnapshot } from './useDocumentSelection';
 
@@ -57,7 +62,20 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
 }) => {
   const { store, toolbarItems, runToolbarItem } = useSelectionContext();
   const snapshot = useSelectionSnapshot(store);
-  const rects = useSelectionRects();
+  const liveRects = useSelectionRects();
+  // `useSelectionRects` derives a fresh array on every render, so publishing it
+  // directly would make any render — a registry bump from a sibling block, a
+  // streaming re-measure, a host re-render — count as a geometry change and cost
+  // a host-plus-anchor native measurement. Key the published value on its own
+  // geometry instead, and leave window-position follow to `hostRef.refresh()`.
+  const rectsKey = liveRects
+    .map(
+      rect =>
+        `${rect.x},${rect.y},${rect.w},${rect.h},${rect.startHandleVisible ? 1 : 0}${rect.endHandleVisible ? 1 : 0}`
+    )
+    .join(';');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the geometry key IS the dependency
+  const rects = useMemo(() => liveRects, [rectsKey]);
   // Publish the same selection into the host's visible area instead of the small bubble.
   const portal = useContext(ToolbarPortalContext);
   const id = useMemo(() => Symbol(`selection-toolbar-${++toolbarIdSeq}`), []);
@@ -158,7 +176,9 @@ export function SelectionToolbarView({
         position: 'absolute',
         left: placement?.x ?? 0,
         top: placement?.y ?? 0,
-        width: Math.max(0, viewport.w - 16),
+        // Same margin the placement clamps against: a bar wider than this would
+        // break the invariant that it always fits between both margins.
+        width: Math.max(0, viewport.w - 2 * TOOLBAR_MARGIN),
         zIndex,
         opacity: placement === null ? 0 : 1,
       }}
@@ -167,7 +187,7 @@ export function SelectionToolbarView({
         onLayout={onLayout}
         style={{
           alignSelf: 'flex-start',
-          maxWidth: Math.max(0, viewport.w - 16),
+          maxWidth: Math.max(0, viewport.w - 2 * TOOLBAR_MARGIN),
           flexWrap: 'wrap',
           flexDirection: 'row',
           alignItems: 'center',
