@@ -110,16 +110,19 @@ interface FeatureScanResult {
   path: string;
 }
 
+/** A check that fired, carrying the CHECKS key it came from. */
+type CheckProblem = CheckItem & { key: string };
+
 interface CheckResult {
-  issues: CheckItem[];
-  warnings: CheckItem[];
-  suggestions: CheckItem[];
+  issues: CheckProblem[];
+  warnings: CheckProblem[];
+  suggestions: CheckProblem[];
 }
 
 function checkFeaturePackage(featurePkg: FeatureScanResult): CheckResult {
-  const issues: CheckItem[] = [];
-  const warnings: CheckItem[] = [];
-  const suggestions: CheckItem[] = [];
+  const issues: CheckProblem[] = [];
+  const warnings: CheckProblem[] = [];
+  const suggestions: CheckProblem[] = [];
 
   for (const [key, check] of Object.entries(CHECKS)) {
     let hasProblem = false;
@@ -132,7 +135,7 @@ function checkFeaturePackage(featurePkg: FeatureScanResult): CheckResult {
     }
 
     if (hasProblem) {
-      const item: CheckItem & { key: string } = {
+      const item: CheckProblem = {
         ...check,
         key,
       };
