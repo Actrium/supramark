@@ -305,7 +305,10 @@ function wrapLabelLine(line: string, maxWidth: number, fontSize: number): string
  * - a block with no text and no break paints nothing.
  */
 function labelHardLines(markup: string): string[] {
-  const TOKEN = /(<br\s*\/?>|<\/(?:p|div|li|h[1-6])>|\n)/i;
+  // Only `<br>` (attributes allowed, as `is_br_tag_body` accepts them) and
+  // `<p>`/`</p>` are boundaries; every other tag is transparent — `</div>` and
+  // friends must not end a line.
+  const TOKEN = /(<br(?:\s[^>]*)?\/?>|<\/?p(?:\s[^>]*)?>|\n)/i;
   const lines: string[] = [];
   let block: string[] = [];
   let segment = '';
@@ -316,7 +319,7 @@ function labelHardLines(markup: string): string[] {
     block = [];
   };
   for (const token of markup.split(TOKEN)) {
-    if (/^<\//.test(token)) {
+    if (/^<p/i.test(token) || /^<\/p/i.test(token)) {
       block.push(segment);
       segment = '';
       endBlock();
@@ -476,7 +479,15 @@ export function normalizeSvg(xml: string): string {
     // browser would wrap with `white-space: break-spaces` and this renderer has
     // to wrap itself. Plain text inside the foreignObject is taken regardless
     // of element (not limited to <p> — venn labels use <span>).
-    const fontSize = 16;
+    // The size the label is finally painted in — the engine prefixes it onto
+    // the `<div>`/`<span>` when a node carries an inline `font-size`, and the
+    // box the label was measured against is in that same domain. Last match
+    // wins, like the colour above (the innermost span is the label's own).
+    let fontSize = 16;
+    for (const sm of fo.matchAll(/style\s*=\s*"([^"]*)"/gi)) {
+      const decl = sm[1].match(/(?:^|;)\s*font-size\s*:\s*([\d.]+)px/i);
+      if (decl) fontSize = Number(decl[1]) || fontSize;
+    }
     const hardLines = labelHardLines(fo);
     if (hardLines.every(line => !line)) return '';
     // The box height says how many lines the engine painted (one line box per

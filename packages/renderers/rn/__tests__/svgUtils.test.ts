@@ -268,6 +268,66 @@ test('normalizeSvg keeps an empty line between two <br/> breaks', () => {
   expect(tspans[1]).toBe('<tspan x="20" dy="24"></tspan>');
 });
 
+// The expected counts here come from the engine itself
+// (`label_metrics::split_label_lines`): the host must paint exactly the lines
+// the box height was reserved for. Only `<br>` (attributes allowed) and
+// `<p>`/`</p>` are boundaries — `</div>` and friends are transparent — and a
+// break at the end of a block opens no line.
+test('normalizeSvg paints the same hard lines the engine reserved', () => {
+  const cases: Array<[string, number]> = [
+    ['<p>A</p><p>B</p>', 2],
+    ['A<br/><br/>B', 3],
+    ['A<br/><br/>', 2],
+    ['A<br/>', 1],
+    ['<br/>A', 2],
+    ['<p>A</div>B</p>', 1],
+    ['<p>A</li>B</p>', 1],
+    ['<p>A</h1>B</p>', 1],
+    ['A<p>B', 2],
+    ['<p>one<p>two</p>', 2],
+    ['<p>A<br class="x">B</p>', 2],
+    ['<p>a<br/>b<br/>c</p>', 3],
+    ['<p>A<br>B<br />C</p>', 3],
+  ];
+  for (const [body, expected] of cases) {
+    // A box exactly as tall as those lines, so the soft wrap cannot fire.
+    const input =
+      `<svg><foreignObject width="400" height="${expected * 24}">` +
+      `<div><span class="nodeLabel">${body}</span></div></foreignObject></svg>`;
+    const out = normalizeSvg(input);
+    const tspans = out.match(/<tspan[^>]*>[^<]*<\/tspan>/g) ?? [];
+    const painted = tspans.length || (out.includes('<text') ? 1 : 0);
+    expect({ body, painted }).toEqual({ body, painted: expected });
+  }
+});
+
+// A label with no painted glyph paints nothing: react-native-svg would draw an
+// empty line box where the engine reserved one, and there is nothing to show.
+test('normalizeSvg drops a label with no text', () => {
+  for (const body of ['<p></p>', '<p>   </p>']) {
+    const input = `<svg><foreignObject width="40" height="24"><div><span class="nodeLabel">${body}</span></div></foreignObject></svg>`;
+    expect(normalizeSvg(input)).not.toContain('<text');
+  }
+});
+
+// The engine prefixes the node's inline `font-size` onto the label, and the box
+// it reserved is in that same domain — so the host has to paint (and wrap) at
+// that size, not at a hardcoded 16 px.
+test('normalizeSvg paints a styled label at its own font size', () => {
+  const input =
+    '<svg><foreignObject width="200" height="90">' +
+    '<div style="font-size: 30px !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;">' +
+    '<span style="font-size:30px !important" class="nodeLabel "><p>fits at sixteen px</p></span>' +
+    '</div></foreignObject></svg>';
+  const out = normalizeSvg(input);
+  expect(out).toContain('font-size: 30px');
+  // 90 px of box at a 30 px font is two line boxes, and the text only fits two
+  // lines when it is wrapped at that size.
+  const tspans = out.match(/<tspan[^>]*>[^<]*<\/tspan>/g) ?? [];
+  expect(tspans).toHaveLength(2);
+  expect(out).toContain('dy="45"');
+});
+
 // A label that fits its box is left alone: the engine measured it with real
 // font metrics, and this module only estimates them, so re-wrapping on the
 // estimate would break lines the engine deliberately left whole.
