@@ -105,11 +105,6 @@ ignore = [
     # syntect -> two-face -> supramark-code-highlight. No safe upgrade.
     "RUSTSEC-2024-0320",
 
-    # idna punycode advisory (RUSTSEC-2024-0421); transitive via
-    # url -> plantuml-little (duplicate idna in tree). Low real risk for a
-    # markdown/diagram toolchain; revisit when url/plantuml dedupe idna.
-    "RUSTSEC-2024-0421",
-
     # ttf-parser is unmaintained (RUSTSEC-2026-0192); the author has
     # stopped maintenance and future work moved to the skrifa / fontikos
     # ecosystem. Core parsing dep of font-metrics (TtfParserMetrics) and
