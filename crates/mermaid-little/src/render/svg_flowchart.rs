@@ -614,6 +614,8 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     out
 }
 
+/// Retained for reference only — `compute_viewbox_browser` is the live path.
+///
 /// the `x` attribute of the `<text class="flowchartTitleText">` element it
 /// appends — the title is then measured by jsdom's getBBox shim and pushes the
 /// outer bbox horizontally.
