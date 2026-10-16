@@ -9,6 +9,14 @@
  * These declarations are global, so any tsconfig that includes scripts/ inherits
  * them. That is intended — these scripts run under bun and nowhere else — but it
  * is also why this file should stay at the minimum the scripts actually use.
+ *
+ * One caveat: minimality only keeps the coverage side honest. Any script
+ * reaching for an API missing here errors immediately, but a hand-written
+ * signature can also mis-declare — if a future Bun changed `spawnSync`'s
+ * result shape, this file would silently lie rather than fail. The real
+ * invariant is that declared signatures match runtime behaviour, which
+ * minimality alone does not guarantee; for these two stable APIs the
+ * practical risk is near zero.
  */
 
 interface ImportMeta {
