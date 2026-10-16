@@ -2253,6 +2253,21 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
     }
 }
 
+/// The `outer_tx`/`outer_ty` translate recorded by the layout engine, parsed.
+///
+/// The two keys are written as a pair and name one `translate(tx, ty)`, so
+/// they are treated as one unit: `None` means at least one component is
+/// missing from `extra` or is not a valid number — exactly the condition
+/// under which `isolated_cluster_translate` substitutes its inner-pass
+/// fallback. Callers that cannot tolerate that fallback (e.g. lifting a
+/// nested cluster's rect between frames) branch on this instead of
+/// re-testing key presence.
+fn parsed_outer_translate(cnode: &UNode) -> Option<(f64, f64)> {
+    let tx = cnode.extra.get("outer_tx")?.parse::<f64>().ok()?;
+    let ty = cnode.extra.get("outer_ty")?.parse::<f64>().ok()?;
+    Some((tx, ty))
+}
+
 /// The `translate(tx, ty)` an isolated cluster's inner root group carries.
 ///
 /// Single source of truth: `render_isolated_cluster_inner_root` emits exactly
@@ -2261,28 +2276,16 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
 /// resolve collisions that do not exist on screen.
 fn isolated_cluster_translate(cnode: &UNode) -> (f64, f64) {
     // Prefer the pre-computed outer translate from the layout engine.
-    let tx = cnode
-        .extra
-        .get("outer_tx")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            // Fallback: classic formula using inner dagre coords.
-            let cx = cnode.x.unwrap_or(0.0);
-            let w = cnode.width.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cx - padding - w / 2.0
-        });
-    let ty = cnode
-        .extra
-        .get("outer_ty")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            let cy = cnode.y.unwrap_or(0.0);
-            let h = cnode.height.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cy - h / 2.0 - padding
-        });
-    (tx, ty)
+    if let Some(t) = parsed_outer_translate(cnode) {
+        return t;
+    }
+    // Fallback: classic formula using inner dagre coords.
+    let cx = cnode.x.unwrap_or(0.0);
+    let w = cnode.width.unwrap_or(0.0);
+    let padding = cnode.padding.unwrap_or(8.0);
+    let cy = cnode.y.unwrap_or(0.0);
+    let h = cnode.height.unwrap_or(0.0);
+    (cx - padding - w / 2.0, cy - h / 2.0 - padding)
 }
 
 /// Isolated-cluster ancestors of `node_id`, outermost first.
@@ -2554,9 +2557,17 @@ fn render_isolated_cluster_inner_root(
     }
     out.push_str(unified_shell::close_layer());
 
-    // Build cluster_bounds for edge clipping: non-isolated sub-clusters
-    // that are descendants of cnode.id. Their bounds (from l.clusters)
-    // are already in the inner dagre coordinate frame.
+    // Build cluster_bounds for edge clipping: sub-clusters that are
+    // descendants of cnode.id. Their bounds (from l.clusters) are already in
+    // the inner dagre coordinate frame.
+    //
+    // An isolated sub-cluster draws its own contents in its own inner root, so
+    // it contributes no bounds of its own — except that an edge *between two
+    // sibling isolated sub-clusters* (B1 --> B2) is emitted here, in the
+    // parent's edgePaths, with the sub-clusters themselves as endpoints. Those
+    // bounds are lifted out of the sub-cluster's own frame by the translate its
+    // inner root carries, which for a nested isolated cluster is already
+    // relative to the parent's inner frame.
     let inner_cluster_bounds: std::collections::HashMap<String, crate::layout::unified::Bounds> = l
         .clusters
         .iter()
@@ -2568,10 +2579,33 @@ fn render_isolated_cluster_inner_root(
             if !is_descendant_of(&c.id, &cnode.id, l) {
                 return None;
             }
-            if l.isolated_cluster_ids.contains(&c.id) {
-                return None;
+            if !l.isolated_cluster_ids.contains(&c.id) {
+                return Some((c.id.clone(), *b));
             }
-            Some((c.id.clone(), *b))
+            let sub = l.nodes.iter().find(|n| n.id == c.id && n.is_group)?;
+            // The renderer places this sub-cluster's root group by outer_tx/
+            // outer_ty. When either is missing or unparsable,
+            // `isolated_cluster_translate` falls back to the inner-pass
+            // coordinates, which are in the wrong frame — skip the entry
+            // rather than lift the rect by a wrong offset and let the snap
+            // act on it. Branching on `parsed_outer_translate` itself keeps
+            // this test identical to the fallback condition it guards
+            // against.
+            let (tx, ty) = match parsed_outer_translate(sub) {
+                Some(t) => t,
+                None => {
+                    log::debug!(
+                        "svg_flowchart: nested isolated cluster '{}' has no usable outer \
+                         translate; leaving its rect out of the clip map",
+                        c.id
+                    );
+                    return None;
+                }
+            };
+            let mut lifted = *b;
+            lifted.x += tx;
+            lifted.y += ty;
+            Some((c.id.clone(), lifted))
         })
         .collect();
 
@@ -3291,6 +3325,77 @@ fn cut_path_at_intersect(
     out
 }
 
+/// Land an endpoint that stopped short of `bounds` on the rect border.
+///
+/// Dagre routes a cluster-endpoint edge to the placeholder rectangle the
+/// cluster was laid out with. For an isolated cluster that placeholder is the
+/// inner pass's rendered footprint, which is larger than the rect the renderer
+/// actually draws, so the endpoint can sit outside `bounds` while the whole
+/// path misses it — `cut_path_at_intersect` returns such a path unchanged.
+/// Extending the final segment along its own direction moves the endpoint onto
+/// the border and leaves the rest of the spline alone.
+///
+/// No-op when the endpoint is already on or inside the border, or when the
+/// segment's direction never reaches it.
+///
+/// Edge labels are still positioned from the pre-snap path
+/// (`processed_edge_points`), so on an affected edge the label anchor and the
+/// drawn `d` no longer agree exactly. No fixture in the corpus moves a label as
+/// a result — the drift stays well inside the label box.
+fn snap_endpoint_to_bounds(pts: &mut [Point], bounds: &crate::layout::unified::Bounds) {
+    if pts.len() < 2 {
+        return;
+    }
+    let last = pts[pts.len() - 1];
+    if !outside_node(bounds, last) {
+        return;
+    }
+    let prev = pts[pts.len() - 2];
+    let (dx, dy) = (last.x - prev.x, last.y - prev.y);
+    if dx == 0.0 && dy == 0.0 {
+        return;
+    }
+    if let Some(hit) = ray_box_entry(bounds, last, dx, dy) {
+        pts[pts.len() - 1] = hit;
+    }
+}
+
+/// Where the ray `origin + t·(dx, dy)` (`t >= 0`) enters the axis-aligned box,
+/// or `None` when it never does (slab method).
+fn ray_box_entry(
+    bounds: &crate::layout::unified::Bounds,
+    origin: Point,
+    dx: f64,
+    dy: f64,
+) -> Option<Point> {
+    let (x0, y0) = (bounds.x, bounds.y);
+    let (x1, y1) = (bounds.x + bounds.width, bounds.y + bounds.height);
+    let mut t_enter = f64::NEG_INFINITY;
+    let mut t_exit = f64::INFINITY;
+    for (o, d, lo, hi) in [(origin.x, dx, x0, x1), (origin.y, dy, y0, y1)] {
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return None;
+            }
+            continue;
+        }
+        let (mut near, mut far) = ((lo - o) / d, (hi - o) / d);
+        if near > far {
+            std::mem::swap(&mut near, &mut far);
+        }
+        t_enter = t_enter.max(near);
+        t_exit = t_exit.min(far);
+    }
+    if t_enter > t_exit || t_exit < 0.0 {
+        return None;
+    }
+    let t = t_enter.max(0.0);
+    Some(Point {
+        x: origin.x + dx * t,
+        y: origin.y + dy * t,
+    })
+}
+
 /// Walk the rendered edges, collect unique (family, position, color)
 /// triples implied by each edge's pathStyle stroke color, and emit one
 /// `<marker>` per triple in upstream's order.
@@ -3532,12 +3637,47 @@ fn render_edge_path(
         .get("orig_start")
         .map(|s| s.as_str())
         .unwrap_or_else(|| e.start.as_deref().unwrap_or(""));
-    if let Some(bounds) = cluster_bounds.get(orig_dst) {
+    // A cyclic-special segment (one third of an expanded self-edge) inherits its
+    // user edge's orig_start/orig_end, but its real dagre endpoints are the
+    // invisible helper labelRects `expand_self_edge` places outside the cluster
+    // — only the outer segments end on the cluster itself. Both the clip and the
+    // snap below key off orig_*, so a segment counts as cluster-attached only on
+    // an end dagre actually routed to the cluster. Acting on a helper either
+    // tears the loop open (snap) or cuts it short (clip).
+    let synthetic_segment = e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment");
+    let dst_on_cluster = !synthetic_segment || e.end.as_deref() == Some(orig_dst);
+    let src_on_cluster = !synthetic_segment || e.start.as_deref() == Some(orig_src);
+    // Resolve each cluster-attached endpoint's drawn rect once so the clip
+    // and the snap below act on the same target.
+    let dst_bounds = if dst_on_cluster {
+        cluster_bounds.get(orig_dst)
+    } else {
+        None
+    };
+    let src_bounds = if src_on_cluster {
+        cluster_bounds.get(orig_src)
+    } else {
+        None
+    };
+
+    if let Some(bounds) = dst_bounds {
         pts = cut_path_at_intersect(&pts, bounds);
     }
-    if let Some(bounds) = cluster_bounds.get(orig_src) {
+    if let Some(bounds) = src_bounds {
         pts.reverse();
         pts = cut_path_at_intersect(&pts, bounds);
+        pts.reverse();
+    }
+    // The clip above only acts on paths that cross the border. An isolated
+    // cluster's placeholder — the size dagre routes its edges to — is larger
+    // than the rect drawn, so some endpoints stop short of the border and the
+    // path never crosses it. Pull those onto the border.
+    if let Some(bounds) = dst_bounds {
+        snap_endpoint_to_bounds(&mut pts, bounds);
+    }
+    if let Some(bounds) = src_bounds {
+        pts.reverse();
+        snap_endpoint_to_bounds(&mut pts, bounds);
         pts.reverse();
     }
 
@@ -5272,6 +5412,245 @@ mod tests {
         let l = fcl::layout(&d, &th, false).unwrap();
         let svg = render(&d, &l, &th, "t").unwrap();
         assert!(svg.contains(r#"aria-roledescription="flowchart-v2""#));
+    }
+
+    #[test]
+    fn snap_endpoint_pulls_a_short_endpoint_onto_the_border() {
+        // Regression (issue #255): dagre routes a cluster-endpoint edge to the
+        // oversized placeholder an isolated cluster enters the outer pass with,
+        // so the endpoint stops short of the rect the renderer actually draws.
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Approaching from the right, travelling left: lands on the right border.
+        let mut pts = vec![Point { x: 360.0, y: 100.0 }, Point { x: 340.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+
+        // Approaching from below, travelling up: lands on the bottom border.
+        let mut pts = vec![Point { x: 200.0, y: 250.0 }, Point { x: 200.0, y: 230.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 200.0).abs() < 1e-9 && (pts[1].y - 150.0).abs() < 1e-9,
+            "expected (200, 150), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn snap_endpoint_leaves_unreachable_and_on_border_paths_alone() {
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Travelling away from the box: the ray never reaches it.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 360.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert_eq!(pts[1].x, 360.0);
+
+        // Already on the border: left where it is.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 300.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn cluster_endpoint_edges_land_on_the_drawn_cluster_rect() {
+        // End-to-end guard for issue #255: every edge aimed at the subgraph used
+        // to stop on the oversized placeholder, leaving the right-hand arrows
+        // floating ~86px clear of the rect.
+        let src = "flowchart TB\n\
+            subgraph g[\"gate\"]\n a[\"if: always()\"]\n b[\"result != success\"]\n end\n\
+            n0[\"rust\"] --> g\n n1[\"test\"] --> g\n n2[\"typescript\"] --> g\n\
+            n3[\"web\"] --> g\n n4[\"webrtc\"] --> g\n n5[\"identity\"] --> g\n\
+            n6[\"cjk\"] --> g\n n7[\"csharp\"] --> g\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        // The cluster rect lives in the inner root group's frame, so its
+        // absolute position is that group's translate plus the rect's own
+        // (8, 8) origin.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let root = root_re.captures(&svg).expect("isolated cluster root group");
+        let tx: f64 = root[1].parse().unwrap();
+        let ty: f64 = root[2].parse().unwrap();
+
+        let rect_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        // This guard reads the first root group and the first cluster rect, so
+        // hold the input to exactly one of each.
+        let mut rect_matches = rect_re.captures_iter(&svg);
+        let rect = rect_matches.next().expect("cluster rect");
+        assert!(
+            rect_matches.next().is_none(),
+            "guard assumes a single cluster rect"
+        );
+        let x0 = tx + rect[1].parse::<f64>().unwrap();
+        let y0 = ty + rect[2].parse::<f64>().unwrap();
+        let x1 = x0 + rect[3].parse::<f64>().unwrap();
+        let y1 = y0 + rect[4].parse::<f64>().unwrap();
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_[^"]*""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let mut checked = 0;
+        for cap in path_re.captures_iter(&svg) {
+            let last = num_re
+                .captures_iter(&cap[1])
+                .last()
+                .expect("edge path has at least one point");
+            let ex: f64 = last[1].parse().unwrap();
+            let ey: f64 = last[2].parse().unwrap();
+            let dist = (ex - x0)
+                .abs()
+                .min((ex - x1).abs())
+                .min((ey - y0).abs())
+                .min((ey - y1).abs());
+            // The emitted path is pulled back by the arrow marker offset
+            // (~3.4-3.9px) before it is written out, so a landing endpoint sits
+            // a few px clear of the border rather than exactly on it.
+            assert!(
+                dist < 6.0,
+                "edge endpoint ({ex}, {ey}) sits {dist}px off the cluster rect"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 8, "expected all 8 cluster-endpoint edges");
+    }
+
+    /// Absolute rect of every cluster in the SVG. A root group's translate
+    /// accumulates through nesting, so a nested sub-cluster's rect is lifted by
+    /// the sum of the translates along its chain.
+    fn absolute_cluster_rects(svg: &str) -> Vec<(String, f64, f64, f64, f64)> {
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let cluster_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*id="([^"]+)"[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        let clusters: Vec<(usize, String, f64, f64, f64, f64)> = cluster_re
+            .captures_iter(svg)
+            .map(|c| {
+                (
+                    c.get(0).unwrap().start(),
+                    c[1].to_string(),
+                    c[2].parse().unwrap(),
+                    c[3].parse().unwrap(),
+                    c[4].parse().unwrap(),
+                    c[5].parse().unwrap(),
+                )
+            })
+            .collect();
+
+        let tag_re = regex::Regex::new(r"<g\b[^>]*>|</g>").unwrap();
+        // One entry per open <g>: `Some(acc on entry)` for a root group,
+        // `None` for anything else. `acc` is the sum of the root translates
+        // currently in scope.
+        let mut stack: Vec<Option<(f64, f64)>> = Vec::new();
+        let mut acc = (0.0_f64, 0.0_f64);
+        let mut out = Vec::new();
+        let mut next = 0;
+        for tag in tag_re.find_iter(svg) {
+            while next < clusters.len() && clusters[next].0 < tag.start() {
+                let (_, id, x, y, w, h) = &clusters[next];
+                let (x0, y0) = (acc.0 + x, acc.1 + y);
+                out.push((id.clone(), x0, y0, x0 + w, y0 + h));
+                next += 1;
+            }
+            let t = tag.as_str();
+            if t.starts_with("</g") {
+                // Only a root group restores the accumulator; a plain <g>
+                // (clusters / edgePaths / nodes / label) closing must not touch
+                // it, or the stack falls out of step with the real nesting.
+                if let Some(Some(prev)) = stack.pop() {
+                    acc = prev;
+                }
+            } else if let Some(m) = root_re.captures(t) {
+                stack.push(Some(acc));
+                acc = (
+                    acc.0 + m[1].parse::<f64>().unwrap(),
+                    acc.1 + m[2].parse::<f64>().unwrap(),
+                );
+            } else {
+                stack.push(None);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sibling_isolated_subcluster_edges_land_on_their_rects() {
+        // Regression guard for the nested case: an edge between two sibling
+        // isolated sub-clusters is emitted in the parent's edgePaths with the
+        // clusters themselves as endpoints, so the clip map has to carry their
+        // rects, lifted out of each sub-cluster's own frame.
+        let src = "flowchart LR\n\
+            subgraph TOP\n direction TB\n\
+            subgraph B1\n i1 --> f1\n end\n\
+            subgraph B2\n i2 --> f2\n end\n\
+            end\n\
+            A --> TOP --> B\n B1 --> B2\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        let rects = absolute_cluster_rects(&svg);
+        assert!(rects.len() >= 3, "expected TOP/B1/B2, got {}", rects.len());
+
+        // The edge is emitted inside the outer (TOP) root group, so its
+        // coordinates are relative to that frame; lift them by that group's
+        // translate before comparing against the absolute rects.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let outer = root_re.captures(&svg).expect("outer root group");
+        let (otx, oty) = (
+            outer[1].parse::<f64>().unwrap(),
+            outer[2].parse::<f64>().unwrap(),
+        );
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_B1_B2_0""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let cap = path_re.captures(&svg).expect("B1 --> B2 edge");
+        let nums: Vec<_> = num_re.captures_iter(&cap[1]).collect();
+        for (label, idx) in [("start", 0), ("end", nums.len() - 1)] {
+            let px: f64 = nums[idx][1].parse::<f64>().unwrap() + otx;
+            let py: f64 = nums[idx][2].parse::<f64>().unwrap() + oty;
+            let dist = rects
+                .iter()
+                .map(|(_, x0, y0, x1, y1)| {
+                    (px - x0)
+                        .abs()
+                        .min((px - x1).abs())
+                        .min((py - y0).abs())
+                        .min((py - y1).abs())
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                dist < 6.0,
+                "{label} of B1 --> B2 sits {dist}px off every cluster rect"
+            );
+        }
     }
 
     #[test]
