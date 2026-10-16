@@ -166,8 +166,13 @@ jobs:
       - name: Run core tests (coverage)
         run: bun run test:core -- --coverage
 
-      - name: Run workspace tests (features / renderers / engines)
-        run: bun run --filter '@supramark/feature-*' --filter '@supramark/rn' --filter '@supramark/engines' --if-present test
+      # The `example-*` filter pulls in examples/react-web-csr, whose
+      # playground-routes.test.ts guards the route table the web preview builds
+      # its URLs from. Nothing else in CI ran that package's tests, so those
+      # assertions were local-only feedback. `--if-present` skips example
+      # packages that declare no test script.
+      - name: Run workspace tests (features / renderers / engines / examples)
+        run: bun run --filter '@supramark/feature-*' --filter '@supramark/rn' --filter '@supramark/engines' --filter '@supramark/example-*' --if-present test
 
       - name: Upload coverage to Codecov
         if: matrix.node-version == '20.x'
