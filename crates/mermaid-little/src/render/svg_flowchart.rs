@@ -1067,6 +1067,18 @@ fn compute_viewbox_browser(
         if is_cyclic_helper_from_anchor_rewrite(n, l) {
             continue;
         }
+        // Isolated clusters are painted inside a translated inner root (see
+        // the dedicated loop below): n.x/y are inner-layout numbers, so this
+        // box sits where nothing is drawn. Its label measurement is equally
+        // meaningless here — this loop centres the label vertically, while
+        // render_cluster paints the cluster label inside the rect's top edge
+        // (label_ty = ry). Skipping isolated clusters is safe: the second
+        // loop grows the bounds with the cluster rect at its composed
+        // position, and a label painted on that rect's inner top edge is
+        // covered by the rect itself.
+        if l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
 
         let cx = n.x.unwrap_or(0.0);
         let cy = n.y.unwrap_or(0.0);
@@ -1106,6 +1118,29 @@ fn compute_viewbox_browser(
             };
             bounds.expand_box(cx - lw / 2.0, cy - lh / 2.0, lw, lh);
         }
+    }
+
+    // Isolated clusters are laid out recursively and drawn inside a translated
+    // inner `<g class="root">`: their x/y/width/height are inner-layout numbers
+    // and the placement lives in the pre-computed `outer_tx`/`outer_ty`. The
+    // node coordinates above therefore never describe where the cluster lands,
+    // which leaves the viewBox short of it — the cluster and everything below
+    // its row then sit outside the viewport (clipped by browsers, painted
+    // outside the host view on React Native). Compose the same placement
+    // `render_isolated_cluster_inner_root` emits.
+    for n in &l.nodes {
+        if !l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        if w == 0.0 && h == 0.0 {
+            continue;
+        }
+        let (tx, ty) = isolated_cluster_translate(n);
+        let cx = n.x.unwrap_or(0.0);
+        let cy = n.y.unwrap_or(0.0);
+        bounds.expand_box(tx + cx - w / 2.0, ty + cy - h / 2.0, w, h);
     }
 
     for e in &l.edges {
