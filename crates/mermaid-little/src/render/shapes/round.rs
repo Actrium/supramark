@@ -111,14 +111,15 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         };
         // Apply FA icon substitution before measuring.
         let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
-        let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
+        let (lw, lh, clamped) = crate::render::shapes::types::measure_node_label(
+            node,
             &for_measure,
             &crate::render::foreign_object::HtmlLabelFont::default(),
-            200.0,
-            true,
+            false,
         );
         let div_prefix = build_div_style_prefix(css);
         let opts = crate::render::foreign_object::LabelOpts {
+            clamped,
             extra_span_classes: if is_markdown {
                 "markdown-node-label"
             } else {

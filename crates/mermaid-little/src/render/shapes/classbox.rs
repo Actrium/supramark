@@ -72,14 +72,18 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         // upstream `classBox.ts` + `labelHelper` when the config sets
         // markdown rendering. Emit a foreignObject at the centre of the
         // title band.
-        use crate::render::foreign_object::{
-            foreign_object_body, measure_html_label, HtmlLabelFont, LabelOpts,
-        };
+        use crate::render::foreign_object::{foreign_object_body, HtmlLabelFont, LabelOpts};
         let esc = xml_escape(label);
-        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true);
+        let (fw, fh, clamped) = crate::render::shapes::types::measure_node_label(
+            node,
+            &esc,
+            &HtmlLabelFont::default(),
+            true,
+        );
         let ly = y + band1 / 2.0;
         let opts = LabelOpts {
             extra_span_classes: "markdown-node-label",
+            clamped,
             ..LabelOpts::default()
         };
         out.push_str(&format!(

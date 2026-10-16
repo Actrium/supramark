@@ -224,7 +224,7 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     out.push_str("</g>");
 
     if !label.is_empty() {
-        use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont, LabelOpts};
+        use crate::render::foreign_object::{HtmlLabelFont, LabelOpts};
         // Upstream: `\n` is pre-replaced with `<br/>` before innerHTML-assign.
         let html_label = normalize_note_html(&label);
         // Width: the concatenated text of the source label (reference
@@ -232,9 +232,18 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         // measured on the `<br/>`-normalised HTML so a multi-line
         // `note … end note` block and a literal `<br/>` note agree. The note
         // box in `layout::state` grows by the same amount.
-        let (fw, _) = measure_html_markup_label(&label, &HtmlLabelFont::default(), 200.0, true);
-        let (_, fh) =
-            measure_html_markup_label(&html_label, &HtmlLabelFont::default(), 200.0, true);
+        let (fw, _, clamped) = crate::render::shapes::types::measure_node_label(
+            node,
+            &label,
+            &HtmlLabelFont::default(),
+            false,
+        );
+        let (_, fh, _) = crate::render::shapes::types::measure_node_label(
+            node,
+            &html_label,
+            &HtmlLabelFont::default(),
+            false,
+        );
         // Build the FO HTML body:
         // 1. Normalize all `<br>` variants to `<br/>`.
         // 2. Replace `\n` (multi-line note separator) with `<br/>`.
@@ -244,6 +253,7 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         // typically doesn't contain unencoded HTML-unsafe chars.
         let opts = LabelOpts {
             extra_span_classes: "markdown-node-label",
+            clamped,
             ..LabelOpts::default()
         };
         // Emit <g class="label noteLabel" style="" transform="translate(-fw/2, -fh/2)">

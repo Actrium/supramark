@@ -581,3 +581,553 @@ fn flowchart_fa_icon_alone_on_a_line_agrees_with_the_renderer() {
     }
     assert_eq!(rect_widths(&svg)[1], 60.0, "two icons measure as empty");
 }
+
+/// Where a single-cluster flowchart puts its pieces: the cluster rect, the
+/// title's `foreignObject`, and the top edge of the first node.
+#[derive(Debug)]
+struct ClusterTitleGeom {
+    rect_y: f64,
+    rect_h: f64,
+    title_h: f64,
+    node_top: f64,
+}
+
+fn cluster_title_geom(svg: &str) -> ClusterTitleGeom {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let cluster = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("g")
+                && n.attribute("class")
+                    .is_some_and(|c| c == "cluster " || c.starts_with("cluster "))
+        })
+        .expect("cluster group");
+    let rect = cluster
+        .descendants()
+        .find(|n| n.has_tag_name("rect"))
+        .expect("cluster rect");
+    let title = cluster
+        .descendants()
+        .find(|n| n.has_tag_name("foreignObject"))
+        .expect("cluster title");
+    let node = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("g")
+                && n.attribute("class")
+                    .is_some_and(|c| c == "node" || c.starts_with("node "))
+        })
+        .expect("node group");
+    let transform = node.attribute("transform").expect("node transform");
+    let cy: f64 = transform
+        .trim_start_matches("translate(")
+        .trim_end_matches(')')
+        .split(',')
+        .nth(1)
+        .expect("node centre y")
+        .trim()
+        .parse()
+        .expect("parse node centre y");
+    let node_rect = node
+        .descendants()
+        .find(|n| n.has_tag_name("rect"))
+        .expect("node rect");
+    ClusterTitleGeom {
+        rect_y: parse_number(rect.attribute("y").unwrap_or("0")),
+        rect_h: parse_number(rect.attribute("height").unwrap_or("0")),
+        title_h: parse_number(title.attribute("height").unwrap_or("0")),
+        node_top: cy + parse_number(node_rect.attribute("y").unwrap_or("0")),
+    }
+}
+
+/// `#241`: a `<br/>` in a subgraph title paints a second line, so the cluster
+/// box has to grow by one line per extra line and its contents have to move
+/// down with it — before this the second line was drawn on top of the first
+/// row of nodes (dagre sizes a cluster from its border nodes, and the title is
+/// no part of that).
+#[test]
+fn flowchart_cluster_title_lines_get_their_own_band() {
+    let one_line = convert_with_id(
+        "flowchart TB\n    subgraph S [\"Sub\"]\n        A\n    end\n",
+        "cluster-title-one",
+    )
+    .expect("render one-line title");
+    let two_lines = convert_with_id(
+        "flowchart TB\n    subgraph S [\"Sub<br/>title\"]\n        A\n    end\n",
+        "cluster-title-two",
+    )
+    .expect("render two-line title");
+
+    let one = cluster_title_geom(&one_line);
+    let two = cluster_title_geom(&two_lines);
+
+    assert_eq!(one.title_h, 24.0, "a one-line title paints one line");
+    assert_eq!(two.title_h, 48.0, "`<br/>` paints a second title line");
+    assert_eq!(
+        two.rect_y, one.rect_y,
+        "the box grows downwards, not upwards"
+    );
+    assert_eq!(
+        two.rect_h - one.rect_h,
+        24.0,
+        "the box gains exactly the second title line"
+    );
+    assert_eq!(
+        two.node_top - one.node_top,
+        24.0,
+        "the contents move down by the line the title gained"
+    );
+    assert!(
+        two.node_top >= two.rect_y + two.title_h,
+        "the second title line ({}) must clear the first row of nodes ({}): \
+         title bottom {} vs node top {}",
+        two.title_h,
+        two.node_top - two.rect_y,
+        two.rect_y + two.title_h,
+        two.node_top,
+    );
+
+    // The line break itself paints no width: measured the way the renderer
+    // paints it, a two-line title takes up exactly the horizontal room of the
+    // two lines concatenated. The isolated-cluster width pass used to measure
+    // the *escaped* label instead — `<br/>` counted as five literal
+    // characters — so the cluster's bbox came out wider than any line the
+    // title ever paints, and a sibling next to the cluster is pushed that
+    // much further right. The title here is longer than the cluster's content
+    // so the label, not the node, drives the bbox width (with `Sub<br/>title`
+    // the node is wider and the canvas proves nothing about the label
+    // measurement); the untitled cluster gives the content-driven baseline.
+    let canvas_w = |title: Option<&str>, id: &str| {
+        let title = title.map_or(String::new(), |t| format!(" [\"{t}\"]"));
+        viewbox(
+            &convert_with_id(
+                &format!("flowchart TB\n    subgraph S{title}\n        A\n    end\n    B\n"),
+                id,
+            )
+            .expect("render cluster with sibling"),
+        )[2]
+    };
+    let bare = canvas_w(None, "cluster-title-bare");
+    let concatenated = canvas_w(
+        Some("A rather longcluster title indeed"),
+        "cluster-title-concat",
+    );
+    let broken = canvas_w(
+        Some("A rather long<br/>cluster title indeed"),
+        "cluster-title-break",
+    );
+    assert!(
+        concatenated > bare,
+        "the concatenated title must out-measure the content, or the equality \
+         below compares two content-sized canvases and proves nothing: \
+         {concatenated} vs {bare}",
+    );
+    assert_eq!(
+        broken, concatenated,
+        "a line break adds no width: the canvas is as wide as the concatenated title"
+    );
+}
+
+/// The band a title needs is a property of the lines it paints, so a title
+/// that stays on one line — and a cluster with no title at all — must keep the
+/// geometry they had before `#241`, which is what every existing fixture
+/// exercises.
+#[test]
+fn flowchart_one_line_cluster_titles_keep_their_geometry() {
+    let bare = convert_with_id(
+        "flowchart TB\n    subgraph S\n        A\n    end\n",
+        "cluster-bare",
+    )
+    .expect("render untitled cluster");
+    let titled = convert_with_id(
+        "flowchart TB\n    subgraph S [\"Sub\"]\n        A\n    end\n",
+        "cluster-titled",
+    )
+    .expect("render one-line title");
+
+    let without = cluster_title_geom(&bare);
+    let with = cluster_title_geom(&titled);
+    assert_eq!(
+        with.rect_h, without.rect_h,
+        "a one-line title asks for no room"
+    );
+    assert_eq!(
+        with.node_top, without.node_top,
+        "a one-line title moves nothing"
+    );
+}
+
+/// x and y coordinates of the first edge's `data-points` payload — the layout's
+/// own points, before the renderer shortens the path for the arrow marker.
+fn edge_data_points(svg: &str) -> (Vec<f64>, Vec<f64>) {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let payload = doc
+        .descendants()
+        .find_map(|n| {
+            let class = n.attribute("class")?;
+            if class.contains("flowchart-link") {
+                n.attribute("data-points")
+            } else {
+                None
+            }
+        })
+        .expect("edge data-points");
+    let text = String::from_utf8(decode_base64(payload)).expect("base64 is utf-8");
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for pair in text.split('{').skip(1) {
+        for (key, out) in [("\"x\":", &mut xs), ("\"y\":", &mut ys)] {
+            let Some(at) = pair.find(key) else { continue };
+            let rest = &pair[at + key.len()..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .unwrap_or(rest.len());
+            out.push(rest[..end].parse().expect("coordinate"));
+        }
+    }
+    (xs, ys)
+}
+
+/// Minimal base64 decoder for the `data-points` payload, which upstream writes
+/// as `btoa(JSON.stringify(points))`.
+fn decode_base64(input: &str) -> Vec<u8> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, &c) in TABLE.iter().enumerate() {
+        lookup[c as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buffer = 0u32;
+    let mut bits = 0;
+    for byte in input.bytes() {
+        if byte == b'=' {
+            break;
+        }
+        let value = lookup[byte as usize];
+        if value == 255 {
+            continue;
+        }
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    out
+}
+
+/// Numbers in an SVG path `d` string, in order — `M77.8,79.3L77.8,83.5C…`
+/// yields x, y, x, y, … so odd indices are the y coordinates.
+fn path_numbers(d: &str) -> Vec<f64> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for c in d.chars() {
+        if c.is_ascii_digit() || c == '.' || (c == '-' && current.is_empty()) {
+            current.push(c);
+        } else if !current.is_empty() {
+            out.push(current.parse().unwrap_or(0.0));
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        out.push(current.parse().unwrap_or(0.0));
+    }
+    out
+}
+
+/// y coordinates of the first flowchart edge path, in path order.
+fn edge_path_ys(svg: &str) -> Vec<f64> {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let d = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("path")
+                && n.attribute("class")
+                    .is_some_and(|c| c.contains("flowchart-link"))
+        })
+        .and_then(|n| n.attribute("d"))
+        .expect("flowchart edge path");
+    path_numbers(d).into_iter().skip(1).step_by(2).collect()
+}
+
+/// y of the first edge label's group, if the diagram has one.
+fn edge_label_y(svg: &str) -> Option<f64> {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let transform = doc
+        .descendants()
+        .find(|n| n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c == "edgeLabel"))?
+        .attribute("transform")?;
+    transform
+        .trim_start_matches("translate(")
+        .trim_end_matches(')')
+        .split(',')
+        .nth(1)?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// An edge inside a titled cluster moves as one piece. Two failure modes this
+/// guards, both found in review: judging each point by the cluster rect it
+/// falls in tears the spline at the boundary (a point just outside keeps its
+/// old y while its neighbours move a whole line), and `refine_edges` places the
+/// label before the move, so a label left behind floats a line above its edge.
+#[test]
+fn flowchart_cluster_title_moves_edges_and_labels_as_one_piece() {
+    let source = |title: &str| {
+        format!(
+            "flowchart TB\n    subgraph S [\"{title}\"]\n        A -->|edge label| B\n    end\n"
+        )
+    };
+    let one_line = convert_with_id(&source("Sub"), "cluster-edge-one").expect("render");
+    let two_lines = convert_with_id(&source("Sub<br/>title"), "cluster-edge-two").expect("render");
+
+    let before = edge_path_ys(&one_line);
+    let after = edge_path_ys(&two_lines);
+    assert_eq!(before.len(), after.len(), "same path shape");
+    assert!(before.len() >= 2, "edge has a path");
+    for (a, b) in before.iter().zip(&after) {
+        assert!(
+            (b - a - 24.0).abs() < 1e-6,
+            "every path point shifts by the title's line: {a} -> {b}"
+        );
+    }
+
+    let label_before = edge_label_y(&one_line).expect("label");
+    let label_after = edge_label_y(&two_lines).expect("label");
+    assert!(
+        (label_after - label_before - 24.0).abs() < 1e-6,
+        "the label rides with the edge: {label_before} -> {label_after}"
+    );
+}
+
+/// An edge crossing a cluster boundary shifts smoothly: the amount is
+/// interpolated along the path, so neighbouring points never diverge by a whole
+/// line. The per-point rect rule this replaced moved one point 24px while the
+/// next stayed put, folding the spline into a 1px kink.
+#[test]
+fn flowchart_cluster_title_keeps_cross_cluster_edges_smooth() {
+    let source = |first: &str, second: &str| {
+        format!(
+            "flowchart TB\n    subgraph S1 [\"{first}\"]\n        A\n    end\n    subgraph S2 [\"{second}\"]\n        B\n    end\n    A --> B\n"
+        )
+    };
+    let flat = convert_with_id(&source("One", "Three"), "cluster-cross-flat").expect("render");
+    let titled =
+        convert_with_id(&source("One<br/>Two", "Three<br/>Four"), "cluster-cross").expect("render");
+
+    let before = edge_path_ys(&flat);
+    let after = edge_path_ys(&titled);
+    assert_eq!(before.len(), after.len(), "same path shape");
+    assert!(before.len() >= 3, "edge has a routed path");
+
+    let shifts: Vec<f64> = before.iter().zip(&after).map(|(a, b)| b - a).collect();
+    assert!(
+        shifts.iter().any(|s| s.abs() > 1.0),
+        "the edge moved with its clusters, got {shifts:?}"
+    );
+    for w in shifts.windows(2) {
+        assert!(
+            (w[1] - w[0]).abs() < 12.0,
+            "the shift varies smoothly along the path (half a line at most \
+             between neighbours), got {shifts:?}"
+        );
+    }
+}
+
+/// The edge endpoints land exactly on the node boundaries they attach to — the
+/// invariant every downstream clip depends on (`node.intersect`, the
+/// cluster-endpoint cut, subroutine's polygon rounding). The endpoints take
+/// their node's shift verbatim rather than the interpolated value, so it holds
+/// after the move too.
+///
+/// The edge leaves the cluster, so the two endpoints carry *different* shifts.
+/// That is what lets this tell a per-endpoint assignment from an interpolated
+/// one — and from no movement at all — which an edge that stays inside a single
+/// cluster cannot: there both endpoints share a shift, so every candidate
+/// produces the same numbers. Read from `data-points`, not from `d`: the
+/// rendered path is shortened by the arrow marker's offset, so only the layout's
+/// own points sit on the boundary.
+#[test]
+fn flowchart_cluster_title_keeps_edge_endpoints_on_their_nodes() {
+    let svg = convert_with_id(
+        "flowchart TB\n    subgraph S [\"One<br/>Two\"]\n        A\n    end\n    B\n    A --> B\n",
+        "cluster-endpoints",
+    )
+    .expect("render");
+
+    let doc = roxmltree::Document::parse(&svg).expect("valid svg");
+    let vertical_extent = |id_fragment: &str| -> (f64, f64) {
+        let node = doc
+            .descendants()
+            .find(|n| {
+                n.has_tag_name("g") && n.attribute("id").is_some_and(|id| id.contains(id_fragment))
+            })
+            .unwrap_or_else(|| panic!("node {id_fragment}"));
+        let (_, cy) = translate(node);
+        let rect = node
+            .children()
+            .find(|c| c.has_tag_name("rect"))
+            .expect("node rect");
+        let ry = parse_number(rect.attribute("y").unwrap());
+        let rh = parse_number(rect.attribute("height").unwrap());
+        (cy + ry, cy + ry + rh)
+    };
+    let (_, a_bottom) = vertical_extent("-flowchart-A-");
+    let (b_top, _) = vertical_extent("-flowchart-B-");
+
+    let (_, ys) = edge_data_points(&svg);
+    let last = *ys.last().unwrap();
+    assert!(
+        (ys[0] - a_bottom).abs() < 1e-6,
+        "the start sits on A's bottom edge: {} vs {a_bottom}",
+        ys[0]
+    );
+    assert!(
+        (last - b_top).abs() < 1e-6,
+        "the end sits on B's top edge: {last} vs {b_top}"
+    );
+}
+
+/// Distance from `point` to the polyline `path`.
+fn distance_to_path(point: (f64, f64), path: &[(f64, f64)]) -> f64 {
+    let mut best = f64::INFINITY;
+    for w in path.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len_sq = dx * dx + dy * dy;
+        let t = if len_sq > 0.0 {
+            (((point.0 - a.0) * dx + (point.1 - a.1) * dy) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (qx, qy) = (a.0 + dx * t, a.1 + dy * t);
+        best = best.min(((point.0 - qx).powi(2) + (point.1 - qy).powi(2)).sqrt());
+    }
+    best
+}
+
+/// The edge label's centre, from its `<g class="edgeLabel">` translate.
+fn edge_label_point(svg: &str) -> Option<(f64, f64)> {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let transform = doc
+        .descendants()
+        .find(|n| n.has_tag_name("g") && n.attribute("class").is_some_and(|c| c == "edgeLabel"))?
+        .attribute("transform")?;
+    let inner = transform
+        .trim_start_matches("translate(")
+        .trim_end_matches(')');
+    let mut parts = inner.split(',');
+    let x = parts.next()?.trim().parse().ok()?;
+    let y = parts.next()?.trim().parse().ok()?;
+    Some((x, y))
+}
+
+/// A label on an edge that crosses a cluster boundary rides the same
+/// interpolation its path does. Asserting only that the label sits on the edge
+/// is not enough: this edge is a straight line, so a label that never moved
+/// still lies on the moved path. The only quantity that separates a real
+/// interpolation from a stale position is how far the label travelled — one
+/// endpoint's cluster grows and the other does not, so the label moves a
+/// fraction of the line rather than all of it or none of it.
+#[test]
+fn flowchart_cluster_title_interpolates_cross_cluster_edge_labels() {
+    let source = |title: &str| {
+        format!(
+            "flowchart TB\n    subgraph S [\"{title}\"]\n        A\n    end\n    B\n    A -->|edge label| B\n"
+        )
+    };
+    let flat = convert_with_id(&source("One"), "cluster-cross-label-flat").expect("render");
+    let titled = convert_with_id(&source("One<br/>Two"), "cluster-cross-label").expect("render");
+
+    let before = edge_label_point(&flat).expect("label before");
+    let after = edge_label_point(&titled).expect("label after");
+    let shift = after.1 - before.1;
+    assert!(
+        shift > 0.0 && shift < 24.0,
+        "the label moves with the path but not with one endpoint alone: {shift}px"
+    );
+
+    let (xs, ys) = edge_data_points(&titled);
+    let path: Vec<(f64, f64)> = xs.iter().zip(&ys).map(|(x, y)| (*x, *y)).collect();
+    let distance = distance_to_path(after, &path);
+    assert!(
+        distance < 0.5,
+        "and it still sits on its edge: {distance}px away from the path"
+    );
+}
+
+/// Geometry of a single-composite-state diagram: the cluster's outer rect, its
+/// title box, and the first node's centre.
+#[derive(Debug)]
+struct StateTitleGeom {
+    outer_y: f64,
+    outer_h: f64,
+    title_h: f64,
+    first_node_y: f64,
+}
+
+fn state_cluster_geometry(svg: &str) -> StateTitleGeom {
+    let doc = roxmltree::Document::parse(svg).expect("valid svg");
+    let outer = doc
+        .descendants()
+        .find(|n| n.has_tag_name("rect") && n.attribute("class") == Some("outer"))
+        .expect("cluster outer rect");
+    let title = doc
+        .descendants()
+        .find(|n| n.has_tag_name("foreignObject"))
+        .expect("cluster title");
+    let node = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("g")
+                && n.attribute("class")
+                    .is_some_and(|c| c == "node" || c.starts_with("node "))
+        })
+        .expect("node group");
+    StateTitleGeom {
+        outer_y: parse_number(outer.attribute("y").unwrap_or("0")),
+        outer_h: parse_number(outer.attribute("height").unwrap_or("0")),
+        title_h: parse_number(title.attribute("height").unwrap_or("0")),
+        first_node_y: translate(node).1,
+    }
+}
+
+/// A `<br/>` in a composite state's title gets the same treatment a flowchart
+/// subgraph title gets: it paints a second line, and the cluster grows to keep
+/// that line clear of its contents. Upstream 11.14 leaves the box alone and
+/// lets the line land on the first node (measured in Chromium: it covers about
+/// 11.5px of it) — this port deliberately does not reproduce that, the same
+/// call it makes for flowchart titles.
+#[test]
+fn state_composite_title_lines_get_their_own_band() {
+    let render = |title: &str, id: &str| {
+        convert_with_id(
+            &format!("stateDiagram-v2\n    state \"{title}\" as S {{\n        A --> B\n    }}\n"),
+            id,
+        )
+        .expect("render state diagram")
+    };
+    let one = state_cluster_geometry(&render("Sub", "state-title-one"));
+    let two = state_cluster_geometry(&render("Sub<br/>title", "state-title-two"));
+
+    assert_eq!(one.title_h, 24.0, "a one-line title paints one line");
+    assert_eq!(two.title_h, 48.0, "`<br/>` paints a second title line");
+    assert_eq!(two.outer_y, one.outer_y, "the box grows downwards");
+    assert_eq!(
+        two.outer_h - one.outer_h,
+        24.0,
+        "the box gains exactly the second title line"
+    );
+    assert_eq!(
+        two.first_node_y - one.first_node_y,
+        24.0,
+        "the contents move down with it"
+    );
+    // 22.5 is half the node box's height in this diagram (the box is 45 tall).
+    assert!(
+        two.first_node_y - 22.5 >= two.outer_y + two.title_h,
+        "the second title line clears the first row of nodes"
+    );
+}

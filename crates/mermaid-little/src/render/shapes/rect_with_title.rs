@@ -54,14 +54,20 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         x2 = fmt_num(-x),
         ly = fmt_num(ly),
     ));
-    use crate::render::foreign_object::{
-        foreign_object_body, measure_html_label, HtmlLabelFont, LabelOpts,
-    };
+    use crate::render::foreign_object::{foreign_object_body, HtmlLabelFont, LabelOpts};
     if !title.is_empty() {
         let esc = xml_escape(&title);
-        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true);
+        let (fw, fh, clamped) = crate::render::shapes::types::measure_node_label(
+            node,
+            &esc,
+            &HtmlLabelFont::default(),
+            true,
+        );
         let cy = y + title_h / 2.0;
-        let opts = LabelOpts::default();
+        let opts = LabelOpts {
+            clamped,
+            ..LabelOpts::default()
+        };
         out.push_str(&format!(
             r#"<g class="label" transform="translate({tx}, {ty})">"#,
             tx = fmt_num(-fw / 2.0),
@@ -73,9 +79,17 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
     }
     if !descr.is_empty() {
         let esc = xml_escape(&descr);
-        let (fw, fh) = measure_html_label(&esc, &HtmlLabelFont::default(), 200.0, true);
+        let (fw, fh, clamped) = crate::render::shapes::types::measure_node_label(
+            node,
+            &esc,
+            &HtmlLabelFont::default(),
+            true,
+        );
         let cy = ly + (h - title_h) / 2.0;
-        let opts = LabelOpts::default();
+        let opts = LabelOpts {
+            clamped,
+            ..LabelOpts::default()
+        };
         out.push_str(&format!(
             r#"<g class="label" transform="translate({tx}, {ty})">"#,
             tx = fmt_num(-fw / 2.0),

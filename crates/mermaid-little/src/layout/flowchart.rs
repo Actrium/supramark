@@ -81,6 +81,19 @@ pub fn layout(
     // entry/exit point for those endpoints here so the rendered path matches
     // upstream byte-for-byte.
     let mut edges = edges;
+    // Flowchart labels are HTML labels the browser clamps to
+    // `flowchart.wrappingWidth`. The boxes above were reserved as that clamped,
+    // wrapped box (`measure_vertex_box`), so mark the nodes for the renderer:
+    // their labels must be measured and emitted the same way, or the text wraps
+    // into a box that was sized for one line (issue #254).
+    let mut nodes = nodes;
+    for n in &mut nodes {
+        // Clusters keep the un-clamped label: their box is sized by their
+        // children, not by the label, so wrapping would only overflow it.
+        if !n.is_group {
+            n.clamp_html_label = true;
+        }
+    }
     fix_polygon_edge_endpoints(&mut edges, &nodes);
     // Circle / ellipse / doublecircle nodes: dagre's `intersect_rect` clips
     // to the AABB; upstream calls `intersect.circle` / `intersect.ellipse`
@@ -768,6 +781,7 @@ fn build_layout_data(d: &FlowchartDiagram, edge_label_decluster: bool) -> Layout
         node_spacing: Some(d.node_spacing.map(f64::from).unwrap_or(50.0)),
         rank_spacing: Some(d.rank_spacing.map(f64::from).unwrap_or(50.0)),
         layout_algorithm: Some("dagre".into()),
+        html_labels: d.html_labels,
         ..Default::default()
     };
 
@@ -1249,14 +1263,50 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     // detour the bbox is computed from the raw `$$..$$` source text and
     // gets the node sized as if the LaTeX were a plain string — much wider
     // than the rendered KaTeX result.
-    let (tw, th) = if crate::render::foreign_object::contains_katex_marker(&measure_label) {
-        let font = crate::render::foreign_object::HtmlLabelFont::default();
-        match crate::render::foreign_object::try_render_katex_label(&measure_label, &font) {
-            Some((_, w, h)) => (w, h),
-            None => measure(&measure_label, is_bold, font_size_px),
-        }
+    let katex_box =
+        crate::render::foreign_object::contains_katex_marker(&measure_label).then(|| {
+            crate::render::foreign_object::try_render_katex_label(
+                &measure_label,
+                &crate::render::foreign_object::HtmlLabelFont::default(),
+            )
+        });
+    let katex_rendered = matches!(katex_box, Some(Some(_)));
+    let (tw, th) = match katex_box {
+        Some(Some((_, w, h))) => (w, h),
+        _ => measure(&measure_label, is_bold, font_size_px),
+    };
+    // A label the browser clamps to `flowchart.wrappingWidth` wraps inside it,
+    // and the node box is built from that wrapped box (upstream measures the
+    // clamped div). Sizing the box from the un-clamped text instead is what
+    // left wide labels flush with the box's left edge — issue #254. The markup
+    // and font are the renderer's own, so layout and render cannot disagree
+    // about whether the clamp happened.
+    //
+    // The clamp runs in the node's *rendered* font (inline `font-size` /
+    // `font-weight` from its styles): that is the domain the emitted label's
+    // geometry is finally measured in (`font_size_postprocess_node_svg` /
+    // `bold_postprocess_node_svg`), so a 30 px label is reserved at 30 px
+    // wrapped line heights instead of wrapping further in the browser and
+    // spilling out of the box.
+    //
+    // KaTeX labels are exempt: their box came from the *rendered* math, not
+    // from the `$$..$$` source this clamp would measure, and the renderer emits
+    // that KaTeX geometry (`shapes/rect.rs` early-returns before its own
+    // measurement). Clamping the source here would reserve a box the label
+    // never paints into — `measure_edge_label` takes the same early exit.
+    let (tw, th) = if katex_rendered {
+        (tw, th)
     } else {
-        measure(&measure_label, is_bold, font_size_px)
+        let clamp_font = resolved_label_font(font_size_px, is_bold);
+        match crate::render::foreign_object::clamp_html_label(
+            &rendered_label_markup(&label, is_markdown),
+            &clamp_font,
+            crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+            true,
+        ) {
+            Some(clamped) => clamped,
+            None => (tw, th),
+        }
     };
     // Upstream shape helpers compute total size from the label bbox
     // plus per-shape padding. The `node.padding` config default is 15.
@@ -1541,19 +1591,53 @@ fn measure_text_with_size(label: &str, force_bold: bool, font_size_px: Option<f6
     )
 }
 
-/// Painted lines of a label: the count the renderer gets, from the very
-/// markup it will emit (`string_label_to_html` / `markdown_label_to_html`,
-/// then `replace_fa_icons`), split by the splitter the renderer itself uses.
-/// Counting anything else lets layout and render disagree — an FA icon alone
-/// on a line, for instance, paints no line box of its own.
-fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
+/// The label markup exactly as the renderer emits it
+/// (`string_label_to_html` / `markdown_label_to_html`, then
+/// `replace_fa_icons`). Measuring anything else lets layout and render
+/// disagree — an FA icon alone on a line, for instance, paints no line box of
+/// its own.
+fn rendered_label_markup(label: &str, is_markdown: bool) -> String {
     let html = if is_markdown {
         crate::render::foreign_object::markdown_label_to_html(label)
     } else {
         crate::render::foreign_object::string_label_to_html(label)
     };
-    let rendered = crate::render::foreign_object::replace_fa_icons(&html);
-    crate::layout::label_metrics::split_label_lines(&rendered).len()
+    crate::render::foreign_object::replace_fa_icons(&html)
+}
+
+/// Painted lines of a label: the count the renderer gets, from the very
+/// markup it will emit, split by the splitter the renderer itself uses.
+fn rendered_label_lines(label: &str, is_markdown: bool) -> usize {
+    crate::layout::label_metrics::split_label_lines(&rendered_label_markup(label, is_markdown))
+        .len()
+}
+
+/// Extra height a cluster title paints beyond its first line, in pixels.
+///
+/// dagre sizes a cluster from its border nodes alone — the title never enters
+/// the compound node's dimensions — so a title that breaks onto a second line
+/// is drawn on top of the cluster's first row of nodes. The lines past the
+/// first are exactly the space the box has to grow by (and what the cluster's
+/// contents have to move down by) for the title to clear them. Single-line
+/// titles need nothing and return `0.0`, which keeps every existing layout
+/// byte-identical.
+pub(crate) fn cluster_title_leading(label: &str, is_markdown: bool) -> f64 {
+    use crate::render::foreign_object::{html_label_line_height, HTML_LABEL_FONT_SIZE};
+
+    // Unlike node labels, the cluster-title render paths (`render_cluster`,
+    // state's composite title) emit the label markup as-is, with no
+    // `replace_fa_icons` — so count the lines of that same markup, not
+    // `rendered_label_lines`. An icon reference in a title paints as literal
+    // text: `Sub<br/>fa:fa-car` is two painted lines, and counting it as one
+    // (the icon-only line is blank markup once replaced) under-reserves the
+    // band and drops the second line onto the first row of nodes.
+    let html = if is_markdown {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let lines = crate::layout::label_metrics::split_label_lines(&html).len();
+    lines.saturating_sub(1) as f64 * html_label_line_height(HTML_LABEL_FONT_SIZE)
 }
 
 /// [`strip_fa_icons`] applied to each line of the raw label, keeping the line
@@ -1742,6 +1826,27 @@ fn measure_edge_label(text: &str, html_labels: bool, is_markdown: bool) -> (f64,
     // rendered line-height per extra line — the same growth the rendered
     // foreignObject gets. Reserving a single line let multi-line edge labels
     // crowd into their neighbours (markon #97).
+    //
+    // A label the browser clamps to the wrap budget wraps inside it, and
+    // upstream's dagre sees that wrapped box — reserve the same, padding
+    // included, or the renderer paints a 208 px label into rank space
+    // reserved for an un-clamped 600+ px one (issue #254).
+    if let Some((cw, ch)) = crate::render::foreign_object::clamp_html_label(
+        &rendered_label_markup(text, is_markdown),
+        &crate::render::foreign_object::HtmlLabelFont::default(),
+        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        true,
+    ) {
+        // The padding is part of the box this label paints (upstream's
+        // `max-width` is a content-box property, so it sits outside it), and
+        // dagre has to reserve the painted width. The un-clamped path below
+        // returns the bare measurement because its padding is added where the
+        // viewBox is computed instead.
+        return (
+            cw + crate::render::foreign_object::HTML_LABEL_EDGE_PADDING_X * 2.0,
+            ch,
+        );
+    }
     let lines = crate::layout::label_metrics::plain_text_lines(&measure_text).len();
     (w, multiline_label_height(h, lines, None))
 }
@@ -1917,6 +2022,35 @@ fn stroke_descriptor(s: EdgeStroke) -> (&'static str, &'static str) {
 /// Keeping the helper inside this module so the layout-side measurement
 /// and the render-side post-processor share a single parser, avoiding
 /// drift between resolved widths and emitted SVG numbers.
+/// The font a node's HTML label is finally rendered in: the inline `font-size` /
+/// `font-weight` its styles resolve to, on top of the browser defaults the
+/// generated SVG root declares (`font-size: 16px`, trebuchet).
+///
+/// The clamp, the shape label emitters and the `font_size` / `bold`
+/// post-process passes all have to resolve it the same way — a label wrapped in
+/// one domain and painted in another is exactly the mismatch issue #254 is
+/// about.
+pub fn resolved_label_font<'a>(
+    font_size_px: Option<f64>,
+    is_bold: bool,
+) -> crate::render::foreign_object::HtmlLabelFont<'a> {
+    crate::render::foreign_object::HtmlLabelFont {
+        font_family: None,
+        font_size_px,
+        bold: is_bold.then_some(true),
+    }
+}
+
+/// [`resolved_label_font`] for a node's raw inline `style` declarations.
+pub fn resolved_label_font_from_styles<'a>(
+    css_styles: &[String],
+) -> crate::render::foreign_object::HtmlLabelFont<'a> {
+    resolved_label_font(
+        styles_font_size_px(css_styles),
+        styles_have_bold(css_styles),
+    )
+}
+
 pub fn styles_font_size_px_pub(styles: &[String]) -> Option<f64> {
     styles_font_size_px(styles)
 }
@@ -1965,7 +2099,7 @@ fn styles_font_size_px(styles: &[String]) -> Option<f64> {
     None
 }
 
-fn styles_have_bold(styles: &[String]) -> bool {
+pub fn styles_have_bold(styles: &[String]) -> bool {
     for s in styles {
         let trimmed = s.trim().trim_end_matches(';');
         let Some(colon) = trimmed.find(':') else {
