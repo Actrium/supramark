@@ -288,6 +288,15 @@ test('normalizeSvg paints the same hard lines the engine reserved', () => {
     ['<p>A<br class="x">B</p>', 2],
     ['<p>a<br/>b<br/>c</p>', 3],
     ['<p>A<br>B<br />C</p>', 3],
+    // A text element that merely *starts* with `<p` is not a boundary: only a
+    // whole `<p …>` / `</p>` token is.
+    ['<p><pre>code</pre></p>', 1],
+    ['line1<br/><pre>code</pre>', 2],
+    ['<p>tagged in <path d="M0 0"/>label</p>', 1],
+    ['<p>a<polygon points="0,0"/></p>', 1],
+    // `<p/>` and `</p/>` are still p tags to the engine.
+    ['one<p/>two', 2],
+    ['one</p/>two', 2],
   ];
   for (const [body, expected] of cases) {
     // A box exactly as tall as those lines, so the soft wrap cannot fire.
@@ -303,6 +312,7 @@ test('normalizeSvg paints the same hard lines the engine reserved', () => {
 
 // A label with no painted glyph paints nothing: react-native-svg would draw an
 // empty line box where the engine reserved one, and there is nothing to show.
+// (A guard, not a regression test: this holds before and after the wrap work.)
 test('normalizeSvg drops a label with no text', () => {
   for (const body of ['<p></p>', '<p>   </p>']) {
     const input = `<svg><foreignObject width="40" height="24"><div><span class="nodeLabel">${body}</span></div></foreignObject></svg>`;
