@@ -379,7 +379,7 @@ export function findFeaturePackageByShortName(shortName: string): FeaturePackage
 
 export function getNewFeatureLocation(
   kebabName: string,
-  syntaxFamily: 'main' | 'container' | 'containers' | 'fence' | 'diagrams' = 'main'
+  syntaxFamily: 'main' | 'container' | 'containers' | 'input' | 'fence' | 'diagrams' = 'main'
 ): {
   dir: string;
   relativeDir: string;
