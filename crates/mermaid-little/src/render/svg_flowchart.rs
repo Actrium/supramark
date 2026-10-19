@@ -614,6 +614,8 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     out
 }
 
+/// Retained for reference only — `compute_viewbox_browser` is the live path.
+///
 /// the `x` attribute of the `<text class="flowchartTitleText">` element it
 /// appends — the title is then measured by jsdom's getBBox shim and pushes the
 /// outer bbox horizontally.
@@ -1133,9 +1135,8 @@ fn compute_viewbox_browser(
         // meaningless here — this loop centres the label vertically, while
         // render_cluster paints the cluster label inside the rect's top edge
         // (label_ty = ry). Skipping isolated clusters is safe: the second
-        // loop grows the bounds with the cluster rect at its composed
-        // position, and a label painted on that rect's inner top edge is
-        // covered by the rect itself.
+        // loop grows the bounds with the cluster rect and its un-clamped
+        // label at their composed position.
         if l.isolated_cluster_ids.contains(&n.id) {
             continue;
         }
@@ -1201,6 +1202,13 @@ fn compute_viewbox_browser(
         let cx = n.x.unwrap_or(0.0);
         let cy = n.y.unwrap_or(0.0);
         bounds.expand_box(tx + cx - w / 2.0, ty + cy - h / 2.0, w, h);
+        // A cluster title is never clamped, so it can be wider than the rect it
+        // sits on: union it where `render_cluster` centres it (`label_tx =
+        // cx - lw / 2`, `label_ty = ry`), carried by the same inner-root
+        // translate as the rect.
+        if let Some((_, lw, lh)) = cluster_label_markup_and_box(n) {
+            bounds.expand_box(tx + cx - lw / 2.0, ty + cy - h / 2.0, lw, lh);
+        }
     }
 
     for e in &l.edges {
@@ -1929,6 +1937,36 @@ fn render_empty_cluster_as_node(
     }
 }
 
+/// The HTML markup a cluster title paints, plus the label box measured the way
+/// the renderer emits it.
+///
+/// Shared between `render_cluster` and the viewBox computation so the box that
+/// is painted and the box the viewBox unions cannot drift apart: the viewBox
+/// used to assume a cluster title stayed inside the cluster rect, which stopped
+/// holding once titles kept their un-clamped width.
+fn cluster_label_markup_and_box(node: &UNode) -> Option<(String, f64, f64)> {
+    let label = node.label.as_deref().unwrap_or("");
+    if label.is_empty() {
+        return None;
+    }
+    // Markdown subgraph titles (e.g. `subgraph "`**strong**`"`) need the
+    // bold/italic markup expanded to HTML before measuring + emitting, so the
+    // foreignObject dimensions and the inner `<p>` content match upstream
+    // byte-for-byte.
+    let escaped = if node.label_type.as_deref() == Some("markdown") {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
+        &escaped,
+        &crate::render::foreign_object::HtmlLabelFont::default(),
+        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        true,
+    );
+    Some((escaped, lw, lh))
+}
+
 fn render_cluster(
     node: &UNode,
     _cluster: &Cluster,
@@ -1936,8 +1974,6 @@ fn render_cluster(
     svg_id: &str,
     html_labels: bool,
 ) -> String {
-    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
-
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
     let cx = node.x.unwrap_or(0.0);
@@ -1983,20 +2019,8 @@ fn render_cluster(
         w = fmt_num(w),
         h = fmt_num(h),
     ));
-    if !label.is_empty() {
-        // Measure label for foreignObject dimensions.
-        let font = HtmlLabelFont::default();
-        // Markdown subgraph titles (e.g. `subgraph "`**strong**`"`) need the
-        // bold/italic markup expanded to HTML before measuring + emitting,
-        // so the foreignObject dimensions and the inner `<p>` content match
-        // upstream byte-for-byte.
+    if let Some((escaped, lw, lh)) = cluster_label_markup_and_box(node) {
         let is_markdown = node.label_type.as_deref() == Some("markdown");
-        let escaped = if is_markdown {
-            crate::render::foreign_object::markdown_label_to_html(&label)
-        } else {
-            crate::render::foreign_object::string_label_to_html(&label)
-        };
-        let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
         let label_tx = cx - lw / 2.0;
         let label_ty = ry;
