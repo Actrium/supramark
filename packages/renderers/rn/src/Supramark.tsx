@@ -1436,10 +1436,10 @@ function renderNode(
           return (
             <View key={key} style={admonitionContainerStyle}>
               {title ? (
-                  <SelectableTextBlock node={container} style={styles.paragraph}>
-                    {title}
-                  </SelectableTextBlock>
-                ) : null}
+                <SelectableTextBlock node={container} style={styles.paragraph}>
+                  {title}
+                </SelectableTextBlock>
+              ) : null}
               {renderAdmonitionContent()}
             </View>
           );

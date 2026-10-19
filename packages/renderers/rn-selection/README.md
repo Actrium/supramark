@@ -196,6 +196,12 @@ atom/boundary units split the document into regions), `containerTitle` supplies
 container titles as drawn, and `rendersAsText` marks nodes a disabled feature
 draws as source text.
 
+One layout difference is visible per host: with `selection` configured, a tight
+list item renders as a hanging-indent row (a marker column and a text column)
+rather than an inline-flow marker. It is static for the host — toggling
+`enabled` never remounts blocks — so the layout does not shift when selection is
+turned on or off.
+
 ### Text precision depends on metrics
 
 `SelectableBlock` publishes the line table React Native reports through
@@ -218,6 +224,11 @@ whole rectangle and long-presses as a whole block, rather than not at all.
 - `Intl.Segmenter` is used when present, and falls back to the in-package UAX #29
   tables and a script-class scan when it is not — which is the normal case on
   Hermes.
+- The inline-attachment model assumes `onTextLayout` reports one U+FFFC per
+  inline attachment; it has been verified on iOS and Android hosts. If a
+  platform lays out different text than the model holds, the block's metric
+  table is dropped and hit testing degrades to the whole block — never to a
+  wrong offset.
 
 ## Native Primitive Boundary
 
