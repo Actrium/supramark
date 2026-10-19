@@ -1817,15 +1817,7 @@ impl Compiler {
         }
 
         // Mixed interpolation: build a flat string.
-        let mut flat = String::new();
-        for box_ in &us.value {
-            if let Some(ref s) = box_.string {
-                flat.push_str(s);
-            } else if let Some(ref sub) = box_.substitution {
-                let resolved_val = self.resolve_substitution(vars_stack, sub)?;
-                flat.push_str(&resolved_val);
-            }
-        }
+        let flat = self.resolve_interpolation_boxes(vars_stack, &us.value)?;
         Some(ArraySubResult::Scalar(Scalar {
             value: ast::ScalarBox::UnquotedString(ast::flat_unquoted_string(&flat)),
         }))
@@ -1863,62 +1855,81 @@ impl Compiler {
         true
     }
 
+    /// Flatten interpolation boxes into one string, resolving every
+    /// substitution against the current scope.
+    ///
+    /// Mirrors upstream Go `d2ir.resolveSubstitutions` + `InterpolationBox`
+    /// coalescing: literal fragments and resolved substitutions are
+    /// concatenated in order, none of them dropped. Returns `None` when there
+    /// is nothing to resolve (no substitution) or a substitution fails to
+    /// resolve, in which case the caller keeps the original value.
+    fn resolve_interpolation_boxes(
+        &mut self,
+        vars_stack: &[&Map],
+        boxes: &[ast::InterpolationBox],
+    ) -> Option<String> {
+        if !boxes.iter().any(|b| b.substitution.is_some()) {
+            return None;
+        }
+        let mut flat = String::new();
+        for ibox in boxes {
+            if let Some(ref s) = ibox.string {
+                flat.push_str(s);
+            } else if let Some(ref sub) = ibox.substitution {
+                flat.push_str(&self.resolve_substitution(vars_stack, sub)?);
+            }
+        }
+        Some(flat)
+    }
+
     fn resolve_substitutions(&mut self, vars_stack: &[&Map], f: &mut Field) {
         let primary = match f.primary.as_ref() {
             Some(p) => p,
             None => return,
         };
 
-        // Check if the primary value contains substitutions
-        if let ast::ScalarBox::UnquotedString(ref us) = primary.value {
-            for ibox in &us.value {
-                if let Some(ref sub) = ibox.substitution {
-                    let resolved = self.resolve_substitution(vars_stack, sub);
-                    if let Some(resolved_val) = resolved {
-                        f.primary = Some(Scalar {
-                            value: ast::ScalarBox::UnquotedString(ast::flat_unquoted_string(
-                                &resolved_val,
-                            )),
-                        });
+        // Resolve into a local first: `primary` borrows `f.primary`, so the
+        // write-back below has to wait until that borrow is done.
+        let resolved = match primary.value {
+            ast::ScalarBox::UnquotedString(ref us) => self
+                .resolve_interpolation_boxes(vars_stack, &us.value)
+                .map(|flat| ast::ScalarBox::UnquotedString(ast::flat_unquoted_string(&flat))),
+            ast::ScalarBox::DoubleQuotedString(ref dqs) => self
+                .resolve_interpolation_boxes(vars_stack, &dqs.value)
+                .map(|flat| {
+                    ast::ScalarBox::DoubleQuotedString(ast::flat_double_quoted_string(&flat))
+                }),
+            // BlockString (|md ...|) supports variable substitution in
+            // non-code text. Mirror Go
+            // `textmeasure.ReplaceSubstitutionsMarkdown`.
+            ast::ScalarBox::BlockString(ref bs) => {
+                let mut variables = std::collections::BTreeMap::new();
+                for vars_map in vars_stack {
+                    collect_variables_flat(vars_map, String::new(), &mut variables);
+                }
+                if variables.is_empty() {
+                    None
+                } else {
+                    let new_val = replace_substitutions_markdown(&bs.value, &variables);
+                    if new_val == bs.value {
+                        None
+                    } else {
+                        let mut new_bs = bs.clone();
+                        new_bs.value = new_val;
+                        Some(ast::ScalarBox::BlockString(new_bs))
                     }
-                    return;
                 }
             }
-        }
+            // Remaining scalar kinds cannot carry an interpolation box.
+            ast::ScalarBox::Null(_)
+            | ast::ScalarBox::Suspension(_)
+            | ast::ScalarBox::Boolean(_)
+            | ast::ScalarBox::Number(_)
+            | ast::ScalarBox::SingleQuotedString(_) => None,
+        };
 
-        if let ast::ScalarBox::DoubleQuotedString(ref dqs) = primary.value {
-            for ibox in &dqs.value {
-                if let Some(ref sub) = ibox.substitution {
-                    let resolved = self.resolve_substitution(vars_stack, sub);
-                    if let Some(resolved_val) = resolved {
-                        f.primary = Some(Scalar {
-                            value: ast::ScalarBox::DoubleQuotedString(
-                                ast::flat_double_quoted_string(&resolved_val),
-                            ),
-                        });
-                    }
-                    return;
-                }
-            }
-        }
-
-        // BlockString (|md ...|) supports variable substitution in non-code
-        // text. Mirror Go `textmeasure.ReplaceSubstitutionsMarkdown`.
-        if let ast::ScalarBox::BlockString(ref bs) = primary.value {
-            let mut variables = std::collections::BTreeMap::new();
-            for vars_map in vars_stack {
-                collect_variables_flat(vars_map, String::new(), &mut variables);
-            }
-            if !variables.is_empty() {
-                let new_val = replace_substitutions_markdown(&bs.value, &variables);
-                if new_val != bs.value {
-                    let mut new_bs = bs.clone();
-                    new_bs.value = new_val;
-                    f.primary = Some(Scalar {
-                        value: ast::ScalarBox::BlockString(new_bs),
-                    });
-                }
-            }
+        if let Some(value) = resolved {
+            f.primary = Some(Scalar { value });
         }
     }
 
@@ -1928,20 +1939,29 @@ impl Compiler {
             None => return,
         };
 
-        if let ast::ScalarBox::UnquotedString(ref us) = primary.value {
-            for ibox in &us.value {
-                if let Some(ref sub) = ibox.substitution {
-                    let resolved = self.resolve_substitution(vars_stack, sub);
-                    if let Some(resolved_val) = resolved {
-                        e.primary = Some(Scalar {
-                            value: ast::ScalarBox::UnquotedString(ast::flat_unquoted_string(
-                                &resolved_val,
-                            )),
-                        });
-                    }
-                    return;
-                }
-            }
+        // Edge labels accept the same scalar forms as field values. The
+        // double-quoted form used to be skipped here, which left `${...}`
+        // unresolved and then truncated the label to the first box downstream.
+        let resolved = match primary.value {
+            ast::ScalarBox::UnquotedString(ref us) => self
+                .resolve_interpolation_boxes(vars_stack, &us.value)
+                .map(|flat| ast::ScalarBox::UnquotedString(ast::flat_unquoted_string(&flat))),
+            ast::ScalarBox::DoubleQuotedString(ref dqs) => self
+                .resolve_interpolation_boxes(vars_stack, &dqs.value)
+                .map(|flat| {
+                    ast::ScalarBox::DoubleQuotedString(ast::flat_double_quoted_string(&flat))
+                }),
+            // Remaining scalar kinds cannot carry an interpolation box.
+            ast::ScalarBox::Null(_)
+            | ast::ScalarBox::Suspension(_)
+            | ast::ScalarBox::Boolean(_)
+            | ast::ScalarBox::Number(_)
+            | ast::ScalarBox::SingleQuotedString(_)
+            | ast::ScalarBox::BlockString(_) => None,
+        };
+
+        if let Some(value) = resolved {
+            e.primary = Some(Scalar { value });
         }
     }
 
@@ -2085,8 +2105,12 @@ fn replace_substitutions_line(
             out.push('`');
             i += 1;
             while i < bytes.len() && bytes[i] != b'`' {
-                out.push(bytes[i] as char);
-                i += 1;
+                // Copy a whole character. A multi-byte character spans several
+                // bytes, and `bytes[i] as char` would turn each byte into a
+                // separate Latin-1 character (mojibake for any non-ASCII text).
+                let ch = line[i..].chars().next().expect("i is a char boundary");
+                out.push(ch);
+                i += ch.len_utf8();
             }
             if i < bytes.len() {
                 out.push('`');
@@ -2110,8 +2134,10 @@ fn replace_substitutions_line(
                 }
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // Copy a whole character; see the code-span loop above.
+        let ch = line[i..].chars().next().expect("i is a char boundary");
+        out.push(ch);
+        i += ch.len_utf8();
     }
 }
 
@@ -2258,6 +2284,45 @@ mod tests {
         let m = compile_str("vars: {\n  color: red\n}\nx: ${color}").unwrap();
         let x = m.get_field("x").unwrap();
         assert_eq!(x.primary_string(), Some("red".to_string()));
+    }
+
+    #[test]
+    fn test_mixed_interpolation_keeps_every_fragment() {
+        // `${v}` substitutes into the surrounding text, so the literal
+        // fragments have to survive alongside it. Only the first substitution
+        // used to, which matches neither upstream Go `resolveSubstitutions`
+        // (it coalesces every box) nor the plain-text meaning of the source.
+        let m = compile_str("vars: {\n  v: hello\n}\nx: a${v}b").unwrap();
+        let x = m.get_field("x").unwrap();
+        assert_eq!(x.primary_string(), Some("ahellob".to_string()));
+    }
+
+    #[test]
+    fn test_mixed_interpolation_resolves_every_substitution() {
+        let m = compile_str("vars: {\n  a: x\n  b: y\n}\nx: ${a}-${b}-c").unwrap();
+        let x = m.get_field("x").unwrap();
+        assert_eq!(x.primary_string(), Some("x-y-c".to_string()));
+    }
+
+    #[test]
+    fn test_mixed_interpolation_in_double_quoted_string() {
+        let m = compile_str("vars: {\n  v: hello\n}\nx: \"a${v}b\"").unwrap();
+        let x = m.get_field("x").unwrap();
+        assert_eq!(x.primary_string(), Some("ahellob".to_string()));
+    }
+
+    #[test]
+    fn test_mixed_interpolation_in_edge_label() {
+        let m = compile_str("vars: {\n  v: hello\n}\na -> b: x${v}y").unwrap();
+        let label = m.edges[0].primary.as_ref().unwrap().scalar_string();
+        assert_eq!(label, "xhelloy");
+    }
+
+    #[test]
+    fn test_mixed_interpolation_in_double_quoted_edge_label() {
+        let m = compile_str("vars: {\n  v: hello\n}\na -> b: \"x${v}y\"").unwrap();
+        let label = m.edges[0].primary.as_ref().unwrap().scalar_string();
+        assert_eq!(label, "xhelloy");
     }
 
     #[test]
