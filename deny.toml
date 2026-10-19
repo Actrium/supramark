@@ -129,4 +129,21 @@ ignore = [
     # upstream chain bumps quick-xml.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+
+    # zip 0.6.6 is pulled by plantuml-little (the `!include` archive support).
+    # Three advisories cover it:
+    #   RUSTSEC-2026-0367 — SUID/SGID bits preserved during extraction
+    #   RUSTSEC-2026-0368 — `extract()` creates symlinks whose targets are
+    #                       outside the destination
+    #   RUSTSEC-2026-0369 — extraction applies Unix permissions through
+    #                       symlinks without confining the target
+    # All three live in `ZipArchive::extract` / `ZipStreamReader::extract`,
+    # which this repository never calls: `extract_archive_to_temp` walks the
+    # entries by hand, gates every path through `enclosed_name()`, and writes
+    # plain files with `File::create` — it creates no symlinks and sets no
+    # permissions, so none of the three paths is reachable. The real fix is
+    # zip >= 9.0.0; that upgrade is a 9-major-version jump and gets its own PR.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
