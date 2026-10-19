@@ -57,6 +57,8 @@ export interface SelectionGestureDeps {
   wordAt(point: Point): SelectionRange | null;
   /** Which handle a touch grabs, if any. */
   handleAt(point: Point): HandleEdge | null;
+  /** Text-edge centre used to preserve the pointer grab offset during a handle drag. */
+  handlePoint?(edge: HandleEdge): Point | null;
   /** The endpoint that must stay fixed while the visible handle moves. */
   fixedPointForHandle(edge: HandleEdge, range: SelectionRange): SelectionPoint;
   /** Notified whenever the phase changes, so React can re-render. */
@@ -77,7 +79,7 @@ export interface SelectionGesture {
   isPending(): boolean;
   touchStart(point: Point, timeMs: number): void;
   /** Start dragging a known handle edge from a dedicated handle responder. */
-  handleStart(edge: HandleEdge, timeMs: number): void;
+  handleStart(edge: HandleEdge, timeMs: number, point?: Point): void;
   touchMove(point: Point, timeMs: number): void;
   touchEnd(point: Point, timeMs: number): void;
   /** Advance the long-press timer. Safe to call at any time. */
@@ -109,6 +111,9 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
    */
   let fixedPoint: SelectionPoint | null = null;
 
+  // Fixed pointer-to-caret delta, shared by root and dedicated knob responders.
+  let grabOffset: Point = { x: 0, y: 0 };
+
   const setPhase = (next: GesturePhase): void => {
     if (phase === next) return;
     phase = next;
@@ -118,6 +123,7 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
   const reset = (): void => {
     pressPoint = null;
     fixedPoint = null;
+    grabOffset = { x: 0, y: 0 };
     setPhase('idle');
   };
 
@@ -147,7 +153,12 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
     return true;
   };
 
-  const beginHandleDrag = (edge: HandleEdge): void => {
+  const beginHandleDrag = (edge: HandleEdge, point?: Point): void => {
+    // A bubbling start and a dedicated grant must not restart an active drag.
+    if (phase === 'handle') return;
+    // Use the caret line centre, not the knob drawn above/below the line.
+    const caret = deps.handlePoint?.(edge);
+    grabOffset = point && caret ? { x: point.x - caret.x, y: point.y - caret.y } : { x: 0, y: 0 };
     const range = deps.store.getSnapshot().range;
     // `anchor` / `focus` preserve gesture direction and may be reversed after
     // one handle crosses the other. Ask the document-aware dependency for the
@@ -176,15 +187,15 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
     isActive: () => phase === 'extending' || phase === 'handle',
     isPending: () => phase === 'pending',
 
-    handleStart(edge) {
-      beginHandleDrag(edge);
+    handleStart(edge, _timeMs, point) {
+      beginHandleDrag(edge, point);
     },
 
     touchStart(point, timeMs) {
       if (phase === 'extending' || phase === 'handle') return;
       const edge = deps.handleAt(point);
       if (edge !== null) {
-        beginHandleDrag(edge);
+        beginHandleDrag(edge, point);
         return;
       }
       pressPoint = point;
@@ -220,7 +231,7 @@ export function createSelectionGesture(deps: SelectionGestureDeps): SelectionGes
         return;
       }
       if (phase === 'handle' && fixedPoint !== null) {
-        const at = deps.pointAt(point);
+        const at = deps.pointAt({ x: point.x - grabOffset.x, y: point.y - grabOffset.y });
         if (at === null) return;
         deps.store.beginAt(fixedPoint);
         deps.store.extendTo(at);

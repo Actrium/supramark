@@ -234,6 +234,16 @@ selection layer.
 4. Feature selection providers for code, math, diagrams, tables, and containers.
 5. Copy actions for text, Markdown, source, SVG, PNG, and HTML.
 
+
+### Toolbars in scrolling message hosts
+
+Mount `SelectionToolbarHost` around the visible message-list area, outside its
+scrolling content. It portals the built-in toolbar into that area's coordinate
+space, so a short message cannot compress the menu or force it over the selection.
+Pass a `hostRef` and call `hostRef.current?.refresh()` from the list's `onScroll`.
+The host measures both native surfaces in window coordinates and preserves normal
+touch handling outside the toolbar buttons. `@supramark/rn` also exports this host.
+
 Inline attachments in a `SelectableBlock` must use `SelectableInlineObject` with
 the atom's `unitId`. The native text contains one attachment offset, including
 while a formula displays its loading text. The attachment publishes its measured
