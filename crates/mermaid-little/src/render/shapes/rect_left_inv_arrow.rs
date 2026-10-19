@@ -220,6 +220,7 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
                 dx,
                 0.0,
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }

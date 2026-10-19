@@ -116,6 +116,13 @@ pub struct Node {
 
     pub use_html_labels: Option<bool>,
     pub center_label: Option<bool>,
+    /// Whether the browser clamps this node's HTML label to the wrapping
+    /// width, so both the box this node was sized with and the emitted label
+    /// go through the clamped measurement (`measure_html_markup_label_clamped`
+    /// — issue #254). Set by diagram families whose layout reserves the
+    /// wrapped box; `false` everywhere else, where clamping the label alone
+    /// would leave it wrapped inside a box sized for one line.
+    pub clamp_html_label: bool,
 
     // --- Node style properties ------------------------------------------
     pub background_color: Option<String>,
@@ -330,6 +337,12 @@ pub struct LayoutData {
     pub rank_spacing: Option<f64>,
     pub markers: Vec<String>,
     pub layout_algorithm: Option<String>,
+
+    /// `config.flowchart.htmlLabels` (default true). The layout needs it
+    /// because the two spellings reserve different room: an HTML label
+    /// paints one line box per `<br/>`, a `<text>`/`<tspan>` label paints a
+    /// single line whatever the label says.
+    pub html_labels: Option<bool>,
 
     /// Diagram-family extras. Upstream uses `[key: string]: any` — we
     /// restrict to string-valued extras.

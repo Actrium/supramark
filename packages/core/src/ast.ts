@@ -189,7 +189,13 @@ export interface SupramarkDiagramEngineConfig {
   cache?: {
     enabled?: boolean;
     maxSize?: number;
-    /** Maximum estimated resident bytes for this engine's runtime cache. */
+    /**
+     * Maximum estimated resident bytes for this engine's runtime cache. `0`
+     * (or any non-positive / non-finite value) disables the byte bound — it
+     * is NOT "cache disabled": the cache keeps storing entries, it just stops
+     * evicting by bytes. Use `enabled: false` or `maxSize: 0` to disable
+     * caching entirely. Honored by @supramark/rn only.
+     */
     maxBytes?: number;
     ttl?: number;
   };
@@ -208,13 +214,13 @@ export interface SupramarkDiagramConfig {
 
   /**
    * Host-provided cap on diagram display width. React Native only —
-   * @supramark/web currently ignores this option and lays diagrams out with
-   * CSS. Units are RN dp, and the value is a cap, not a target: display width
-   * is clamped to [0.6 × cap, cap] where cap = min(windowWidth × 0.9,
-   * maxWidth), so small diagrams still get the 0.6× floor. Wrapping
-   * `<Supramark>` in a narrower container is NOT enough — the cap is derived
-   * from the window, so hosts with a bubble narrower than the window must pass
-   * the number explicitly or the diagram overflows the container.
+   * @supramark/web ignores this option and lays diagrams out with CSS.
+   * Units are RN dp, and the value is a cap, not a target: the diagram renders
+   * at its intrinsic width (never upscaled), narrowed by the container it is
+   * rendered into and by this cap, whichever is smaller. Hosts pass it only to
+   * keep diagrams below what the container itself allows. Display height is
+   * capped at 500 dp by trimming the width, so the aspect ratio stays exact;
+   * SVGs without intrinsic dimensions fall back to 300 dp.
    */
   maxWidth?: number;
 
@@ -222,7 +228,21 @@ export interface SupramarkDiagramConfig {
   defaultCache?: {
     enabled?: boolean;
     maxSize?: number;
-    /** Maximum estimated resident bytes for a runtime cache. */
+    /**
+     * Maximum estimated resident bytes for a runtime cache. `0` (or any
+     * non-positive / non-finite value) disables the byte bound — it is NOT
+     * "cache disabled": the cache keeps storing entries, it just stops
+     * evicting by bytes. Use `enabled: false` or `maxSize: 0` to disable
+     * caching entirely. Honored by @supramark/rn only.
+     *
+     * Scope: this value bounds the shared parsed-document cache only while
+     * document-level caching is on — `enabled: true` here or
+     * `options.cache: true`. With document-level caching off, that cache takes
+     * its bound from the enabled engines instead: the strictest resolved bound
+     * among them, where an engine that enables caching without its own
+     * maxBytes contributes the 8 MB default. `engines[].cache.maxBytes` also
+     * overrides this value for that engine's own diagram cache.
+     */
     maxBytes?: number;
     ttl?: number;
   };

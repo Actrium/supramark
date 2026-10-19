@@ -37,7 +37,8 @@ use crate::theme::ThemeVariables;
 /// especially for short labels like `Pass` / `Fail`. Keep node labels and
 /// other diagram families byte-oriented; flowchart edge labels deliberately
 /// get a small symmetric horizontal cushion.
-const FLOWCHART_EDGE_LABEL_PADDING_X: f64 = 4.0;
+const FLOWCHART_EDGE_LABEL_PADDING_X: f64 =
+    crate::render::foreign_object::HTML_LABEL_EDGE_PADDING_X;
 
 /// Compute the viewBox matching the upstream jsdom `getBBox()` shim.
 ///
@@ -157,7 +158,6 @@ fn node_styles_have_bold(styles: &[String]) -> bool {
 /// `measure_vertex_box(v, is_bold=true)`, so we only need to rewrite the
 /// label-level numbers here.
 fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
-    use crate::render::foreign_object::HtmlLabelFont;
     use crate::render::shapes::types::{fmt_num, xml_escape};
 
     let shape = node.shape.as_deref().unwrap_or("rect");
@@ -187,12 +187,25 @@ fn diamond_br_postprocess(node: &UNode, svg: &str) -> String {
     // entities remain as plain text and inflate the width. We need to
     // recompute (s_wrong) so we can find-and-replace the literal numbers.
     let escaped = xml_escape(label);
-    let (wrong_w, wrong_h) = crate::render::foreign_object::measure_html_label(
-        &escaped,
-        &HtmlLabelFont::default(),
-        200.0,
-        true,
+    // Mirror exactly what `shapes::diamond` measured, clamp included, so the
+    // numbers we look for are the numbers it wrote.
+    // `shapes::diamond` measures through `measure_node_label`, which resolves
+    // the node's own `font-size` / `font-weight`; recompute in that same domain
+    // or the needles miss for a styled node and the polygon keeps the size the
+    // shape drew instead of the one dagre laid out.
+    let shape_font = crate::layout::flowchart::resolved_label_font_from_styles(
+        node.css_styles.as_deref().unwrap_or(&[]),
     );
+    let (wrong_w, wrong_h) = if node.clamp_html_label {
+        let (w, h, _) = crate::render::foreign_object::measure_html_label_clamped(
+            &escaped,
+            &shape_font,
+            crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        );
+        (w, h)
+    } else {
+        crate::render::foreign_object::measure_html_label(&escaped, &shape_font, 200.0, true)
+    };
     let p = node.padding.unwrap_or(15.0);
     let s_wrong = (wrong_w + p) + (wrong_h + p);
     let half_wrong = s_wrong / 2.0;
@@ -424,22 +437,22 @@ fn bold_postprocess_node_svg(node: &UNode, svg: &str) -> String {
         crate::render::foreign_object::string_label_to_html(label)
     };
     let for_measure = crate::render::foreign_object::replace_fa_icons(&escaped);
-    let (lw_norm, _lh_norm) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_norm, _lh_norm, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &HtmlLabelFont::default(),
         200.0,
-        true,
+        node.clamp_html_label,
     );
     let bold_font = HtmlLabelFont {
         font_family: None,
         font_size_px: None,
         bold: Some(true),
     };
-    let (lw_bold, _lh_bold) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_bold, _lh_bold, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &bold_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     if (lw_bold - lw_norm).abs() < 1e-9 {
         // Bold metrics happen to match (e.g. font lacks bold variant).
@@ -512,22 +525,22 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
         font_size_px: None,
         bold: if bold { Some(true) } else { None },
     };
-    let (lw_default, lh_default) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_default, lh_default, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &default_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     let sized_font = HtmlLabelFont {
         font_family: None,
         font_size_px: Some(font_size_px),
         bold: if bold { Some(true) } else { None },
     };
-    let (lw_sized, lh_sized) = crate::render::foreign_object::measure_html_markup_label(
+    let (lw_sized, lh_sized, _) = crate::render::foreign_object::measure_node_label_box(
         &for_measure,
         &sized_font,
         200.0,
-        true,
+        node.clamp_html_label,
     );
     if (lw_sized - lw_default).abs() < 1e-9 && (lh_sized - lh_default).abs() < 1e-9 {
         return svg.to_string();
@@ -560,13 +573,37 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     );
     out = out.replace(&needle_tx, &replace_tx);
 
-    // 3. Inline font-size on the inner `<div>` and `<span>`.
-    let div_needle = r#"<div style="display: table-cell;"#;
-    let div_replace = format!(
-        r#"<div style="font-size: {fs}px !important; display: table-cell;"#,
+    // The transform needle above only matches when the shape emitted the
+    // default-font numbers. A clamped label already carries the resolved-size
+    // geometry (that is what the clamp measured), so stamp the size on its
+    // `<g>` independently of the number rewrite.
+    let g_needle = r##"<g class="label" style="" "##;
+    let g_replace = format!(
+        r##"<g class="label" style="font-size:{fs}px !important" "##,
         fs = fmt_num(font_size_px)
     );
-    out = out.replace(div_needle, &div_replace);
+    out = out.replace(g_needle, &g_replace);
+
+    // 3. Inline font-size on the inner `<div>` and `<span>`. A clamped label
+    //    carries upstream's wrapping style instead of `nowrap`, so both
+    //    spellings get the prefix — the shape emitted whichever its
+    //    measurement picked, and the size override applies to either.
+    for (needle, rest) in [
+        (
+            r#"<div style="display: table-cell;"#,
+            "display: table-cell;",
+        ),
+        (
+            r#"<div style="display: table; white-space: break-spaces;"#,
+            "display: table; white-space: break-spaces;",
+        ),
+    ] {
+        let replace = format!(
+            r#"<div style="font-size: {fs}px !important; {rest}"#,
+            fs = fmt_num(font_size_px)
+        );
+        out = out.replace(needle, &replace);
+    }
     let span_needle = r#"<span class="nodeLabel ">"#;
     let span_replace = format!(
         r#"<span style="font-size:{fs}px !important" class="nodeLabel ">"#,
@@ -577,6 +614,8 @@ fn font_size_postprocess_node_svg(node: &UNode, svg: &str) -> String {
     out
 }
 
+/// Retained for reference only — `compute_viewbox_browser` is the live path.
+///
 /// the `x` attribute of the `<text class="flowchartTitleText">` element it
 /// appends — the title is then measured by jsdom's getBBox shim and pushes the
 /// outer bbox horizontally.
@@ -587,7 +626,8 @@ fn compute_viewbox(
     title: Option<&str>,
 ) -> (f64, f64, f64, f64, f64) {
     use crate::render::foreign_object::{
-        measure_html_label, measure_html_markup_label, HtmlLabelFont,
+        measure_html_label, measure_html_markup_label, measure_html_markup_label_clamped,
+        HtmlLabelFont,
     };
 
     let mut min_x = f64::INFINITY;
@@ -782,8 +822,7 @@ fn compute_viewbox(
                         } else {
                             font.clone()
                         };
-                        let (lw, lh) =
-                            measure_html_markup_label(&processed, &label_font, 200.0, true);
+                        let (lw, lh) = measure_node_label_for_viewbox(n, &processed, &label_font);
                         expand(
                             &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh,
                         );
@@ -841,10 +880,10 @@ fn compute_viewbox(
                 match crate::render::foreign_object::try_render_katex_label(&processed, &label_font)
                 {
                     Some((_, w, h)) => (w, h),
-                    None => measure_html_markup_label(&processed, &label_font, 200.0, true),
+                    None => measure_node_label_for_viewbox(n, &processed, &label_font),
                 }
             } else {
-                measure_html_markup_label(&processed, &label_font, 200.0, true)
+                measure_node_label_for_viewbox(n, &processed, &label_font)
             };
             expand(
                 &mut min_x, &mut min_y, &mut max_x, &mut max_y, 0.0, 0.0, lw, lh,
@@ -948,7 +987,8 @@ fn compute_viewbox(
             // replace_fa_icons converts `fa:fa-car` → `<i class="fa fa-car"></i>`
             // which measure_html_markup_label strips as a zero-width HTML tag.
             let processed = crate::render::foreign_object::replace_fa_icons(label_text);
-            measure_html_markup_label(&processed, &font, 200.0, true)
+            let (w, h, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
+            (w, h)
         };
         // foreignObject x=0, y=0 (no transform applied)
         expand(
@@ -1009,6 +1049,28 @@ fn compute_viewbox(
 /// can therefore pass byte fixtures while clipping labels and bottom nodes in
 /// Chrome/Safari. This function unions the same high-level geometry the
 /// renderer emits, but in browser coordinates.
+/// Measure a flowchart node's HTML label the way the viewBox needs it: through
+/// the clamp when the node's label is clamped (non-cluster nodes — issue #254),
+/// and with the plain shim measurement otherwise.
+///
+/// Clusters are the case that matters here: their labels carry no `max-width`
+/// (upstream never wraps them), so measuring them as clamped computes a viewBox
+/// narrower than the label the renderer actually paints, and a long subgraph
+/// title gets clipped on both sides.
+fn measure_node_label_for_viewbox(
+    node: &UNode,
+    markup: &str,
+    font: &crate::render::foreign_object::HtmlLabelFont<'_>,
+) -> (f64, f64) {
+    let (w, h, _) = crate::render::foreign_object::measure_node_label_box(
+        markup,
+        font,
+        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        node.clamp_html_label,
+    );
+    (w, h)
+}
+
 fn compute_viewbox_browser(
     l: &FlowchartLayout,
     padding: f64,
@@ -1016,7 +1078,7 @@ fn compute_viewbox_browser(
     adjustments: &EdgeLabelAdjustments,
 ) -> (f64, f64, f64, f64, f64) {
     use crate::render::foreign_object::{
-        measure_html_markup_label, replace_fa_icons, HtmlLabelFont,
+        measure_html_markup_label_clamped, replace_fa_icons, HtmlLabelFont,
     };
 
     struct BrowserBounds {
@@ -1067,6 +1129,17 @@ fn compute_viewbox_browser(
         if is_cyclic_helper_from_anchor_rewrite(n, l) {
             continue;
         }
+        // Isolated clusters are painted inside a translated inner root (see
+        // the dedicated loop below): n.x/y are inner-layout numbers, so this
+        // box sits where nothing is drawn. Its label measurement is equally
+        // meaningless here — this loop centres the label vertically, while
+        // render_cluster paints the cluster label inside the rect's top edge
+        // (label_ty = ry). Skipping isolated clusters is safe: the second
+        // loop grows the bounds with the cluster rect and its un-clamped
+        // label at their composed position.
+        if l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
 
         let cx = n.x.unwrap_or(0.0);
         let cy = n.y.unwrap_or(0.0);
@@ -1099,12 +1172,42 @@ fn compute_viewbox_browser(
                 match crate::render::foreign_object::try_render_katex_label(&processed, &label_font)
                 {
                     Some((_, w, h)) => (w, h),
-                    None => measure_html_markup_label(&processed, &label_font, 200.0, true),
+                    None => measure_node_label_for_viewbox(n, &processed, &label_font),
                 }
             } else {
-                measure_html_markup_label(&processed, &label_font, 200.0, true)
+                measure_node_label_for_viewbox(n, &processed, &label_font)
             };
             bounds.expand_box(cx - lw / 2.0, cy - lh / 2.0, lw, lh);
+        }
+    }
+
+    // Isolated clusters are laid out recursively and drawn inside a translated
+    // inner `<g class="root">`: their x/y/width/height are inner-layout numbers
+    // and the placement lives in the pre-computed `outer_tx`/`outer_ty`. The
+    // node coordinates above therefore never describe where the cluster lands,
+    // which leaves the viewBox short of it — the cluster and everything below
+    // its row then sit outside the viewport (clipped by browsers, painted
+    // outside the host view on React Native). Compose the same placement
+    // `render_isolated_cluster_inner_root` emits.
+    for n in &l.nodes {
+        if !l.isolated_cluster_ids.contains(&n.id) {
+            continue;
+        }
+        let w = n.width.unwrap_or(0.0);
+        let h = n.height.unwrap_or(0.0);
+        if w == 0.0 && h == 0.0 {
+            continue;
+        }
+        let (tx, ty) = isolated_cluster_translate(n);
+        let cx = n.x.unwrap_or(0.0);
+        let cy = n.y.unwrap_or(0.0);
+        bounds.expand_box(tx + cx - w / 2.0, ty + cy - h / 2.0, w, h);
+        // A cluster title is never clamped, so it can be wider than the rect it
+        // sits on: union it where `render_cluster` centres it (`label_tx =
+        // cx - lw / 2`, `label_ty = ry`), carried by the same inner-root
+        // translate as the rect.
+        if let Some((_, lw, lh)) = cluster_label_markup_and_box(n) {
+            bounds.expand_box(tx + cx - lw / 2.0, ty + cy - h / 2.0, lw, lh);
         }
     }
 
@@ -1161,7 +1264,7 @@ fn compute_viewbox_browser(
             continue;
         }
         let processed = replace_fa_icons(label_text);
-        let (lw, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
+        let (lw, lh, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
         let lw = lw + FLOWCHART_EDGE_LABEL_PADDING_X * 2.0;
         let (lx, ly) = adjustments
             .get(&e.id)
@@ -1834,6 +1937,36 @@ fn render_empty_cluster_as_node(
     }
 }
 
+/// The HTML markup a cluster title paints, plus the label box measured the way
+/// the renderer emits it.
+///
+/// Shared between `render_cluster` and the viewBox computation so the box that
+/// is painted and the box the viewBox unions cannot drift apart: the viewBox
+/// used to assume a cluster title stayed inside the cluster rect, which stopped
+/// holding once titles kept their un-clamped width.
+fn cluster_label_markup_and_box(node: &UNode) -> Option<(String, f64, f64)> {
+    let label = node.label.as_deref().unwrap_or("");
+    if label.is_empty() {
+        return None;
+    }
+    // Markdown subgraph titles (e.g. `subgraph "`**strong**`"`) need the
+    // bold/italic markup expanded to HTML before measuring + emitting, so the
+    // foreignObject dimensions and the inner `<p>` content match upstream
+    // byte-for-byte.
+    let escaped = if node.label_type.as_deref() == Some("markdown") {
+        crate::render::foreign_object::markdown_label_to_html(label)
+    } else {
+        crate::render::foreign_object::string_label_to_html(label)
+    };
+    let (lw, lh) = crate::render::foreign_object::measure_html_markup_label(
+        &escaped,
+        &crate::render::foreign_object::HtmlLabelFont::default(),
+        crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH,
+        true,
+    );
+    Some((escaped, lw, lh))
+}
+
 fn render_cluster(
     node: &UNode,
     _cluster: &Cluster,
@@ -1841,8 +1974,6 @@ fn render_cluster(
     svg_id: &str,
     html_labels: bool,
 ) -> String {
-    use crate::render::foreign_object::{measure_html_markup_label, HtmlLabelFont};
-
     let w = node.width.unwrap_or(0.0);
     let h = node.height.unwrap_or(0.0);
     let cx = node.x.unwrap_or(0.0);
@@ -1888,20 +2019,8 @@ fn render_cluster(
         w = fmt_num(w),
         h = fmt_num(h),
     ));
-    if !label.is_empty() {
-        // Measure label for foreignObject dimensions.
-        let font = HtmlLabelFont::default();
-        // Markdown subgraph titles (e.g. `subgraph "`**strong**`"`) need the
-        // bold/italic markup expanded to HTML before measuring + emitting,
-        // so the foreignObject dimensions and the inner `<p>` content match
-        // upstream byte-for-byte.
+    if let Some((escaped, lw, lh)) = cluster_label_markup_and_box(node) {
         let is_markdown = node.label_type.as_deref() == Some("markdown");
-        let escaped = if is_markdown {
-            crate::render::foreign_object::markdown_label_to_html(&label)
-        } else {
-            xml_escape(&label)
-        };
-        let (lw, lh) = measure_html_markup_label(&escaped, &font, 200.0, true);
         // cluster-label translate: center label horizontally at cx, vertically at top of rect (ry).
         let label_tx = cx - lw / 2.0;
         let label_ty = ry;
@@ -2158,6 +2277,21 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
     }
 }
 
+/// The `outer_tx`/`outer_ty` translate recorded by the layout engine, parsed.
+///
+/// The two keys are written as a pair and name one `translate(tx, ty)`, so
+/// they are treated as one unit: `None` means at least one component is
+/// missing from `extra` or is not a valid number — exactly the condition
+/// under which `isolated_cluster_translate` substitutes its inner-pass
+/// fallback. Callers that cannot tolerate that fallback (e.g. lifting a
+/// nested cluster's rect between frames) branch on this instead of
+/// re-testing key presence.
+fn parsed_outer_translate(cnode: &UNode) -> Option<(f64, f64)> {
+    let tx = cnode.extra.get("outer_tx")?.parse::<f64>().ok()?;
+    let ty = cnode.extra.get("outer_ty")?.parse::<f64>().ok()?;
+    Some((tx, ty))
+}
+
 /// The `translate(tx, ty)` an isolated cluster's inner root group carries.
 ///
 /// Single source of truth: `render_isolated_cluster_inner_root` emits exactly
@@ -2166,28 +2300,16 @@ fn edge_is_inside_isolated(src: Option<&str>, dst: Option<&str>, l: &FlowchartLa
 /// resolve collisions that do not exist on screen.
 fn isolated_cluster_translate(cnode: &UNode) -> (f64, f64) {
     // Prefer the pre-computed outer translate from the layout engine.
-    let tx = cnode
-        .extra
-        .get("outer_tx")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            // Fallback: classic formula using inner dagre coords.
-            let cx = cnode.x.unwrap_or(0.0);
-            let w = cnode.width.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cx - padding - w / 2.0
-        });
-    let ty = cnode
-        .extra
-        .get("outer_ty")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or_else(|| {
-            let cy = cnode.y.unwrap_or(0.0);
-            let h = cnode.height.unwrap_or(0.0);
-            let padding = cnode.padding.unwrap_or(8.0);
-            cy - h / 2.0 - padding
-        });
-    (tx, ty)
+    if let Some(t) = parsed_outer_translate(cnode) {
+        return t;
+    }
+    // Fallback: classic formula using inner dagre coords.
+    let cx = cnode.x.unwrap_or(0.0);
+    let w = cnode.width.unwrap_or(0.0);
+    let padding = cnode.padding.unwrap_or(8.0);
+    let cy = cnode.y.unwrap_or(0.0);
+    let h = cnode.height.unwrap_or(0.0);
+    (cx - padding - w / 2.0, cy - h / 2.0 - padding)
 }
 
 /// Isolated-cluster ancestors of `node_id`, outermost first.
@@ -2459,9 +2581,17 @@ fn render_isolated_cluster_inner_root(
     }
     out.push_str(unified_shell::close_layer());
 
-    // Build cluster_bounds for edge clipping: non-isolated sub-clusters
-    // that are descendants of cnode.id. Their bounds (from l.clusters)
-    // are already in the inner dagre coordinate frame.
+    // Build cluster_bounds for edge clipping: sub-clusters that are
+    // descendants of cnode.id. Their bounds (from l.clusters) are already in
+    // the inner dagre coordinate frame.
+    //
+    // An isolated sub-cluster draws its own contents in its own inner root, so
+    // it contributes no bounds of its own — except that an edge *between two
+    // sibling isolated sub-clusters* (B1 --> B2) is emitted here, in the
+    // parent's edgePaths, with the sub-clusters themselves as endpoints. Those
+    // bounds are lifted out of the sub-cluster's own frame by the translate its
+    // inner root carries, which for a nested isolated cluster is already
+    // relative to the parent's inner frame.
     let inner_cluster_bounds: std::collections::HashMap<String, crate::layout::unified::Bounds> = l
         .clusters
         .iter()
@@ -2473,10 +2603,33 @@ fn render_isolated_cluster_inner_root(
             if !is_descendant_of(&c.id, &cnode.id, l) {
                 return None;
             }
-            if l.isolated_cluster_ids.contains(&c.id) {
-                return None;
+            if !l.isolated_cluster_ids.contains(&c.id) {
+                return Some((c.id.clone(), *b));
             }
-            Some((c.id.clone(), *b))
+            let sub = l.nodes.iter().find(|n| n.id == c.id && n.is_group)?;
+            // The renderer places this sub-cluster's root group by outer_tx/
+            // outer_ty. When either is missing or unparsable,
+            // `isolated_cluster_translate` falls back to the inner-pass
+            // coordinates, which are in the wrong frame — skip the entry
+            // rather than lift the rect by a wrong offset and let the snap
+            // act on it. Branching on `parsed_outer_translate` itself keeps
+            // this test identical to the fallback condition it guards
+            // against.
+            let (tx, ty) = match parsed_outer_translate(sub) {
+                Some(t) => t,
+                None => {
+                    log::debug!(
+                        "svg_flowchart: nested isolated cluster '{}' has no usable outer \
+                         translate; leaving its rect out of the clip map",
+                        c.id
+                    );
+                    return None;
+                }
+            };
+            let mut lifted = *b;
+            lifted.x += tx;
+            lifted.y += ty;
+            Some((c.id.clone(), lifted))
         })
         .collect();
 
@@ -3196,6 +3349,77 @@ fn cut_path_at_intersect(
     out
 }
 
+/// Land an endpoint that stopped short of `bounds` on the rect border.
+///
+/// Dagre routes a cluster-endpoint edge to the placeholder rectangle the
+/// cluster was laid out with. For an isolated cluster that placeholder is the
+/// inner pass's rendered footprint, which is larger than the rect the renderer
+/// actually draws, so the endpoint can sit outside `bounds` while the whole
+/// path misses it — `cut_path_at_intersect` returns such a path unchanged.
+/// Extending the final segment along its own direction moves the endpoint onto
+/// the border and leaves the rest of the spline alone.
+///
+/// No-op when the endpoint is already on or inside the border, or when the
+/// segment's direction never reaches it.
+///
+/// Edge labels are still positioned from the pre-snap path
+/// (`processed_edge_points`), so on an affected edge the label anchor and the
+/// drawn `d` no longer agree exactly. No fixture in the corpus moves a label as
+/// a result — the drift stays well inside the label box.
+fn snap_endpoint_to_bounds(pts: &mut [Point], bounds: &crate::layout::unified::Bounds) {
+    if pts.len() < 2 {
+        return;
+    }
+    let last = pts[pts.len() - 1];
+    if !outside_node(bounds, last) {
+        return;
+    }
+    let prev = pts[pts.len() - 2];
+    let (dx, dy) = (last.x - prev.x, last.y - prev.y);
+    if dx == 0.0 && dy == 0.0 {
+        return;
+    }
+    if let Some(hit) = ray_box_entry(bounds, last, dx, dy) {
+        pts[pts.len() - 1] = hit;
+    }
+}
+
+/// Where the ray `origin + t·(dx, dy)` (`t >= 0`) enters the axis-aligned box,
+/// or `None` when it never does (slab method).
+fn ray_box_entry(
+    bounds: &crate::layout::unified::Bounds,
+    origin: Point,
+    dx: f64,
+    dy: f64,
+) -> Option<Point> {
+    let (x0, y0) = (bounds.x, bounds.y);
+    let (x1, y1) = (bounds.x + bounds.width, bounds.y + bounds.height);
+    let mut t_enter = f64::NEG_INFINITY;
+    let mut t_exit = f64::INFINITY;
+    for (o, d, lo, hi) in [(origin.x, dx, x0, x1), (origin.y, dy, y0, y1)] {
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return None;
+            }
+            continue;
+        }
+        let (mut near, mut far) = ((lo - o) / d, (hi - o) / d);
+        if near > far {
+            std::mem::swap(&mut near, &mut far);
+        }
+        t_enter = t_enter.max(near);
+        t_exit = t_exit.min(far);
+    }
+    if t_enter > t_exit || t_exit < 0.0 {
+        return None;
+    }
+    let t = t_enter.max(0.0);
+    Some(Point {
+        x: origin.x + dx * t,
+        y: origin.y + dy * t,
+    })
+}
+
 /// Walk the rendered edges, collect unique (family, position, color)
 /// triples implied by each edge's pathStyle stroke color, and emit one
 /// `<marker>` per triple in upstream's order.
@@ -3437,12 +3661,47 @@ fn render_edge_path(
         .get("orig_start")
         .map(|s| s.as_str())
         .unwrap_or_else(|| e.start.as_deref().unwrap_or(""));
-    if let Some(bounds) = cluster_bounds.get(orig_dst) {
+    // A cyclic-special segment (one third of an expanded self-edge) inherits its
+    // user edge's orig_start/orig_end, but its real dagre endpoints are the
+    // invisible helper labelRects `expand_self_edge` places outside the cluster
+    // — only the outer segments end on the cluster itself. Both the clip and the
+    // snap below key off orig_*, so a segment counts as cluster-attached only on
+    // an end dagre actually routed to the cluster. Acting on a helper either
+    // tears the loop open (snap) or cuts it short (clip).
+    let synthetic_segment = e.extra.get("synthetic").map(|s| s.as_str()) == Some("cyclic_segment");
+    let dst_on_cluster = !synthetic_segment || e.end.as_deref() == Some(orig_dst);
+    let src_on_cluster = !synthetic_segment || e.start.as_deref() == Some(orig_src);
+    // Resolve each cluster-attached endpoint's drawn rect once so the clip
+    // and the snap below act on the same target.
+    let dst_bounds = if dst_on_cluster {
+        cluster_bounds.get(orig_dst)
+    } else {
+        None
+    };
+    let src_bounds = if src_on_cluster {
+        cluster_bounds.get(orig_src)
+    } else {
+        None
+    };
+
+    if let Some(bounds) = dst_bounds {
         pts = cut_path_at_intersect(&pts, bounds);
     }
-    if let Some(bounds) = cluster_bounds.get(orig_src) {
+    if let Some(bounds) = src_bounds {
         pts.reverse();
         pts = cut_path_at_intersect(&pts, bounds);
+        pts.reverse();
+    }
+    // The clip above only acts on paths that cross the border. An isolated
+    // cluster's placeholder — the size dagre routes its edges to — is larger
+    // than the rect drawn, so some endpoints stop short of the border and the
+    // path never crosses it. Pull those onto the border.
+    if let Some(bounds) = dst_bounds {
+        snap_endpoint_to_bounds(&mut pts, bounds);
+    }
+    if let Some(bounds) = src_bounds {
+        pts.reverse();
+        snap_endpoint_to_bounds(&mut pts, bounds);
         pts.reverse();
     }
 
@@ -3616,8 +3875,9 @@ fn render_edge_label(
     decluster: bool,
 ) -> String {
     use crate::render::foreign_object::{
-        markdown_label_to_html, measure_html_markup_label, render_edge_label as fo_edge,
+        markdown_label_to_html, measure_html_markup_label_clamped, render_edge_label as fo_edge,
         replace_fa_icons, string_label_to_html, HtmlLabelFont, LabelOpts,
+        HTML_LABEL_WRAPPING_WIDTH,
     };
     use crate::render::shapes::types::{build_div_style_prefix, build_label_style};
     let label_text = e.label.clone().unwrap_or_default();
@@ -3649,22 +3909,30 @@ fn render_edge_label(
     // pipeline and emit an edge label with `wrap_in_p: false` so the
     // inner `<span class="edgeLabel ">` directly carries the KaTeX
     // `<div>…</div>` markup, matching the reference SVG.
-    let (w, h, katex_html) = if !is_empty
+    let (w, h, katex_html, clamped) = if !is_empty
         && crate::render::foreign_object::contains_katex_marker(&processed)
     {
         let font = HtmlLabelFont::default();
         match crate::render::foreign_object::try_render_katex_label(&processed, &font) {
-            Some((html, w, h)) => (w, h, Some(html)),
+            Some((html, w, h)) => (w, h, Some(html), false),
             None => {
-                let (w, h) = measure_html_markup_label(&processed, &font, 200.0, true);
-                (w, h, None)
+                let (w, h, clamped) =
+                    measure_html_markup_label_clamped(&processed, &font, HTML_LABEL_WRAPPING_WIDTH);
+                (w, h, None, clamped)
             }
         }
     } else if is_empty {
-        (0.0, 0.0, None)
+        (0.0, 0.0, None, false)
     } else {
-        let (w, h) = measure_html_markup_label(&processed, &HtmlLabelFont::default(), 200.0, true);
-        (w, h, None)
+        // Edge labels are clamped exactly like node labels: the layout reserved
+        // the clamped box (`measure_edge_label`) and the emitted `<div>` has to
+        // wrap inside the same budget — issue #254.
+        let (w, h, clamped) = measure_html_markup_label_clamped(
+            &processed,
+            &HtmlLabelFont::default(),
+            HTML_LABEL_WRAPPING_WIDTH,
+        );
+        (w, h, None, clamped)
     };
     // Opt-in decluster: dagre reserved rank space for the CJK-floored label
     // width (stored on the edge at layout time, see `build_edge`). Emit the
@@ -3730,6 +3998,7 @@ fn render_edge_label(
         .map(|styles| build_label_style(styles))
         .unwrap_or_default();
     let opts = LabelOpts {
+        clamped,
         data_id: Some(&e.id),
         group_style: None,
         wrap_in_p: !is_empty && katex_html.is_none(),
@@ -4823,7 +5092,7 @@ impl EdgeLabelAdjustments {
 /// algorithm. Returns an empty map when the option is off.
 fn build_edge_label_adjustments(l: &FlowchartLayout, opts: &RenderOptions) -> EdgeLabelAdjustments {
     use crate::render::foreign_object::{
-        measure_html_markup_label, replace_fa_icons, HtmlLabelFont,
+        measure_html_markup_label_clamped, replace_fa_icons, HtmlLabelFont,
     };
     if !opts.edge_label_decluster {
         return EdgeLabelAdjustments::default();
@@ -4893,7 +5162,7 @@ fn build_edge_label_adjustments(l: &FlowchartLayout, opts: &RenderOptions) -> Ed
             continue;
         }
         let processed = replace_fa_icons(label_text);
-        let (lw_m, lh) = measure_html_markup_label(&processed, &font, 200.0, true);
+        let (lw_m, lh, _) = measure_html_markup_label_clamped(&processed, &font, 200.0);
         // Floor the width over the marker-free plain text (tags / entities
         // stripped), not the raw markup — otherwise `<br/>`, `**` and `&amp;`
         // are billed ~0.56em each and the collision box widens past the real
@@ -5167,6 +5436,245 @@ mod tests {
         let l = fcl::layout(&d, &th, false).unwrap();
         let svg = render(&d, &l, &th, "t").unwrap();
         assert!(svg.contains(r#"aria-roledescription="flowchart-v2""#));
+    }
+
+    #[test]
+    fn snap_endpoint_pulls_a_short_endpoint_onto_the_border() {
+        // Regression (issue #255): dagre routes a cluster-endpoint edge to the
+        // oversized placeholder an isolated cluster enters the outer pass with,
+        // so the endpoint stops short of the rect the renderer actually draws.
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Approaching from the right, travelling left: lands on the right border.
+        let mut pts = vec![Point { x: 360.0, y: 100.0 }, Point { x: 340.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+
+        // Approaching from below, travelling up: lands on the bottom border.
+        let mut pts = vec![Point { x: 200.0, y: 250.0 }, Point { x: 200.0, y: 230.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 200.0).abs() < 1e-9 && (pts[1].y - 150.0).abs() < 1e-9,
+            "expected (200, 150), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn snap_endpoint_leaves_unreachable_and_on_border_paths_alone() {
+        let bounds = crate::layout::unified::Bounds {
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        // Travelling away from the box: the ray never reaches it.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 360.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert_eq!(pts[1].x, 360.0);
+
+        // Already on the border: left where it is.
+        let mut pts = vec![Point { x: 340.0, y: 100.0 }, Point { x: 300.0, y: 100.0 }];
+        snap_endpoint_to_bounds(&mut pts, &bounds);
+        assert!(
+            (pts[1].x - 300.0).abs() < 1e-9 && (pts[1].y - 100.0).abs() < 1e-9,
+            "expected (300, 100), got {:?}",
+            pts[1]
+        );
+    }
+
+    #[test]
+    fn cluster_endpoint_edges_land_on_the_drawn_cluster_rect() {
+        // End-to-end guard for issue #255: every edge aimed at the subgraph used
+        // to stop on the oversized placeholder, leaving the right-hand arrows
+        // floating ~86px clear of the rect.
+        let src = "flowchart TB\n\
+            subgraph g[\"gate\"]\n a[\"if: always()\"]\n b[\"result != success\"]\n end\n\
+            n0[\"rust\"] --> g\n n1[\"test\"] --> g\n n2[\"typescript\"] --> g\n\
+            n3[\"web\"] --> g\n n4[\"webrtc\"] --> g\n n5[\"identity\"] --> g\n\
+            n6[\"cjk\"] --> g\n n7[\"csharp\"] --> g\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        // The cluster rect lives in the inner root group's frame, so its
+        // absolute position is that group's translate plus the rect's own
+        // (8, 8) origin.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let root = root_re.captures(&svg).expect("isolated cluster root group");
+        let tx: f64 = root[1].parse().unwrap();
+        let ty: f64 = root[2].parse().unwrap();
+
+        let rect_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        // This guard reads the first root group and the first cluster rect, so
+        // hold the input to exactly one of each.
+        let mut rect_matches = rect_re.captures_iter(&svg);
+        let rect = rect_matches.next().expect("cluster rect");
+        assert!(
+            rect_matches.next().is_none(),
+            "guard assumes a single cluster rect"
+        );
+        let x0 = tx + rect[1].parse::<f64>().unwrap();
+        let y0 = ty + rect[2].parse::<f64>().unwrap();
+        let x1 = x0 + rect[3].parse::<f64>().unwrap();
+        let y1 = y0 + rect[4].parse::<f64>().unwrap();
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_[^"]*""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let mut checked = 0;
+        for cap in path_re.captures_iter(&svg) {
+            let last = num_re
+                .captures_iter(&cap[1])
+                .last()
+                .expect("edge path has at least one point");
+            let ex: f64 = last[1].parse().unwrap();
+            let ey: f64 = last[2].parse().unwrap();
+            let dist = (ex - x0)
+                .abs()
+                .min((ex - x1).abs())
+                .min((ey - y0).abs())
+                .min((ey - y1).abs());
+            // The emitted path is pulled back by the arrow marker offset
+            // (~3.4-3.9px) before it is written out, so a landing endpoint sits
+            // a few px clear of the border rather than exactly on it.
+            assert!(
+                dist < 6.0,
+                "edge endpoint ({ex}, {ey}) sits {dist}px off the cluster rect"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 8, "expected all 8 cluster-endpoint edges");
+    }
+
+    /// Absolute rect of every cluster in the SVG. A root group's translate
+    /// accumulates through nesting, so a nested sub-cluster's rect is lifted by
+    /// the sum of the translates along its chain.
+    fn absolute_cluster_rects(svg: &str) -> Vec<(String, f64, f64, f64, f64)> {
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let cluster_re = regex::Regex::new(
+            r#"<g class="cluster[^>]*id="([^"]+)"[^>]*>\s*<rect[^>]*\sx="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)""#,
+        )
+        .unwrap();
+        let clusters: Vec<(usize, String, f64, f64, f64, f64)> = cluster_re
+            .captures_iter(svg)
+            .map(|c| {
+                (
+                    c.get(0).unwrap().start(),
+                    c[1].to_string(),
+                    c[2].parse().unwrap(),
+                    c[3].parse().unwrap(),
+                    c[4].parse().unwrap(),
+                    c[5].parse().unwrap(),
+                )
+            })
+            .collect();
+
+        let tag_re = regex::Regex::new(r"<g\b[^>]*>|</g>").unwrap();
+        // One entry per open <g>: `Some(acc on entry)` for a root group,
+        // `None` for anything else. `acc` is the sum of the root translates
+        // currently in scope.
+        let mut stack: Vec<Option<(f64, f64)>> = Vec::new();
+        let mut acc = (0.0_f64, 0.0_f64);
+        let mut out = Vec::new();
+        let mut next = 0;
+        for tag in tag_re.find_iter(svg) {
+            while next < clusters.len() && clusters[next].0 < tag.start() {
+                let (_, id, x, y, w, h) = &clusters[next];
+                let (x0, y0) = (acc.0 + x, acc.1 + y);
+                out.push((id.clone(), x0, y0, x0 + w, y0 + h));
+                next += 1;
+            }
+            let t = tag.as_str();
+            if t.starts_with("</g") {
+                // Only a root group restores the accumulator; a plain <g>
+                // (clusters / edgePaths / nodes / label) closing must not touch
+                // it, or the stack falls out of step with the real nesting.
+                if let Some(Some(prev)) = stack.pop() {
+                    acc = prev;
+                }
+            } else if let Some(m) = root_re.captures(t) {
+                stack.push(Some(acc));
+                acc = (
+                    acc.0 + m[1].parse::<f64>().unwrap(),
+                    acc.1 + m[2].parse::<f64>().unwrap(),
+                );
+            } else {
+                stack.push(None);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sibling_isolated_subcluster_edges_land_on_their_rects() {
+        // Regression guard for the nested case: an edge between two sibling
+        // isolated sub-clusters is emitted in the parent's edgePaths with the
+        // clusters themselves as endpoints, so the clip map has to carry their
+        // rects, lifted out of each sub-cluster's own frame.
+        let src = "flowchart LR\n\
+            subgraph TOP\n direction TB\n\
+            subgraph B1\n i1 --> f1\n end\n\
+            subgraph B2\n i2 --> f2\n end\n\
+            end\n\
+            A --> TOP --> B\n B1 --> B2\n";
+        let d = fcp::parse(src).unwrap();
+        let th = theme::get_theme("default");
+        let l = fcl::layout(&d, &th, false).unwrap();
+        let svg = render(&d, &l, &th, "t").unwrap();
+
+        let rects = absolute_cluster_rects(&svg);
+        assert!(rects.len() >= 3, "expected TOP/B1/B2, got {}", rects.len());
+
+        // The edge is emitted inside the outer (TOP) root group, so its
+        // coordinates are relative to that frame; lift them by that group's
+        // translate before comparing against the absolute rects.
+        let root_re =
+            regex::Regex::new(r#"<g class="root" transform="translate\(([-\d.]+), ?([-\d.]+)\)">"#)
+                .unwrap();
+        let outer = root_re.captures(&svg).expect("outer root group");
+        let (otx, oty) = (
+            outer[1].parse::<f64>().unwrap(),
+            outer[2].parse::<f64>().unwrap(),
+        );
+
+        let path_re = regex::Regex::new(r#"<path d="([^"]+)" id="[^"]*-L_B1_B2_0""#).unwrap();
+        let num_re = regex::Regex::new(r#"(-?[\d.]+),(-?[\d.]+)"#).unwrap();
+        let cap = path_re.captures(&svg).expect("B1 --> B2 edge");
+        let nums: Vec<_> = num_re.captures_iter(&cap[1]).collect();
+        for (label, idx) in [("start", 0), ("end", nums.len() - 1)] {
+            let px: f64 = nums[idx][1].parse::<f64>().unwrap() + otx;
+            let py: f64 = nums[idx][2].parse::<f64>().unwrap() + oty;
+            let dist = rects
+                .iter()
+                .map(|(_, x0, y0, x1, y1)| {
+                    (px - x0)
+                        .abs()
+                        .min((px - x1).abs())
+                        .min((py - y0).abs())
+                        .min((py - y1).abs())
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                dist < 6.0,
+                "{label} of B1 --> B2 sits {dist}px off every cluster rect"
+            );
+        }
     }
 
     #[test]

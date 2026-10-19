@@ -67,6 +67,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 y_offset,
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }

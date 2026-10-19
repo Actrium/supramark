@@ -6,7 +6,7 @@
  */
 
 import { coreMarkdownFeature } from '@supramark/feature-core-markdown';
-import { cardVisonFeature } from '@supramark/feature-card-vison';
+import { visonFeature } from '@supramark/feature-card-vison';
 import { plantumlFeature } from '@supramark/feature-plantuml';
 import { diagramDotFeature } from '@supramark/feature-diagram-dot';
 import { diagramVegaLiteFeature } from '@supramark/feature-diagram-vega-lite';
@@ -31,7 +31,7 @@ import { gfmFeature } from '@supramark/feature-gfm';
 
 export const allFeatures = [
   coreMarkdownFeature,
-  cardVisonFeature,
+  visonFeature,
   plantumlFeature,
   diagramDotFeature,
   diagramVegaLiteFeature,

@@ -7,6 +7,7 @@ import {
   clearReactNativeRendererCaches,
   clearSupramarkRenderCache,
   getRendererCache,
+  resolveDiagramCachePolicy,
   resolveRendererCachePolicy,
   type RendererCachePolicy,
 } from '../src/renderCache';
@@ -280,5 +281,141 @@ describe('resolveRendererCachePolicy maxBytes resolution (#124 follow-up)', () =
     ).toBeUndefined();
     // unset → default
     expect(resolveRendererCachePolicy({ enabled: true }).maxBytes).toBe(8_000_000);
+  });
+});
+
+// Issue #231: resolveDiagramCachePolicy folds diagram policy through a RESOLVED
+// RendererCachePolicy, where maxBytes: undefined means "no byte cap" — but the
+// second fold read that undefined as "not configured" and restored the 8 MB
+// default. An explicit maxBytes: 0 on the diagram layer must survive to the
+// final result as "no byte cap" (undefined), matching the direct path.
+describe('resolveDiagramCachePolicy maxBytes resolution (issue #231)', () => {
+  // The three measured paths from the issue, kept as one regression anchor.
+  it('resolves an explicit maxBytes: 0 the same way on the direct, diagram, and engine paths', () => {
+    // direct: already correct pre-fix
+    expect(resolveRendererCachePolicy({ enabled: true, maxBytes: 0 }).maxBytes).toBeUndefined();
+    // diagram: restored 8 MB pre-fix — the core regression
+    expect(
+      resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: 0 }, undefined).maxBytes
+    ).toBeUndefined();
+    // engine: already correct pre-fix
+    expect(
+      resolveDiagramCachePolicy({ maxBytes: 0 }, { enabled: true }, undefined).maxBytes
+    ).toBeUndefined();
+  });
+
+  it('diagram-layer maxBytes: 0 yields no byte cap even when globalCache enables the fallback', () => {
+    const policy = resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: 0 }, true);
+    expect(policy.maxBytes).toBeUndefined();
+    expect(policy.enabled).toBe(true);
+    expect(policy.maxSize).toBe(50);
+  });
+
+  it('non-positive / non-finite maxBytes at the diagram layer all mean "no byte cap"', () => {
+    expect(
+      resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: -1 }, undefined).maxBytes
+    ).toBeUndefined();
+    expect(
+      resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: Number.NaN }, undefined)
+        .maxBytes
+    ).toBeUndefined();
+    expect(
+      resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: Infinity }, undefined)
+        .maxBytes
+    ).toBeUndefined();
+  });
+
+  it('engine maxBytes takes precedence over diagram maxBytes', () => {
+    expect(
+      resolveDiagramCachePolicy(
+        { enabled: true, maxBytes: 1024 },
+        { enabled: true, maxBytes: 2048 },
+        undefined
+      ).maxBytes
+    ).toBe(1024);
+  });
+
+  it('diagram maxBytes applies when the engine layer does not configure one', () => {
+    expect(
+      resolveDiagramCachePolicy({ enabled: true }, { enabled: true, maxBytes: 2048 }, undefined)
+        .maxBytes
+    ).toBe(2048);
+  });
+
+  it('an engine-layer explicit 0 wins over a positive diagram maxBytes', () => {
+    expect(
+      resolveDiagramCachePolicy(
+        { enabled: true, maxBytes: 0 },
+        { enabled: true, maxBytes: 2048 },
+        undefined
+      ).maxBytes
+    ).toBeUndefined();
+  });
+
+  it('applies the 8 MB default only when neither engine nor diagram configures maxBytes', () => {
+    expect(
+      resolveDiagramCachePolicy({ enabled: true }, { enabled: true }, true).maxBytes
+    ).toBe(8_000_000);
+    expect(resolveDiagramCachePolicy(undefined, undefined, true).maxBytes).toBe(8_000_000);
+  });
+
+  it('keeps engine > diagram precedence for enabled, maxSize, and ttl', () => {
+    const policy = resolveDiagramCachePolicy(
+      { enabled: true, maxSize: 10, ttl: 5000 },
+      { enabled: true, maxSize: 20, ttl: 3000 },
+      true
+    );
+    expect(policy.enabled).toBe(true);
+    expect(policy.maxSize).toBe(10);
+    expect(policy.ttl).toBe(5000);
+
+    // Engine layer unset → diagram values win over the global toggle's defaults.
+    const diagramWins = resolveDiagramCachePolicy(undefined, { enabled: true, maxSize: 20 }, true);
+    expect(diagramWins.enabled).toBe(true);
+    expect(diagramWins.maxSize).toBe(20);
+
+    // Both layers unset → globalCache enables caching with defaults.
+    const globalOnly = resolveDiagramCachePolicy(undefined, undefined, true);
+    expect(globalOnly.enabled).toBe(true);
+    expect(globalOnly.maxSize).toBe(50);
+    expect(globalOnly.ttl).toBeUndefined();
+  });
+});
+
+// The JSDoc promises host-visible behaviour, not just field values: `maxBytes:
+// 0` opts out of the byte bound WITHOUT disabling the cache, and disabling the
+// cache is `maxSize: 0` / `enabled: false`. These promises land in
+// getRendererCache, so they are asserted there rather than only at the
+// resolution layer.
+describe('renderer cache bounds reach the LRU layer (issue #231 JSDoc contract)', () => {
+  it('keeps storing entries with maxBytes: 0 — the byte bound only trims retention', async () => {
+    clearReactNativeRendererCaches();
+    const cache = getRendererCache<number>(
+      'test:maxbytes-zero',
+      resolveDiagramCachePolicy(undefined, { enabled: true, maxBytes: 0 }, true),
+      () => 1
+    );
+    expect(cache).toBeDefined();
+    await cache?.getOrCreate('k1', async () => 1);
+    await cache?.getOrCreate('k2', async () => 2);
+    const stats = cache?.getStats();
+    expect(stats?.maxBytes).toBeUndefined();
+    expect(stats?.size).toBe(2);
+  });
+
+  it('disables caching through maxSize: 0 or enabled: false, never through maxBytes', () => {
+    clearReactNativeRendererCaches();
+    expect(
+      getRendererCache(
+        'test:disabled-by-maxsize',
+        resolveDiagramCachePolicy(undefined, { enabled: true, maxSize: 0 }, true)
+      )
+    ).toBeUndefined();
+    expect(
+      getRendererCache(
+        'test:disabled-by-enabled',
+        resolveDiagramCachePolicy(undefined, { enabled: false, maxBytes: 0 }, undefined)
+      )
+    ).toBeUndefined();
   });
 });

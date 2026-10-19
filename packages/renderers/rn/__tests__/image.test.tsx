@@ -33,12 +33,20 @@ async function renderAst(
   ast: SupramarkRootNode,
   styles?: React.ComponentProps<typeof Supramark>['styles'],
   config?: React.ComponentProps<typeof Supramark>['config'],
-  onImagePress?: React.ComponentProps<typeof Supramark>['onImagePress']
+  onImagePress?: React.ComponentProps<typeof Supramark>['onImagePress'],
+  selection?: React.ComponentProps<typeof Supramark>['selection']
 ): Promise<ReactTestRenderer> {
   let renderer: ReactTestRenderer | null = null;
   await act(async () => {
     renderer = create(
-      React.createElement(Supramark, { ast, markdown: '', styles, config, onImagePress })
+      React.createElement(Supramark, {
+        ast,
+        markdown: '',
+        styles,
+        config,
+        onImagePress,
+        selection,
+      })
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -325,7 +333,8 @@ describe('image rendering', () => {
     const image = renderer.root.findByType('Image');
     expect(image.props.accessibilityElementsHidden).toBe(true);
     expect(image.props.importantForAccessibility).toBe('no-hide-descendants');
-    expect(image.props.accessibilityLabel).toBeUndefined();
+    // The element is hidden, so the inert fallback label is never read.
+    expect(image.props.accessibilityLabel).toBe('[image]');
   });
 
   it('falls back to image title for the accessibility label when alt is empty', async () => {
@@ -570,5 +579,266 @@ describe('image rendering', () => {
     const images = renderer.root.findAllByType('Image');
     expect(images).toHaveLength(2);
     expect(images[1].props.source).toEqual({ uri: 'https://example.com/fresh.jpg' });
+  });
+
+  // --- #232 fix 1: a press wrapper around an unlabeled, linkless image must
+  // still expose an accessible name (WCAG 4.1.2) — the label chain ends with
+  // the shared [image] fallback instead of `undefined` ---
+  it('labels an onImagePress wrapper with the [image] fallback when alt, title and linkUrl are all empty', async () => {
+    const renderer = await renderAst(
+      imageAst([{ type: 'image', url: 'https://example.com/a.jpg', alt: '' }]),
+      undefined,
+      undefined,
+      () => {}
+    );
+
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityLabel).toBe('[image]');
+    expect(touchable.props.accessibilityElementsHidden).toBe(false);
+    expect(touchable.props.importantForAccessibility).toBe('yes');
+    // The wrapped inner image is pruned from the traversal as well (#232 fix 2).
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessible).toBe(false);
+    expect(image.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+
+  it('labels an onImagePress wrapper over a relative-URL placeholder with the [image] fallback too', async () => {
+    const renderer = await renderAst(
+      imageAst([{ type: 'image', url: './photo.jpg', alt: '' }]),
+      undefined,
+      undefined,
+      () => {}
+    );
+
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityLabel).toBe('[image]');
+    expect(touchable.props.accessibilityElementsHidden).toBe(false);
+    expect(touchable.props.importantForAccessibility).toBe('yes');
+    expect(touchable.props.children).toBeTruthy();
+  });
+
+  // --- #232 fix 2: `accessible={false}` alone does not remove a node from
+  // TalkBack traversal (Android maps it to View.setFocusable() only), so the
+  // wrapped placeholder subtree must be pruned via no-hide-descendants ---
+  it('prunes the wrapped placeholder subtree from the Android traversal', async () => {
+    const renderer = await renderAst(
+      imageAst([{ type: 'image', url: './photo.jpg', alt: '' }]),
+      undefined,
+      undefined,
+      () => {}
+    );
+
+    const placeholderText = renderer.root.findByProps({ children: '[image]' });
+    const placeholder = placeholderText.parent;
+    expect(placeholder.type).toBe('View');
+    expect(placeholder.props.accessible).toBe(false);
+    expect(placeholder.props.importantForAccessibility).toBe('no-hide-descendants');
+    // The label lives on the wrapper, which stays exposed.
+    const touchable = renderer.root.findByType('TouchableOpacity');
+    expect(touchable.props.accessibilityLabel).toBe('[image]');
+    expect(touchable.props.importantForAccessibility).toBe('yes');
+  });
+
+  // --- #232 fix 3: the inline fallback must carry the block placeholder's
+  // decorative flags, so `![](relative.png)` is muted inline too.
+  //
+  // Scope these assertions encode: the props only matter once the node has a
+  // native view of its own; the host's `selection` mode is what gives it one,
+  // by wrapping it in a <View> (the variant at the end pins that wrapper).
+  // Which platform then acts on them is up to RN's own text containers, so no
+  // claim is made here — in the default configuration an inline node stays
+  // inside the paragraph and its content is announced, or not, as part of that
+  // paragraph's text. The cases pin what the renderer emits. ---
+  it('flags an unlabeled inline relative-URL fallback as hidden', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'icon: ' },
+        { type: 'image', url: './icon.png', alt: '' },
+      ])
+    );
+
+    expect(renderer.root.findAllByType('Image')).toHaveLength(0);
+    const fallback = renderer.root.findByProps({ children: '[image]' });
+    expect(fallback.props.accessibilityElementsHidden).toBe(true);
+    expect(fallback.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+
+  it('wraps the inline fallback in a <View> once selection is enabled', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'icon: ' },
+        { type: 'image', url: './icon.png', alt: '' },
+      ]),
+      undefined,
+      undefined,
+      undefined,
+      {}
+    );
+
+    const fallback = renderer.root.findByProps({ children: '[image]' });
+    // A <View> resets TextAncestorContext, which is what stops RN from
+    // absorbing this node into the paragraph's text, which is what the flags
+    // above are for. Only the element type is asserted — pinning the wrapper's
+    // own props would break whenever rn-selection changes how it wraps, without
+    // the renderer's behaviour changing.
+    expect(fallback.parent?.type).toBe('View');
+    expect(fallback.props.accessibilityElementsHidden).toBe(true);
+    expect(fallback.props.importantForAccessibility).toBe('no-hide-descendants');
+  });
+
+  it('keeps a labeled inline relative-URL fallback announced (regression guard)', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'icon: ' },
+        { type: 'image', url: './icon.png', alt: 'local icon' },
+      ])
+    );
+
+    const fallback = renderer.root.findByProps({ children: 'local icon' });
+    expect(fallback.props.accessibilityElementsHidden).toBe(false);
+    expect(fallback.props.importantForAccessibility).toBe('yes');
+  });
+
+  // A link wraps inline images just like the block path, so a decorative
+  // inline image inside a link stays exposed — hiding it would leave the
+  // link without a readable name (same rule #224 applied to the block path).
+  it('keeps a decorative inline image inside a link exposed so the link keeps a readable name', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'see ' },
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [{ type: 'image', url: './icon.png', alt: '' }],
+        },
+        { type: 'text', value: ' now' },
+      ])
+    );
+
+    expect(renderer.root.findAllByType('Image')).toHaveLength(0);
+    const fallback = renderer.root.findByProps({ children: '[image]' });
+    expect(fallback.props.accessibilityElementsHidden).toBe(false);
+    expect(fallback.props.importantForAccessibility).toBe('yes');
+  });
+
+  it('names a decorative linked loadable inline image with the link URL, mirroring the block path', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'see ' },
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [{ type: 'image', url: 'https://example.com/icon.png', alt: '' }],
+        },
+        { type: 'text', value: ' now' },
+      ])
+    );
+
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessibilityElementsHidden).toBe(false);
+    expect(image.props.importantForAccessibility).toBe('yes');
+    // A wrapped decorative image is named by its link URL on the block path;
+    // the inline path follows the same chain instead of exposing an unnamed
+    // focusable node.
+    expect(image.props.accessibilityLabel).toBe('https://example.com/article');
+  });
+
+  // The link URL has to survive every inline wrapper between the link and the
+  // image — a missed hop would silently take the name away again.
+  const linkedThrough = (wrapper: string): SupramarkRootNode =>
+    ({
+      type: 'root',
+      ast_version: 2,
+      diagnostics: [],
+      children: [
+        {
+          type: 'paragraph',
+          children: [
+            { type: 'text', value: 'see ' },
+            {
+              type: 'link',
+              url: 'https://example.com/article',
+              children: [
+                {
+                  type: wrapper,
+                  children: [{ type: 'image', url: 'https://example.com/icon.png', alt: '' }],
+                },
+              ],
+            },
+            { type: 'text', value: ' now' },
+          ],
+        },
+      ],
+    }) as unknown as SupramarkRootNode;
+
+  for (const wrapper of ['strong', 'emphasis', 'delete']) {
+    it(`carries the link URL through a <${wrapper}> wrapper`, async () => {
+      const renderer = await renderAst(linkedThrough(wrapper));
+
+      const image = renderer.root.findByType('Image');
+      expect(image.props.accessibilityLabel).toBe('https://example.com/article');
+      expect(image.props.accessibilityElementsHidden).toBe(false);
+      expect(image.props.importantForAccessibility).toBe('yes');
+    });
+  }
+
+  // The flattenNestedStrong branch recurses through its own path in
+  // renderInlineNode's strong case, so the link URL has to survive that hop
+  // too — a missed pass-through would silently take the name away again.
+  it('carries the link URL through the flattenNestedStrong branch', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'see ' },
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [
+            {
+              type: 'strong',
+              children: [
+                {
+                  type: 'strong',
+                  children: [{ type: 'image', url: 'https://example.com/icon.png', alt: '' }],
+                },
+              ],
+            },
+          ],
+        },
+        { type: 'text', value: ' now' },
+      ]),
+      undefined,
+      { options: { flattenNestedStrong: true } }
+    );
+
+    // The flatten branch actually ran: the nested strong collapses into a
+    // single bold <Text> instead of rendering bold-on-bold.
+    const strongTexts = renderer.root
+      .findAllByType('Text')
+      .filter(
+        text => (text.props.style as { fontWeight?: string } | undefined)?.fontWeight === '700'
+      );
+    expect(strongTexts).toHaveLength(1);
+
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessibilityLabel).toBe('https://example.com/article');
+    expect(image.props.accessibilityElementsHidden).toBe(false);
+    expect(image.props.importantForAccessibility).toBe('yes');
+  });
+
+  it('prefers alt over the link URL for a linked inline image', async () => {
+    const renderer = await renderAst(
+      imageAst([
+        { type: 'text', value: 'see ' },
+        {
+          type: 'link',
+          url: 'https://example.com/article',
+          children: [{ type: 'image', url: 'https://example.com/icon.png', alt: 'icon' }],
+        },
+        { type: 'text', value: ' now' },
+      ])
+    );
+
+    const image = renderer.root.findByType('Image');
+    expect(image.props.accessibilityLabel).toBe('icon');
   });
 });

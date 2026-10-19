@@ -320,6 +320,160 @@ fn flowchart_134_isolated_cluster_has_browser_aligned_bounds() {
     let vb = viewbox(&svg);
     assert!(vb[2] > 1.0, "{rel} width should be non-empty: {vb:?}");
     assert!(vb[3] > 1.0, "{rel} height should be non-empty: {vb:?}");
+
+    // Regression guard: the viewBox used to be computed without the isolated
+    // cluster's inner-root translate, so the cluster — and everything below its
+    // row — landed outside the viewport (clipped by browsers, painted outside
+    // the host view on React Native). Every drawn cluster rect must sit inside.
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(!rects.is_empty(), "{rel} should emit cluster rects");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "{rel}: cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+    // The viewport tracks the drawing: the outermost cluster plus 8px padding.
+    assert!(
+        (vb[2] - 570.027).abs() < 0.5 && (vb[3] - 350.668).abs() < 0.5,
+        "{rel}: viewBox drifted to {vb:?}"
+    );
+}
+
+#[test]
+fn flowchart_isolated_cluster_below_the_node_row_stays_inside_the_viewbox() {
+    // The shape from the chat report: dagre places the subgraph below the node
+    // row, so the cluster is laid out recursively (isolated) and drawn inside a
+    // translated inner root. Computing the viewBox without that translate used to
+    // leave the cluster — and everything below its row — outside the viewport.
+    let svg = mermaid_little::convert_with_id(
+        "flowchart TB\n\
+         subgraph g[\"gate\"]\n     a[\"if: always()\"]\n     b[\"result != success\"]\n   end\n\
+         n0[\"rust\"] --> g\n   n1[\"test\"] --> g\n",
+        "t-isolated-cluster",
+    )
+    .expect("render isolated cluster");
+
+    let vb = viewbox(&svg);
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(!rects.is_empty(), "expected a cluster rect, got none");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+}
+
+#[test]
+fn flowchart_nested_isolated_clusters_stay_inside_the_viewbox() {
+    // Nested isolated clusters carry their placement in the parent's inner frame
+    // (dagre_bridge `outer_tx/outer_ty`), which the viewBox union has to compose
+    // the same way the inner-root emission does.
+    let svg = mermaid_little::convert_with_id(
+        "flowchart TB\n\
+         subgraph outer[\"outer\"]\n\
+           subgraph inner[\"inner\"]\n     n0[\"a\"]\n   end\n\
+           n1[\"b\"]\n\
+         end\n\
+         n2[\"c\"] --> outer\n",
+        "t-nested-cluster",
+    )
+    .expect("render nested clusters");
+
+    let vb = viewbox(&svg);
+    let rects = cluster_rects_in_viewbox_coords(&svg);
+    assert!(rects.len() >= 2, "expected both clusters, got {rects:?}");
+    for (x, y, w, h) in &rects {
+        assert!(
+            *x >= vb[0] - 0.5
+                && *y >= vb[1] - 0.5
+                && x + w <= vb[0] + vb[2] + 0.5
+                && y + h <= vb[1] + vb[3] + 0.5,
+            "nested cluster rect ({x}, {y}, {w}, {h}) falls outside viewBox {vb:?}"
+        );
+    }
+}
+
+/// Every cluster `<rect>`, in viewBox coordinates: the scan composes the
+/// `translate(...)` of each enclosing `<g>` (isolated clusters are drawn inside
+/// their own translated inner root) and only counts rects whose nearest
+/// ancestor `<g>` carries a `cluster` class.
+fn cluster_rects_in_viewbox_coords(svg: &str) -> Vec<(f64, f64, f64, f64)> {
+    let tag_re =
+        regex::Regex::new(r#"<(\/?)([A-Za-z][\w:.-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>"#)
+            .expect("tag regex");
+    let translate_re = regex::Regex::new(r#"translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)"#)
+        .expect("translate regex");
+    let attr_re = |attrs: &str, name: &str| -> Option<f64> {
+        regex::Regex::new(&format!(r#"\b{name}="([-\d.]+)""#))
+            .ok()?
+            .captures(attrs)?
+            .get(1)?
+            .as_str()
+            .parse::<f64>()
+            .ok()
+    };
+
+    let mut rects = Vec::new();
+    // Frame: (accumulated translate, translate of the nearest cluster ancestor).
+    let mut stack: Vec<((f64, f64), Option<(f64, f64)>)> = vec![((0.0, 0.0), None)];
+    for caps in tag_re.captures_iter(svg) {
+        let closing = &caps[1];
+        let name = caps[2].to_ascii_lowercase();
+        let attrs = &caps[3];
+        let self_closing = !caps[4].is_empty();
+
+        if !closing.is_empty() {
+            if stack.len() > 1 {
+                stack.pop();
+            }
+            continue;
+        }
+
+        let (parent_t, parent_cluster) = *stack.last().expect("stack frame");
+        let extra = translate_re
+            .captures(attrs)
+            .map(|c| {
+                (
+                    c[1].parse::<f64>().unwrap_or(0.0),
+                    c[2].parse::<f64>().unwrap_or(0.0),
+                )
+            })
+            .unwrap_or((0.0, 0.0));
+        let acc = (parent_t.0 + extra.0, parent_t.1 + extra.1);
+        let is_cluster =
+            attrs.contains(r#"class="cluster"#) || attrs.contains(r#"class="cluster "#);
+        let cluster_frame = if is_cluster {
+            Some(acc)
+        } else {
+            parent_cluster
+        };
+
+        if name == "rect" {
+            if let Some((cx, cy)) = cluster_frame {
+                if let (Some(x), Some(y), Some(w), Some(h)) = (
+                    attr_re(attrs, "x"),
+                    attr_re(attrs, "y"),
+                    attr_re(attrs, "width"),
+                    attr_re(attrs, "height"),
+                ) {
+                    rects.push((cx + x, cy + y, w, h));
+                }
+            }
+        }
+
+        if !self_closing {
+            stack.push((acc, cluster_frame));
+        }
+    }
+    rects
 }
 
 #[test]
@@ -573,4 +727,244 @@ fn dump_fixture_168_clusters() {
         let end = (idx + 200).min(got.len());
         eprintln!("\nEdge path fragment:\n{}", &got[start..end]);
     }
+}
+
+/// Issue #254: a label the browser clamps to `flowchart.wrappingWidth` has to
+/// be measured, laid out and emitted as the *wrapped* box.
+///
+/// Upstream measures the label `<div>` in a real DOM, where `max-width: 200px`
+/// shrinks it to 200 px; it then re-styles the div to
+/// `display: table; white-space: break-spaces; width: 200px`, which wraps the
+/// text inside 200 px, and sizes the node from that box. Measuring the
+/// un-clamped text instead reserves a 614.91 px node for a label the browser
+/// paints 200 px wide, flush with the box's left edge — its over-wide lines
+/// poking out of the border.
+#[test]
+fn clamped_html_label_matches_the_browser_box() {
+    // `wide` label, one line longer than the 200 px wrapping width:
+    //   python_codegen / unittest + protoc <mao yan> /
+    //   compileall <wu> legacy import <xie lou> / python -m build
+    // `narrow` stays inside the budget and must keep the un-clamped box.
+    let source = concat!(
+        "flowchart TD\n",
+        "    wide[\"python_codegen<br/>unittest + protoc \u{5192}\u{70DF}<br/>",
+        "compileall \u{65E0} legacy import \u{6CC4}\u{6F0F}<br/>python -m build\"]\n",
+        "    narrow[\"webrtc<br/>\u{771F}\u{5B9E} RTC \u{573A}\u{666F}\"]\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "issue-254").expect("render");
+    // The clamped node: 200 px label + 2 x 30 px label padding, five painted
+    // lines at line-height 24.
+    assert!(
+        svg.contains(r#"<foreignObject width="200" height="120" overflow="visible">"#),
+        "clamped label must be the wrapped 200 x 120 box"
+    );
+    assert!(
+        svg.contains(
+            r#"<div style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;""#
+        ),
+        "clamped label div must switch to the wrapping style"
+    );
+    assert!(
+        svg.contains(r#"x="-130" y="-75" width="260" height="150""#),
+        "node box must be sized from the wrapped label"
+    );
+    assert!(
+        !svg.contains(r#"<foreignObject width="614.9"#),
+        "the un-clamped label width must not reach the node box"
+    );
+    // The label that fits keeps `nowrap` and its measured width.
+    assert!(
+        svg.contains(r#"<div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;""#),
+        "labels inside the budget must keep the un-clamped style"
+    );
+}
+
+/// A subgraph title is an HTML label upstream never gives a `max-width`, so the
+/// browser never wraps it. Measuring it through the clamp made the viewBox
+/// narrower than the label the renderer paints, clipping a long title on both
+/// sides.
+#[test]
+fn cluster_labels_stay_unclamped() {
+    use mermaid_little::render::foreign_object::{
+        measure_html_markup_label, HtmlLabelFont, HTML_LABEL_WRAPPING_WIDTH,
+    };
+    // A title well past the wrapping width.
+    let title = "a very long subgraph title that goes past the two hundred pixel wrapping budget";
+    let source = format!("flowchart TD\n    subgraph SG[\"{title}\"]\n    a --> b\n    end\n");
+    let d = fcp::parse(&source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "cluster-clamp").expect("render");
+
+    assert!(
+        !svg.contains("break-spaces"),
+        "cluster labels must keep the un-clamped `nowrap` style"
+    );
+    let markup = mermaid_little::render::foreign_object::string_label_to_html(title);
+    let (label_w, _) = measure_html_markup_label(
+        &markup,
+        &HtmlLabelFont::default(),
+        HTML_LABEL_WRAPPING_WIDTH,
+        true,
+    );
+    assert!(label_w > HTML_LABEL_WRAPPING_WIDTH, "fixture must overflow");
+    let label_fo = format!(
+        r#"<foreignObject width="{}""#,
+        mermaid_little::render::shapes::types::fmt_num(label_w)
+    );
+    assert!(
+        svg.contains(&label_fo),
+        "the emitted label must be the un-clamped box ({label_w})"
+    );
+    // And the viewBox has to cover it.
+    let vb = viewbox(&svg);
+    assert!(
+        vb[2] >= label_w,
+        "viewBox width {} must cover the {} px label",
+        vb[2],
+        label_w
+    );
+}
+
+/// The `font-size` / `bold` post-process passes rewrite the label's
+/// foreignObject numbers by literal needle replacement, so they must resolve
+/// the clamp exactly as the measurement that produced those numbers did. A
+/// demoted empty cluster is not clamped: measuring it clamped made every needle
+/// miss, silently dropping the patch while the `<div>` kept its
+/// `font-size: 30px !important`.
+#[test]
+fn postprocess_patches_match_the_unclamped_label_it_emitted() {
+    use mermaid_little::render::foreign_object::{
+        measure_html_markup_label, HtmlLabelFont, HTML_LABEL_WRAPPING_WIDTH,
+    };
+    let title = "a very long subgraph title that goes past the two hundred pixel wrapping budget";
+    let source = format!(
+        "flowchart TD\n    subgraph SG[\"{title}\"]\n    end\n    classDef big font-size:30px\n    class SG big\n"
+    );
+    let d = fcp::parse(&source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "cluster-fontsize").expect("render");
+
+    assert!(
+        svg.contains("font-size: 30px !important"),
+        "fixture must carry the size override"
+    );
+    let markup = mermaid_little::render::foreign_object::string_label_to_html(title);
+    let sized = HtmlLabelFont {
+        font_family: None,
+        font_size_px: Some(30.0),
+        bold: None,
+    };
+    let (w30, _) = measure_html_markup_label(&markup, &sized, HTML_LABEL_WRAPPING_WIDTH, true);
+    assert!(
+        svg.contains(&format!(
+            r#"<foreignObject width="{}""#,
+            mermaid_little::render::shapes::types::fmt_num(w30)
+        )),
+        "the post-process patch must land on the 30 px geometry ({w30})"
+    );
+    // The label `<g>` carries the size override, i.e. the pass ran and its
+    // needle for the group matched. (Its translate stays at the default-font
+    // centre — pre-existing behaviour, byte-identical to HEAD.)
+    assert!(
+        svg.contains(r#"<g class="label" style="font-size:30px !important""#),
+        "the pass must also stamp the size on the label group"
+    );
+}
+
+/// A label that only overflows at its own inline `font-size` must still clamp:
+/// the shape emitters have to decide the clamp in the same font domain the
+/// layout reserved the box in, or the layout wraps it while the emitted `<div>`
+/// stays `nowrap` and a CSS-aware host paints the larger text out of the box.
+#[test]
+fn styled_polygon_label_clamps_in_the_rendered_font() {
+    // The label has to overflow *only* at 30 px (~169 px at 16 px, ~317 px at
+    // 30 px): one that overflows in both domains passes even without the fix.
+    let source = concat!(
+        "flowchart TD\n",
+        "    classDef big font-size:30px\n",
+        "    a{{\"fits at sixteen px\"}}:::big\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "styled-polygon").expect("render");
+
+    // The size pass prefixes the div; the clamp has to have switched it to the
+    // wrapping style underneath that prefix.
+    assert!(
+        svg.contains("font-size: 30px !important; display: table; white-space: break-spaces;"),
+        "a label clamped at 30 px must carry the wrapping style"
+    );
+    assert!(
+        svg.contains(r#"<foreignObject width="200""#),
+        "the box must be the wrapping width"
+    );
+    // The size pass's number needles only match default-font geometry, which a
+    // clamped label no longer emits — the label group still has to carry the
+    // size.
+    assert!(
+        svg.contains(r#"<g class="label" style="font-size:30px !important""#),
+        "the label group must keep the size stamp"
+    );
+}
+
+/// `diamond_br_postprocess` rewrites the polygon to the size dagre laid out. It
+/// recomputes the numbers it searches for, so with a styled node it has to use
+/// the same font the shape drew with — otherwise the needle misses and the
+/// polygon keeps the drawn size while every edge endpoint was intersected
+/// against the laid-out one.
+#[test]
+fn diamond_br_postprocess_matches_a_styled_drawing() {
+    let source = concat!(
+        "flowchart TD\n",
+        "    classDef big font-size:30px\n",
+        "    a{\"diamond<br/>a longer label that overflows at thirty px\"}:::big\n",
+    );
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "styled-diamond").expect("render");
+
+    // 455 is the diamond size `measure_vertex_box` laid out for this label; the
+    // shape draws 496.54 when the post-process cannot find its needles.
+    assert!(
+        svg.contains(r#"points="227.5,0 455,-227.5 227.5,-455 0,-227.5""#),
+        "the polygon must be the laid-out diamond, not the drawn one"
+    );
+}
+
+/// A KaTeX label is measured from the *rendered* math, so the clamp — which
+/// measures the label's HTML — must not replace that box with the `$$..$$`
+/// source's (the renderer emits the KaTeX geometry).
+#[cfg(feature = "katex")]
+#[test]
+fn katex_node_label_keeps_the_rendered_math_box() {
+    let source = "flowchart TD\n    a[\"$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$\"]\n";
+    let d = fcp::parse(source).expect("parse");
+    let th = theme::get_theme("default");
+    let l = fcl::layout(&d, &th, false).expect("layout");
+    let svg = svg_flowchart::render(&d, &l, &th, "katex-clamp").expect("render");
+
+    let rect_w: f64 = svg
+        .split(r#"<rect class="basic label-container" style="" x=""#)
+        .nth(1)
+        .and_then(|rest| rest.split("width=\"").nth(1))
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|w| w.parse().ok())
+        .expect("node rect");
+    let fo_w: f64 = svg
+        .split("<foreignObject width=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|w| w.parse().ok())
+        .expect("label foreignObject");
+    assert!(
+        rect_w >= fo_w,
+        "the node box ({rect_w}) must contain the rendered KaTeX label ({fo_w})"
+    );
 }

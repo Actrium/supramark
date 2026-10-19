@@ -90,6 +90,15 @@ jobs:
       - name: ESLint + feature linter
         run: bun run lint
 
+      # scripts/ is type-checked nowhere else in CI and never gets built, so its
+      # config had drifted into reporting errors on correct code — see the
+      # comments in scripts/tsconfig.json. Runs in the Lint job, a required
+      # status check, so the gate blocks a merge. Like the CJK check below, it
+      # runs even when eslint failed, so a type error is named on its own.
+      - name: Type-check scripts
+        if: always()
+        run: bun run lint:scripts
+
       # Deliberately its own step rather than only riding inside `bun run lint`,
       # so a language violation is named in the check list instead of being
       # reported as a generic lint failure. It also still runs when eslint is
@@ -166,8 +175,13 @@ jobs:
       - name: Run core tests (coverage)
         run: bun run test:core -- --coverage
 
-      - name: Run workspace tests (features / renderers / engines)
-        run: bun run --filter '@supramark/feature-*' --filter '@supramark/rn' --filter '@supramark/engines' --if-present test
+      # The `example-*` filter pulls in examples/react-web-csr, whose
+      # playground-routes.test.ts guards the route table the web preview builds
+      # its URLs from. Nothing else in CI ran that package's tests, so those
+      # assertions were local-only feedback. `--if-present` skips example
+      # packages that declare no test script.
+      - name: Run workspace tests (features / renderers / engines / examples)
+        run: bun run --filter '@supramark/feature-*' --filter '@supramark/rn' --filter '@supramark/engines' --filter '@supramark/example-*' --if-present test
 
       - name: Upload coverage to Codecov
         if: matrix.node-version == '20.x'

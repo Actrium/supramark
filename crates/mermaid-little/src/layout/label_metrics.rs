@@ -30,6 +30,35 @@ pub fn cjk_aware_label_width(text: &str, measured: f64) -> f64 {
     measured.max(per_glyph)
 }
 
+/// Width estimate for one painted line: the shim width, topped up by each
+/// *wide* glyph's deficit — a browser paints CJK and other wide glyphs at 1em
+/// while the shim's fallback metrics give them ~0.33em, so every wide glyph is
+/// under-measured by roughly the same amount.
+///
+/// Narrow glyphs keep the shim's own width. [`cjk_aware_label_width`] instead
+/// bills every glyph a flat 0.56em, which badly over-estimates narrow ones
+/// (`i`, `l`, `.`, `,` measure ~0.28em) and reports labels as over-budget that
+/// a browser leaves alone — a false clamp, and a node box grown for text that
+/// never wraps.
+pub fn painted_line_width(
+    text: &str,
+    measured: f64,
+    em: f64,
+    glyph_width: &dyn Fn(char) -> f64,
+) -> f64 {
+    let mut deficit = 0.0f64;
+    for ch in text.chars() {
+        if !is_wide_glyph(ch) {
+            continue;
+        }
+        let shim = glyph_width(ch);
+        if em > shim {
+            deficit += em - shim;
+        }
+    }
+    measured + deficit
+}
+
 /// Whether a glyph renders ~1em wide and is thus under-measured by the shim.
 /// Used both inside [`cjk_aware_label_width`] and to cheaply gate the floor on
 /// "label contains at least one wide glyph", so pure-Latin diagrams are not
@@ -165,6 +194,105 @@ pub fn split_label_lines(s: &str) -> Vec<&str> {
     if lines.is_empty() {
         lines.push("");
     }
+    lines
+}
+
+/// Whitespace a browser may break a line at.
+///
+/// `char::is_whitespace` is too broad for that: the no-break spaces (`U+00A0`
+/// no-break space, `U+202F` narrow no-break space) are White_Space property
+/// members that CSS explicitly forbids breaking at — they glue the words on
+/// either side together, so `break-spaces` keeps them inside one run and the
+/// whole run moves to the next line together.
+pub fn is_breakable_space(c: char) -> bool {
+    c.is_whitespace() && !matches!(c, '\u{00A0}' | '\u{202F}')
+}
+
+/// `s` without its trailing breakable spaces: the part of a line that
+/// contributes to a `break-spaces` box's min-content width, since the trailing
+/// spaces that end a line are allowed to run past its edge.
+pub fn trim_trailing_breakable_spaces(s: &str) -> &str {
+    let mut end = s.len();
+    while end > 0 {
+        let c = s[..end].chars().next_back().unwrap();
+        if !is_breakable_space(c) {
+            break;
+        }
+        end -= c.len_utf8();
+    }
+    &s[..end]
+}
+
+/// Greedy line breaking for one painted line of an HTML label — the
+/// algorithm a browser runs when the label `<div>` is clamped to
+/// `max-width` (`white-space: break-spaces`, `word-break: normal`,
+/// `overflow-wrap: normal`):
+///
+/// - a break opportunity sits after every run of breakable whitespace, so
+///   spaces move to the end of the line they were typed on (break-spaces
+///   preserves them);
+/// - CJK and other wide glyphs may break between any two characters;
+/// - a single word wider than the whole budget is never broken — it takes a
+///   line of its own and overflows, exactly as `overflow-wrap: normal` does.
+///
+/// `width_of` is supplied by the caller so the same algorithm serves both
+/// metric domains the crate keeps apart: the layout shim (14 px label font)
+/// and the rendered browser one (16 px, see
+/// [`crate::render::foreign_object::HTML_LABEL_FONT_SIZE`]).
+///
+/// Returns one slice per painted line; always at least one.
+pub fn wrap_line_to_width<'a>(
+    line: &'a str,
+    max_width: f64,
+    width_of: &dyn Fn(&str) -> f64,
+) -> Vec<&'a str> {
+    // A segment is the smallest run that can be moved to the next line
+    // whole: a word, one wide glyph, or a whitespace run — each followed by
+    // the whitespace that makes the break opportunity after it.
+    let mut segments: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < line.len() {
+        let start = i;
+        let c = line[i..].chars().next().unwrap();
+        i += c.len_utf8();
+        if !is_breakable_space(c) && !is_wide_glyph(c) {
+            // A word: consume until breakable whitespace or a wide glyph,
+            // which may break on either side of itself. No-break spaces stay
+            // inside the word — that is what makes them no-break.
+            while i < line.len() {
+                let c = line[i..].chars().next().unwrap();
+                if is_breakable_space(c) || is_wide_glyph(c) {
+                    break;
+                }
+                i += c.len_utf8();
+            }
+        }
+        // Absorb the trailing whitespace: the break lands after it.
+        while i < line.len() {
+            let c = line[i..].chars().next().unwrap();
+            if !is_breakable_space(c) {
+                break;
+            }
+            i += c.len_utf8();
+        }
+        segments.push((start, i));
+    }
+
+    let mut lines: Vec<&'a str> = Vec::new();
+    let mut line_start = 0;
+    let mut line_width = 0.0f64;
+    for (start, end) in segments {
+        let w = width_of(&line[start..end]);
+        // An over-wide segment still opens a line of its own rather than
+        // being broken (`overflow-wrap: normal`).
+        if line_width > 0.0 && line_width + w > max_width {
+            lines.push(&line[line_start..start]);
+            line_start = start;
+            line_width = 0.0;
+        }
+        line_width += w;
+    }
+    lines.push(&line[line_start..]);
     lines
 }
 
@@ -444,5 +572,82 @@ mod tests {
             edge_label_plain_text(ent, false),
             "\u{8D26}\u{6237}&\u{540C}\u{6B65}"
         );
+    }
+
+    /// Width model for the wrapping tests: a wide glyph is two units, every
+    /// other char one — the same shape as the real metrics, at a scale that
+    /// keeps the expected line breaks readable.
+    fn unit_width(s: &str) -> f64 {
+        s.chars()
+            .map(|c| if is_wide_glyph(c) { 2.0 } else { 1.0 })
+            .sum()
+    }
+
+    #[test]
+    fn wraps_at_whitespace_keeping_the_space_on_the_earlier_line() {
+        let lines = wrap_line_to_width("aaaa bbbb cccc", 10.0, &unit_width);
+        // `break-spaces` keeps the space that ends the first line.
+        assert_eq!(lines, vec!["aaaa bbbb ", "cccc"]);
+    }
+
+    #[test]
+    fn wraps_between_ideographs() {
+        // 4 ideographs + 3 latin glyphs; budget 4 units.
+        let lines = wrap_line_to_width("\u{8D26}\u{6237}RTC\u{540C}\u{6B65}", 4.0, &unit_width);
+        assert_eq!(lines, vec!["\u{8D26}\u{6237}", "RTC", "\u{540C}\u{6B65}"]);
+    }
+
+    #[test]
+    fn never_breaks_a_word_wider_than_the_budget() {
+        // `overflow-wrap: normal` — the word overflows instead of breaking.
+        let lines = wrap_line_to_width("abcdefghij", 4.0, &unit_width);
+        assert_eq!(lines, vec!["abcdefghij"]);
+    }
+
+    #[test]
+    fn no_break_spaces_are_not_break_opportunities() {
+        // U+00A0 glues its neighbours: `break-spaces` never breaks there, so
+        // the whole run moves together even though each word fits alone.
+        let line = "alpha\u{00A0}beta gamma";
+        let no_nbsp = wrap_line_to_width(line, 11.0, &unit_width);
+        assert_eq!(no_nbsp, vec!["alpha\u{00A0}beta ", "gamma"]);
+        // With a breakable space in the same place the run splits.
+        assert_eq!(
+            wrap_line_to_width("alpha beta gamma", 11.0, &unit_width),
+            vec!["alpha beta ", "gamma"]
+        );
+    }
+
+    #[test]
+    fn trailing_breakable_spaces_do_not_set_min_content_width() {
+        assert_eq!(trim_trailing_breakable_spaces("word  "), "word");
+        // A trailing no-break space is painted inside the run, not hung.
+        assert_eq!(
+            trim_trailing_breakable_spaces("word\u{00A0}"),
+            "word\u{00A0}"
+        );
+    }
+
+    #[test]
+    fn painted_line_width_tops_up_wide_glyphs_only() {
+        // Narrow glyphs keep the shim width: no wide glyph, no top-up.
+        assert_eq!(painted_line_width("iiii", 100.0, 16.0, &|_| 4.0), 100.0);
+        // Each wide glyph is topped up to 1em; a glyph the shim already
+        // measures at or above 1em is left alone.
+        assert_eq!(painted_line_width("\u{4E2D}", 5.0, 16.0, &|_| 5.0), 16.0);
+        assert_eq!(painted_line_width("\u{4E2D}", 20.0, 16.0, &|_| 20.0), 20.0);
+    }
+
+    #[test]
+    fn empty_line_paints_one_line() {
+        assert_eq!(wrap_line_to_width("", 10.0, &unit_width), vec![""]);
+    }
+
+    #[test]
+    fn wrapping_preserves_every_painted_glyph() {
+        let src = "python_codegen unittest + protoc \u{5192}\u{70DF} compileall";
+        let lines = wrap_line_to_width(src, 25.0, &unit_width);
+        assert_eq!(lines.concat(), src);
+        assert!(lines.len() > 1);
     }
 }

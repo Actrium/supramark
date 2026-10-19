@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type discoverFeaturePackages, findFeaturePackageByShortName } from './lib-feature-layout';
+import { type FeaturePackageInfo, findFeaturePackageByShortName } from './lib-feature-layout';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,7 +44,7 @@ function generateIndexPage(): string {
 }
 
 function generateFeatureDoc(
-  pkg: ReturnType<typeof discoverFeaturePackages extends (infer T)[] ? T : never>,
+  pkg: FeaturePackageInfo,
   featureName: string,
   featurePath: string
 ): string {

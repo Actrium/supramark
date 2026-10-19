@@ -1,7 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   type LayoutChangeEvent,
   StyleSheet,
   Text,
@@ -93,10 +92,10 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
     deferRender ? null : (diagramCache?.get(diagramCacheKey)?.svg ?? null)
   );
   const [error, setError] = useState<string | null>(null);
-  // Actual container width: the diagram should follow its parent container
-  // (e.g. a narrow container like a chat bubble) rather than rendering
-  // straight to the screen width, otherwise it would drift right or
-  // overflow. 0 means not yet measured; rendering falls back to the screen width.
+  // Width granted by the container, reported by the diagram box's own onLayout.
+  // Placeholder states deliberately do not report: they shrink-wrap their own
+  // spinner/text, so their width is not the container's and would poison the
+  // first frame's box height.
   const [measuredWidth, setMeasuredWidth] = useState<number>(0);
 
   const handleLayout = (event: LayoutChangeEvent) => {
@@ -182,7 +181,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
 
   if (deferRender) {
     return (
-      <View style={styles.placeholder} onLayout={handleLayout} testID="supramark-diagram-receiving">
+      <View style={styles.placeholder} testID="supramark-diagram-receiving">
         <ActivityIndicator size="small" />
         <Text style={styles.placeholderText}>Receiving diagram ({node.engine})…</Text>
       </View>
@@ -191,7 +190,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
 
   if (!svg && !error) {
     return (
-      <View style={styles.placeholder} onLayout={handleLayout} testID="supramark-diagram-rendering">
+      <View style={styles.placeholder} testID="supramark-diagram-rendering">
         <ActivityIndicator size="small" />
         <Text style={styles.placeholderText}>Rendering diagram ({node.engine})…</Text>
       </View>
@@ -200,7 +199,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
 
   if (error) {
     return (
-      <View style={styles.placeholder} onLayout={handleLayout} testID="supramark-diagram-error">
+      <View style={styles.placeholder} testID="supramark-diagram-error">
         <Text style={styles.errorText}>Diagram render error: {error}</Text>
       </View>
     );
@@ -211,19 +210,6 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
     const widthAttrMatch = svg.match(/<svg[^>]*\bwidth="([^"]+)"/);
     const heightAttrMatch = svg.match(/<svg[^>]*\bheight="([^"]+)"/);
 
-    const { width: screenWidth } = Dimensions.get('window');
-    // Diagram width cap: 90% of the screen width, leaving room for the
-    // bubble's padding so the diagram doesn't touch the edge.
-    // Uses a percentage rather than a fixed pixel value to adapt to different hosts' padding.
-    // diagram.maxWidth (host config) caps it further for containers narrower
-    // than the window (e.g. a desktop chat bubble with a fixed maxWidth);
-    // unset keeps the screen-derived cap alone.
-    const maxChartWidth = Math.min(
-      screenWidth * 0.9,
-      typeof diagramConfig?.maxWidth === 'number' && diagramConfig.maxWidth > 0
-        ? diagramConfig.maxWidth
-        : Number.POSITIVE_INFINITY
-    );
     let svgWidth = 0;
     let svgHeight = 0;
 
@@ -238,25 +224,48 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
     if (svgWidth <= 0 && widthAttrMatch) svgWidth = parseFloat(widthAttrMatch[1]);
     if (svgHeight <= 0 && heightAttrMatch) svgHeight = parseFloat(heightAttrMatch[1]);
 
-    // Diagram display width: take the SVG's intrinsic width, clamped to
-    // [maxChartWidth×0.6, maxChartWidth].
-    // The diagram proactively declares a width to expand the bubble (solving
-    // the collapse that happens because width:100% has nothing to expand
-    // against in a diagram-only message bubble); the value is derived from
-    // the SVG's intrinsic attributes, doesn't depend on onLayout, and forms
-    // no feedback loop with the parent container (unlike the old code, which
-    // used width:containerWidth measured back from the parent via onLayout).
-    const minChartWidth = maxChartWidth * 0.6;
-    const intrinsicWidth = svgWidth > 0
+    // Display size = the SVG's intrinsic width, capped by the host config and by
+    // the height budget; the *container* may narrow it further through the
+    // `maxWidth: '100%'` in styles.diagram.
+    // Declaring the intrinsic width (rather than `width: '100%'`) keeps
+    // shrink-wrapped parents — a chat bubble with only a max width — expanding,
+    // while the container cap stops the diagram from ever painting outside it.
+    // Window/screen dimensions are deliberately not consulted: they describe the
+    // host window, not the container the diagram is rendered into.
+    const hostCap =
+      typeof diagramConfig?.maxWidth === 'number' &&
+      Number.isFinite(diagramConfig.maxWidth) &&
+      diagramConfig.maxWidth > 0
+        ? diagramConfig.maxWidth
+        : Number.POSITIVE_INFINITY;
+    // Trim the width instead of clamping the height so the box keeps the SVG's
+    // exact aspect ratio (a clamped height letterboxes the drawing).
+    const heightLimitedWidth =
+      isPositiveFinite(svgWidth) && isPositiveFinite(svgHeight)
+        ? (MAX_DIAGRAM_HEIGHT * svgWidth) / svgHeight
+        : Number.POSITIVE_INFINITY;
+    // No usable intrinsic width (malformed SVG): fall back to the width measured
+    // on the previous layout, else a fixed width. Never `width: '100%'` — that
+    // resolves to 0 in a shrink-wrapped chain and would collapse the bubble.
+    const intrinsicWidth = isPositiveFinite(svgWidth)
       ? svgWidth
-      : (measuredWidth > 0 ? measuredWidth : maxChartWidth);
-    const chartWidth = Math.max(minChartWidth, Math.min(maxChartWidth, intrinsicWidth));
-
-    let height = 300;
-    if (svgWidth > 0 && svgHeight > 0) {
-      height = (svgHeight / svgWidth) * chartWidth;
-      height = Math.min(height, 500);
-    }
+      : measuredWidth > 0
+        ? measuredWidth
+        : FALLBACK_DIAGRAM_WIDTH;
+    const declaredWidth = Math.min(intrinsicWidth, hostCap, heightLimitedWidth);
+    const aspectRatio =
+      isPositiveFinite(svgWidth) && isPositiveFinite(svgHeight)
+        ? svgWidth / svgHeight
+        : undefined;
+    // Yoga derives an `aspectRatio` height from the *declared* width, not from
+    // the width the container actually grants: the maxWidth clamp lands on the
+    // cross axis in a column parent (the chat bubble), leaving the box taller
+    // than the drawing and the surplus as blank space. onLayout reports the
+    // granted width, so the height is derived from it here instead. The width
+    // never depends on the height, so this settles in a single pass.
+    const grantedWidth =
+      measuredWidth > 0 ? Math.min(measuredWidth, declaredWidth) : declaredWidth;
+    const boxHeight = aspectRatio === undefined ? FALLBACK_DIAGRAM_HEIGHT : grantedWidth / aspectRatio;
 
     let scalableSvg = svg;
     if (!viewBoxMatch && svgWidth > 0 && svgHeight > 0) {
@@ -270,14 +279,14 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
 
     return (
       <View
-        style={[styles.diagram, { width: chartWidth, height }]}
+        style={[styles.diagram, { width: declaredWidth, height: boxHeight }]}
         onLayout={handleLayout}
         testID="supramark-diagram-svg"
       >
         <SvgXml
           xml={scalableSvg}
-          width={chartWidth}
-          height={height}
+          width="100%"
+          height="100%"
           preserveAspectRatio="xMidYMid meet"
         />
       </View>
@@ -337,8 +346,33 @@ function buildRenderOptions(
   return { ...base, ...meta };
 }
 
+// Engines lay tall diagrams out at their intrinsic width; without a budget a
+// vertical flowchart would occupy an unbounded amount of the host's scroll
+// view. The width is trimmed to honour this, so the aspect ratio stays exact.
+const MAX_DIAGRAM_HEIGHT = 500;
+
+// Size used when the SVG exposes no usable intrinsic width/height.
+const FALLBACK_DIAGRAM_WIDTH = 300;
+const FALLBACK_DIAGRAM_HEIGHT = 300;
+
+/** True for a finite, positive number — the only values usable as a size. */
+function isPositiveFinite(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
 const styles = StyleSheet.create({
-  diagram: {},
+  diagram: {
+    // The container owns the final width: a diagram narrower than the host
+    // window (a chat bubble, a card, a side panel) must never paint outside it.
+    maxWidth: '100%',
+    // Deliberately not clipped. A viewport clip only matches a browser when the
+    // engine's viewBox actually covers the drawing; where it does not (engines
+    // have gaps here — see the flowchart cluster bounds fix in
+    // crates/mermaid-little), clipping would silently truncate the diagram
+    // instead of showing it whole. Hosts render the full drawing.
+    // The engine's own bounds are covered by regression tests there
+    // (flowchart_*_stay_inside_the_viewbox).
+  },
   placeholder: {
     width: '100%',
     padding: 8,

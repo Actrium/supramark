@@ -42,21 +42,13 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
         // which strips tags via the textContent rule. For plain labels
         // (no `<i>` injected) keep `measure_html_label` for the
         // existing markdown-marker / `\n` semantics.
-        if for_measure.contains("<i ") {
-            crate::render::foreign_object::measure_html_markup_label(
-                &for_measure,
-                &crate::render::foreign_object::HtmlLabelFont::default(),
-                200.0,
-                true,
-            )
-        } else {
-            crate::render::foreign_object::measure_html_label(
-                &for_measure,
-                &crate::render::foreign_object::HtmlLabelFont::default(),
-                200.0,
-                true,
-            )
-        }
+        let (w, h, _clamped) = crate::render::shapes::types::measure_node_label(
+            node,
+            &for_measure,
+            &crate::render::foreign_object::HtmlLabelFont::default(),
+            !for_measure.contains("<i "),
+        );
+        (w, h)
     };
     let p = node.padding.unwrap_or(15.0);
     let w = bbox_w + p;
@@ -117,6 +109,7 @@ pub fn draw(node: &Node, _theme: &ThemeVariables) -> Result<String> {
                 &xml_escape_label(&label),
                 &crate::render::foreign_object::HtmlLabelFont::default(),
                 css_styles,
+                node.clamp_html_label,
             ),
         );
     }

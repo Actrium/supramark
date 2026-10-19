@@ -43,12 +43,13 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
         String::new()
     };
     let font = crate::render::foreign_object::HtmlLabelFont::default();
-    let (lw, lh) = if has_label {
-        crate::render::foreign_object::measure_html_markup_label(&for_measure, &font, 200.0, true)
+    let (lw, lh, clamped) = if has_label {
+        crate::render::shapes::types::measure_node_label(node, &for_measure, &font, false)
     } else {
         (
             0.0,
             crate::render::foreign_object::measure_html_markup_label("", &font, 200.0, true).1,
+            false,
         )
     };
 
@@ -88,8 +89,18 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
     } else {
         String::new()
     };
+    // A clamped label swaps `nowrap` for upstream's wrapping style, exactly as
+    // `foreign_object_body` does (this shape emits its own div template).
+    let div_style = if clamped {
+        format!(
+            "display: table; white-space: break-spaces; line-height: 1.5; max-width: {w}px; text-align: center; width: {w}px;",
+            w = fmt_num(crate::render::foreign_object::HTML_LABEL_WRAPPING_WIDTH)
+        )
+    } else {
+        "display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;".to_string()
+    };
     out.push_str(&format!(
-        r#"<g class="label" style="" transform="translate({ltx},{lty})"><rect></rect><foreignObject width="{lw}" height="{lh}"><div style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="nodeLabel {md_cls}">{label_html}</span></div></foreignObject></g>"#,
+        r#"<g class="label" style="" transform="translate({ltx},{lty})"><rect></rect><foreignObject width="{lw}" height="{lh}"><div style="{div_style}" xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"><span class="nodeLabel {md_cls}">{label_html}</span></div></foreignObject></g>"#,
         ltx = label_translate_x,
         lty = label_translate_y,
         lw = fmt_num(lw),
@@ -100,6 +111,7 @@ pub fn draw(node: &Node, theme: &ThemeVariables) -> Result<String> {
             ""
         },
         label_html = inner_html,
+        div_style = div_style,
     ));
 
     let bw_half = fmt_num(bounding_w / 2.0);
