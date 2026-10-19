@@ -18,7 +18,7 @@ import type {
   SupramarkTableNode,
   SupramarkTableRowNode,
 } from '@supramark/core';
-import { isInlineNode } from '@supramark/core';
+import { fenceMarkdown, isInlineNode } from '@supramark/core';
 import type {
   SelectionAtomUnit,
   SelectionBoundaryUnit,
@@ -393,7 +393,7 @@ function linearizeNode(
     }
     case 'diagram': {
       if (options.rendersAsText?.(node) === true) {
-        const fenced = '```' + node.engine + '\n' + node.code + '\n```';
+        const fenced = fenceMarkdown(node.engine, node.code);
         const units = [
           renderedSourceUnit(nodeId, node, node.code, fenced),
           breakUnit(makeUnitId(nodeId, 1), nodeId, 'block', node),
@@ -552,9 +552,10 @@ function linearizeListItem(
 }
 
 function linearizeCodeBlock(code: SupramarkCodeNode, nodeId: SelectionNodeId): SelectionUnit[] {
-  const fence = '```';
+  // One fence builder for the whole repo: the fullscreen action hands a host the
+  // same Markdown this copies, including the single terminating newline.
   const info = code.lang ? code.lang + (code.meta ? ` ${code.meta}` : '') : '';
-  const markdown = `${fence}${info}\n${code.value}\n${fence}`;
+  const markdown = fenceMarkdown(info, code.value);
   // The canonical double-representation example: `text` is the raw code, while
   // the payload carries the fenced markdown/source.
   return [
@@ -598,7 +599,7 @@ function mathAtom(
 }
 
 function diagramAtom(node: SupramarkDiagramNode, nodeId: SelectionNodeId): SelectionAtomUnit {
-  const markdown = `\`\`\`${node.engine}\n${node.code}\n\`\`\``;
+  const markdown = fenceMarkdown(node.engine, node.code);
   return {
     kind: 'atom',
     unitId: makeUnitId(nodeId, 0),
