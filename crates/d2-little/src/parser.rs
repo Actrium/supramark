@@ -1134,6 +1134,12 @@ impl Parser {
                         });
                         sb.clear();
                         rawb.clear();
+                        // `last_pattern_index` is an offset into `sb`, so
+                        // clearing `sb` invalidates it. Without this reset the
+                        // next glob segment slices the refilled buffer (or the
+                        // trimmed value) at a stale offset — out of bounds on
+                        // pure ASCII, mid-character on multi-byte input.
+                        last_pattern_index = 0;
                     }
                     value_parts.push(InterpolationBox {
                         string: None,
