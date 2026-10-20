@@ -441,3 +441,31 @@ describe('selection rendering policy regressions', () => {
     await act(async () => r.unmount());
   });
 });
+
+
+describe('WikiLink selection integration', () => {
+  it('matches visible labels and invalidates the plan when the feature is disabled', async () => {
+    const ast: SupramarkRootNode = {
+      type: 'root', ast_version: 2, diagnostics: [], children: [{
+        type: 'paragraph', children: [
+          { type: 'text', value: 'Before ' },
+          { type: 'wiki_link', target: 'Note', section: 'Heading', label: 'Label' },
+          { type: 'text', value: ' after' },
+        ],
+      }],
+    };
+    const config = (enabled: boolean) => ({
+      features: [{ id: '@supramark/feature-wikilink', enabled }],
+    });
+    const r = await renderTree({ ast, config: config(true), selection: {} });
+    const before = r.root.findByType(SelectionRoot).props.units;
+    const selectedText = () => r.root.findByType(SelectionRoot).props.units
+      .filter((unit: { kind: string }) => unit.kind === 'text')
+      .map((unit: { text: string }) => unit.text).join('');
+    expect(selectedText()).toBe('Before Label after');
+    await updateTree(r, { ast, config: config(false), selection: {} });
+    expect(selectedText()).toBe('Before [[Note#Heading|Label]] after');
+    expect(r.root.findByType(SelectionRoot).props.units).not.toBe(before);
+    await act(async () => { r.unmount(); });
+  });
+});

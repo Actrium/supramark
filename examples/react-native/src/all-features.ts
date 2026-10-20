@@ -25,6 +25,7 @@ import { mathFeature } from '@supramark/feature-math';
 import { codeHighlightPresetFullFeature } from '@supramark/feature-code-highlight-preset-full';
 import { codeHighlightPresetDocsFeature } from '@supramark/feature-code-highlight-preset-docs';
 import { definitionListFeature } from '@supramark/feature-definition-list';
+import { wikilinkFeature } from '@supramark/feature-wikilink';
 import { footnoteFeature } from '@supramark/feature-footnote';
 import { gfmFeature } from '@supramark/feature-gfm';
 
@@ -49,6 +50,7 @@ export const allFeatures = [
   codeHighlightPresetFullFeature,
   codeHighlightPresetDocsFeature,
   definitionListFeature,
+  wikilinkFeature,
   footnoteFeature,
   gfmFeature
 ];
