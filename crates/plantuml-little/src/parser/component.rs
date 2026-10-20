@@ -424,14 +424,17 @@ pub fn parse_component_diagram(source: &str) -> Result<ComponentDiagram> {
 // Entity declaration parsing
 // ---------------------------------------------------------------------------
 
-/// Reject a leaf declaration that reuses the id of the group it is declared in.
+/// Reject a leaf declaration whose id is already used by **any** enclosing
+/// group.
 ///
-/// Java reports `Error line N` for `rectangle web { component web }` and
-/// `package p { component p }`. The same shape used to build a self-referential
-/// parent chain here (and an uncatchable stack overflow in the renderer).
-/// Nested same-named *containers* stay allowed, matching Java.
+/// The jar reports an error page for `rectangle web { component web }` and
+/// `package p { component p }`, and for the outer-group case
+/// `rectangle a { rectangle b { component a } }` as well; a clash with an outer
+/// name is the same "already defined" rule. The same shape used to build a
+/// self-referential parent chain here (and an uncatchable stack overflow in the
+/// renderer). Nested same-named *containers* stay allowed, matching the jar.
 fn check_enclosing_clash(line: usize, id: &str, open: &[GroupFrame]) -> Result<()> {
-    if open.last().is_some_and(|frame| frame.id == id) {
+    if open.iter().any(|frame| frame.id == id) {
         return Err(crate::Error::Parse {
             line,
             column: Some(1),
@@ -1735,6 +1738,9 @@ end note
         for src in [
             "@startuml\nrectangle web {\n  component web\n}\n@enduml",
             "@startuml\npackage p {\n  component p\n}\n@enduml",
+            // The jar rejects a clash with an outer group too, not just the
+            // innermost one.
+            "@startuml\nrectangle a {\n  rectangle b {\n    component a\n  }\n}\n@enduml",
         ] {
             let err = parse_component_diagram(src).expect_err("must be rejected");
             assert!(

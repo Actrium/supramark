@@ -207,7 +207,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: actor id='{}' name='{}'",
                 line_num, actor.id, actor.name
             );
-            check_enclosing_clash(line_num, &actor.id, &boundary_stack)?;
+            check_group_name_clash(line_num, &actor.id, &boundary_stack)?;
             if !actors.iter().any(|a| a.id == actor.id) {
                 actor.source_line = Some(line_num);
                 if let Some(parent) = boundary_stack.last_mut() {
@@ -224,7 +224,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: colon-actor id='{}' name='{}'",
                 line_num, actor.id, actor.name
             );
-            check_enclosing_clash(line_num, &actor.id, &boundary_stack)?;
+            check_group_name_clash(line_num, &actor.id, &boundary_stack)?;
             if !actors.iter().any(|a| a.id == actor.id) {
                 actor.source_line = Some(line_num);
                 if let Some(parent) = boundary_stack.last_mut() {
@@ -287,7 +287,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: usecase id='{}' name='{}'",
                 line_num, uc.id, uc.name
             );
-            check_enclosing_clash(line_num, &uc.id, &boundary_stack)?;
+            check_group_name_clash(line_num, &uc.id, &boundary_stack)?;
             let parent_id = boundary_stack.last().map(|f| f.id.clone());
             uc.parent = parent_id.clone();
             uc.source_line = Some(line_num);
@@ -306,7 +306,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: paren-usecase id='{}' name='{}'",
                 line_num, uc.id, uc.name
             );
-            check_enclosing_clash(line_num, &uc.id, &boundary_stack)?;
+            check_self_parent_clash(line_num, &uc.id, &boundary_stack)?;
             let parent_id = boundary_stack.last().map(|f| f.id.clone());
             uc.parent = parent_id.clone();
             uc.source_line = Some(line_num);
@@ -415,13 +415,39 @@ fn record_link(
     links.push(link);
 }
 
-/// Reject a leaf declaration that reuses the id of the group it is declared in.
+/// Reject a keyword declaration (`usecase a` / `actor a`) whose id is already
+/// used by **any** enclosing group.
 ///
-/// Java reports `Error line N` for `rectangle a { (a) }`, `{ usecase a }`,
-/// `{ actor a }` and for `rectangle web { component web }`. The same shape is
-/// what used to build a self-referential parent chain (and an uncatchable
-/// stack overflow) here.
-fn check_enclosing_clash(line: usize, id: &str, open: &[BoundaryFrame]) -> Result<()> {
+/// The jar rejects the clash with an outer group too, not just the innermost
+/// one: `rectangle a { rectangle b { usecase a } }` and the `component a`
+/// variant both produce its error page.
+fn check_group_name_clash(line: usize, id: &str, open: &[BoundaryFrame]) -> Result<()> {
+    if open.iter().any(|frame| frame.id == id) {
+        return Err(crate::Error::Parse {
+            line,
+            column: Some(1),
+            message: format!(
+                "'{id}' is already used by the enclosing group; rename the entity or the boundary"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Reject a `(Name)` declaration that reuses the id of the group it is declared
+/// in — the shape that builds a self-referential parent chain here.
+///
+/// This is a deliberate divergence, not jar parity: with a component/usecase
+/// cue the jar reports `This element (a) is already defined (Assumed diagram
+/// type: component)`, but with no such cue it assumes an Activity diagram and
+/// renders the same source. Resolving `(a)` against the enclosing boundary the
+/// way the link path does is follow-up work; until then, main stack-overflows
+/// on this input and rejecting it is the safe behaviour.
+///
+/// Only the innermost group is checked: the jar renders
+/// `rectangle a { rectangle b { (a) } }`, so an outer group with the same name
+/// must stay accepted.
+fn check_self_parent_clash(line: usize, id: &str, open: &[BoundaryFrame]) -> Result<()> {
     if open.last().is_some_and(|frame| frame.id == id) {
         return Err(crate::Error::Parse {
             line,
@@ -1320,6 +1346,12 @@ mod tests {
 
     #[test]
     fn same_name_leaf_declaration_inside_boundary_is_rejected() {
+        // Two reasons, kept together because the outcome is the same:
+        // - `(a)` inside `rectangle a` is a deliberate divergence. The jar
+        //   reports "This element (a) is already defined" when it assumes a
+        //   component/usecase diagram (an actor cue forces that), but with no
+        //   cue it assumes Activity and renders; main stack-overflows on it.
+        // - `usecase a` inside `rectangle a` matches the jar's error page.
         for src in [
             "@startuml\nrectangle a {\n  (a)\n}\n@enduml",
             "@startuml\nrectangle a {\n  usecase a\n}\n@enduml",
@@ -1331,6 +1363,31 @@ mod tests {
                 "unexpected error for {src:?}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn keyword_declaration_clashing_with_an_outer_group_is_rejected() {
+        // The jar rejects the clash with an outer group, not just the
+        // innermost one. Reachability note: `actor a` inside a same-named
+        // boundary is routed to the sequence parser by diagram-type detection,
+        // so only the usecase keyword form is exercised here.
+        let src = "@startuml\nrectangle a {\n  rectangle b {\n    usecase a\n  }\n}\n@enduml";
+        let err = parse_usecase_diagram(src).expect_err("must be rejected");
+        assert!(
+            matches!(err, crate::Error::Parse { .. }),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn paren_declaration_clashing_with_an_outer_group_is_allowed() {
+        // Deliberate divergence from a blanket rule: the jar renders
+        // `rectangle a { rectangle b { (a) } }`, so an outer group with the
+        // same name must not be rejected. Only the innermost (self-parent)
+        // case is rejected (see `check_self_parent_clash`).
+        let d = parse("@startuml\nrectangle a {\n  rectangle b {\n    (a)\n  }\n}\n@enduml");
+        assert_eq!(d.boundaries.len(), 2);
+        assert!(d.usecases.iter().any(|u| u.id == "a"));
     }
 
     #[test]

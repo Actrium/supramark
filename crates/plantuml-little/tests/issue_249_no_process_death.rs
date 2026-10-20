@@ -103,13 +103,31 @@ fn unclosed_same_named_boundary_renders() {
 
 #[test]
 fn same_name_leaf_declaration_reports_an_error() {
+    // Keyword declarations clashing with an enclosing group match the jar's
+    // error page (outer groups included). `rectangle a { (a) }` is a
+    // deliberate divergence: the jar renders it when it assumes an Activity
+    // diagram and errors only with a component/usecase cue; main
+    // stack-overflows on it, so it is rejected until `(a)` can resolve to the
+    // enclosing boundary (follow-up).
     for case in [
         "@startuml\nrectangle a {\n  (a)\n}\n@enduml\n",
+        "@startuml\nrectangle a {\n  usecase a\n}\n@enduml\n",
         "@startuml\nrectangle web {\n  component web\n}\n@enduml\n",
         "@startuml\npackage p {\n  component p\n}\n@enduml\n",
+        "@startuml\nrectangle a {\n  rectangle b {\n    component a\n  }\n}\n@enduml\n",
     ] {
         assert_reports_error("same-name declaration", case);
     }
+}
+
+#[test]
+fn paren_declaration_clashing_with_an_outer_group_renders() {
+    // The jar renders this shape, so the outer name must not be treated as a
+    // clash for the paren form.
+    assert_no_process_death(
+        "paren declaration inside a nested container with an outer same name",
+        "@startuml\nrectangle a {\n  rectangle b {\n    (a)\n  }\n}\n@enduml\n",
+    );
 }
 
 #[test]
