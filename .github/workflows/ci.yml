@@ -264,9 +264,9 @@ jobs:
   graphviz-release-runtime-smoke:
     name: Graphviz release runtime (${{ matrix.os }})
     env:
-      # PRs for the next crate version run before that tag exists. Use the
-      # latest published assets while exercising the current build script.
-      GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD: "1"
+      # The release download is enabled by default; this job deliberately
+      # exercises that path unchanged. Pinning the version lets PRs for the
+      # next crate version run before that tag's assets exist.
       GRAPHVIZ_ANYWHERE_RELEASE_VERSION: "0.2.3"
     strategy:
       fail-fast: false
