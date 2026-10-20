@@ -1214,8 +1214,10 @@ function ListItemLine({
       <SelectableBlock
         nodeId={binding.nodeId}
         unitIds={binding.unitIds}
-        // The row must constrain the outer view; Text only owns typography.
-        containerStyle={{ flex: 1 }}
+        // Keep the content's natural width in shrink-wrapped hosts; flex: 1
+        // uses a zero basis and can leave ancestors shorter than the wrapped text.
+        // Shrink only at the available width limit; Text still owns typography.
+        containerStyle={{ flexShrink: 1 }}
         style={[styles.paragraph, styles.listItemText, { flex: 0 }]}
       >
         {children}
