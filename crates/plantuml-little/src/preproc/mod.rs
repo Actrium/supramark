@@ -44,6 +44,10 @@ pub fn preprocess_with_source_path(source: &str, source_path: &Path) -> Result<S
     let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
     let source_key = source_path.to_string_lossy().to_string();
     ctx.process_source_into(source, Some(base_dir), None, Some(&source_key), &mut output)?;
+    log::debug!(
+        "preproc: used {} of {PREPROC_WORK_BUDGET} work units",
+        ctx.work_used()
+    );
     Ok(output.join("\n"))
 }
 
@@ -93,6 +97,18 @@ impl Value {
         match self {
             Value::Array(items) => Some(items),
             _ => None,
+        }
+    }
+
+    /// Approximate byte cost of materialising this value, without allocating.
+    ///
+    /// Charged against the preprocessing work budget; `$x = $x + ...` in a
+    /// loop grows quadratically, which this makes visible.
+    fn work_len(&self) -> usize {
+        match self {
+            Value::Str(s) => s.len(),
+            Value::Int(_) => 8,
+            Value::Array(items) => 2 + items.iter().map(Value::work_len).sum::<usize>(),
         }
     }
 
@@ -177,7 +193,23 @@ struct Context {
     func_expansion_depth: usize,
     /// Active function return values, innermost last
     return_stack: Vec<Option<String>>,
+    /// Remaining shared work budget for this preprocessing run.
+    ///
+    /// `!while`/`!foreach` nesting multiplies per-loop iteration caps
+    /// (10k × 10k = 1e8) and `$x = $x + ...` copies a growing string per
+    /// iteration, so a per-loop cap cannot bound the total work. Every
+    /// processed line, produced value and loop iteration is charged here
+    /// instead, and exhausting it returns a normal `Error::Parse`.
+    work_budget: u64,
 }
+
+/// Shared preprocessing work budget (~8 MiB of processed text).
+///
+/// The heaviest fixture in the corpus (`preprocessor/jaws1.puml`, the C4
+/// stdlib stress case) consumes ~411 KiB, so legitimate documents keep a ~20×
+/// margin; a runaway loop burns the same budget in about a second instead of
+/// running for hours.
+const PREPROC_WORK_BUDGET: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub(super) struct DefineEntry {
@@ -225,13 +257,38 @@ impl Context {
             expanding_funcs: Vec::new(),
             func_expansion_depth: 0,
             return_stack: Vec::new(),
+            work_budget: PREPROC_WORK_BUDGET,
         }
+    }
+
+    /// Charge `units` against the shared preprocessing work budget.
+    fn charge_work(&mut self, units: usize, line: usize) -> Result<()> {
+        self.work_budget = self.work_budget.saturating_sub(units as u64);
+        if self.work_budget == 0 {
+            return Err(crate::Error::Parse {
+                line,
+                column: Some(1),
+                message:
+                    "preprocessor work limit exceeded; the document may contain an unbounded loop"
+                        .to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Work units consumed so far, for diagnostics and budget tuning.
+    fn work_used(&self) -> u64 {
+        PREPROC_WORK_BUDGET - self.work_budget
     }
 
     /// Top-level processing entry point.
     fn process(&mut self, source: &str, base_dir: Option<&Path>) -> Result<String> {
         let mut output = Vec::new();
         self.process_source_into(source, base_dir, None, None, &mut output)?;
+        log::debug!(
+            "preproc: used {} of {PREPROC_WORK_BUDGET} work units",
+            self.work_used()
+        );
         Ok(output.join("\n"))
     }
 
@@ -349,6 +406,10 @@ impl Context {
             }
             let line = lines[i];
             let trimmed = line.trim();
+            // Every line the preprocessor walks is charged, so nested loop
+            // bodies (which re-walk their body each iteration) exhaust the
+            // shared budget instead of multiplying their per-loop caps.
+            self.charge_work(line.len() + 1, i + 1)?;
 
             // ── directive detection ──
             if trimmed.starts_with("!pragma ") {
@@ -429,7 +490,7 @@ impl Context {
             // Variable assignment: `!$var = value` or `!$var="value"`
             if let Some(rest) = strip_directive_prefix(trimmed, "!") {
                 if rest.starts_with('$') {
-                    if let Some(consumed) = self.try_var_assign(rest, VarAssignMode::Auto)? {
+                    if let Some(consumed) = self.try_var_assign(rest, VarAssignMode::Auto, i + 1)? {
                         if consumed {
                             i += 1;
                             continue;
@@ -479,7 +540,7 @@ impl Context {
             // !global $var = value
             if let Some(rest) = strip_directive_prefix(trimmed, "!global ") {
                 if rest.starts_with('$') {
-                    self.try_var_assign(rest, VarAssignMode::Global)?;
+                    self.try_var_assign(rest, VarAssignMode::Global, i + 1)?;
                 }
                 i += 1;
                 continue;
@@ -488,7 +549,7 @@ impl Context {
             // !local $var = value
             if let Some(rest) = strip_directive_prefix(trimmed, "!local ") {
                 if rest.starts_with('$') {
-                    self.try_var_assign(rest, VarAssignMode::Local)?;
+                    self.try_var_assign(rest, VarAssignMode::Local, i + 1)?;
                 }
                 i += 1;
                 continue;
@@ -1059,7 +1120,12 @@ impl Context {
     /// Variable references on the RHS are expanded, and if the result looks
     /// like an arithmetic expression it is evaluated numerically.
     /// The resulting value is stored as a typed `Value` (Int, Array, or Str).
-    fn try_var_assign(&mut self, rest: &str, mode: VarAssignMode) -> Result<Option<bool>> {
+    fn try_var_assign(
+        &mut self,
+        rest: &str,
+        mode: VarAssignMode,
+        line: usize,
+    ) -> Result<Option<bool>> {
         // Format: `$name = value`, `$name=value`, `$name ?= value`
         let rest = rest.trim();
         let (name, raw_val, assign_if_missing) =
@@ -1094,11 +1160,15 @@ impl Context {
             // Expand variables inside the array expression
             let expanded = self.expand_vars(trimmed_raw);
             let value = Value::parse_from(&expanded);
+            self.charge_work(value.work_len(), line)?;
             self.assign_var(name, value, mode);
             return Ok(Some(true));
         }
 
         let value = self.evaluate_assignment_value_with_funcs(raw_val)?;
+        // Charge the produced value: `$x = $x + ...` inside a loop copies a
+        // growing string every iteration, which is quadratic without this.
+        self.charge_work(value.work_len(), line)?;
         self.assign_var(name, value, mode);
         Ok(Some(true))
     }
@@ -1457,6 +1527,9 @@ impl Context {
                 });
             }
             let body_refs: Vec<&str> = body.iter().map(std::string::String::as_str).collect();
+            // Charge the iteration itself so nested loops multiply into the
+            // shared budget rather than into wall-clock time.
+            self.charge_work(condition_expr.len() + 1, start + 1)?;
             self.process_lines(&body_refs, output)?;
             if self.has_pending_return() {
                 break;
@@ -3877,6 +3950,53 @@ a->b: test:\nTEST";
         let out = preprocess(src).unwrap();
         assert!(!out.contains("should not appear"), "got: {}", out);
         assert!(out.contains("after"), "got: {}", out);
+    }
+
+    /// issue #249: two individually-legal loops multiply (each loop stays under
+    /// its own 10k cap); the shared work budget must bound the product. The
+    /// long body line keeps the test fast — it is the total charged work, not
+    /// the iteration count, that exhausts the budget.
+    #[test]
+    fn test_nested_while_product_is_bounded() {
+        let filler = format!("'{}", "x".repeat(2000));
+        let src = format!(
+            "!$n = 200\n\
+             !$row = 0\n\
+             !while $row < $n\n\
+             !$column = 0\n\
+             !while $column < $n\n\
+             {filler}\n\
+             !$column = $column + 1\n\
+             !endwhile\n\
+             !$row = $row + 1\n\
+             !endwhile"
+        );
+        let err = preprocess(&src).unwrap_err();
+        assert!(
+            err.to_string().contains("preprocessor work limit exceeded"),
+            "got: {err}"
+        );
+    }
+
+    /// issue #249: `$res = $res + ...` copies a growing string every round
+    /// (quadratic work); charging the produced value stops it quickly.
+    #[test]
+    fn test_growing_string_assignment_is_bounded() {
+        let chunk = "0123456789".repeat(20);
+        let src = format!(
+            "!$res = \"\"\n\
+             !$i = 0\n\
+             !$n = 100000\n\
+             !while $i < $n\n\
+             !$res = $res + \"{chunk}\"\n\
+             !$i = $i + 1\n\
+             !endwhile"
+        );
+        let err = preprocess(&src).unwrap_err();
+        assert!(
+            err.to_string().contains("preprocessor work limit exceeded"),
+            "got: {err}"
+        );
     }
 
     // ── arithmetic tests ───────────────────────────────────
