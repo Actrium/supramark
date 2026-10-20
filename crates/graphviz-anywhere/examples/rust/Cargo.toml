@@ -2,7 +2,9 @@
 name = "graphviz-anywhere-example"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.64"
+# Follows the `graphviz-anywhere` crate's MSRV; the 1.82 floor comes from its
+# mandatory `supramark-diagram-core` dependency.
+rust-version = "1.82"
 license = "Apache-2.0"
 authors = ["kookyleo <kookyleo@gmail.com>"]
 publish = false

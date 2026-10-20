@@ -32,6 +32,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   linked `libgraphviz_api.so` and then failed at runtime with
   `gv_context_new: symbol not found`.
 
+### Fixed
+
+- **Declared MSRV** — `rust-version` is now `1.82` for both the crate and
+  `examples/rust`. `graphviz-anywhere` has a mandatory
+  `supramark-diagram-core` dependency (since 0.2.5) that requires 1.82, and
+  Cargo enforces a dependency's `rust-version`, so the previous declarations
+  (1.67 for the crate, 1.64 for the example) could never build. The crates.io
+  metadata of the already published 0.2.5 and 0.2.6 is immutable; this
+  correction takes effect from the next release.
+
 ## [0.2.6] — 2026-09-22
 
 ### Fixed

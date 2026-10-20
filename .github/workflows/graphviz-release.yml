@@ -702,8 +702,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify and publish to crates.io
-        env:
-          GRAPHVIZ_ANYWHERE_ALLOW_DOWNLOAD: "1"
         run: |
           cargo publish --manifest-path packages/rust/Cargo.toml --allow-dirty --dry-run
           cargo publish --manifest-path packages/rust/Cargo.toml --token ${{ secrets.CARGO_TOKEN }} --allow-dirty

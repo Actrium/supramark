@@ -2,7 +2,9 @@
 name = "graphviz-anywhere"
 version = "0.2.6"
 edition = "2021"
-rust-version = "1.67"
+# The MSRV is dictated by the mandatory `supramark-diagram-core` dependency
+# (1.82), not by this crate's own code.
+rust-version = "1.82"
 description = "Safe Rust wrapper for the graphviz-anywhere C library with bundled prebuilt binaries (and a wasm32 JS bridge)"
 license = "Apache-2.0"
 authors = ["kookyleo <kookyleo@gmail.com>"]
