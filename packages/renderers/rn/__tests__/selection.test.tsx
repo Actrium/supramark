@@ -151,6 +151,21 @@ describe('Supramark selection integration', () => {
     expect(itemBlocks.length).toBeGreaterThan(0);
   });
 
+  it('keeps list-item content shrink-wrapped (no zero-basis flex)', async () => {
+    const ast = docAst();
+    const r = await renderAst(ast, { selection: {} });
+    const itemBlocks = selectableBlocks(r).filter(inst =>
+      (inst.props.nodeId as string).startsWith('list_item@')
+    );
+    expect(itemBlocks.length).toBeGreaterThan(0);
+    for (const inst of itemBlocks) {
+      // `flex: 1` is flexGrow 1 / flexShrink 0 / flexBasis 0 in Yoga. In a
+      // shrink-wrapped host the content then measures against a zero basis,
+      // wraps early and reports a height the laid-out text overflows.
+      expect(inst.props.containerStyle).toEqual({ flexShrink: 1 });
+    }
+  });
+
   it('skips a loose list item but keeps its child paragraph selectable', async () => {
     const ast = {
       type: 'root',
