@@ -1,0 +1,121 @@
+--- a/lib/dotgen/dotsplines.c
++++ b/lib/dotgen/dotsplines.c
+@@ -95,6 +95,21 @@
+ static int straight_len(Agnode_t *);
+ static Agedge_t *straight_path(Agedge_t *, int, points_t *);
+ static Agedge_t *top_bound(Agedge_t *, int);
++
++/* y coordinate of the first node on rank r, when the rank holds one.
++ *
++ * Ranks can be empty: `minlen=0` edges combined with rank constraints
++ * compress the ranking, and a self edge, a flat edge or rank_box() would then
++ * dereference a null v[0]. Callers fall back to their default spacing. */
++static bool rank_first_y(graph_t *g, int r, double *y) {
++  if (r < GD_minrank(g) || r > GD_maxrank(g))
++    return false;
++  node_t *const first = GD_rank(g)[r].v[0];
++  if (first == NULL)
++    return false;
++  *y = ND_coord(first).y;
++  return true;
++}
+ 
+ static edge_t *getmainedge(edge_t *e) {
+   edge_t *le = e;
+@@ -389,17 +404,28 @@
+       double sizey;
+       n = agtail(e0);
+       const int r = ND_rank(n);
++      double prev_y, next_y;
+       if (r == GD_maxrank(g)) {
+-        if (r > 0)
+-          sizey = ND_coord(GD_rank(g)[r - 1].v[0]).y - ND_coord(n).y;
++        if (r > 0 && rank_first_y(g, r - 1, &prev_y))
++          sizey = prev_y - ND_coord(n).y;
+         else
+           sizey = ND_ht(n);
+       } else if (r == GD_minrank(g)) {
+-        sizey = ND_coord(n).y - ND_coord(GD_rank(g)[r + 1].v[0]).y;
++        if (rank_first_y(g, r + 1, &next_y))
++          sizey = ND_coord(n).y - next_y;
++        else
++          sizey = ND_ht(n);
+       } else {
+-        double upy = ND_coord(GD_rank(g)[r - 1].v[0]).y - ND_coord(n).y;
+-        double dwny = ND_coord(n).y - ND_coord(GD_rank(g)[r + 1].v[0]).y;
+-        sizey = fmin(upy, dwny);
++        const bool has_prev = rank_first_y(g, r - 1, &prev_y);
++        const bool has_next = rank_first_y(g, r + 1, &next_y);
++        if (has_prev && has_next)
++          sizey = fmin(prev_y - ND_coord(n).y, ND_coord(n).y - next_y);
++        else if (has_prev)
++          sizey = prev_y - ND_coord(n).y;
++        else if (has_next)
++          sizey = ND_coord(n).y - next_y;
++        else
++          sizey = GD_ranksep(g);
+       }
+       makeSelfEdge(LIST_AT(&edges, ind), cnt, sd.Multisep, sizey / 2, &sinfo);
+       for (unsigned b = 0; b < cnt; b++) {
+@@ -1427,10 +1453,10 @@
+   tn = agtail(e);
+   hn = aghead(e);
+   r = ND_rank(tn);
+-  if (r < GD_maxrank(g)) {
++  double next_y;
++  if (r < GD_maxrank(g) && rank_first_y(g, r + 1, &next_y)) {
+     nextr = GD_rank(g) + (r + 1);
+-    vspace = ND_coord(tn).y - GD_rank(g)[r].pht1 -
+-             (ND_coord(nextr->v[0]).y + nextr->pht2);
++    vspace = ND_coord(tn).y - GD_rank(g)[r].pht1 - (next_y + nextr->pht2);
+   } else {
+     vspace = GD_ranksep(g);
+   }
+@@ -1547,14 +1573,17 @@
+   node_t *tn = agtail(e);
+   node_t *hn = aghead(e);
+   const int r = ND_rank(tn);
++  double prev_y;
+   if (r > 0) {
+-    rank_t *prevr;
+-    if (GD_has_labels(g->root) & EDGE_LABEL)
+-      prevr = GD_rank(g) + (r - 2);
++    /* r - 2 skips the rank the edge labels occupy; at r == 1 it would index
++     * before the rank array, so fall back to r - 1 there. */
++    const int prev_idx =
++        (r > 1 && (GD_has_labels(g->root) & EDGE_LABEL)) ? r - 2 : r - 1;
++    rank_t *const prevr = GD_rank(g) + prev_idx;
++    if (rank_first_y(g, prev_idx, &prev_y))
++      vspace = prev_y - prevr->ht1 - ND_coord(tn).y - GD_rank(g)[r].ht2;
+     else
+-      prevr = GD_rank(g) + (r - 1);
+-    vspace = ND_coord(prevr->v[0]).y - prevr->ht1 - ND_coord(tn).y -
+-             GD_rank(g)[r].ht2;
++      vspace = GD_ranksep(g);
+   } else {
+     vspace = GD_ranksep(g);
+   }
+@@ -2009,13 +2038,16 @@
+ static boxf rank_box(spline_info_t *sp, graph_t *g, int r) {
+   boxf b = sp->Rank_box[r];
+   if (b.LL.x == b.UR.x) {
+-    node_t *const left0 = GD_rank(g)[r].v[0];
+-    node_t *const left1 = GD_rank(g)[r + 1].v[0];
+-    b.LL.x = sp->LeftBound;
+-    b.LL.y = ND_coord(left1).y + GD_rank(g)[r + 1].ht2;
+-    b.UR.x = sp->RightBound;
+-    b.UR.y = ND_coord(left0).y - GD_rank(g)[r].ht1;
+-    sp->Rank_box[r] = b;
++    double top_y, bottom_y;
++    /* An empty rank leaves the box undefined; return the cached (empty) box
++     * instead of dereferencing a null v[0]. */
++    if (rank_first_y(g, r, &top_y) && rank_first_y(g, r + 1, &bottom_y)) {
++      b.LL.x = sp->LeftBound;
++      b.LL.y = bottom_y + GD_rank(g)[r + 1].ht2;
++      b.UR.x = sp->RightBound;
++      b.UR.y = top_y - GD_rank(g)[r].ht1;
++      sp->Rank_box[r] = b;
++    }
+   }
+   return b;
+ }

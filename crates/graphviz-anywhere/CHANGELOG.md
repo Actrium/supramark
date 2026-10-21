@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Null dereference on empty ranks in `dotgen/dotsplines.c`** — Graphviz 14.1.5
+  dereferences `GD_rank(g)[i].v[0]` without checking that the rank holds a
+  node. `minlen=0` edges combined with rank constraints (PlantUML state
+  diagrams with `<<inputPin>>`/`<<outputPin>>` children produce exactly that)
+  compress the ranking, and a flat edge, a self edge or `rank_box()` then
+  crashes the process with SIGSEGV on input a user can write by hand. The same
+  file also indexes `GD_rank(g)[r - 2]` for flat edges whenever the graph has
+  edge labels; at `r == 1` that is one before the rank array.
+
+  Seven unguarded sites in `lib/dotgen/dotsplines.c` now go through a
+  `rank_first_y()` helper that reports an empty rank, with each caller falling
+  back to its existing default spacing (`ND_ht`, `GD_ranksep`). The fix is
+  carried as `patches/0001-dotgen-dotsplines-rank-guards.patch`, applied by
+  `prepare_graphviz_source`, so it reaches every platform asset. Graphs without
+  empty ranks take the same path and produce the same layout.
+
+  Upstream report: the code is still unguarded on graphviz `main`; this is a
+  local patch until it lands there.
+
 ### Added
 
 - **musl targets** — `x86_64-unknown-linux-musl` and

@@ -1,6 +1,6 @@
 [package]
 name = "graphviz-anywhere"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 # The MSRV is dictated by the mandatory `supramark-diagram-core` dependency
 # (1.82), not by this crate's own code.

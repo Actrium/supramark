@@ -42,7 +42,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/linux-${{ matrix.arch }}
-          key: gv-build-linux-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-linux-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -154,7 +154,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/linux-musl-${{ matrix.arch }}
-          key: gv-build-linux-musl-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-linux-musl-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-linux.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Build
         if: steps.cache.outputs.cache-hit != 'true'
@@ -258,7 +258,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/macos-universal
-          key: gv-build-macos-universal-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-macos.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-macos-universal-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-macos.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -332,7 +332,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/ios
-          key: gv-build-ios-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-ios.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-ios-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-ios.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -429,7 +429,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/android/${{ matrix.abi }}
-          key: gv-build-android-${{ matrix.abi }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-android.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-android-${{ matrix.abi }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-android.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -503,7 +503,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: crates/graphviz-anywhere/output/windows-${{ matrix.arch }}
-          key: gv-build-windows-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-windows.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-windows-${{ matrix.arch }}-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-windows.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install dependencies
         # choco.org serves 503 periodically; retry a few times before
@@ -626,7 +626,7 @@ jobs:
             packages/web/dist/viz.js
             packages/web/dist/viz.wasm
             packages/web/dist/viz.d.ts
-          key: gv-build-wasm-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/scripts/build-wasm.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
+          key: gv-build-wasm-${{ steps.gvpin.outputs.sha }}-${{ hashFiles('crates/graphviz-anywhere/capi/**', 'crates/graphviz-anywhere/patches/**', 'crates/graphviz-anywhere/scripts/build-wasm.sh', 'crates/graphviz-anywhere/scripts/common.sh') }}
 
       - name: Install emscripten
         if: steps.cache.outputs.cache-hit != 'true'
