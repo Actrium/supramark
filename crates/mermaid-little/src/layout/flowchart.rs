@@ -1499,43 +1499,10 @@ fn measure_vertex_box(v: &Vertex, is_bold: bool, font_size_px: Option<f64>) -> (
     (tw + pad_x, th + pad_y)
 }
 
-/// Strip FontAwesome icon prefixes from a label string before measurement.
-/// Upstream replaces `fa:fa-car` with `<i class="fa fa-car"></i>` at render
-/// time; the `<i>` element contributes negligible width under the jsdom shim,
-/// so we remove those tokens before measuring text width.
-fn strip_fa_icons(text: &str) -> String {
-    // Match patterns like `fa:fa-car`, `fas:fa-spinner`, `fab:fa-github`, etc.
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(pos) = rest.find("fa") {
-        // Check whether this starts a "fa[bklrs]?:fa-<name>" sequence.
-        let tail = &rest[pos..];
-        // Find the colon.
-        let prefix_end = tail.find(':').unwrap_or(tail.len());
-        let prefix = &tail[..prefix_end];
-        // Valid FA prefixes: fa, fab, fak, fal, far, fas
-        let valid_prefix = matches!(prefix, "fa" | "fab" | "fak" | "fal" | "far" | "fas");
-        // `prefix_end == tail.len()` when there is no colon at all, and then
-        // `prefix_end + 1` is past the end — a label ending in `fa` (`A[sofa]`)
-        // reaches that with a valid-looking prefix.
-        if valid_prefix && prefix_end < tail.len() && tail[prefix_end + 1..].starts_with("fa-") {
-            // Consume leading text up to this match.
-            out.push_str(&rest[..pos]);
-            // Skip past "prefix:fa-name" where name is [a-z0-9-]+.
-            let icon_tail = &tail[prefix_end + 1 + 3..]; // after "fa-"
-            let icon_end = icon_tail
-                .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
-                .unwrap_or(icon_tail.len());
-            rest = &rest[pos + prefix_end + 1 + 3 + icon_end..];
-        } else {
-            // Not a valid FA token — emit up to and including "fa" and move on.
-            out.push_str(&rest[..pos + 2]);
-            rest = &rest[pos + 2..];
-        }
-    }
-    out.push_str(rest);
-    out
-}
+// Icon tokens are stripped for measurement by
+// `render::foreign_object::strip_fa_icons`, which shares `find_fa_icon` with
+// the renderer's `replace_fa_icons` — one lexicon, so the spans measured away
+// and the spans painted as `<i>` can no longer drift apart (issue #242).
 
 /// Plain text of a label for width measurement: every HTML tag stripped
 /// (per `label_metrics::tag_len`, so a bare `<` stays literal) and `\n` dropped, i.e. the concatenation of all lines measured as one
@@ -1640,10 +1607,11 @@ pub(crate) fn cluster_title_leading(label: &str, is_markdown: bool) -> f64 {
     lines.saturating_sub(1) as f64 * html_label_line_height(HTML_LABEL_FONT_SIZE)
 }
 
-/// [`strip_fa_icons`] applied to each line of the raw label, keeping the line
-/// breaks. An icon name ends at its line break exactly as it ends at a `<`,
-/// so stripping must happen before the lines are concatenated for width —
-/// otherwise `fa:fa-car<br/>Longer text` eats the next line's first word.
+/// [`crate::render::foreign_object::strip_fa_icons`] applied to each line of
+/// the raw label, keeping the line breaks. An icon name ends at its line
+/// break exactly as it ends at a `<`, so stripping must happen before the
+/// lines are concatenated for width — otherwise `fa:fa-car<br/>Longer text`
+/// eats the next line's first word.
 fn strip_fa_icons_per_line(label: &str) -> String {
     let mut out = String::with_capacity(label.len());
     let mut segment_start = 0;
@@ -1659,7 +1627,9 @@ fn strip_fa_icons_per_line(label: &str) -> String {
         };
         match brk {
             Some(len) => {
-                out.push_str(&strip_fa_icons(&label[segment_start..i]));
+                out.push_str(&crate::render::foreign_object::strip_fa_icons(
+                    &label[segment_start..i],
+                ));
                 out.push_str(&label[i..i + len]);
                 i += len;
                 segment_start = i;
@@ -1667,7 +1637,9 @@ fn strip_fa_icons_per_line(label: &str) -> String {
             None => i += 1,
         }
     }
-    out.push_str(&strip_fa_icons(&label[segment_start..]));
+    out.push_str(&crate::render::foreign_object::strip_fa_icons(
+        &label[segment_start..],
+    ));
     out
 }
 
@@ -2272,5 +2244,24 @@ mod tests {
         let a = l.nodes.iter().find(|n| n.id == "A").unwrap();
         let b = l.nodes.iter().find(|n| n.id == "B").unwrap();
         assert!(b.x.unwrap() > a.x.unwrap());
+    }
+
+    #[test]
+    fn per_line_fa_strip_keeps_the_line_boundary() {
+        // Icon tokens are stripped line by line, before the lines are
+        // concatenated for width: an icon name ends at `<br/>` exactly as it
+        // ends at a `<`, so `fa:fa-car<br/>Longer text` must not swallow the
+        // next line's first word (issue #242 keeps this order).
+        assert_eq!(
+            strip_fa_icons_per_line("fa:fa-car<br/>Longer text"),
+            "<br/>Longer text"
+        );
+        // `_` belongs to the name, so this whole token goes too.
+        assert_eq!(strip_fa_icons_per_line("fa:fa-car_x<br/>tail"), "<br/>tail");
+        // A name-less token has no span to strip and stays literal.
+        assert_eq!(
+            strip_fa_icons_per_line("fa:fa-<br/>tail"),
+            "fa:fa-<br/>tail"
+        );
     }
 }
