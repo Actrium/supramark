@@ -1461,9 +1461,13 @@ fn markdown_paragraph_to_html(src: &str) -> String {
             out.push('`');
             i += 1;
         } else if b == b'<' {
-            // Embedded HTML tag — pass through (with normalisation of <br> → <br/>)
-            if let Some(rel_end) = src[i..].find('>') {
-                let tag = &src[i..i + rel_end + 1];
+            // Embedded HTML tag — pass through (with normalisation of
+            // <br> → <br/>). Same tag rule as the measurement side's
+            // `label_metrics::tag_len` (issue #240): a `<` whose span
+            // contains another `<` or a newline opens no tag and stays
+            // literal, so the text after it is not swallowed.
+            if let Some(len) = crate::layout::label_metrics::tag_len(src, i) {
+                let tag = &src[i..i + len];
                 let inner = tag[1..tag.len() - 1].trim();
                 let tag_lc = inner.trim_end_matches('/').trim().to_ascii_lowercase();
                 if tag_lc == "br" {
@@ -1471,7 +1475,7 @@ fn markdown_paragraph_to_html(src: &str) -> String {
                 } else {
                     out.push_str(tag); // pass through other tags verbatim
                 }
-                i += rel_end + 1;
+                i += len;
             } else {
                 out.push_str("&lt;");
                 i += 1;
@@ -1569,18 +1573,17 @@ pub fn string_label_to_html(src: &str) -> String {
             out.push_str("<br/>");
             i += 1;
         } else if b == b'<' {
-            // Check if this starts an HTML tag (letter, '/', '!' follows).
-            let next = bytes.get(i + 1).copied().unwrap_or(0);
-            if next.is_ascii_alphabetic() || next == b'/' || next == b'!' {
+            // A `<` opens a tag only under the same rule the measurement side
+            // uses (`label_metrics::tag_len`): the span must close with a `>`
+            // before any other `<` or newline. Otherwise it is literal text —
+            // `<n<br/>` used to be passed through as one raw tag, and the
+            // browser swallowed the text up to its `>` (issue #240).
+            if let Some(len) = crate::layout::label_metrics::tag_len(src, i) {
                 // HTML tag — pass through the entire tag (including its closing `>`).
                 // Capture the entire tag span to detect the `<br>` family and
                 // normalise to upstream's canonical `<br/>` form.
                 let tag_start = i;
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j] != b'>' {
-                    j += 1;
-                }
-                let tag_end = if j < bytes.len() { j + 1 } else { j };
+                let tag_end = i + len;
                 let inner = &src[tag_start + 1..tag_end.saturating_sub(1).max(tag_start + 1)];
                 let inner_trim = inner
                     .trim_end_matches('/')
@@ -2066,5 +2069,27 @@ mod tests {
             stripped.push_str(rest);
             assert_eq!(stripped, strip_fa_icons(label), "label: {label}");
         }
+    }
+
+    #[test]
+    fn emitters_escape_a_less_than_that_opens_no_tag() {
+        // issue #240: `<n<br/>` must not be borrowed as a tag. The measurement
+        // side (`label_metrics::tag_len`) already treats this `<` as literal
+        // text; both emitters must do the same, or the browser swallows the
+        // text up to the next `>` and the RN `<tspan>` path emits invalid XML.
+        assert_eq!(string_label_to_html("i<n<br/>loop"), "i&lt;n<br/>loop");
+        assert_eq!(markdown_label_to_html("i<n<br/>loop"), "i&lt;n<br/>loop");
+        // No `>` at all: the old scanner swallowed the rest of the label,
+        // including the raw newline, instead of emitting `<br/>`.
+        assert_eq!(string_label_to_html("i<n\nloop"), "i&lt;n<br/>loop");
+        // A `>` behind a later `<` does not belong to this tag.
+        assert_eq!(string_label_to_html("a<b<br/>c>d"), "a&lt;b<br/>c&gt;d");
+        // A `<` that opens no tag at all keeps its existing escape.
+        assert_eq!(string_label_to_html("a < b"), "a &lt; b");
+        // Real tags still pass through verbatim.
+        assert_eq!(
+            string_label_to_html("a<strong>b</strong>c"),
+            "a<strong>b</strong>c"
+        );
     }
 }
