@@ -199,21 +199,118 @@ fn utf8_char_len(b: u8) -> usize {
     }
 }
 
+/// One FontAwesome reference — `fa:fa-car`, `fas:fa-spinner`, … — inside a
+/// label, carrying the exact span upstream's regex matches.
+pub(crate) struct FaIconRef<'a> {
+    /// Byte offset of the token start (the `f` of the prefix).
+    pub start: usize,
+    /// Byte offset just past the last name character.
+    pub end: usize,
+    /// `fa` / `fab` / `fak` / `fal` / `far` / `fas`.
+    pub prefix: &'a str,
+    /// The icon name without its `fa-` leader.
+    pub name: &'a str,
+}
+
+/// The first FontAwesome reference at or after `from`.
+///
+/// This is the single definition of what an FA token is — the renderer
+/// ([`replace_fa_icons`]) and the layout measurement
+/// (`layout::flowchart::strip_fa_icons`, via [`strip_fa_icons`]) both consume
+/// these spans, so the two can no longer disagree about where a token ends.
+///
+/// Mirrors upstream `createText.ts::replaceIconSubstring`'s
+/// `/(fa[bklrs]?):fa-([\w-]+)/g`, including the parts that surprise:
+///
+/// - JavaScript's `\w` is ASCII (`[A-Za-z0-9_]`), so `_` *is* a name
+///   character (`fa:fa-car_x` is one icon named `car_x`, not `car` followed
+///   by text), while a non-ASCII letter *ends* the name and stays text —
+///   Rust's Unicode `\w` used to swallow it into the icon name (the lexicon
+///   tests below pin the literal).
+/// - The name needs at least one character, so a name-less `fa:fa-` stays
+///   literal text on both sides.
+pub(crate) fn find_fa_icon(text: &str, from: usize) -> Option<FaIconRef<'_>> {
+    let mut search = from;
+    while let Some(rest) = text.get(search..) {
+        let start = match rest.find("fa") {
+            Some(rel) => search + rel,
+            None => return None,
+        };
+        if let Some(icon) = fa_icon_at(text, start) {
+            return Some(icon);
+        }
+        // Not a token here — resume past the `fa` we just rejected.
+        search = start + 2;
+    }
+    None
+}
+
+/// Read one FA token starting exactly at `start`, which must point at the `f`
+/// of the prefix. `None` when this position is not a token.
+fn fa_icon_at(text: &str, start: usize) -> Option<FaIconRef<'_>> {
+    let rest = text.get(start..)?;
+    // Upstream's `fa[bklrs]?`: the optional style letter belongs to the
+    // prefix, and a rejected longer prefix does not fall back to the short
+    // one (`fabx:fa-car` is not a token, exactly as the regex backtracks).
+    let prefix_len = match rest.as_bytes().get(2) {
+        Some(b'b' | b'k' | b'l' | b'r' | b's') => 3,
+        _ => 2,
+    };
+    let prefix = rest.get(..prefix_len)?;
+    if !matches!(prefix, "fa" | "fab" | "fak" | "fal" | "far" | "fas") {
+        return None;
+    }
+    let name_start = prefix_len + 1 + 3; // past `:` and `fa-`
+    let after_colon = rest.get(prefix_len..)?.strip_prefix(':')?;
+    let after_leader = after_colon.strip_prefix("fa-")?;
+    let name_len = after_leader
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .unwrap_or(after_leader.len());
+    if name_len == 0 {
+        return None;
+    }
+    Some(FaIconRef {
+        start,
+        end: start + name_start + name_len,
+        prefix,
+        name: &after_leader[..name_len],
+    })
+}
+
+/// Rewrite every FA reference in `text` through `replacement`, copying the
+/// text between references verbatim. Both sides of the icon pipeline go
+/// through here, which is what keeps them on the same token lexicon.
+fn rewrite_fa_icons(text: &str, mut replacement: impl FnMut(&FaIconRef<'_>) -> String) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(icon) = find_fa_icon(text, cursor) {
+        out.push_str(&text[cursor..icon.start]);
+        out.push_str(&replacement(&icon));
+        cursor = icon.end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
 /// Replace FontAwesome icon references (`fa:fa-car`, `fas:fa-spinner`, etc.)
 /// with `<i class="fa fa-car"></i>` etc. — matches upstream's
 /// `createText.ts::replaceIconSubstring` fallback when the icon is not
 /// registered in the Iconify registry.
 pub fn replace_fa_icons(text: &str) -> String {
-    regex::Regex::new(r"(fa[bklrs]?):fa-([\w-]+)")
-        .unwrap()
-        .replace_all(text, |caps: &regex::Captures| {
-            let prefix = &caps[1];
-            let icon = &caps[2];
-            // Upstream: `<i class='fa fa-car'></i>` (space between prefix and
-            // `fa-icon` name, using `fa-` prefix on the icon).
-            format!(r#"<i class="{} fa-{}"></i>"#, prefix, icon)
-        })
-        .to_string()
+    rewrite_fa_icons(text, |icon| {
+        // Upstream: `<i class='fa fa-car'></i>` (space between prefix and
+        // `fa-` icon name); the reference SVGs carry the double-quoted form
+        // a DOM serialiser writes.
+        format!(r#"<i class="{} fa-{}"></i>"#, icon.prefix, icon.name)
+    })
+}
+
+/// Remove every FA reference — the measuring side of [`replace_fa_icons`],
+/// consuming exactly the same tokens. The `<i>` element contributes
+/// negligible width under the jsdom shim, so layout measures the label
+/// without them.
+pub(crate) fn strip_fa_icons(text: &str) -> String {
+    rewrite_fa_icons(text, |_| String::new())
 }
 
 // ─── Public API ────────────────────────────────────────────────────────
@@ -1888,5 +1985,86 @@ mod tests {
             string_label_to_html("a<strong>b</strong>c"),
             "a<strong>b</strong>c"
         );
+    }
+
+    // ─── FA token lexicon (issue #242) ─────────────────────────────────
+    //
+    // Upstream `createText.ts::replaceIconSubstring` matches
+    // `/(fa[bklrs]?):fa-([\w-]+)/g` against JavaScript's ASCII `\w`. The
+    // measuring side consumes exactly the spans this side renders, so these
+    // cases pin the lexicon and the two sides' agreement.
+
+    #[test]
+    fn fa_icon_lexicon_matches_upstream_ascii_word() {
+        // `_` is a name character: `car_x` is one icon name, not `car` plus
+        // a stray `_x` measured as text.
+        assert_eq!(
+            replace_fa_icons("fa:fa-car_x"),
+            r#"<i class="fa fa-car_x"></i>"#
+        );
+        // cjk-allow: the CJK glyph is the token boundary under test.
+        let glyph = "中";
+        assert_eq!(
+            replace_fa_icons(&format!("fa:fa-car{glyph}")),
+            format!(r#"<i class="fa fa-car"></i>{glyph}"#)
+        );
+        // A name-less `fa:fa-` is literal text on both sides.
+        assert_eq!(replace_fa_icons("fa:fa-"), "fa:fa-");
+        assert_eq!(strip_fa_icons("fa:fa-"), "fa:fa-");
+        // Every style prefix upstream's `fa[bklrs]?` accepts.
+        for prefix in ["fa", "fab", "fak", "fal", "far", "fas"] {
+            let label = format!("{prefix}:fa-car");
+            assert_eq!(
+                replace_fa_icons(&label),
+                format!(r#"<i class="{prefix} fa-car"></i>"#),
+                "prefix {prefix}"
+            );
+        }
+        // Not tokens: an unknown prefix letter, an uppercase spelling
+        // (upstream's regex is case-sensitive), a word merely containing
+        // `fa`, and a rejected longer prefix that must not fall back to
+        // `fa:` in front of it.
+        for label in ["faq:fa-car", "FA:FA-car", "sofa", "fa", "fabx:fa-car"] {
+            assert_eq!(replace_fa_icons(label), label, "label {label}");
+        }
+        // Consecutive tokens both convert, and the gap is copied verbatim.
+        assert_eq!(
+            replace_fa_icons("fa:fa-a and fas:fa-b"),
+            r#"<i class="fa fa-a"></i> and <i class="fas fa-b"></i>"#
+        );
+    }
+
+    #[test]
+    fn measuring_and_rendering_consume_the_same_fa_tokens() {
+        // The regression this guards (issue #242): the two sides used to scan
+        // with different alphabets, so a token's tail was measured as text
+        // while being painted as part of the icon (or the reverse). Removing
+        // the `<i>` markup this side emits must reproduce the measuring side
+        // byte for byte.
+        let labels = [
+            "fa:fa-car Car",
+            "fa:fa-car_x",
+            "fa:fa-car中", // cjk-allow: CJK glyphs are the token-boundary cases under test.
+            "fa:fa-car的图标",
+            "fa:fa-",
+            "fa:fa-<br/>Longer text here",
+            "fa:fa-car<br/>Longer text",
+            "sofa fa:fa-a",
+            "before fab:fa-github after",
+            "fa:fa-a fa:fa-b",
+            "fak:fa-x|fal:fa-y",
+        ];
+        for label in labels {
+            let replaced = replace_fa_icons(label);
+            let mut stripped = String::new();
+            let mut rest = replaced.as_str();
+            while let Some(start) = rest.find("<i class=\"") {
+                stripped.push_str(&rest[..start]);
+                let past_close = rest[start..].find("></i>").expect("icon close tag") + start + 5;
+                rest = &rest[past_close..];
+            }
+            stripped.push_str(rest);
+            assert_eq!(stripped, strip_fa_icons(label), "label: {label}");
+        }
     }
 }
