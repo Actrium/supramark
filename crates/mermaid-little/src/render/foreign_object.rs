@@ -224,8 +224,9 @@ pub(crate) struct FaIconRef<'a> {
 ///
 /// - JavaScript's `\w` is ASCII (`[A-Za-z0-9_]`), so `_` *is* a name
 ///   character (`fa:fa-car_x` is one icon named `car_x`, not `car` followed
-///   by text), while a CJK character *ends* the name (`fa:fa-car中` leaves
-///   `中` as text). Rust's Unicode `\w` swallowed it into the icon name.
+///   by text), while a non-ASCII letter *ends* the name and stays text —
+///   Rust's Unicode `\w` used to swallow it into the icon name (the lexicon
+///   tests below pin the literal).
 /// - The name needs at least one character, so a name-less `fa:fa-` stays
 ///   literal text on both sides.
 pub(crate) fn find_fa_icon(text: &str, from: usize) -> Option<FaIconRef<'_>> {
@@ -2001,10 +2002,11 @@ mod tests {
             replace_fa_icons("fa:fa-car_x"),
             r#"<i class="fa fa-car_x"></i>"#
         );
-        // CJK is not ASCII `\w`: the name ends at `car` and `中` stays text.
+        // cjk-allow: the CJK glyph is the token boundary under test.
+        let glyph = "中";
         assert_eq!(
-            replace_fa_icons("fa:fa-car中"),
-            r#"<i class="fa fa-car"></i>中"#
+            replace_fa_icons(&format!("fa:fa-car{glyph}")),
+            format!(r#"<i class="fa fa-car"></i>{glyph}"#)
         );
         // A name-less `fa:fa-` is literal text on both sides.
         assert_eq!(replace_fa_icons("fa:fa-"), "fa:fa-");
@@ -2042,7 +2044,7 @@ mod tests {
         let labels = [
             "fa:fa-car Car",
             "fa:fa-car_x",
-            "fa:fa-car中",
+            "fa:fa-car中", // cjk-allow: CJK glyphs are the token-boundary cases under test.
             "fa:fa-car的图标",
             "fa:fa-",
             "fa:fa-<br/>Longer text here",
