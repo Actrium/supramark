@@ -17,12 +17,17 @@ static UNESCAPE_ALL_RE: Lazy<Regex> =
 #[allow(clippy::manual_range_contains)]
 /// Return true if a `code` you got from `&#xHHHH;` entity is a valid charcode.
 ///
-/// Mirrors cmark: only NUL, surrogates (U+D800–U+DFFF) and code points above
-/// U+10FFFF are rejected. Noncharacters (U+FDD0–U+FDEF, U+xFFFE/U+xFFFF) are
-/// valid Unicode scalar values, so like cmark we keep them verbatim instead
-/// of replacing them with U+FFFD. C0/C1 controls are still rejected to
-/// preserve the markdown-it-compatible behavior callers rely on outside of
-/// the conformance-facing entity decoding.
+/// Noncharacter handling matches cmark's `houdini_unescape_ent`: noncharacters
+/// (U+FDD0–U+FDEF and the last two code points of every plane, U+FFFE/U+FFFF,
+/// U+1FFFE/U+1FFFF, ...) are valid Unicode scalar values, so like cmark we keep
+/// them verbatim instead of replacing them with U+FFFD.
+///
+/// This is NOT a full mirror of cmark: cmark replaces only NUL, surrogates
+/// (U+D800–U+DFFF) and code points above U+10FFFF with U+FFFD and decodes
+/// C0/C1 controls (and DEL, U+007F) as-is. This function additionally rejects
+/// those controls — a deliberate markdown-it compatibility deviation, kept
+/// because no conformance case exercises them and callers outside the
+/// conformance-facing entity decoding rely on the markdown-it escape behavior.
 /// ```
 /// # use supramark_markdown::common::utils::is_valid_entity_code;
 /// assert_eq!(is_valid_entity_code(1), false);
