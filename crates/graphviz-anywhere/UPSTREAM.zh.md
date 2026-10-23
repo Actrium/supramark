@@ -75,3 +75,14 @@ these, the corresponding skip entry can be removed here.
 | Path | Issue | Suggested upstream patch |
 |---|---|---|
 | `examples/react-native/package.json` | missing `"license"` field | add `"license": "Apache-2.0"` (matches repo `LICENSE`) |
+
+## 本仓维护的 Graphviz 源码补丁
+
+| 补丁 | 作用 | 上游状态 |
+|---|---|---|
+| `patches/0001-dotgen-dotsplines-rank-guards.patch` | 给 `lib/dotgen/dotsplines.c` 的 7 处 `v[0]` 解引用加空 rank 守卫，并修掉带 edge label 时 `GD_rank(g)[r - 2]` 在 `r == 1` 的越界（PlantUML state 图的 `<<inputPin>>` + 带 label 转移会 SIGSEGV） | graphviz `main` 仍未修（2026-10-21 核对），建议向上游提 MR；上游接受后可删除本补丁 |
+
+补丁由 `scripts/common.sh::prepare_graphviz_source` 在拷贝源码后应用，
+marker 为 `.supramark-rank-guards-applied`（独立于 static-build marker，
+保证已有 build 目录也会被打上）。改动补丁内容后 `graphviz-release.yml`
+的 cache key 会因 `patches/**` 变化而失效并重编。

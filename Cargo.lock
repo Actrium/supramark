@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "graphviz-anywhere"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "supramark-diagram-core",
  "thiserror 1.0.69",

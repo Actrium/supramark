@@ -218,6 +218,29 @@ REGEX_EOF
         find "${output_dir}" -name "*.bak" -delete
         touch "${patch_marker}"
     fi
+
+    # Local fixes on top of the pinned Graphviz source. Kept outside the marker
+    # above, so a build directory that already carries the static-build marker
+    # still receives patches added later.
+    local rank_guard_marker="${output_dir}/.supramark-rank-guards-applied"
+    if [ ! -f "${rank_guard_marker}" ]; then
+        if [ ! -f "${output_dir}/lib/dotgen/dotsplines.c" ]; then
+            # Minimal or partial source trees (the retry fixture in the RN
+            # package test, an interrupted copy) have nothing to patch; a real
+            # Graphviz tree always carries this file. The marker stays unset so
+            # a later run with a complete tree still applies the patch.
+            log_warn "lib/dotgen/dotsplines.c not found under ${output_dir}; skipping the rank-guard patch"
+        else
+            if ! command -v patch &>/dev/null; then
+                log_error "Required command not found: patch"
+                exit 1
+            fi
+            log_info "Applying Graphviz rank-guard patch..."
+            patch -p1 -d "${output_dir}" \
+                < "${PROJECT_ROOT}/patches/0001-dotgen-dotsplines-rank-guards.patch"
+            touch "${rank_guard_marker}"
+        fi
+    fi
 }
 
 # Download expat source for cross-compilation targets that lack it.
