@@ -52,6 +52,11 @@ pub struct MarkdownParser {
     /// another definition. See `ParseOptions::subsequent_indented_definitions`.
     pub subsequent_indented_definitions: bool,
 
+    /// micromark's lazy type-7 HTML flow interrupt: a type-7 sequence may
+    /// interrupt a paragraph on a markerless lazy continuation line, exiting
+    /// the container. See `ParseOptions::micromark_lazy_type7_interrupt`.
+    pub micromark_lazy_type7_interrupt: bool,
+
     /// When false (the parser's default), an unsafe protocol in a link, image,
     /// or autolink destination collapses the URL to empty — micromark's
     /// `allowDangerousProtocol: false` default. Set true to pass dangerous
@@ -121,6 +126,7 @@ impl Default for MarkdownParser {
             disable_character_escape: false,
             disable_label_end: false,
             subsequent_indented_definitions: false,
+            micromark_lazy_type7_interrupt: true,
             allow_dangerous_protocol: false,
             sanitize_image_src: false,
             mixed_line_suffix_soft_break: false,
