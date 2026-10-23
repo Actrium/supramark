@@ -1703,19 +1703,20 @@ pub(super) fn offset_svg_coords(svg: &str, dx: f64, dy: f64) -> String {
 /// rx, ry, x-rotation, and flags must NOT be offset.
 fn offset_path_data(d: &str, dx: f64, dy: f64) -> String {
     let mut result = String::with_capacity(d.len());
-    let mut chars = d.chars().peekable();
+    let mut chars = d.chars();
     let mut cmd = ' ';
 
-    while chars.peek().is_some() {
+    while !chars.as_str().is_empty() {
+        let before = chars.as_str().len();
         // Skip whitespace
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+        while peek_path_char(&chars).is_some_and(|c| c.is_whitespace()) {
             result.push(chars.next().unwrap());
         }
-        if chars.peek().is_none() {
+        if chars.as_str().is_empty() {
             break;
         }
 
-        let c = *chars.peek().unwrap();
+        let c = peek_path_char(&chars).unwrap();
         if c.is_alphabetic() {
             cmd = chars.next().unwrap();
             result.push(cmd);
@@ -1812,19 +1813,22 @@ fn offset_path_data(d: &str, dx: f64, dy: f64) -> String {
                 }
             }
         }
+
+        // A malformed character (`$`, emoji, …) can leave every branch above
+        // without consuming anything; drop one so the loop cannot spin.
+        if chars.as_str().len() == before {
+            chars.next();
+        }
     }
     result
 }
 
-fn parse_path_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<f64> {
+fn parse_path_number(chars: &mut std::str::Chars) -> Option<f64> {
     let mut s = String::new();
-    if chars.peek() == Some(&'-') {
+    if peek_path_char(chars) == Some('-') {
         s.push(chars.next().unwrap());
     }
-    while chars
-        .peek()
-        .is_some_and(|c| c.is_ascii_digit() || *c == '.')
-    {
+    while peek_path_char(chars).is_some_and(|c| c.is_ascii_digit() || c == '.') {
         s.push(chars.next().unwrap());
     }
     if s.is_empty() || s == "-" {
@@ -1834,8 +1838,34 @@ fn parse_path_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option
     }
 }
 
-fn skip_path_sep(chars: &mut std::iter::Peekable<std::str::Chars>, result: &mut String) {
-    while chars.peek().is_some_and(|c| *c == ',' || c.is_whitespace()) {
+/// Peek without consuming; `Chars` clone is O(1) and keeps `as_str` available
+/// for the loop's progress check.
+fn peek_path_char(chars: &std::str::Chars) -> Option<char> {
+    chars.clone().next()
+}
+
+fn skip_path_sep(chars: &mut std::str::Chars, result: &mut String) {
+    while peek_path_char(chars).is_some_and(|c| c == ',' || c.is_whitespace()) {
         result.push(chars.next().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_offset_path_with_invalid_char_terminates() {
+        // issue #249: the H/V/A/C/S/Q branches used to leave a malformed
+        // character unconsumed, spinning forever on bodies that get offset
+        // (titles, legends, …).
+        for d in ["M 0 0 H $", "H $", "M 1\u{1F600}2 3", "$"] {
+            let _ = offset_path_data(d, 1.0, 2.0);
+        }
+    }
+
+    #[test]
+    fn test_offset_path_still_offsets_valid_input() {
+        assert_eq!(offset_path_data("M0,0 L10,0", 5.0, 3.0), "M5,3 L15,3");
     }
 }

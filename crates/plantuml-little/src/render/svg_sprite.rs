@@ -1708,7 +1708,7 @@ fn get_stroke_style(element: &str) -> String {
 /// command to absolute uppercase before rendering via `UPath`.
 fn translate_path_data(d: &str, ox: f64, oy: f64) -> String {
     let mut result = String::new();
-    let mut chars = d.chars().peekable();
+    let mut chars = d.chars();
     let mut current_cmd = ' ';
     // Current point (absolute, in sprite coordinate space before scale/offset).
     let mut cur_x = 0.0_f64;
@@ -1717,17 +1717,18 @@ fn translate_path_data(d: &str, ox: f64, oy: f64) -> String {
     let mut start_x = 0.0_f64;
     let mut start_y = 0.0_f64;
 
-    while chars.peek().is_some() {
+    while !chars.as_str().is_empty() {
+        let before = chars.as_str().len();
         // Skip whitespace
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+        while peek_char(&chars).is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
-        if chars.peek().is_none() {
+        if chars.as_str().is_empty() {
             break;
         }
 
-        let c = *chars.peek().unwrap();
+        let c = peek_char(&chars).unwrap();
         if c.is_alphabetic() {
             current_cmd = c;
             chars.next();
@@ -1964,12 +1965,27 @@ fn translate_path_data(d: &str, ox: f64, oy: f64) -> String {
                 }
             }
         }
+
+        // Malformed input (a stray `$`, emoji, …) can leave every branch above
+        // without consuming anything; drop one character so the loop always
+        // makes progress instead of spinning forever.
+        if chars.as_str().len() == before {
+            chars.next();
+        }
     }
 
     result
 }
 
-fn parse_coord_pair(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<(f64, f64)> {
+/// Peek the next character without consuming it.
+///
+/// `Chars` is `Clone` and cloning is O(1), which keeps this loop free to check
+/// progress through `Chars::as_str` — a `Peekable` hides the remaining text.
+fn peek_char(chars: &std::str::Chars) -> Option<char> {
+    chars.clone().next()
+}
+
+fn parse_coord_pair(chars: &mut std::str::Chars) -> Option<(f64, f64)> {
     skip_whitespace_comma(chars);
     let x = parse_number(chars)?;
     skip_comma(chars);
@@ -1977,18 +1993,15 @@ fn parse_coord_pair(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<
     Some((x, y))
 }
 
-fn parse_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<f64> {
+fn parse_number(chars: &mut std::str::Chars) -> Option<f64> {
     skip_whitespace_comma(chars);
     let mut s = String::new();
     // Optional sign
-    if chars.peek().is_some_and(|&c| c == '-' || c == '+') {
+    if peek_char(chars).is_some_and(|c| c == '-' || c == '+') {
         s.push(chars.next().unwrap());
     }
     // Digits and decimal point
-    while chars
-        .peek()
-        .is_some_and(|&c| c.is_ascii_digit() || c == '.')
-    {
+    while peek_char(chars).is_some_and(|c| c.is_ascii_digit() || c == '.') {
         s.push(chars.next().unwrap());
     }
     if s.is_empty() || s == "-" || s == "+" {
@@ -1997,14 +2010,14 @@ fn parse_number(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<f64>
     s.parse::<f64>().ok()
 }
 
-fn skip_comma(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while chars.peek().is_some_and(|&c| c == ',' || c.is_whitespace()) {
+fn skip_comma(chars: &mut std::str::Chars) {
+    while peek_char(chars).is_some_and(|c| c == ',' || c.is_whitespace()) {
         chars.next();
     }
 }
 
-fn skip_whitespace_comma(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while chars.peek().is_some_and(|&c| c.is_whitespace() || c == ',') {
+fn skip_whitespace_comma(chars: &mut std::str::Chars) {
+    while peek_char(chars).is_some_and(|c| c.is_whitespace() || c == ',') {
         chars.next();
     }
 }
@@ -2108,5 +2121,15 @@ mod tests {
         let d = "M0,0 L10,0 L10,10 L0,10 Z";
         let result = translate_path_data(d, 5.0, 3.0);
         assert_eq!(result, "M5,3 L15,3 L15,13 L5,13 Z");
+    }
+
+    #[test]
+    fn test_path_with_invalid_char_terminates() {
+        // issue #249: a stray `$`/emoji used to leave every branch without
+        // consuming anything, so the translator spun forever. Rendering the
+        // malformed document must return instead of hanging the host.
+        for d in ["M 1$ 2", "M 1 2 Z $", "M 1\u{1F600}2 3", "$", "H $"] {
+            let _ = translate_path_data(d, 0.0, 0.0);
+        }
     }
 }

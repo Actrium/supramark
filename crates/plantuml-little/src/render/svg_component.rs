@@ -274,7 +274,7 @@ pub fn render_component(
             }
         }
     }
-    let qualified_names = build_component_qualified_names(cd);
+    let qualified_names = build_component_qualified_names(cd)?;
     // Map entity ID → Java "code" (alias if given, else display name)
     let entity_codes: std::collections::HashMap<String, String> = cd
         .entities
@@ -2231,9 +2231,15 @@ fn render_node_text(
     }
 }
 
+/// Build the `data-qualified-name` value for every entity.
+///
+/// A parent reference always names a group (the parser records the enclosing
+/// container), so a parent that is a group resolves to that group's code and
+/// terminates there. Anything else that would revisit an id is a cycle in the
+/// model and is reported instead of recursing until the stack overflows.
 fn build_component_qualified_names(
     cd: &ComponentDiagram,
-) -> std::collections::HashMap<String, String> {
+) -> Result<std::collections::HashMap<String, String>> {
     // Java uses the "code" (alias if given, else display name) in qualified paths.
     let parents: std::collections::HashMap<&str, Option<&str>> = cd
         .entities
@@ -2245,6 +2251,8 @@ fn build_component_qualified_names(
         .iter()
         .map(|ent| (ent.id.as_str(), ent.code.as_str()))
         .collect();
+    let group_ids: std::collections::HashSet<&str> =
+        cd.groups.iter().map(|g| g.id.as_str()).collect();
     // Include groups so parent resolution uses the group's display code
     for group in &cd.groups {
         id_to_code.insert(group.id.as_str(), group.code.as_str());
@@ -2254,25 +2262,55 @@ fn build_component_qualified_names(
         id: &str,
         parents: &std::collections::HashMap<&str, Option<&str>>,
         id_to_code: &std::collections::HashMap<&str, &str>,
+        group_ids: &std::collections::HashSet<&str>,
         memo: &mut std::collections::HashMap<String, String>,
-    ) -> String {
+        visiting: &mut std::collections::HashSet<String>,
+    ) -> Result<String> {
         if let Some(existing) = memo.get(id) {
-            return existing.clone();
+            return Ok(existing.clone());
+        }
+        if !visiting.insert(id.to_string()) {
+            return Err(crate::Error::Render(format!(
+                "cannot build qualified name: '{id}' is its own ancestor"
+            )));
         }
         let code = id_to_code.get(id).copied().unwrap_or(id);
         let qualified = match parents.get(id).copied().flatten() {
-            Some(parent) => format!("{}.{}", resolve(parent, parents, id_to_code, memo), code),
+            // A parent naming a group stops the chain: groups carry no parent
+            // of their own in the model (this also covers a leaf declared in a
+            // same-named container, which Java allows for nested containers).
+            Some(parent) if group_ids.contains(parent) => {
+                format!(
+                    "{}.{}",
+                    id_to_code.get(parent).copied().unwrap_or(parent),
+                    code
+                )
+            }
+            Some(parent) => format!(
+                "{}.{}",
+                resolve(parent, parents, id_to_code, group_ids, memo, visiting)?,
+                code
+            ),
             None => code.to_string(),
         };
+        visiting.remove(id);
         memo.insert(id.to_string(), qualified.clone());
-        qualified
+        Ok(qualified)
     }
 
     let mut memo = std::collections::HashMap::new();
+    let mut visiting = std::collections::HashSet::new();
     for ent in &cd.entities {
-        resolve(&ent.id, &parents, &id_to_code, &mut memo);
+        resolve(
+            &ent.id,
+            &parents,
+            &id_to_code,
+            &group_ids,
+            &mut memo,
+            &mut visiting,
+        )?;
     }
-    memo
+    Ok(memo)
 }
 
 // ---------------------------------------------------------------------------
@@ -3198,7 +3236,7 @@ mod tests {
         ComponentEdgeLayout, ComponentGroupLayout, ComponentLayout, ComponentNodeLayout,
         ComponentNoteLayout,
     };
-    use crate::model::component::ComponentDiagram;
+    use crate::model::component::{ComponentDiagram, ComponentEntity};
     use crate::style::SkinParams;
 
     fn empty_diagram() -> ComponentDiagram {
@@ -3728,5 +3766,82 @@ mod tests {
         let svg =
             render_component(&diagram, &layout, &SkinParams::default()).expect("render failed");
         assert!(svg.contains("<path"), "multi-point edge must use path");
+    }
+
+    // ── issue #249: qualified names never recurse without bound ─────────────
+
+    fn entity(id: &str, code: &str, parent: Option<&str>) -> ComponentEntity {
+        ComponentEntity {
+            name: id.to_string(),
+            id: id.to_string(),
+            code: code.to_string(),
+            kind: ComponentKind::Component,
+            stereotype: None,
+            stereotypes: Vec::new(),
+            description: vec![],
+            parent: parent.map(str::to_string),
+            color: None,
+            source_line: None,
+        }
+    }
+
+    #[test]
+    fn qualified_names_stop_at_a_group_parent() {
+        // `rectangle web { component web }` used to build parent == own id and
+        // recurse forever (uncatchable stack overflow). A parent naming a group
+        // stops the chain instead.
+        let mut diagram = empty_diagram();
+        diagram
+            .groups
+            .push(crate::model::component::ComponentGroup {
+                name: "web".to_string(),
+                id: "web".to_string(),
+                code: "web".to_string(),
+                kind: ComponentKind::Rectangle,
+                stereotype: None,
+                stereotypes: Vec::new(),
+                children: vec!["web".to_string()],
+                source_line: Some(1),
+            });
+        diagram.entities.push(entity("web", "web", Some("web")));
+
+        let names = build_component_qualified_names(&diagram).expect("must terminate");
+        assert_eq!(names.get("web").map(String::as_str), Some("web.web"));
+    }
+
+    #[test]
+    fn qualified_names_report_entity_cycles() {
+        let mut diagram = empty_diagram();
+        diagram.entities.push(entity("a", "a", Some("b")));
+        diagram.entities.push(entity("b", "b", Some("a")));
+
+        let err = build_component_qualified_names(&diagram).expect_err("cycle must be reported");
+        assert!(
+            matches!(err, crate::Error::Render(_)),
+            "unexpected: {err:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_names_keep_the_group_prefix() {
+        let mut diagram = empty_diagram();
+        diagram
+            .groups
+            .push(crate::model::component::ComponentGroup {
+                name: "Web Store".to_string(),
+                id: "web_store".to_string(),
+                code: "Web Store".to_string(),
+                kind: ComponentKind::Rectangle,
+                stereotype: None,
+                stereotypes: Vec::new(),
+                children: vec!["UC1".to_string()],
+                source_line: Some(1),
+            });
+        diagram
+            .entities
+            .push(entity("UC1", "UC1", Some("web_store")));
+
+        let names = build_component_qualified_names(&diagram).expect("must resolve");
+        assert_eq!(names.get("UC1").map(String::as_str), Some("Web Store.UC1"));
     }
 }

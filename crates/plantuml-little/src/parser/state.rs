@@ -4,6 +4,14 @@ use crate::model::state::{State, StateDiagram, StateKind, StateNote, Transition}
 use crate::model::Direction;
 use crate::Result;
 
+/// Maximum composite-state nesting depth.
+///
+/// Model walks that follow the nesting are recursive (clone/drop,
+/// `reorder_java_pass_order`, inner layout); without a bound a deeply nested
+/// document aborts the process with a stack overflow no host can catch.
+/// Real diagrams are nowhere near this: the fixture corpus tops out at 2.
+const MAX_COMPOSITE_NESTING: usize = 64;
+
 /// Parser state for multi-line constructs
 #[derive(Debug)]
 enum ParseMode {
@@ -326,6 +334,16 @@ pub fn parse_state_diagram(source: &str) -> Result<StateDiagram> {
                     "line {}: entering composite state '{}' (name='{}')",
                     line_num, composite.id, composite.name
                 );
+                // Recursive model walks (clone/drop, reorder_java_pass_order,
+                // inner layout) follow this nesting: an unbounded depth aborts
+                // the process with a stack overflow the host cannot catch.
+                if stack.len() >= MAX_COMPOSITE_NESTING {
+                    return Err(crate::Error::Parse {
+                        line: line_num,
+                        column: Some(1),
+                        message: format!("state nesting exceeds {MAX_COMPOSITE_NESTING} levels"),
+                    });
+                }
                 let mut composite = composite;
                 composite.source_line = Some(line_num);
                 composite.explicit_source_line = Some(line_num);
@@ -2047,5 +2065,45 @@ mod tests {
         assert_eq!(diagram.notes[0].source_line, Some(6));
         assert_eq!(diagram.notes[1].source_line, Some(8));
         assert_eq!(diagram.transitions[2].from, "[*]__startActive");
+    }
+
+    // ── issue #249: nesting depth is bounded ────────────────────────────────
+
+    #[test]
+    fn composite_nesting_below_the_limit_still_parses() {
+        let depth = 10;
+        let mut src = String::from("@startuml\n");
+        for i in 0..depth {
+            src.push_str(&format!("state s{i} {{\n"));
+        }
+        src.push_str("[*] -> x\n");
+        for _ in 0..depth {
+            src.push_str("}\n");
+        }
+        src.push_str("@enduml\n");
+        let d = parse_state_diagram(&src).expect("depth 10 must parse");
+        assert!(!d.states.is_empty());
+    }
+
+    #[test]
+    fn composite_nesting_beyond_the_limit_is_rejected() {
+        // 500 nested states used to abort the process: recursive model walks
+        // (clone/drop, reorder_java_pass_order) overflow the stack before any
+        // host can catch it.
+        let depth = 500;
+        let mut src = String::from("@startuml\n");
+        for i in 0..depth {
+            src.push_str(&format!("state s{i} {{\n"));
+        }
+        src.push_str("[*] -> x\n");
+        for _ in 0..depth {
+            src.push_str("}\n");
+        }
+        src.push_str("@enduml\n");
+        let err = parse_state_diagram(&src).expect_err("must be rejected");
+        assert!(
+            matches!(err, crate::Error::Parse { .. }),
+            "unexpected error: {err:?}"
+        );
     }
 }

@@ -207,6 +207,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: actor id='{}' name='{}'",
                 line_num, actor.id, actor.name
             );
+            check_group_name_clash(line_num, &actor.id, &boundary_stack)?;
             if !actors.iter().any(|a| a.id == actor.id) {
                 actor.source_line = Some(line_num);
                 if let Some(parent) = boundary_stack.last_mut() {
@@ -223,6 +224,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: colon-actor id='{}' name='{}'",
                 line_num, actor.id, actor.name
             );
+            check_group_name_clash(line_num, &actor.id, &boundary_stack)?;
             if !actors.iter().any(|a| a.id == actor.id) {
                 actor.source_line = Some(line_num);
                 if let Some(parent) = boundary_stack.last_mut() {
@@ -233,12 +235,59 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
             continue;
         }
 
+        // --- `(a) --> (b)` linkage lines ---
+        //
+        // A parenthesised endpoint followed by an arrow is a link, not a
+        // `(Name)` declaration: Java resolves `(a)` against the objects
+        // declared so far and allows it to name the enclosing group. Handled
+        // before the declaration branches so the arrow is not dropped.
+        if paren_line_starts_link(line) {
+            if let Some(link) = try_parse_link(line) {
+                // Java reads parenthesised endpoints as use cases (not actors)
+                // and keeps them inside the enclosing boundary. Declaring them
+                // here also keeps the actor heuristic out of the picture.
+                for name in paren_link_endpoint_names(line) {
+                    let id = name_to_id(&name);
+                    if is_boundary_id(&id, &boundary_stack, &boundaries)
+                        || actors.iter().any(|a| a.id == id)
+                        || usecases.iter().any(|u| u.id == id)
+                    {
+                        continue;
+                    }
+                    let parent_id = boundary_stack.last().map(|f| f.id.clone());
+                    if let Some(parent) = boundary_stack.last_mut() {
+                        parent.children.push(id.clone());
+                    }
+                    usecases.push(UseCase {
+                        id,
+                        name: name.clone(),
+                        code: name,
+                        stereotype: None,
+                        color: None,
+                        parent: parent_id,
+                        source_line: Some(line_num),
+                    });
+                }
+                record_link(
+                    line_num,
+                    link,
+                    &mut actors,
+                    &mut usecases,
+                    &mut links,
+                    &boundary_stack,
+                    &boundaries,
+                );
+                continue;
+            }
+        }
+
         // --- usecase "Name" as id / usecase id ---
         if let Some(mut uc) = try_parse_usecase_decl(line) {
             debug!(
                 "line {}: usecase id='{}' name='{}'",
                 line_num, uc.id, uc.name
             );
+            check_group_name_clash(line_num, &uc.id, &boundary_stack)?;
             let parent_id = boundary_stack.last().map(|f| f.id.clone());
             uc.parent = parent_id.clone();
             uc.source_line = Some(line_num);
@@ -257,6 +306,7 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
                 "line {}: paren-usecase id='{}' name='{}'",
                 line_num, uc.id, uc.name
             );
+            check_self_parent_clash(line_num, &uc.id, &boundary_stack)?;
             let parent_id = boundary_stack.last().map(|f| f.id.clone());
             uc.parent = parent_id.clone();
             uc.source_line = Some(line_num);
@@ -280,16 +330,16 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
         }
 
         // --- relationship arrows ---
-        if let Some(mut link) = try_parse_link(line) {
-            debug!(
-                "line {}: link '{}' {:?} '{}' label='{}'",
-                line_num, link.from, link.style, link.to, link.label
+        if let Some(link) = try_parse_link(line) {
+            record_link(
+                line_num,
+                link,
+                &mut actors,
+                &mut usecases,
+                &mut links,
+                &boundary_stack,
+                &boundaries,
             );
-            link.source_line = Some(line_num);
-            // Auto-create actors/usecases referenced in links but not yet declared
-            ensure_entity_exists(&link.from, &mut actors, &mut usecases);
-            ensure_entity_exists(&link.to, &mut actors, &mut usecases);
-            links.push(link);
             continue;
         }
 
@@ -331,6 +381,84 @@ pub fn parse_usecase_diagram(source: &str) -> Result<UseCaseDiagram> {
 // ---------------------------------------------------------------------------
 // Helper: ensure entity (actor or usecase) exists when referenced in a link
 // ---------------------------------------------------------------------------
+
+/// True when `id` names a boundary, still open or already closed.
+fn is_boundary_id(id: &str, open: &[BoundaryFrame], closed: &[UseCaseBoundary]) -> bool {
+    open.iter().any(|f| f.id == id) || closed.iter().any(|b| b.id == id)
+}
+
+/// Record a parsed link and auto-create endpoints that are not declared yet.
+///
+/// An endpoint naming a boundary stays a reference to that boundary: Java
+/// resolves `(a) .> (aa)` inside `rectangle a {` to the boundary itself, so no
+/// phantom actor/usecase may be created for it.
+fn record_link(
+    line_num: usize,
+    mut link: UseCaseLink,
+    actors: &mut Vec<UseCaseActor>,
+    usecases: &mut Vec<UseCase>,
+    links: &mut Vec<UseCaseLink>,
+    open_boundaries: &[BoundaryFrame],
+    closed_boundaries: &[UseCaseBoundary],
+) {
+    debug!(
+        "line {}: link '{}' {:?} '{}' label='{}'",
+        line_num, link.from, link.style, link.to, link.label
+    );
+    link.source_line = Some(line_num);
+    for endpoint in [&link.from, &link.to] {
+        if is_boundary_id(endpoint, open_boundaries, closed_boundaries) {
+            continue;
+        }
+        ensure_entity_exists(endpoint, actors, usecases);
+    }
+    links.push(link);
+}
+
+/// Reject a keyword declaration (`usecase a` / `actor a`) whose id is already
+/// used by **any** enclosing group.
+///
+/// The jar rejects the clash with an outer group too, not just the innermost
+/// one: `rectangle a { rectangle b { usecase a } }` and the `component a`
+/// variant both produce its error page.
+fn check_group_name_clash(line: usize, id: &str, open: &[BoundaryFrame]) -> Result<()> {
+    if open.iter().any(|frame| frame.id == id) {
+        return Err(crate::Error::Parse {
+            line,
+            column: Some(1),
+            message: format!(
+                "'{id}' is already used by the enclosing group; rename the entity or the boundary"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Reject a `(Name)` declaration that reuses the id of the group it is declared
+/// in — the shape that builds a self-referential parent chain here.
+///
+/// This is a deliberate divergence, not jar parity: with a component/usecase
+/// cue the jar reports `This element (a) is already defined (Assumed diagram
+/// type: component)`, but with no such cue it assumes an Activity diagram and
+/// renders the same source. Resolving `(a)` against the enclosing boundary the
+/// way the link path does is follow-up work; until then, main stack-overflows
+/// on this input and rejecting it is the safe behaviour.
+///
+/// Only the innermost group is checked: the jar renders
+/// `rectangle a { rectangle b { (a) } }`, so an outer group with the same name
+/// must stay accepted.
+fn check_self_parent_clash(line: usize, id: &str, open: &[BoundaryFrame]) -> Result<()> {
+    if open.last().is_some_and(|frame| frame.id == id) {
+        return Err(crate::Error::Parse {
+            line,
+            column: Some(1),
+            message: format!(
+                "'{id}' is already used by the enclosing group; rename the entity or the boundary"
+            ),
+        });
+    }
+    Ok(())
+}
 
 /// When a link references an id that has not been explicitly declared, we
 /// auto-create a minimal entity.  We use a simple heuristic: if the raw id
@@ -719,63 +847,126 @@ fn try_parse_link(line: &str) -> Option<UseCaseLink> {
     })
 }
 
-/// Arrow patterns we recognise (checked in priority order):
+/// Arrow patterns we recognise, longest-first so a longer arrow never loses to
+/// one of its own prefixes (`-->` before `->`, `..>>` before `..>`).
 ///
 /// Inheritance:  `--|>` / `<|--`
 /// Dashed:       `..>` / `<..` / `..>>` / `<<..`
 /// Dotted:       `.>` / `<.`
 /// Association:  `-->` / `<--` / `->` / `<-`
 ///               with optional direction hints: `-up->` etc.
-fn try_split_arrow(s: &str) -> Option<LinkParseResult> {
-    // Patterns with their styles, sorted longest-first to avoid ambiguity
-    // Each entry: (left_arrow, right_arrow, style, is_reversed_when_left)
-    //
-    // We scan for each pattern string in s and check that something meaningful
-    // is on each side.
+const ARROW_CANDIDATES: &[(&str, UseCaseLinkStyle, bool)] = &[
+    // Inheritance
+    ("--|>", UseCaseLinkStyle::Inheritance, false),
+    ("<|--", UseCaseLinkStyle::Inheritance, true),
+    ("-up-|>", UseCaseLinkStyle::Inheritance, false),
+    ("-down-|>", UseCaseLinkStyle::Inheritance, false),
+    ("-left-|>", UseCaseLinkStyle::Inheritance, false),
+    ("-right-|>", UseCaseLinkStyle::Inheritance, false),
+    // Dashed
+    ("..>>", UseCaseLinkStyle::Dashed, false),
+    ("<<..", UseCaseLinkStyle::Dashed, true),
+    ("..>", UseCaseLinkStyle::Dashed, false),
+    ("<..", UseCaseLinkStyle::Dashed, true),
+    // Dotted (single dot)
+    (".>", UseCaseLinkStyle::Dotted, false),
+    ("<.", UseCaseLinkStyle::Dotted, true),
+    // Association with direction hints
+    ("-up->", UseCaseLinkStyle::Association, false),
+    ("<-up-", UseCaseLinkStyle::Association, true),
+    ("-down->", UseCaseLinkStyle::Association, false),
+    ("<-down-", UseCaseLinkStyle::Association, true),
+    ("-left->", UseCaseLinkStyle::Association, false),
+    ("<-left-", UseCaseLinkStyle::Association, true),
+    ("-right->", UseCaseLinkStyle::Association, false),
+    ("<-right-", UseCaseLinkStyle::Association, true),
+    // Plain association
+    ("-->", UseCaseLinkStyle::Association, false),
+    ("<--", UseCaseLinkStyle::Association, true),
+    ("->", UseCaseLinkStyle::Association, false),
+    ("<-", UseCaseLinkStyle::Association, true),
+    // Undirected
+    ("--", UseCaseLinkStyle::Association, false),
+    ("..", UseCaseLinkStyle::Dotted, false),
+];
 
+/// Find the arrow token that starts a linkage line, if any.
+///
+/// The token must begin the text: `(a) -- (b)` is a link, while
+/// `(a) as x <<..>>` is a declaration whose stereotype merely contains dots.
+fn leading_arrow(s: &str) -> Option<&'static str> {
+    ARROW_CANDIDATES
+        .iter()
+        .filter(|(pattern, _, _)| s.starts_with(*pattern))
+        .max_by_key(|(pattern, _, _)| pattern.len())
+        .map(|(pattern, _, _)| *pattern)
+}
+
+/// True when a line that starts with a parenthesised use case is actually a
+/// linkage line (Java resolves `(a)` against the objects declared so far), not
+/// a `(Name)` declaration.
+///
+/// Only the text between the closing `)` and the label separator is inspected,
+/// so arrows appearing inside a quoted name or a stereotype cannot turn a
+/// declaration into a link.
+fn paren_line_starts_link(line: &str) -> bool {
+    let mut in_quotes = false;
+    let mut close = None;
+    for (i, ch) in line.char_indices() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ')' if !in_quotes => {
+                close = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return false;
+    };
+    let after = &line[close + 1..];
+    let arrow_part = after.split(" : ").next().unwrap_or(after).trim_start();
+    // `(a) <<stereo>>` is a declaration; no linkage arrow starts with `<<`.
+    if arrow_part.starts_with("<<") {
+        return false;
+    }
+    leading_arrow(arrow_part).is_some()
+}
+
+/// Names of the parenthesised endpoints of a linkage line, in source order.
+///
+/// `(a) .> (aa) : <<a>>` yields `["a", "aa"]`; endpoints written as bare ids
+/// are skipped (they keep the existing auto-create heuristic).
+fn paren_link_endpoint_names(line: &str) -> Vec<String> {
+    let arrow_part = line.split(" : ").next().unwrap_or(line);
+    let Some((pos, pattern)) = ARROW_CANDIDATES
+        .iter()
+        .filter_map(|(p, _, _)| arrow_part.find(p).map(|i| (i, *p)))
+        .min_by_key(|(i, p)| (*i, std::cmp::Reverse(p.len())))
+    else {
+        return Vec::new();
+    };
+    let sides = [
+        arrow_part[..pos].trim(),
+        arrow_part[pos + pattern.len()..].trim(),
+    ];
+    sides
+        .iter()
+        .filter_map(|side| {
+            side.strip_prefix('(')?
+                .strip_suffix(')')
+                .map(|inner| inner.trim().to_string())
+                .filter(|inner| !inner.is_empty())
+        })
+        .collect()
+}
+
+fn try_split_arrow(s: &str) -> Option<LinkParseResult> {
     // Collect direction hints embedded in dashes: `-up-`, `-down-`, `-left-`, `-right-`
     let dir_hints = ["up", "down", "left", "right"];
 
-    // Build a list of (pattern_str, style, reversed) to try
-    // For each we split s at the pattern and check both sides non-empty.
-    // The `reversed` flag means the arrow points from right to left.
-
-    let candidates: &[(&str, UseCaseLinkStyle, bool)] = &[
-        // Inheritance
-        ("--|>", UseCaseLinkStyle::Inheritance, false),
-        ("<|--", UseCaseLinkStyle::Inheritance, true),
-        ("-up-|>", UseCaseLinkStyle::Inheritance, false),
-        ("-down-|>", UseCaseLinkStyle::Inheritance, false),
-        ("-left-|>", UseCaseLinkStyle::Inheritance, false),
-        ("-right-|>", UseCaseLinkStyle::Inheritance, false),
-        // Dashed
-        ("..>>", UseCaseLinkStyle::Dashed, false),
-        ("<<..", UseCaseLinkStyle::Dashed, true),
-        ("..>", UseCaseLinkStyle::Dashed, false),
-        ("<..", UseCaseLinkStyle::Dashed, true),
-        // Dotted (single dot)
-        (".>", UseCaseLinkStyle::Dotted, false),
-        ("<.", UseCaseLinkStyle::Dotted, true),
-        // Association with direction hints
-        ("-up->", UseCaseLinkStyle::Association, false),
-        ("<-up-", UseCaseLinkStyle::Association, true),
-        ("-down->", UseCaseLinkStyle::Association, false),
-        ("<-down-", UseCaseLinkStyle::Association, true),
-        ("-left->", UseCaseLinkStyle::Association, false),
-        ("<-left-", UseCaseLinkStyle::Association, true),
-        ("-right->", UseCaseLinkStyle::Association, false),
-        ("<-right-", UseCaseLinkStyle::Association, true),
-        // Plain association
-        ("-->", UseCaseLinkStyle::Association, false),
-        ("<--", UseCaseLinkStyle::Association, true),
-        ("->", UseCaseLinkStyle::Association, false),
-        ("<-", UseCaseLinkStyle::Association, true),
-        // Undirected
-        ("--", UseCaseLinkStyle::Association, false),
-        ("..", UseCaseLinkStyle::Dotted, false),
-    ];
-
-    for (pattern, style, rev) in candidates {
+    for (pattern, style, rev) in ARROW_CANDIDATES {
         if let Some(pos) = s.find(pattern) {
             let left = s[..pos].trim();
             let right = s[pos + pattern.len()..].trim();
@@ -1102,5 +1293,109 @@ mod tests {
         let src = "@startuml\n<style>\nactor { color: red; }\n</style>\nactor User\n@enduml";
         let d = parse(src);
         assert_eq!(d.actors.len(), 1);
+    }
+
+    // ── issue #249: parenthesised linkage lines ─────────────────────────────
+
+    #[test]
+    fn paren_endpoints_start_a_link() {
+        let d = parse("@startuml\n(a) --> (b)\n@enduml");
+        assert_eq!(d.links.len(), 1);
+        assert_eq!(d.links[0].from, "a");
+        assert_eq!(d.links[0].to, "b");
+        // Parenthesised endpoints are use cases (Java draws ellipses), not actors.
+        assert_eq!(d.usecases.len(), 2);
+        assert!(d.actors.is_empty());
+    }
+
+    #[test]
+    fn paren_link_inside_same_named_boundary_resolves_to_the_boundary() {
+        // Java accepts this: `(a)` is a reference to the enclosing boundary,
+        // not a declaration of a second `a`.
+        let d = parse("@startuml\nrectangle a {\n  (a) .> (aa) : <<a>>\n}\n@enduml");
+        assert_eq!(d.boundaries.len(), 1);
+        assert_eq!(d.links.len(), 1);
+        assert_eq!(d.links[0].from, "a");
+        assert_eq!(d.links[0].to, "aa");
+        assert_eq!(d.links[0].label, "<<a>>");
+        assert!(d.usecases.iter().all(|u| u.id != "a"));
+        assert!(d.actors.iter().all(|a| a.id != "a"));
+        // The other endpoint still lives inside the boundary.
+        let aa = d.usecases.iter().find(|u| u.id == "aa").expect("aa");
+        assert_eq!(aa.parent.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn quoted_names_and_stereotypes_stay_declarations() {
+        let d = parse("@startuml\n(\"a --> b\") as x\n@enduml");
+        assert!(d.links.is_empty());
+        assert_eq!(d.usecases.len(), 1);
+
+        let d = parse("@startuml\n(a) <<stereo>>\n@enduml");
+        assert!(d.links.is_empty());
+        assert_eq!(d.usecases.len(), 1);
+        assert_eq!(d.usecases[0].stereotype.as_deref(), Some("stereo"));
+
+        let d = parse("@startuml\n(a) as x\n@enduml");
+        assert!(d.links.is_empty());
+        assert_eq!(d.usecases.len(), 1);
+        assert_eq!(d.usecases[0].id, "x");
+    }
+
+    // ── issue #249: same-name declarations are rejected, like Java ──────────
+
+    #[test]
+    fn same_name_leaf_declaration_inside_boundary_is_rejected() {
+        // Two reasons, kept together because the outcome is the same:
+        // - `(a)` inside `rectangle a` is a deliberate divergence. The jar
+        //   reports "This element (a) is already defined" when it assumes a
+        //   component/usecase diagram (an actor cue forces that), but with no
+        //   cue it assumes Activity and renders; main stack-overflows on it.
+        // - `usecase a` inside `rectangle a` matches the jar's error page.
+        for src in [
+            "@startuml\nrectangle a {\n  (a)\n}\n@enduml",
+            "@startuml\nrectangle a {\n  usecase a\n}\n@enduml",
+            "@startuml\nactor u\nrectangle a {\n  (a)\n}\n@enduml",
+        ] {
+            let err = parse_usecase_diagram(src).expect_err("must be rejected");
+            assert!(
+                matches!(err, crate::Error::Parse { .. }),
+                "unexpected error for {src:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn keyword_declaration_clashing_with_an_outer_group_is_rejected() {
+        // The jar rejects the clash with an outer group, not just the
+        // innermost one. Reachability note: `actor a` inside a same-named
+        // boundary is routed to the sequence parser by diagram-type detection,
+        // so only the usecase keyword form is exercised here.
+        let src = "@startuml\nrectangle a {\n  rectangle b {\n    usecase a\n  }\n}\n@enduml";
+        let err = parse_usecase_diagram(src).expect_err("must be rejected");
+        assert!(
+            matches!(err, crate::Error::Parse { .. }),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn paren_declaration_clashing_with_an_outer_group_is_allowed() {
+        // Deliberate divergence from a blanket rule: the jar renders
+        // `rectangle a { rectangle b { (a) } }`, so an outer group with the
+        // same name must not be rejected. Only the innermost (self-parent)
+        // case is rejected (see `check_self_parent_clash`).
+        let d = parse("@startuml\nrectangle a {\n  rectangle b {\n    (a)\n  }\n}\n@enduml");
+        assert_eq!(d.boundaries.len(), 2);
+        assert!(d.usecases.iter().any(|u| u.id == "a"));
+    }
+
+    #[test]
+    fn nested_same_named_container_is_allowed() {
+        // Java allows a nested container with the same name (`rectangle a {
+        // rectangle a { ... } }`); only leaf entities clash.
+        let d = parse("@startuml\nrectangle a {\n  rectangle a {\n    (x)\n  }\n}\n@enduml");
+        assert_eq!(d.boundaries.len(), 2);
+        assert_eq!(d.usecases.len(), 1);
     }
 }

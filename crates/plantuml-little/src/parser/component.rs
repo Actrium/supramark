@@ -275,6 +275,7 @@ pub fn parse_component_diagram(source: &str) -> Result<ComponentDiagram> {
 
             // Check for description block `Name [ ...`
             if decl.opens_description {
+                check_enclosing_clash(line_num, &decl.id, &group_stack)?;
                 let parent_id = group_stack.last().map(|f| f.id.clone());
                 entities.push(ComponentEntity {
                     name: decl.name.clone(),
@@ -302,6 +303,7 @@ pub fn parse_component_diagram(source: &str) -> Result<ComponentDiagram> {
                 continue;
             }
 
+            check_enclosing_clash(line_num, &decl.id, &group_stack)?;
             let parent_id = group_stack.last().map(|f| f.id.clone());
             let code = decl.id.clone();
             entities.push(ComponentEntity {
@@ -421,6 +423,28 @@ pub fn parse_component_diagram(source: &str) -> Result<ComponentDiagram> {
 // ---------------------------------------------------------------------------
 // Entity declaration parsing
 // ---------------------------------------------------------------------------
+
+/// Reject a leaf declaration whose id is already used by **any** enclosing
+/// group.
+///
+/// The jar reports an error page for `rectangle web { component web }` and
+/// `package p { component p }`, and for the outer-group case
+/// `rectangle a { rectangle b { component a } }` as well; a clash with an outer
+/// name is the same "already defined" rule. The same shape used to build a
+/// self-referential parent chain here (and an uncatchable stack overflow in the
+/// renderer). Nested same-named *containers* stay allowed, matching the jar.
+fn check_enclosing_clash(line: usize, id: &str, open: &[GroupFrame]) -> Result<()> {
+    if open.iter().any(|frame| frame.id == id) {
+        return Err(crate::Error::Parse {
+            line,
+            column: Some(1),
+            message: format!(
+                "'{id}' is already used by the enclosing group; rename the entity or the group"
+            ),
+        });
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 struct EntityDecl {
@@ -1705,5 +1729,43 @@ end note
         assert_eq!(d.entities[0].name, "App");
         assert_eq!(d.entities[0].id, "app");
         assert_eq!(d.entities[0].kind, ComponentKind::Archimate);
+    }
+
+    // ── issue #249: same-name declarations are rejected, like Java ──────────
+
+    #[test]
+    fn test_same_name_leaf_declaration_is_rejected() {
+        for src in [
+            "@startuml\nrectangle web {\n  component web\n}\n@enduml",
+            "@startuml\npackage p {\n  component p\n}\n@enduml",
+            // The jar rejects a clash with an outer group too, not just the
+            // innermost one.
+            "@startuml\nrectangle a {\n  rectangle b {\n    component a\n  }\n}\n@enduml",
+        ] {
+            let err = parse_component_diagram(src).expect_err("must be rejected");
+            assert!(
+                matches!(err, crate::Error::Parse { .. }),
+                "unexpected error for {src:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_nested_same_named_container_is_allowed() {
+        // Java accepts `rectangle a { rectangle a { ... } }`: containers may
+        // repeat the enclosing name, leaf entities may not.
+        let d =
+            parse("@startuml\nrectangle a {\n  rectangle a {\n    component x\n  }\n}\n@enduml");
+        assert_eq!(d.groups.len(), 2);
+        assert!(d.entities.iter().any(|e| e.id == "x"));
+    }
+
+    #[test]
+    fn test_link_to_group_name_is_not_a_clash() {
+        // A link endpoint naming the enclosing group is a reference, not a
+        // declaration, so it must not be rejected (Java resolves it the same).
+        let d = parse("@startuml\nrectangle a {\n  a --> b\n}\n@enduml");
+        assert_eq!(d.links.len(), 1);
+        assert_eq!(d.links[0].from, "a");
     }
 }
