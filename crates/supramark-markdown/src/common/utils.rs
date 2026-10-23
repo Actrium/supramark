@@ -548,6 +548,13 @@ mod tests {
         assert_eq!(unescape_all("&ouml;"), "ö");
         assert_eq!(unescape_all("&AMP;"), "&");
         assert_eq!(unescape_all("&Amp;"), "&Amp;");
+
+        // Names near the scanner's 31-char upper bound decode here too, so
+        // a narrowed NAMED_ENTITY_PATTERN cannot pass this test unnoticed.
+        assert_eq!(
+            unescape_all("&CounterClockwiseContourIntegral;"),
+            "\u{2233}"
+        );
     }
 
     #[test]

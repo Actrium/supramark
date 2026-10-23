@@ -931,22 +931,32 @@ fn map_inline_text(
     let source_end = position.end.byte_offset;
     let span = source_end.saturating_sub(source_start);
 
-    // Fast path: the value's byte length matches the source span, so cmark
-    // decoded nothing inside this run — value IS the raw source slice, and
-    // `$` delimiters / `is_escaped` have correct TeX semantics on it.
+    // Fast path: the value's byte length matches the source span, so the run
+    // is inferred to be raw — value is treated as the source slice, and `$`
+    // delimiters / `is_escaped` have correct TeX semantics on it.
     //
-    // This inference is sound only because every decoding cmark performs
-    // strictly shortens the byte string: backslash escapes 2 raw → 1 value
-    // byte, CRLF 2 → 1, numeric refs are ≥5 raw bytes and decode to ≤4
-    // UTF-8 bytes, and named refs shrink too (`&XY;` is the 4-byte minimum,
-    // and the 2-character names like `&lt;` / `&GT;` decode to ≤3 bytes).
-    // A length-preserving or growing decode would silently take the fast
-    // path on a decoded run; none exists in cmark's decoding set.
+    // That inference is a heuristic, not an invariant. Most decodes do
+    // shorten the byte string (backslash escapes 2 → 1, CRLF 2 → 1, numeric
+    // refs always shrink), but named references do not all shrink: in the
+    // entities 1.0.1 table two grow (`&nGt;` / `&nLt;`, 5 raw bytes → 6
+    // decoded) and fifteen keep their length (`&acE;`, `&caps;`, `&ngE;`,
+    // ...). A run whose decodes sum to zero — an equal-length entity alone,
+    // or a growing entity offset by one backslash escape (`\_$&nGt;$x$`) —
+    // therefore reaches this branch with value still decoded. Known
+    // limitation: when a `$` or `[^` delimiter falls inside the shifted
+    // stretch it is read off decoded text (a decoded `\$` looks like a real
+    // delimiter), and `$…$` content taken from value is decoded instead of
+    // the verbatim source the slow path preserves; the same decoded-vs-raw
+    // split reproduces with an equal-length entity even though its offsets
+    // stay aligned. Pre-existing (the fast-path code is unchanged here) and
+    // tracked as a follow-up.
+    //
     // Passing the path explicitly instead of inferring it was considered
     // (issue #234), but the merge site (`rescan_adjacent_text_runs`) only
     // holds the merged `value` and the run `position`, so an explicit flag
     // would have to ride on the public `SupramarkNode::Text` variant — not
-    // worth the API churn for an invariant that holds by construction.
+    // worth the API churn for a heuristic that is exact for every
+    // shortening decode.
     if span == value.len() {
         return scan_inline_extensions(value, value, position, index, &IdentityMap);
     }
