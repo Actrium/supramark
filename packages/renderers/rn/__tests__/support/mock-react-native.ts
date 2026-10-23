@@ -40,3 +40,20 @@ mock.module('react-native', () => ({
 mock.module('react-native-svg', () => ({
   SvgXml: 'SvgXml',
 }));
+
+// `svgAst.tsx` takes the XML parser and `SvgAst` from `react-native-svg`'s own
+// XML module (the public entry re-exports `SvgXml` but not `parse`). That module
+// pulls in react-native's Flow sources, so register a minimal stand-in. The AST
+// is nested like a real label (`<svg><text><tspan>text</tspan></text></svg>`)
+// so the decoder's recursive walk is exercised, and `__parse_error__` throws to
+// stand in for a document the parser rejects.
+mock.module('react-native-svg/lib/commonjs/xml', () => ({
+  SvgAst: 'SvgAst',
+  parse: (xml: string, middleware?: (ast: unknown) => unknown) => {
+    if (xml === '__parse_error__') throw new Error('bad xml');
+    const tspan = { tag: 'tspan', props: {}, children: [xml], parent: null, Tag: 'TSpan' };
+    const text = { tag: 'text', props: {}, children: [tspan], parent: null, Tag: 'Text' };
+    const root = { tag: 'svg', props: {}, children: [text], parent: null, Tag: 'Svg' };
+    return middleware ? middleware(root) : root;
+  },
+}));

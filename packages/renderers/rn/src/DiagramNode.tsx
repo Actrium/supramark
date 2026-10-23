@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SvgXml } from 'react-native-svg';
+import { SvgXmlDecoded } from './svgAst';
 import type { SupramarkDiagramNode, SupramarkDiagramConfig } from '@supramark/core';
 import { shouldDeferDiagramRender } from '@supramark/core';
 import { type DiagramRenderResult, type DiagramRenderService } from '@supramark/engines';
@@ -283,7 +283,7 @@ export const DiagramNode: React.FC<DiagramNodeProps> = ({
         onLayout={handleLayout}
         testID="supramark-diagram-svg"
       >
-        <SvgXml
+        <SvgXmlDecoded
           xml={scalableSvg}
           width="100%"
           height="100%"
