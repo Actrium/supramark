@@ -11,6 +11,7 @@ import React, {
 import type {
   SupramarkRootNode,
   SupramarkNode,
+  SupramarkCodeActionLabels,
   SupramarkCodeNode,
   SupramarkDiagramNode,
   SupramarkContainerNode,
@@ -48,7 +49,11 @@ import { DiagramEngineContext } from './DiagramEngineProvider.js';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary.js';
 import { MathBlockWeb, MathInlineWeb } from './MathBlockWeb.js';
 import { SourceStateContext } from './SourceStateContext.js';
-import { CodeBlock, CodeCopyContext } from './CodeBlock.js';
+import { CodeBlock, CodeActionsContext } from './CodeBlock.js';
+
+// The label type belongs to the public props surface, so a host can type the
+// object it passes to `codeActionLabels` without importing an internal module.
+export type { SupramarkCodeActionLabels };
 import {
   getRendererCache,
   resolveDiagramCachePolicy,
@@ -86,13 +91,31 @@ export interface SupramarkWebProps {
    * the copy button calls it instead of `navigator.clipboard.writeText`.
    * Language-less fences and indented code have no distinct AST flag, so they
    * render the code card without a copy button.
+   *
+   * `node` is the live AST node — read-only; a mutation leaks into other
+   * renders, since a snapshot may be shared across renderer instances.
    */
   onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
   /**
-   * Whether to show code-block copy chrome (default: true). False restores
-   * the standalone pre.
+   * Whether to show the copy button (default: true).
    */
   copyButton?: boolean;
+  /**
+   * Master switch for the code-block chrome (default: true). False renders the
+   * bare spec `<pre><code>` tree — no card, no header, no button — whatever the
+   * other switches say. This is the switch the conformance harness uses to
+   * measure the plain code block.
+   */
+  codeBlockChrome?: boolean;
+  /**
+   * Overrides for the action labels. The button is icon-only, so these are what
+   * a screen reader announces and what the browser shows as the native hover
+   * tooltip; the library ships English defaults and never guesses a host's
+   * language.
+   *
+   * `fullscreen` is ignored here: the fullscreen action is React Native only.
+   */
+  codeActionLabels?: SupramarkCodeActionLabels;
 }
 
 export interface SupramarkRenderState {
@@ -226,6 +249,8 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   onRenderStateChange,
   onCopyCode,
   copyButton,
+  codeBlockChrome,
+  codeActionLabels,
 }) => {
   const diagramEngine = useContext(DiagramEngineContext) ?? defaultDiagramEngine;
   // Parsing, engine output, highlighting, and source state form one renderable source version.
@@ -376,9 +401,14 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
   );
 
   // Keep the provider identity stable for memoized code-block consumers.
-  const codeCopyContextValue = useMemo(
-    () => ({ onCopyCode, copyButton }),
-    [onCopyCode, copyButton],
+  const codeActionsContextValue = useMemo(
+    () => ({
+      onCopyCode,
+      codeBlockChrome,
+      copyButton,
+      labels: codeActionLabels,
+    }),
+    [onCopyCode, codeBlockChrome, copyButton, codeActionLabels],
   );
 
   if (parseError) {
@@ -418,7 +448,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
     >
       <SourceStateContext.Provider value={parsedDocument.sourceState}>
         <FootnoteMetaContext.Provider value={footnoteMeta}>
-          <CodeCopyContext.Provider value={codeCopyContextValue}>
+          <CodeActionsContext.Provider value={codeActionsContextValue}>
             <div className={mergedClassNames.root}>
               {mergeRawNodes(
                 bodyChildren,
@@ -448,7 +478,7 @@ export const Supramark: React.FC<SupramarkWebProps> = ({
                 />
               )}
             </div>
-          </CodeCopyContext.Provider>
+          </CodeActionsContext.Provider>
         </FootnoteMetaContext.Provider>
       </SourceStateContext.Provider>
     </ErrorBoundary>

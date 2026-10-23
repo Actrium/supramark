@@ -25,16 +25,19 @@ export interface SupramarkClassNames {
   /** Body pre inside the headered code block container (container owns the chrome). */
   codeBlockBody?: string;
   code?: string; // code element
-  /** Wrapper around a code block header (lang + button) and the pre. */
+  /** Wrapper around a code block header (lang + actions) and the pre. */
   codeBlockContainer?: string;
-  /** Header row: language label on the left, copy button on the right. */
+  /** Header row: language label on the left, action buttons on the right. */
   codeBlockHeader?: string;
   /** Language label in the header (the fenced info string). */
   codeBlockLang?: string;
-  /** Copy button in the header. */
-  codeButton?: string;
-  /** Label text inside the copy button. */
-  codeButtonText?: string;
+  /** Row holding the action buttons (copy / fullscreen). */
+  codeActions?: string;
+  /**
+   * A single action button. The icon inside paints with `currentColor`, so the
+   * button's `color` tints it.
+   */
+  codeAction?: string;
 
   // Lists
   listOrdered?: string; // ol element
@@ -111,8 +114,11 @@ export const tailwindClassNames: SupramarkClassNames = {
   codeBlockContainer: 'bg-gray-100 dark:bg-gray-800 rounded-md mb-4 overflow-hidden',
   codeBlockHeader: 'flex items-center justify-between px-2 py-1 select-none',
   codeBlockLang: 'text-xs text-gray-600 dark:text-gray-300 font-mono select-none',
-  codeButton:
-    'bg-gray-700 dark:bg-gray-600 text-white text-xs rounded px-2 py-1 hover:bg-gray-600 dark:hover:bg-gray-500 select-none',
+  codeActions: 'flex items-center gap-1.5',
+  // Icon-only buttons sit directly on the card: no resting background, colour
+  // inherited from the card's text colour, tint only while hovered.
+  codeAction:
+    'inline-flex items-center justify-center w-7 h-6 rounded text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10 select-none',
   listOrdered: 'list-decimal ml-6 mb-4',
   listUnordered: 'list-disc ml-6 mb-4',
   listItem: 'mb-1',
@@ -156,8 +162,8 @@ export const minimalClassNames: SupramarkClassNames = {
   codeBlockContainer: 'sm-code-block-container',
   codeBlockHeader: 'sm-code-block-header',
   codeBlockLang: 'sm-code-block-lang',
-  codeButton: 'sm-code-btn',
-  codeButtonText: 'sm-code-btn-text',
+  codeActions: 'sm-code-actions',
+  codeAction: 'sm-code-action',
   listOrdered: 'sm-ol',
   listUnordered: 'sm-ul',
   listItem: 'sm-li',

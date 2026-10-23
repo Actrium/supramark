@@ -77,11 +77,12 @@ function RenderCase({
           ...(request.flattenNestedStrong ? { flattenNestedStrong: true } : {}),
         },
       }}
-      // Conformance measures Markdown→DOM spec compliance. The copy button is
-      // a host UI decoration (library-added interaction), not part of the spec
-      // DOM, so the harness opts out of it to keep the measured DOM on the
-      // spec <pre><code> baseline.
-      copyButton={false}
+      // Conformance measures Markdown→DOM spec compliance. The code-block
+      // chrome (card, header, action buttons) is a host UI decoration
+      // (library-added interaction), not part of the spec DOM, so the harness
+      // opts out of it entirely to keep the measured DOM on the spec
+      // <pre><code> baseline.
+      codeBlockChrome={false}
       onError={onError}
       onRenderStateChange={onRenderStateChange}
     />
