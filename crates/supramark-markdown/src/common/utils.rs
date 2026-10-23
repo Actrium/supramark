@@ -1,5 +1,8 @@
 //! Random assortment of functions that's used internally to write plugins.
 
+use crate::plugins::cmark::inline::entity::{
+    DIGITAL_ENTITY_PATTERN, DIGITAL_RE, NAMED_ENTITY_PATTERN, NAMED_RE,
+};
 use entities;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -7,12 +10,23 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 const UNESCAPE_MD_RE: &str = r##"\\([!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])"##;
-const ENTITY_RE: &str = r##"&([A-Za-z#][A-Za-z0-9]{1,31});"##;
 
-static DIGITAL_ENTITY_TEST_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(?i)^&#(x[a-f0-9]{1,8}|[0-9]{1,8});$"#).unwrap());
-static UNESCAPE_ALL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(&format!("{UNESCAPE_MD_RE}|{ENTITY_RE}")).unwrap());
+// `unescape_all` runs over fence info strings and link destinations/titles,
+// which are parsed by different rules than inline text but follow the same
+// entity grammar (CommonMark §6.2 draws no positional distinction). It
+// therefore composes the scanner's own pattern bodies
+// (`plugins/cmark/inline/entity.rs` `NAMED_ENTITY_PATTERN` /
+// `DIGITAL_ENTITY_PATTERN`) rather than carrying a third copy — issue #234.
+// The scanner's `Regex` objects cannot be reused directly: the scanner
+// anchors its patterns at the current position (`^`), while this one
+// alternates them anywhere in the string. Composing the same bodies keeps
+// the grammar single-sourced either way.
+static UNESCAPE_ALL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(
+        "{UNESCAPE_MD_RE}|(?i)(?:{NAMED_ENTITY_PATTERN}|{DIGITAL_ENTITY_PATTERN})"
+    ))
+    .unwrap()
+});
 
 #[allow(clippy::manual_range_contains)]
 /// Return true if a `code` you got from `&#xHHHH;` entity is a valid charcode.
@@ -77,71 +91,74 @@ pub fn get_entity_from_str(str: &str) -> Option<&'static str> {
     ENTITIES_HASH.get(str).copied()
 }
 
-#[allow(clippy::from_str_radix_10)]
+/// Decode one `&…;` match produced by `UNESCAPE_ALL_RE`: a named reference
+/// through the shared entity table, a numeric reference through the
+/// scanner's own `decode_numeric_entity` — so an invalid charcode decodes to
+/// `U+FFFD` here exactly as it does in inline text (issue #234). Returns
+/// `None` for anything the table does not know and that is not a numeric
+/// reference (`&Amp;`, `&ffff;`, ...), leaving the match literal.
 fn replace_entity_pattern(str: &str) -> Option<String> {
     if let Some(entity) = get_entity_from_str(str) {
-        Some((*entity).to_owned())
-    } else if let Some(captures) = DIGITAL_ENTITY_TEST_RE.captures(str) {
-        let str = captures.get(1).unwrap().as_str();
-        let code = if str.starts_with('x') || str.starts_with('X') {
-            u32::from_str_radix(&str[1..], 16).unwrap()
-        } else {
-            u32::from_str_radix(str, 10).unwrap()
-        };
-
-        if is_valid_entity_code(code) {
-            Some(char::from_u32(code).unwrap().into())
-        } else {
-            None
-        }
-    } else {
-        None
+        return Some((*entity).to_owned());
     }
+    // Validate the shape with the scanner's own anchored grammar before
+    // decoding, so a look-alike that is not a reference (`&#3F;`, `&#xGG;`)
+    // stays literal instead of reaching the decoder.
+    let captures = DIGITAL_RE.captures(str)?;
+    let digits = captures.get(1).unwrap().as_str();
+    Some(decode_numeric_entity(digits).to_string())
 }
 
-/// Anchored copies of the inline entity scanner's grammar
-/// (`plugins/cmark/inline/entity.rs` `DIGITAL_RE` / `NAMED_RE`). `RawValueMap`
-/// must recognize EXACTLY the spans the scanner consumed — a grammar that
-/// accepts more (e.g. 8-digit numeric refs, which the scanner leaves literal)
-/// mis-models a literal `&…;` as decoded and sinks the whole run to plain
-/// text; a grammar that accepts less misses a real decode the same way.
-static PARSER_DIGITAL_ENTITY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^&#((?:x[a-f0-9]{1,6}|[0-9]{1,7}));").unwrap());
-static PARSER_NAMED_ENTITY_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^&([a-z][a-z0-9]{1,31});").unwrap());
-
-/// Decode the entity / numeric character reference that starts at the
-/// beginning of `raw`, mirroring what the inline entity scanner actually
-/// emitted into the value: `&amp;` -> `&`, `&#65;` -> `A`, and an invalid
-/// charcode (`&#0;`, `&#xD800;`, `&#x110000;`, ...) -> `U+FFFD` (the
-/// scanner's replacement, see `entity.rs::parse_digital_entity`). Returns
-/// the decoded replacement plus the raw byte length consumed, or `None`
-/// when `raw` does not start with an entity the scanner would consume
-/// (the `&` then stays literal and maps 1:1).
-pub(crate) fn decode_entity_at_start(raw: &str) -> Option<(String, usize)> {
-    if let Some(captures) = PARSER_NAMED_ENTITY_RE.captures(raw) {
-        let matched = captures.get(0).unwrap();
-        let decoded = get_entity_from_str(matched.as_str())?;
-        return Some((decoded.to_owned(), matched.as_str().len()));
-    }
-    let captures = PARSER_DIGITAL_ENTITY_RE.captures(raw)?;
-    let matched = captures.get(0).unwrap();
-    let digits = captures.get(1).unwrap().as_str();
-    #[allow(clippy::from_str_radix_10)]
+/// Decode the digit body of a numeric character reference (`x41` / `65`,
+/// exactly what the `DIGITAL_RE` capture group holds) into its character.
+/// Invalid charcodes (`&#0;`, surrogates like `&#xD800;`, noncharacters,
+/// out of Unicode range like `&#x110000;`) map to `U+FFFD` — the
+/// replacement CommonMark prescribes. Shared by the inline scanner
+/// (`entity.rs::parse_digital_entity`), `decode_entity_at_start` (the
+/// `RawValueMap` lock-step) and `replace_entity_pattern` (`unescape_all`),
+/// so the replacement semantics cannot drift between them either.
+#[allow(clippy::from_str_radix_10)]
+pub(crate) fn decode_numeric_entity(digits: &str) -> char {
     let code = if digits.starts_with('x') || digits.starts_with('X') {
         u32::from_str_radix(&digits[1..], 16).unwrap()
     } else {
         u32::from_str_radix(digits, 10).unwrap()
     };
-    let decoded = if is_valid_entity_code(code) {
+    if is_valid_entity_code(code) {
         char::from_u32(code).unwrap()
     } else {
         '\u{FFFD}'
-    };
-    Some((decoded.to_string(), matched.as_str().len()))
+    }
+}
+
+/// Decode the entity / numeric character reference that starts at the
+/// beginning of `raw`, using the inline entity scanner's own grammar
+/// objects (`plugins/cmark/inline/entity.rs` `DIGITAL_RE` / `NAMED_RE` —
+/// imported, not copied, so the two can never diverge; issue #234).
+/// `&amp;` -> `&`, `&#65;` -> `A`, and an invalid charcode (`&#0;`,
+/// `&#xD800;`, `&#x110000;`, ...) -> `U+FFFD` (the scanner's replacement,
+/// via `decode_numeric_entity`). Returns the decoded replacement plus the
+/// raw byte length consumed, or `None` when `raw` does not start with an
+/// entity the scanner would consume (the `&` then stays literal and maps
+/// 1:1).
+pub(crate) fn decode_entity_at_start(raw: &str) -> Option<(String, usize)> {
+    if let Some(captures) = NAMED_RE.captures(raw) {
+        let matched = captures.get(0).unwrap();
+        let decoded = get_entity_from_str(matched.as_str())?;
+        return Some((decoded.to_owned(), matched.as_str().len()));
+    }
+    let captures = DIGITAL_RE.captures(raw)?;
+    let matched = captures.get(0).unwrap();
+    let digits = captures.get(1).unwrap().as_str();
+    Some((decode_numeric_entity(digits).to_string(), matched.as_str().len()))
 }
 
 /// Unescape both entities (`&quot; -> "`) and backslash escapes (`\" -> "`).
+///
+/// Entity recognition follows the inline scanner's grammar
+/// (`plugins/cmark/inline/entity.rs`), so a reference decodes here exactly
+/// when it would decode in inline text — same name table, same numeric
+/// bounds, same `U+FFFD` replacement for invalid charcodes (issue #234).
 /// ```
 /// # use supramark_markdown::common::utils::unescape_all;
 /// assert_eq!(unescape_all("&amp;"), "&");
@@ -378,6 +395,7 @@ pub fn is_punct_char(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::cut_right_whitespace_with_tabstops as cut_ws;
+    use super::decode_entity_at_start;
     use super::find_indent_of;
     use super::replace_entity_pattern;
     use super::rfind_and_count;
@@ -496,6 +514,96 @@ mod tests {
         assert_eq!(replace_entity_pattern("&ffff;"), None);
         assert_eq!(replace_entity_pattern("&#3F;"), None);
         assert_eq!(replace_entity_pattern("&#xGG;"), None);
+    }
+
+    #[test]
+    fn unescape_all_matches_scanner_entity_grammar() {
+        // `unescape_all` runs over fence info strings and link
+        // destinations/titles, but the entity grammar is not positional
+        // (CommonMark §6.2): it must accept exactly the `&…;` spans the
+        // inline scanner accepts. It composes the scanner's own pattern
+        // bodies (entity.rs NAMED_ENTITY_PATTERN / DIGITAL_ENTITY_PATTERN)
+        // rather than carrying a copy — issue #234, where the older
+        // markdown-it copy had drifted to `{1,8}` and decoded references the
+        // scanner leaves literal.
+        assert_eq!(unescape_all("&#65;"), "A");
+        assert_eq!(unescape_all("&#x41;"), "A");
+        assert_eq!(unescape_all("&#X41;"), "A");
+
+        // Past the scanner's bounds (hex {1,6}, decimal {1,7}) the reference
+        // stays literal here too, instead of decoding as it used to.
+        assert_eq!(unescape_all("&#99999999;"), "&#99999999;");
+        assert_eq!(unescape_all("&#x0000041;"), "&#x0000041;");
+
+        // A valid-shape reference with an invalid charcode takes the
+        // scanner's replacement rather than staying literal.
+        assert_eq!(unescape_all("&#1234567;"), "\u{FFFD}");
+        assert_eq!(unescape_all("&#0;"), "\u{FFFD}");
+        assert_eq!(unescape_all("&#xD800;"), "\u{FFFD}");
+
+        // Named references are unchanged: HTML5's all-caps aliases are real
+        // table entries, while a case variant that is not one stays literal,
+        // exactly as the scanner resolves them.
+        assert_eq!(unescape_all("&amp;"), "&");
+        assert_eq!(unescape_all("&ouml;"), "ö");
+        assert_eq!(unescape_all("&AMP;"), "&");
+        assert_eq!(unescape_all("&Amp;"), "&Amp;");
+
+        // Names near the scanner's 31-char upper bound decode here too, so
+        // a narrowed NAMED_ENTITY_PATTERN cannot pass this test unnoticed.
+        assert_eq!(
+            unescape_all("&CounterClockwiseContourIntegral;"),
+            "\u{2233}"
+        );
+    }
+
+    #[test]
+    fn decode_entity_at_start_grammar_boundaries() {
+        // These bounds are the inline scanner's (entity.rs DIGITAL_RE /
+        // NAMED_RE, imported — not copied — by decode_entity_at_start):
+        // hex {1,6}, decimal {1,7}, named names of 2..=32 chars.
+
+        // Hex: 6 digits is the upper bound; 7+ digits stay literal.
+        assert_eq!(decode_entity_at_start("&#x41;"), Some(("A".into(), 6)));
+        assert_eq!(
+            decode_entity_at_start("&#x10FFEF;"),
+            Some(("\u{10FFEF}".into(), 10))
+        );
+        assert_eq!(decode_entity_at_start("&#x0000041;"), None);
+
+        // Decimal: 7 digits is the upper bound; 8+ digits stay literal.
+        assert_eq!(decode_entity_at_start("&#65;"), Some(("A".into(), 5)));
+        assert_eq!(
+            decode_entity_at_start("&#1234567;"),
+            Some(("\u{FFFD}".into(), 10))
+        );
+        assert_eq!(decode_entity_at_start("&#12345678;"), None);
+
+        // Named: 31 chars is the longest real entity name; a 32-char name
+        // still matches NAMED_RE but fails the entity-table lookup (so
+        // None, like the scanner), and 33 chars miss the grammar.
+        assert_eq!(
+            decode_entity_at_start("&CounterClockwiseContourIntegral;"),
+            Some(("\u{2233}".into(), 33))
+        );
+        assert_eq!(decode_entity_at_start(&format!("&{}a;", "a".repeat(31))), None);
+        assert_eq!(decode_entity_at_start(&format!("&{}a;", "a".repeat(32))), None);
+
+        // Invalid charcodes decode to U+FFFD (never literal), matching the
+        // scanner's replacement.
+        assert_eq!(decode_entity_at_start("&#0;"), Some(("\u{FFFD}".into(), 4)));
+        assert_eq!(
+            decode_entity_at_start("&#xD800;"),
+            Some(("\u{FFFD}".into(), 8))
+        );
+        assert_eq!(
+            decode_entity_at_start("&#x110000;"),
+            Some(("\u{FFFD}".into(), 10))
+        );
+        assert_eq!(
+            decode_entity_at_start("&#x10FFFF;"),
+            Some(("\u{FFFD}".into(), 10))
+        );
     }
 
     #[test]
