@@ -57,8 +57,14 @@ function generateExampleIndex(): string {
   let doc = `# Example Projects\n\n`;
   doc += `Supramark's examples fall into two categories: a Feature example gallery you can browse directly on the docs site, and full host projects that need to run locally.\n\n`;
   doc += `## In-Site Examples\n\n`;
-  doc += `### [Live Playground](/playground/)\n\n`;
-  doc += `The homepage hosts this same interactive playground: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples. Stable deep links such as [Mermaid](/playground/mermaid/) and [D2](/playground/d2/) open a Feature directly.\n\n`;
+  // `{.vp-raw}` opts out of VitePress's SPA router: the playground routes are
+  // static pages under `public/`, absent from VitePress's page table, so a
+  // router-handled click lands on "PAGE NOT FOUND" until the user reloads.
+  // `target="_self"` would also bypass the router, but VitePress skips its base
+  // rewrite for any link carrying a target, leaving `href="/playground/..."` —
+  // a 404 once the site is served from `/supramark/`.
+  doc += `### [Live Playground](/playground/){.vp-raw}\n\n`;
+  doc += `The homepage hosts this same interactive playground: edit Markdown on the left, see the actual rendered output on the right, and switch between Features and examples. Stable deep links such as [Mermaid](/playground/mermaid/){.vp-raw} and [D2](/playground/d2/){.vp-raw} open a Feature directly.\n\n`;
   doc += `To open it locally for debugging, run:\n\n`;
   doc += codeFence('bash', FEATURE_PREVIEW_COMMANDS.join('\n'));
   doc += `\n\n`;
@@ -292,7 +298,7 @@ function generateFeatureGallery(groups: FeatureGalleryGroup[]): string {
   const totalExamples = groups.reduce((sum, group) => sum + group.examples.length, 0);
   let doc = `# Feature Example Gallery\n\n`;
   doc += `This page is automatically aggregated from each Feature package's \`src/examples.ts\`, currently covering **${groups.length} Features** and **${totalExamples} examples**.\n\n`;
-  doc += `These examples show the raw Markdown input; for the full live playground, open [Mermaid](/playground/mermaid/) or run \`bun run feature:preview:web\`.\n\n`;
+  doc += `These examples show the raw Markdown input; for the full live playground, open [Mermaid](/playground/mermaid/){.vp-raw} or run \`bun run feature:preview:web\`.\n\n`;
 
   doc += `## Table of Contents\n\n`;
   for (const group of groups) {

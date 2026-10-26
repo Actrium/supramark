@@ -5,7 +5,10 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client"],
+    // `node` is here because the workspace `@supramark/*` packages resolve to
+    // their `src/`, so this config also checks that code — and
+    // `packages/renderers/web` references `process`.
+    "types": ["vite/client", "node"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -20,7 +23,6 @@
     "strict": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
 
@@ -32,5 +34,8 @@
       "@supramark/feature-weather": ["packages/features/container/feature-weather/src"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests import `bun:test`, and this workspace does not install its types.
+  // Other packages exclude their test dirs from `tsc` the same way.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

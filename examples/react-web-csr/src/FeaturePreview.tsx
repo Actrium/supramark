@@ -233,11 +233,17 @@ export function FeaturePreview({ initialFeature }: { initialFeature: string }) {
     const f = findFeature(shortName);
     if (!f) return;
     loadFeature(f);
-    window.history.pushState(
-      { feature: f.shortName },
-      '',
-      playgroundPathForFeature(f.shortName, import.meta.env.BASE_URL)
-    );
+    // Only the top-level playground owns the URL. When embedded in the docs
+    // homepage's iframe this pushState lands in the shared session history, and
+    // the browser's Back button then steps the iframe back instead of leaving
+    // the page.
+    if (window.self === window.top) {
+      window.history.pushState(
+        { feature: f.shortName },
+        '',
+        playgroundPathForFeature(f.shortName, import.meta.env.BASE_URL)
+      );
+    }
   };
 
   const switchExample = (idx: number) => {

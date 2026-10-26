@@ -99,6 +99,14 @@ jobs:
         if: always()
         run: bun run lint:scripts
 
+      # The examples get type-checked nowhere else in CI. Their root tsconfig is
+      # a solution file (`files: []` plus references), so `tsc -p` exits 0
+      # without checking anything — the gate has to use build mode. Runs in the
+      # Lint job so it blocks a merge.
+      - name: Type-check examples
+        if: always()
+        run: bun run lint:examples
+
       # Deliberately its own step rather than only riding inside `bun run lint`,
       # so a language violation is named in the check list instead of being
       # reported as a generic lint failure. It also still runs when eslint is
