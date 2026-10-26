@@ -177,10 +177,10 @@ fn nested_preprocessor_loop_is_bounded() {
 
 /// The state-diagram SIGSEGV is a vendored Graphviz 14.1.5 defect
 /// (`lib/dotgen/dotsplines.c`, `make_flat_edge` reading `GD_rank(g)[r - 2]`
-/// past the rank array). It stays ignored until the patched native library
-/// from issue #249 item 2 ships; un-ignore it together with that release.
+/// past the rank array). `patches/0001-dotgen-dotsplines-rank-guards.patch`
+/// guards those sites, and `prepare_graphviz_source` applies it to every local
+/// and CI build, so the case runs unconditionally here.
 #[test]
-#[ignore = "needs the patched Graphviz native library (issue #249 item 2)"]
 fn state_pin_with_labelled_transition_renders() {
     assert_no_process_death(
         "state inputPin + labelled transition",

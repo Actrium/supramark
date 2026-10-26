@@ -319,9 +319,11 @@ jobs:
   # run in the "Test & Build" job — that job only exercises the RN JS wrappers,
   # and `cargo test -p plantuml-little` needs the graphviz-anywhere native lib,
   # which isn't on a clean runner. Build that lib once (cached), then run the
-  # library unit tests. `--lib` skips the byte-exact reference suite, which
-  # additionally needs a local Java PlantUML jar; that heavier suite can be a
-  # follow-up job. See the CI-coverage tracking issue.
+  # library unit tests and the issue #249 process-death regressions (every case
+  # spawns the CLI, so a stack overflow / SIGSEGV / hang fails the job instead
+  # of taking the runner down). `--lib` skips the byte-exact reference suite,
+  # which additionally needs a local Java PlantUML jar; that heavier suite can
+  # be a follow-up job. See the CI-coverage tracking issue.
   plantuml-rust-tests:
     name: plantuml-little Rust tests
     runs-on: ubuntu-latest
@@ -354,6 +356,9 @@ jobs:
 
       - name: cargo test -p plantuml-little (lib unit tests)
         run: cargo test -p plantuml-little --lib
+
+      - name: cargo test -p plantuml-little (process-death regressions)
+        run: cargo test -p plantuml-little --test issue_249_no_process_death
 
   # d2-little's Rust unit tests (text-measurement / Go-emulation ruler /
   # layout) had no CI job — the "Test & Build" job only exercises the RN
