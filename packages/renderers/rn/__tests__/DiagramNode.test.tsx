@@ -483,9 +483,9 @@ describe('DiagramNode streaming defer/render', () => {
     const renderer = await renderWithState(createDiagramNode(true), 'complete');
     await resolveEngine(wideResult());
 
-    const svg = renderer.root.findAll(node => node.type === 'SvgXml')[0];
-    expect(svg?.props.width).toBe('100%');
-    expect(svg?.props.height).toBe('100%');
+    // SvgXmlDecoded hands the width/height to `SvgAst` as the root <svg> override.
+    const svg = renderer.root.findAll(node => node.type === 'SvgAst')[0];
+    expect(svg?.props.override).toMatchObject({ width: '100%', height: '100%' });
     await unmount(renderer);
   });
 
