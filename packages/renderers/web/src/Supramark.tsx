@@ -1875,7 +1875,7 @@ function renderCodeContent(
   const highlight = highlighted.get(
     buildCodeHighlightKey(codeBlock.value, codeBlock.lang, codeBlock.meta)
   );
-  const languageClass = codeBlock.lang ? `language-${codeBlock.lang}` : undefined;
+  const languageClass = codeBlock.lang ? buildCodeLanguageClass(codeBlock.lang) : undefined;
   const codeClassName = [classNames.code, languageClass].filter(Boolean).join(' ') || undefined;
 
   if (!highlight) {
@@ -2071,7 +2071,7 @@ function serializeBlockToHtml(
     }
     case 'code': {
       const lang = node.lang ?? '';
-      const languageClass = lang ? `language-${escapeHtmlAttr(lang)}` : '';
+      const languageClass = lang ? escapeHtmlAttr(buildCodeLanguageClass(lang)) : '';
       const codeClass = [classNames.code ?? '', languageClass].filter(Boolean).join(' ');
       const codeClassAttr = codeClass ? ` class="${escapeHtmlAttr(codeClass)}"` : '';
       const preClassAttr = classNames.codeBlock
@@ -2668,6 +2668,14 @@ function buildRenderKey(engine: string, code: string, options?: Record<string, u
 
 function buildCodeHighlightKey(code: string, lang?: string, meta?: string): string {
   return `code:${lang ?? ''}:${meta ?? ''}:${code}`;
+}
+
+// cmark (src/html.c) emits the first word of a fenced code block's info
+// string as the `language-` class and prepends the prefix only when the word
+// does not already start with it, so ` ```language-r ` and ` ```r ` both end
+// up as `class="language-r"`.
+function buildCodeLanguageClass(lang: string): string {
+  return lang.startsWith('language-') ? lang : `language-${lang}`;
 }
 
 const PRE_RENDERED_DIAGRAM_ENGINES = new Set([

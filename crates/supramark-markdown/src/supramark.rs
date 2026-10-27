@@ -372,6 +372,14 @@ pub struct ParseOptions {
     /// The conformance harness enables it for the micromark source only.
     #[serde(default)]
     pub mixed_line_suffix_soft_break: bool,
+    /// micromark lets a type-7 HTML flow sequence interrupt a paragraph on a
+    /// markerless lazy continuation line, exiting the enclosing container
+    /// (blockquote / list item). cmark keeps the type-7 interrupt ban
+    /// absolute: the line continues the paragraph instead (cmark's regression
+    /// suite, cmark-regression 0014). On by default to match micromark; the
+    /// conformance harness turns it off for the cmark-regression source only.
+    #[serde(default = "default_true")]
+    pub micromark_lazy_type7_interrupt: bool,
 }
 
 fn default_true() -> bool {
@@ -394,6 +402,7 @@ impl Default for ParseOptions {
             subsequent_indented_definitions: false,
             sanitize_image_src: false,
             mixed_line_suffix_soft_break: false,
+            micromark_lazy_type7_interrupt: true,
         }
     }
 }
@@ -534,6 +543,7 @@ fn create_parser(options: ParseOptions) -> (MarkdownParser, Vec<String>) {
     md.subsequent_indented_definitions = options.subsequent_indented_definitions;
     md.sanitize_image_src = options.sanitize_image_src;
     md.mixed_line_suffix_soft_break = options.mixed_line_suffix_soft_break;
+    md.micromark_lazy_type7_interrupt = options.micromark_lazy_type7_interrupt;
     md.allow_dangerous_protocol = options.allow_dangerous_protocol;
 
     let unknown_disabled = apply_disabled(&mut md, &options.disable);

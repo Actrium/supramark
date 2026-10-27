@@ -20,7 +20,12 @@ const open_tag: &str = formatcp!("<[A-Za-z][A-Za-z0-9\\-]*{attribute}*\\s*/?>");
 const close_tag: &str = r#"</[A-Za-z][A-Za-z0-9\-]*\s*>"#;
 const comment: &str = r#"<!-->|<!--->|<!--[\s\S]*?-->"#;
 const processing: &str = r#"<[?][\s\S]*?[?]>"#;
-const declaration: &str = r#"<![A-Za-z]+\s+[^>]*>"#;
+// CommonMark §6.6 declaration: `<!` + one ASCII letter + any run of non-`>`
+// characters (possibly none) + `>`, e.g. `<!A>`, `<!x>`, `<!docType html>`.
+// The previous markdown-it html_re.js form (`<![A-Za-z]+\s+[^>]*>`) also
+// required at least one extra letter plus whitespace, so `<!A>` was not
+// recognized as inline raw HTML.
+const declaration: &str = r#"<![A-Za-z][^>]*>"#;
 const cdata: &str = r#"<!\[CDATA\[[\s\S]*?\]\]>"#;
 
 #[allow(clippy::double_parens)]

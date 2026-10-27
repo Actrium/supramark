@@ -44,6 +44,21 @@ const baseline = {
   visualFailureIds: uniqueSorted(visualFailures.map(failure => failure.id)),
 };
 
+// Preserve the hand-maintained `notes` (the `_summary` plus per-case entries,
+// in the cmark-gfm.json style): the failure lists above are regenerated from
+// the run, but the notes explain each entry — resolved cases and the real
+// reason a still-failing case fails — and are only ever updated by hand.
+// Regenerating the baseline must not wipe them.
+let previousNotes;
+try {
+  previousNotes = JSON.parse(await readFile(baselinePath, 'utf8')).notes;
+} catch {
+  // No existing baseline (or unreadable) — start without notes.
+}
+if (previousNotes) {
+  baseline.notes = previousNotes;
+}
+
 await mkdir(path.dirname(baselinePath), { recursive: true });
 await writeFile(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
 console.log(

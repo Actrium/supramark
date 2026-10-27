@@ -4,23 +4,22 @@
   "sourceVersion": "master-7042d997",
   "sourceCommit": "7042d9978b20fea86ca9cc98bda55f10be392e69",
   "caseCount": 27,
-  "parserProfile": "supramark-default",
+  "parserProfile": "supramark-cmark",
   "comparisonTarget": "production-web-renderer-dom",
   "semanticFailureIds": [
-    "cmark-regression-master-7042d997-0013",
-    "cmark-regression-master-7042d997-0014",
-    "cmark-regression-master-7042d997-0017",
-    "cmark-regression-master-7042d997-0018",
-    "cmark-regression-master-7042d997-0020",
-    "cmark-regression-master-7042d997-0021",
-    "cmark-regression-master-7042d997-0023"
+    "cmark-regression-master-7042d997-0014"
   ],
   "visualFailureIds": [
-    "cmark-regression-master-7042d997-0013",
-    "cmark-regression-master-7042d997-0014",
-    "cmark-regression-master-7042d997-0017",
-    "cmark-regression-master-7042d997-0018",
-    "cmark-regression-master-7042d997-0021",
-    "cmark-regression-master-7042d997-0023"
-  ]
+    "cmark-regression-master-7042d997-0014"
+  ],
+  "notes": {
+    "_summary": "Baseline for cmark's test/regression.txt (27 implementation regression cases, not normative spec examples) measured against the `supramark-cmark` parser profile: the GFM bare-URL/email autolink extension is OFF because regression.txt is a pure CommonMark regression file (measured: 0/27 cases produce a different AST with the extension on vs off), and `micromarkLazyType7Interrupt: false` carries cmark's strict stance on the lazy type-7 HTML flow interrupt. The source was imported by #229 with 7 semantic / 6 visual failures recorded here without notes; issue #233 tracks resolving them. Six of the seven are resolved (0013, 0017, 0018, 0020, 0021, 0023 — see the per-case notes below); 0014 remains and is expected to stay failing until the web renderer can fold raw HTML across list-item boundaries (see its note). The regression gate only reacts to newly added failures, and the workflow's issue-creation step is gated on the conformance step failing, which never fires while this gate passes — so this file is the only place these cases are tracked honestly.",
+    "cmark-regression-master-7042d997-0013": "BOM handling: RESOLVED — the parser ignores a single leading U+FEFF byte-order mark (supramark.rs strips it before block parsing), so BOM + `# Hi` parses as a heading like cmark. Kept out of the failure list; note retained for traceability.",
+    "cmark-regression-master-7042d997-0014": "HTML block type 1 (`<script>`) spanning list items: STILL FAILING — two independent root causes. (1) Parser: the closing `</script>` line (line 4) is a markerless lazy continuation of item 2's paragraph; micromark lets a type-7 HTML flow sequence interrupt on exactly those lines and exit the container, which put `</script>` in a root-level HTML block instead of inside item 2. Fixed by the `micromarkLazyType7Interrupt: false` option (cmark keeps the type-7 interrupt ban absolute on lazy lines), so the AST now matches cmark's structure: item 1 = raw `<script>\\n`, item 2 = text + raw `</script>`. (2) Renderer: cmark emits the unclosed `<script>` verbatim and the browser's tree-construction swallows `</li> <li>…` into the script's raw text until `</script>`, collapsing the DOM to a single `<li>`. Our client renderer injects each raw node through a separate `template.innerHTML` (which balances the bare `<script>` open tag and discards the stray `</script>` close tag), so the DOM keeps both list items. Reproducing cmark requires folding the raw open tag together with the following siblings into one verbatim fragment for a single root parse — a generalization of the spec-0652 paragraph fold that needs list/list_item support in serializeBlockToHtml; deferred as a renderer-core change with a 702-case cmark-gfm visual blast radius.",
+    "cmark-regression-master-7042d997-0017": "`<!docType html>`: RESOLVED — the HTML block type 4 start condition (`<!` + ASCII letter, html_block.rs) already matches the declaration, so the line is consumed as a verbatim HTML block instead of a paragraph. Kept out of the failure list; note retained for traceability.",
+    "cmark-regression-master-7042d997-0018": "Inline declaration `x <!A>`: RESOLVED (issue #233) — the inline HTML tag regex's declaration arm was markdown-it's `<![A-Za-z]+\\s+[^>]*>` (one or more letters plus mandatory whitespace), stricter than CommonMark §6.6's `<![A-Za-z][^>]*>`. Regexps.rs now uses the spec form, so `<!A>` is recognized as inline raw HTML and emits a `raw` node. Kept out of the failure list; note retained for traceability.",
+    "cmark-regression-master-7042d997-0020": "Fenced code info string `language-r`: RESOLVED (issue #233) — cmark's HTML renderer prefixes the first info-string word with `language-` only when the word does not already start with it, so ` ```language-r ` and ` ```r ` both render `class=\"language-r\"`. The web renderer unconditionally prepended the prefix (`language-language-r`). Both class-emitting paths (the React renderCodeContent and the static serializeBlockToHtml) now share buildCodeLanguageClass, which mirrors cmark's src/html.c rule. The RN renderer has no `language-` class concept (node.lang only gates the copy button), so nothing to change there. Kept out of the failure list; note retained for traceability.",
+    "cmark-regression-master-7042d997-0021": "Inline declarations `x<!x>` / `x<!>`: RESOLVED (issue #233) — same §6.6 declaration fix as 0018: `<!x>` (letter, no whitespace) is now inline raw HTML, while `<!>` (no letter after `<!`) correctly keeps failing every declaration/tag arm and stays literal text, matching cmark. Kept out of the failure list; note retained for traceability.",
+    "cmark-regression-master-7042d997-0023": "Numeric character references `&#xFFFE;&#xFFFF;`: RESOLVED (issue #233) — is_valid_entity_code rejected noncharacters (U+FDD0–U+FDEF, U+xFFFE/U+xFFFF), replacing them with U+FFFD. cmark only rejects NUL, surrogates, and code points above U+10FFFF; noncharacters are valid Unicode scalar values and must be kept verbatim. The two noncharacter checks are removed (the inline entity scanner, decode_entity_at_start, and unescape_all all share the function, so all three stay consistent); the markdown-it-compatible C0/C1 control rejection is kept — no conformance case covers it and the stricter escape behavior is relied on outside entity decoding. Kept out of the failure list; note retained for traceability."
+  }
 }

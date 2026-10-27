@@ -45,10 +45,10 @@ The generic `spec-fixture` adapter imports the 27 fenced examples from cmark's
 These are implementation regression cases, not normative specification examples. This source
 preserves original line endings so the CR+CR+LF case reaches the parser unchanged.
 
-```powershell
+```console
 node tests/markdown-conformance/scripts/import.mjs cmark-regression
 node tests/markdown-conformance/scripts/validate.mjs cmark-regression
-node tests/markdown-conformance/scripts/run.mjs cmark-regression
+node tests/markdown-conformance/scripts/run-visual.mjs cmark-regression
 ```
 
 ## Importing cmark-gfm data
