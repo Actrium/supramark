@@ -951,9 +951,32 @@ fn map_inline_text(
     let source_end = position.end.byte_offset;
     let span = source_end.saturating_sub(source_start);
 
-    // Fast path: the value's byte length matches the source span, so cmark
-    // decoded nothing inside this run — value IS the raw source slice, and
-    // `$` delimiters / `is_escaped` have correct TeX semantics on it.
+    // Fast path: the value's byte length matches the source span, so the run
+    // is inferred to be raw — value is treated as the source slice, and `$`
+    // delimiters / `is_escaped` have correct TeX semantics on it.
+    //
+    // That inference is a heuristic, not an invariant. Most decodes do
+    // shorten the byte string (backslash escapes 2 → 1, CRLF 2 → 1, numeric
+    // refs always shrink), but named references do not all shrink: in the
+    // entities 1.0.1 table two grow (`&nGt;` / `&nLt;`, 5 raw bytes → 6
+    // decoded) and fifteen keep their length (`&acE;`, `&caps;`, `&ngE;`,
+    // ...). A run whose decodes sum to zero — an equal-length entity alone,
+    // or a growing entity offset by one backslash escape (`\_$&nGt;$x$`) —
+    // therefore reaches this branch with value still decoded. Known
+    // limitation: when a `$` or `[^` delimiter falls inside the shifted
+    // stretch it is read off decoded text (a decoded `\$` looks like a real
+    // delimiter), and `$…$` content taken from value is decoded instead of
+    // the verbatim source the slow path preserves; the same decoded-vs-raw
+    // split reproduces with an equal-length entity even though its offsets
+    // stay aligned. Pre-existing (the fast-path code is unchanged here) and
+    // tracked as a follow-up.
+    //
+    // Passing the path explicitly instead of inferring it was considered
+    // (issue #234), but the merge site (`rescan_adjacent_text_runs`) only
+    // holds the merged `value` and the run `position`, so an explicit flag
+    // would have to ride on the public `SupramarkNode::Text` variant — not
+    // worth the API churn for a heuristic that is exact for every
+    // shortening decode.
     if span == value.len() {
         return scan_inline_extensions(value, value, position, index, &IdentityMap);
     }
@@ -1516,8 +1539,16 @@ impl RawValueMap {
             {
                 // Whitespace / CR stripped from the value but present in the
                 // source span (continuation-line indentation, trailing
-                // spaces, the `\r` of a CRLF): consume as 0-width. Genuine
-                // misalignment still bails at the next byte.
+                // spaces, the `\r` of a CRLF): consume as 0-width.
+                //
+                // This is a best-effort heuristic, NOT a provably exact
+                // mapping: any raw ' ' / '\t' / '\r' that disagrees with the
+                // current value byte is dropped without checking that the
+                // parser actually stripped it. Correctness relies on a later
+                // byte mismatch bailing out. ~500k fuzz cases plus all
+                // conformance fixtures have produced no wrong-but-accepted
+                // mapping, but if cmark's whitespace stripping ever changes,
+                // this may misalign silently instead of bailing.
                 ri += 1;
             } else {
                 // 1:1. A variable-width decoding diverges here or on the
@@ -2586,6 +2617,113 @@ mod tests {
         // The LinkFormatter rejects `javascript:` upstream in `full_link`, so
         // the safe product default holds without the micromark policy.
         assert_eq!(url, "");
+    }
+
+    // --- Inline entity grammar consistency (issue #234): the entity
+    // scanner and `decode_entity_at_start` (the `RawValueMap` lock-step
+    // partner) share the same `Regex` objects and numeric-decode helper,
+    // so they cannot diverge structurally. These probes pin the boundary
+    // behaviour both must agree on: hex/decimal/named length limits
+    // ({1,6} / {1,7} / {1,31}) and invalid charcodes mapping to U+FFFD.
+
+    fn first_paragraph_children(ast: &SupramarkNode) -> &[SupramarkNode] {
+        let SupramarkNode::Root { children, .. } = ast else {
+            panic!("expected root");
+        };
+        let SupramarkNode::Paragraph { children, .. } = &children[0] else {
+            panic!("expected paragraph, got {:?}", children[0]);
+        };
+        children
+    }
+
+    fn first_text_value(ast: &SupramarkNode, raw: &str) -> String {
+        let children = first_paragraph_children(ast);
+        assert_eq!(children.len(), 1, "single child expected for {raw:?}");
+        let SupramarkNode::Text { value, .. } = &children[0] else {
+            panic!("expected text for {raw:?}, got {:?}", children[0]);
+        };
+        value.clone()
+    }
+
+    #[test]
+    fn entity_decode_matches_scanner_at_grammar_boundaries() {
+        // (raw, expected first-run text). Decoded entities and U+FFFD
+        // replacements come back as the decoded text.
+        let decoded_cases: &[(&str, &str)] = &[
+            // hex: 6-digit boundary — valid, noncharacter, out of range,
+            // surrogate
+            ("&#x41;", "A"),
+            ("&#x10FFEF;", "\u{10FFEF}"),
+            ("&#x10FFFF;", "\u{FFFD}"),
+            ("&#x110000;", "\u{FFFD}"),
+            ("&#xD800;", "\u{FFFD}"),
+            // decimal: 7-digit boundary — in range, out of range, NUL
+            ("&#65;", "A"),
+            ("&#1234567;", "\u{FFFD}"),
+            ("&#0;", "\u{FFFD}"),
+            // named: 31-char boundary name resolves; case-insensitive
+            ("&CounterClockwiseContourIntegral;", "\u{2233}"),
+            ("&AMP;", "&"),
+        ];
+        for (raw, expected) in decoded_cases {
+            // The scanner emits the decoded text...
+            let value = first_text_value(&parse(raw), raw);
+            assert_eq!(&value, expected, "scanner output for {raw:?}");
+            // ...and the RawValueMap grammar predicts exactly the same
+            // decoding over exactly the same raw span.
+            let (decoded, len) = decode_entity_at_start(raw)
+                .unwrap_or_else(|| panic!("decode_entity_at_start missed {raw:?}"));
+            assert_eq!(len, raw.len(), "span length for {raw:?}");
+            assert_eq!(&decoded, expected, "decode_entity_at_start output for {raw:?}");
+        }
+
+        // Literal cases: outside the grammar, so the span stays raw text
+        // and `decode_entity_at_start` must reject it the same way.
+        let literal_cases = [
+            "&#x0000041;", // 7 hex digits > {1,6}
+            "&#12345678;", // 8 decimal digits > {1,7}
+        ];
+        for raw in literal_cases {
+            let value = first_text_value(&parse(raw), raw);
+            assert_eq!(value, raw, "literal span must survive for {raw:?}");
+            assert!(
+                decode_entity_at_start(raw).is_none(),
+                "decode_entity_at_start must reject {raw:?}"
+            );
+        }
+
+        // A 32-char name still matches NAMED_RE but fails the entity-table
+        // lookup: literal on both sides. A 33-char name misses the grammar.
+        for name_len in [32usize, 33] {
+            let raw = format!("&{};", "a".repeat(name_len));
+            let value = first_text_value(&parse(&raw), &raw);
+            assert_eq!(value, raw, "literal span must survive for {raw:?}");
+            assert!(
+                decode_entity_at_start(&raw).is_none(),
+                "decode_entity_at_start must reject {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn entity_grammar_drift_cannot_sink_adjacent_math() {
+        // The drift experiment behind issue #234: if the RawValueMap
+        // grammar ever drifts from the scanner's again (the experiment
+        // drifted each of hex/decimal/named in turn), the lock-step bails
+        // and the whole text run sinks to plain text, silently dropping
+        // `$x$`. Each probe pairs a boundary-length entity with a math
+        // span so any drift fails here instead of passing silently.
+        for raw in [
+            "&#x10FFFF; and $x$",                        // hex {1,6} boundary
+            "&#1234567; and $x$",                        // decimal {1,7} boundary
+            "&CounterClockwiseContourIntegral; and $x$", // named {1,31} boundary
+        ] {
+            let ast = parse(raw);
+            assert!(
+                any_node(&ast, &|n| matches!(n, SupramarkNode::MathInline { .. })),
+                "math must survive next to {raw:?}"
+            );
+        }
     }
 
     // --- Hard breaks (PR #196 review): CommonMark decides by the spaces

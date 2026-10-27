@@ -6,7 +6,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::common::utils::{get_entity_from_str, is_valid_entity_code};
+use crate::common::utils::{decode_numeric_entity, get_entity_from_str};
 use crate::parser::inline::{InlineRule, InlineState, TextSpecial};
 use crate::{MarkdownParser, Node};
 
@@ -14,10 +14,25 @@ pub fn add(md: &mut MarkdownParser) {
     md.inline.add_rule::<EntityScanner>();
 }
 
-static DIGITAL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new("(?i)^&#((?:x[a-f0-9]{1,6}|[0-9]{1,7}));").unwrap());
+/// The inline entity grammar — the single source of truth for the `&…;`
+/// spans the scanner consumes. Everything that has to recognise those spans
+/// is built from these two pattern strings, so the grammar cannot drift
+/// (issue #234): `common::utils::decode_entity_at_start` reuses the anchored
+/// `Regex` objects below for the `RawValueMap` lock-step in `supramark.rs`,
+/// and `common::utils::unescape_all` (fence info strings, link
+/// destinations/titles) composes the same bodies into its unanchored
+/// alternating pattern. A grammar copy that accepts more mis-models a
+/// literal `&…;` as decoded and sinks the whole text run to plain text,
+/// silently dropping every `$math$` / `[^footnote]` in it. Do NOT copy
+/// these strings — import them.
+pub(crate) const DIGITAL_ENTITY_PATTERN: &str = r"&#((?:x[a-f0-9]{1,6}|[0-9]{1,7}));";
+pub(crate) const NAMED_ENTITY_PATTERN: &str = r"&([a-z][a-z0-9]{1,31});";
 
-static NAMED_RE: Lazy<Regex> = Lazy::new(|| Regex::new("(?i)^&([a-z][a-z0-9]{1,31});").unwrap());
+pub(crate) static DIGITAL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(&format!("(?i)^{DIGITAL_ENTITY_PATTERN}")).unwrap());
+
+pub(crate) static NAMED_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(&format!("(?i)^{NAMED_ENTITY_PATTERN}")).unwrap());
 
 #[doc(hidden)]
 pub struct EntityScanner;
@@ -26,19 +41,8 @@ impl EntityScanner {
     fn parse_digital_entity(state: &mut InlineState) -> Option<(Node, usize)> {
         let capture = DIGITAL_RE.captures(&state.src[state.pos..])?;
         let entity_len = capture[0].len();
-        let entity = &capture[1];
-        #[allow(clippy::from_str_radix_10)]
-        let code = if entity.starts_with('x') || entity.starts_with('X') {
-            u32::from_str_radix(&entity[1..], 16).unwrap()
-        } else {
-            u32::from_str_radix(entity, 10).unwrap()
-        };
-
-        let content_str = if is_valid_entity_code(code) {
-            char::from_u32(code).unwrap().into()
-        } else {
-            '\u{FFFD}'.into()
-        };
+        let content_str: String =
+            decode_numeric_entity(capture.get(1).unwrap().as_str()).into();
 
         let markup_str = capture[0].to_owned();
 
