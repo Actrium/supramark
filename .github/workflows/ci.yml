@@ -119,6 +119,35 @@ jobs:
         if: always()
         run: node scripts/check-cjk.mjs
 
+      # Release bookkeeping for the Rust crates. A fix that changes what a crate
+      # packages has to move that crate's version in the same PR, because the
+      # version line is what crate-auto-tag.yml turns into a release. Without
+      # this gate the fix lands and nothing publishes, which is how #254 and
+      # #255 sat fixed-but-unreleased for twelve days.
+      #
+      # It also checks the things that break a publish rather than skip one: an
+      # exact pin left pointing at a version that no longer exists in the tree
+      # (`supramark-diagram` pins `mermaid-little` with `=`), and a Cargo.lock
+      # left behind by the bump.
+      #
+      # In the Lint job for the same reason as the checks above it: Lint is a
+      # required status check on main, so the gate blocks a merge without the
+      # branch ruleset having to be edited. `release:skip` on the PR turns it
+      # off for a change that needs no release.
+      - name: Crate release bookkeeping
+        if: always() && !contains(github.event.pull_request.labels.*.name, 'release:skip')
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            bun scripts/crate-release.ts check --base "$BASE_SHA"
+          else
+            # A push build has no PR base to diff against; the requirement and
+            # lock consistency checks still apply.
+            bun scripts/crate-release.ts check
+          fi
+
   # Code quality checks and tests
   test:
     name: Test & Build
