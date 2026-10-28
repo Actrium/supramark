@@ -2660,17 +2660,20 @@ mod tests {
         // (raw, expected first-run text). Decoded entities and U+FFFD
         // replacements come back as the decoded text.
         let decoded_cases: &[(&str, &str)] = &[
-            // hex: 6-digit boundary — valid, noncharacter, out of range,
-            // surrogate
+            // hex: 6-digit boundary — valid, noncharacter (kept verbatim,
+            // issue #233), out of range, surrogate
             ("&#x41;", "A"),
             ("&#x10FFEF;", "\u{10FFEF}"),
-            ("&#x10FFFF;", "\u{FFFD}"),
+            ("&#x10FFFF;", "\u{10FFFF}"),
             ("&#x110000;", "\u{FFFD}"),
             ("&#xD800;", "\u{FFFD}"),
-            // decimal: 7-digit boundary — in range, out of range, NUL
+            ("&#xFFFE;", "\u{FFFE}"),
+            // decimal: 7-digit boundary — in range, out of range, NUL,
+            // noncharacter
             ("&#65;", "A"),
             ("&#1234567;", "\u{FFFD}"),
             ("&#0;", "\u{FFFD}"),
+            ("&#1114111;", "\u{10FFFF}"),
             // named: 31-char boundary name resolves; case-insensitive
             ("&CounterClockwiseContourIntegral;", "\u{2233}"),
             ("&AMP;", "&"),
