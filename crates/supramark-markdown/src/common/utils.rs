@@ -113,9 +113,13 @@ fn replace_entity_pattern(str: &str) -> Option<String> {
 
 /// Decode the digit body of a numeric character reference (`x41` / `65`,
 /// exactly what the `DIGITAL_RE` capture group holds) into its character.
-/// Invalid charcodes (`&#0;`, surrogates like `&#xD800;`, noncharacters,
-/// out of Unicode range like `&#x110000;`) map to `U+FFFD` — the
-/// replacement CommonMark prescribes. Shared by the inline scanner
+/// Invalid charcodes (`&#0;`, surrogates like `&#xD800;`, out of Unicode
+/// range like `&#x110000;`) map to `U+FFFD`. That matches cmark's
+/// `houdini_unescape_ent` for NUL, surrogates and code points above
+/// U+10FFFF, plus this crate's own additional C0/C1 rejection — see
+/// `is_valid_entity_code` for the full deviation note. Noncharacters are
+/// valid Unicode scalar values and are kept verbatim (issue #233). Shared
+/// by the inline scanner
 /// (`entity.rs::parse_digital_entity`), `decode_entity_at_start` (the
 /// `RawValueMap` lock-step) and `replace_entity_pattern` (`unescape_all`),
 /// so the replacement semantics cannot drift between them either.
@@ -602,9 +606,27 @@ mod tests {
             decode_entity_at_start("&#x110000;"),
             Some(("\u{FFFD}".into(), 10))
         );
+
+        // Noncharacters are valid Unicode scalar values: like cmark's
+        // `houdini_unescape_ent`, the scanner and both decoders keep them
+        // verbatim instead of replacing them with U+FFFD (issue #233). One
+        // case per branch removed by #283: the U+FDD0-U+FDEF block, the
+        // last two code points of each plane, and the top of the range.
+        assert_eq!(
+            decode_entity_at_start("&#xFDD0;"),
+            Some(("\u{FDD0}".into(), 8))
+        );
+        assert_eq!(
+            decode_entity_at_start("&#xFFFE;"),
+            Some(("\u{FFFE}".into(), 8))
+        );
         assert_eq!(
             decode_entity_at_start("&#x10FFFF;"),
-            Some(("\u{FFFD}".into(), 10))
+            Some(("\u{10FFFF}".into(), 10))
+        );
+        assert_eq!(
+            decode_entity_at_start("&#1114111;"),
+            Some(("\u{10FFFF}".into(), 10))
         );
     }
 
