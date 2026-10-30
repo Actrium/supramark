@@ -423,7 +423,8 @@ fn cluster_rects_in_viewbox_coords(svg: &str) -> Vec<(f64, f64, f64, f64)> {
 
     let mut rects = Vec::new();
     // Frame: (accumulated translate, translate of the nearest cluster ancestor).
-    let mut stack: Vec<((f64, f64), Option<(f64, f64)>)> = vec![((0.0, 0.0), None)];
+    type Frame = ((f64, f64), Option<(f64, f64)>);
+    let mut stack: Vec<Frame> = vec![((0.0, 0.0), None)];
     for caps in tag_re.captures_iter(svg) {
         let closing = &caps[1];
         let name = caps[2].to_ascii_lowercase();

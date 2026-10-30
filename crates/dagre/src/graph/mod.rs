@@ -851,10 +851,7 @@ impl<N, E> Graph<N, E> {
                     }
                     ancestor = self.parent(a);
                 }
-                g.set_parent(
-                    &v,
-                    ancestor.and_then(|a| if a == GRAPH_NODE { None } else { Some(a) }),
-                );
+                g.set_parent(&v, ancestor.filter(|&a| a != GRAPH_NODE));
             }
         }
 

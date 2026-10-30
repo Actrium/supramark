@@ -52,7 +52,7 @@ thread_local! {
     /// single-threaded so this needs no locking.
     static PREPARED: std::cell::RefCell<HashMap<u32, d2_little::PreparedLayout>> =
         std::cell::RefCell::new(HashMap::new());
-    static NEXT_HANDLE: Cell<u32> = Cell::new(1);
+    static NEXT_HANDLE: Cell<u32> = const { Cell::new(1) };
 }
 
 /// Result of [`prepare`]: a handle to the prepared graph state held inside
@@ -123,10 +123,8 @@ pub fn render(handle: u32, layout_json: &str) -> Result<String, JsValue> {
         .with(|p| p.borrow_mut().remove(&handle))
         .ok_or_else(|| JsValue::from_str(&format!("unknown prepare handle: {handle}")))?;
 
-    let result: d2_little::layout_bridge::LayoutResult =
-        serde_json::from_str(layout_json).map_err(|e| {
-            JsValue::from_str(&format!("layout result deserialize: {e}"))
-        })?;
+    let result: d2_little::layout_bridge::LayoutResult = serde_json::from_str(layout_json)
+        .map_err(|e| JsValue::from_str(&format!("layout result deserialize: {e}")))?;
 
     d2_little::render_with_external_layout(prepared, &result)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())

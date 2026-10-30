@@ -30,7 +30,7 @@ pub(crate) fn sort(entries: &[ResolvedEntry], bias_right: bool) -> SortResult {
     }
 
     // Sort unsortable by descending index (so we can pop from the end to get ascending)
-    unsortable.sort_by(|a, b| b.i.cmp(&a.i));
+    unsortable.sort_by_key(|b| std::cmp::Reverse(b.i));
 
     // Sort sortable by barycenter, with tie-breaking by index
     sortable.sort_by(|a, b| {

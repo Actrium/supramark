@@ -156,7 +156,10 @@ pub(crate) fn decode_entity_at_start(raw: &str) -> Option<(String, usize)> {
     let captures = DIGITAL_RE.captures(raw)?;
     let matched = captures.get(0).unwrap();
     let digits = captures.get(1).unwrap().as_str();
-    Some((decode_numeric_entity(digits).to_string(), matched.as_str().len()))
+    Some((
+        decode_numeric_entity(digits).to_string(),
+        matched.as_str().len(),
+    ))
 }
 
 /// Unescape both entities (`&quot; -> "`) and backslash escapes (`\" -> "`).
@@ -592,8 +595,14 @@ mod tests {
             decode_entity_at_start("&CounterClockwiseContourIntegral;"),
             Some(("\u{2233}".into(), 33))
         );
-        assert_eq!(decode_entity_at_start(&format!("&{}a;", "a".repeat(31))), None);
-        assert_eq!(decode_entity_at_start(&format!("&{}a;", "a".repeat(32))), None);
+        assert_eq!(
+            decode_entity_at_start(&format!("&{}a;", "a".repeat(31))),
+            None
+        );
+        assert_eq!(
+            decode_entity_at_start(&format!("&{}a;", "a".repeat(32))),
+            None
+        );
 
         // Invalid charcodes decode to U+FFFD (never literal), matching the
         // scanner's replacement.

@@ -575,8 +575,7 @@ fn validate_protocol(
 fn autolink_delim(data: &[u8], mut link_end: usize) -> usize {
     let mut opening = 0usize;
     let mut closing = 0usize;
-    for i in 0..link_end {
-        let c = data[i];
+    for (i, &c) in data.iter().enumerate().take(link_end) {
         if c == b'<' {
             link_end = i;
             break;

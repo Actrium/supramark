@@ -316,8 +316,10 @@ fn gfm_autolink_option_disables_bare_url_linkification() {
         "default profile should autolink bare URLs"
     );
 
-    let mut options = ParseOptions::default();
-    options.gfm_autolink = false;
+    let options = ParseOptions {
+        gfm_autolink: false,
+        ..Default::default()
+    };
     let ast = parse_with_options("https://example.com\n", options);
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
@@ -350,8 +352,10 @@ fn wikilink_option_enables_wikilink_parsing() {
         children[0]
     );
 
-    let mut options = ParseOptions::default();
-    options.wikilink = true;
+    let options = ParseOptions {
+        wikilink: true,
+        ..Default::default()
+    };
     let ast = parse_with_options("[[Project Plan]]\n", options);
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
@@ -372,8 +376,10 @@ fn wikilink_option_enables_wikilink_parsing() {
 
 #[test]
 fn wikilink_serializes_tagged_node_omitting_absent_fields() {
-    let mut options = ParseOptions::default();
-    options.wikilink = true;
+    let options = ParseOptions {
+        wikilink: true,
+        ..Default::default()
+    };
     let json = serde_json::to_string(&parse_with_options("[[a|b]]\n", options.clone())).unwrap();
     assert!(json.contains(r#""type":"wiki_link""#), "{json}");
     assert!(json.contains(r#""target":"a""#), "{json}");
@@ -396,8 +402,10 @@ fn wikilink_option_defers_to_inline_math() {
     // Regression for the PR-208 review: with the wikilink option on, `$[[foo]]$`
     // must stay one math_inline — the WikiLink scanner declines a `[[` that
     // sits inside an open math span so the text post-pass still claims `$…$`.
-    let mut options = ParseOptions::default();
-    options.wikilink = true;
+    let options = ParseOptions {
+        wikilink: true,
+        ..Default::default()
+    };
     let ast = parse_with_options("pre $[[foo]]$ post\n", options);
     let SupramarkNode::Root { children, .. } = ast else {
         panic!("expected root");
@@ -1490,7 +1498,7 @@ fn footnote_definition_absorbs_indented_continuation() {
         children, label, ..
     } = &children[0]
     else {
-        panic!("expected footnote definition, got {:?}", &children[0]);
+        panic!("expected footnote definition, got {:?}", children[0]);
     };
     assert_eq!(label, "a");
     // blockquote, code, paragraph — in source order.
@@ -1521,7 +1529,7 @@ fn footnote_definition_continuation_ends_at_new_block() {
         ..
     } = &children[0]
     else {
-        panic!("expected first definition, got {:?}", &children[0]);
+        panic!("expected first definition, got {:?}", children[0]);
     };
     assert_eq!(a, "a");
     assert_eq!(
@@ -1530,7 +1538,7 @@ fn footnote_definition_continuation_ends_at_new_block() {
         "first def should have one paragraph child"
     );
     let SupramarkNode::FootnoteDefinition { label: b, .. } = &children[1] else {
-        panic!("expected second definition, got {:?}", &children[1]);
+        panic!("expected second definition, got {:?}", children[1]);
     };
     assert_eq!(b, "b");
 }
@@ -1548,19 +1556,19 @@ fn public_api_maps_emphasis_spanning_an_escape_inside_a_table_cell() {
         panic!("expected root");
     };
     let SupramarkNode::Table { children, .. } = &children[0] else {
-        panic!("expected table, got {:?}", &children[0]);
+        panic!("expected table, got {:?}", children[0]);
     };
     let SupramarkNode::TableRow { children, .. } = &children[1] else {
-        panic!("expected body row, got {:?}", &children[1]);
+        panic!("expected body row, got {:?}", children[1]);
     };
     let SupramarkNode::TableCell { children, .. } = &children[0] else {
-        panic!("expected cell, got {:?}", &children[0]);
+        panic!("expected cell, got {:?}", children[0]);
     };
     let SupramarkNode::Emphasis {
         children, position, ..
     } = &children[0]
     else {
-        panic!("expected emphasis, got {:?}", &children[0]);
+        panic!("expected emphasis, got {:?}", children[0]);
     };
 
     // The emphasis must be mapped back onto the escaped source text, not the unescaped content.
@@ -1571,7 +1579,7 @@ fn public_api_maps_emphasis_spanning_an_escape_inside_a_table_cell() {
     );
 
     let SupramarkNode::Text { value, .. } = &children[0] else {
-        panic!("expected text, got {:?}", &children[0]);
+        panic!("expected text, got {:?}", children[0]);
     };
     assert_eq!(value, "x|y");
 }

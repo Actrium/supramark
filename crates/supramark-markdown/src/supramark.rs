@@ -1709,7 +1709,7 @@ fn strip_task_marker_from_text(value: &mut String) -> Option<bool> {
     // Previously the raw separator was preserved, which forced the web
     // renderer to rely on whitespace-collapse to match cmark and left RN
     // showing a stray tab / doubled space.
-    let content = rest.trim_start_matches(|c| c == ' ' || c == '\t');
+    let content = rest.trim_start_matches([' ', '\t']);
     if content.len() == rest.len() {
         return None;
     }
@@ -2687,7 +2687,10 @@ mod tests {
             let (decoded, len) = decode_entity_at_start(raw)
                 .unwrap_or_else(|| panic!("decode_entity_at_start missed {raw:?}"));
             assert_eq!(len, raw.len(), "span length for {raw:?}");
-            assert_eq!(&decoded, expected, "decode_entity_at_start output for {raw:?}");
+            assert_eq!(
+                &decoded, expected,
+                "decode_entity_at_start output for {raw:?}"
+            );
         }
 
         // Literal cases: outside the grammar, so the span stays raw text
@@ -2969,10 +2972,7 @@ mod tests {
         };
         let reference = paragraph
             .iter()
-            .find_map(|node| match node {
-                SupramarkNode::FootnoteReference { .. } => Some(node),
-                _ => None,
-            })
+            .find(|node| matches!(node, SupramarkNode::FootnoteReference { .. }))
             .expect("footnote reference");
         match reference {
             SupramarkNode::FootnoteReference {
@@ -3375,9 +3375,8 @@ mod tests {
     fn flatten_text(nodes: &[SupramarkNode]) -> String {
         let mut out = String::new();
         for node in nodes {
-            match node {
-                SupramarkNode::Text { value, .. } => out.push_str(value),
-                _ => {}
+            if let SupramarkNode::Text { value, .. } = node {
+                out.push_str(value);
             }
         }
         out
@@ -3388,7 +3387,12 @@ mod tests {
         for (input, target, section, label) in [
             ("[[Project Plan]]", "Project Plan", None, None),
             ("[[Project Plan|plan]]", "Project Plan", None, Some("plan")),
-            ("[[Project Plan#Roadmap]]", "Project Plan", Some("Roadmap"), None),
+            (
+                "[[Project Plan#Roadmap]]",
+                "Project Plan",
+                Some("Roadmap"),
+                None,
+            ),
             (
                 "[[Project Plan#Roadmap|the plan]]",
                 "Project Plan",
@@ -3497,7 +3501,11 @@ mod tests {
                     .all(|n| matches!(n, SupramarkNode::Text { .. })),
                 "malformed {input} must degrade to text, got {paragraph:?}"
             );
-            assert_eq!(flatten_text(paragraph), input, "content preserved for {input}");
+            assert_eq!(
+                flatten_text(paragraph),
+                input,
+                "content preserved for {input}"
+            );
         }
     }
 
@@ -3531,7 +3539,7 @@ mod tests {
         let ast = parse_with_wikilink("[text [[x]] text](url)");
         let paragraph = first_paragraph(&ast);
         let SupramarkNode::Link { url, children, .. } = &paragraph[0] else {
-            panic!("expected link, got {:?}", &paragraph[0]);
+            panic!("expected link, got {:?}", paragraph[0]);
         };
         assert_eq!(url, "url");
         assert!(

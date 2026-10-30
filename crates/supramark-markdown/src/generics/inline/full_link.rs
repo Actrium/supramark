@@ -270,10 +270,7 @@ pub fn parse_link_destination(
                         str: nul_to_replacement(unescape_all(&str[start + 1..pos])),
                     });
                 }
-                Some('\\') => match chars.next() {
-                    None => return None,
-                    Some(x) => pos += 1 + x.len_utf8(),
-                },
+                Some('\\') => pos += 1 + chars.next()?.len_utf8(),
                 Some(x) => {
                     pos += x.len_utf8();
                 }
@@ -387,10 +384,7 @@ pub fn parse_link_title(str: &str, start: usize, max: usize) -> Option<ParseLink
                 pos += 1;
                 lines += 1;
             }
-            Some('\\') => match chars.next() {
-                None => return None,
-                Some(x) => pos += 1 + x.len_utf8(),
-            },
+            Some('\\') => pos += 1 + chars.next()?.len_utf8(),
             Some(x) => {
                 pos += x.len_utf8();
             }
