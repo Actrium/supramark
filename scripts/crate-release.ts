@@ -493,9 +493,12 @@ function owningCrate(ws: Workspace, file: string): Crate | null {
 }
 
 /**
- * Does this file change what a `cargo publish` of its crate would ship?
+ * Does this file change what downstream users of the crate observe?
+ *
  * Documentation, tests, benches, examples and CI config do not, so they do not
- * demand a version bump.
+ * demand a version bump. `cargo package` does include `tests/`, `examples/` and
+ * `benches/` in the `.crate`; the rule here is about behavior, not about the
+ * archive's file list.
  */
 function affectsPackage(file: string, crate: Crate): boolean {
   const rel = file === crate.manifest ? 'Cargo.toml' : file.slice(crate.dir.length + 1);
@@ -921,7 +924,14 @@ async function checkCommand(ws: Workspace, base: string | null, offline: boolean
       if (offline) continue;
       try {
         const published = await publishedVersions(name);
-        if (published.versions.includes(crate.version)) {
+        if (!published.exists) {
+          // A name with nothing on crates.io needs a deliberate first publish:
+          // `pending` skips it. Say so here so a bump that can never
+          // auto-release is not mistaken for a release.
+          notes.push(
+            `${name} has never been published; its first release needs a manual dispatch of crate-release.yml`
+          );
+        } else if (published.versions.includes(crate.version)) {
           problems.push(
             `${name} ${crate.version} is already on crates.io; pick the next one ` +
               `(\`bun run crate:next ${name}\` after rebasing on main)`

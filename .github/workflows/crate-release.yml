@@ -137,7 +137,10 @@ jobs:
       - name: Ensure the release tag exists
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRATE: ${{ steps.release.outputs.crate }}
+          VERSION: ${{ steps.release.outputs.version }}
           TAG: ${{ steps.release.outputs.tag }}
+          SHA: ${{ github.sha }}
         run: |
           # The tag already exists on the normal path. A manual dispatch of a
           # crate that has never been released has none yet, so the publish it
@@ -148,7 +151,10 @@ jobs:
             exit 0
           fi
           git tag "${TAG}"
-          git push origin "${TAG}"
+          if ! git push origin "${TAG}"; then
+            echo "::error::Published ${CRATE} ${VERSION}, but pushing tag ${TAG} failed. Recover with: git tag ${TAG} ${SHA} && git push origin ${TAG}"
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
