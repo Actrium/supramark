@@ -227,11 +227,10 @@ impl ListScanner {
             if is_terminating_paragraph && int != 1 {
                 return None;
             }
-        } else if let Some(p) = Self::skip_bullet_list_marker(current_line) {
+        } else {
+            let p = Self::skip_bullet_list_marker(current_line)?;
             pos_after_marker = p;
             marker_value = None;
-        } else {
-            return None;
         }
 
         // If we're starting a new unordered list right after

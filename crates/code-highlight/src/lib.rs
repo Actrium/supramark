@@ -310,9 +310,11 @@ mod tests {
 
     #[test]
     fn highlights_typescript_with_alias() {
-        let mut manifest = HighlightManifest::default();
-        manifest.languages = vec!["TypeScript".to_owned()];
-        manifest.themes = vec!["GitHub".to_owned()];
+        let mut manifest = HighlightManifest {
+            languages: vec!["TypeScript".to_owned()],
+            themes: vec!["GitHub".to_owned()],
+            ..Default::default()
+        };
         manifest
             .language_aliases
             .insert("ts".to_owned(), "TypeScript".to_owned());
@@ -334,8 +336,10 @@ mod tests {
 
     #[test]
     fn falls_back_to_plain_text_for_uncompiled_language() {
-        let mut manifest = HighlightManifest::default();
-        manifest.languages = vec!["JSON".to_owned()];
+        let manifest = HighlightManifest {
+            languages: vec!["JSON".to_owned()],
+            ..Default::default()
+        };
 
         let result = highlight(
             "const answer = 42;",

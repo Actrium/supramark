@@ -207,7 +207,7 @@ fn inside_math_span(state: &mut InlineState, close: usize) -> bool {
             for &byte in &raw.as_bytes()[cache.scanned..] {
                 if byte == b'\n' {
                     cache.opener = None;
-                } else if byte == b'$' && cache.backslashes % 2 == 0 {
+                } else if byte == b'$' && cache.backslashes.is_multiple_of(2) {
                     cache.opener = match cache.opener {
                         Some(open) if cache.run_offset > open + 1 => None,
                         _ => Some(cache.run_offset),

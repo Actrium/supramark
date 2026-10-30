@@ -41,8 +41,7 @@ impl EntityScanner {
     fn parse_digital_entity(state: &mut InlineState) -> Option<(Node, usize)> {
         let capture = DIGITAL_RE.captures(&state.src[state.pos..])?;
         let entity_len = capture[0].len();
-        let content_str: String =
-            decode_numeric_entity(capture.get(1).unwrap().as_str()).into();
+        let content_str: String = decode_numeric_entity(capture.get(1).unwrap().as_str()).into();
 
         let markup_str = capture[0].to_owned();
 

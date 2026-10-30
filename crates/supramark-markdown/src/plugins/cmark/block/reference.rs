@@ -333,18 +333,14 @@ impl BlockRule for ReferenceScanner {
 
         // [label]:   destination   'title'
         //            ^^^^^^^^^^^ parse this
-        let href;
-        if let Some(res) = full_link::parse_link_destination(str, pos, str.len()) {
-            if pos == res.pos {
-                return None;
-            }
-            href = state.md.link_formatter.normalize_link(&res.str);
-            state.md.link_formatter.validate_link(&href)?;
-            pos = res.pos;
-            lines += res.lines;
-        } else {
+        let res = full_link::parse_link_destination(str, pos, str.len())?;
+        if pos == res.pos {
             return None;
         }
+        let href = state.md.link_formatter.normalize_link(&res.str);
+        state.md.link_formatter.validate_link(&href)?;
+        pos = res.pos;
+        lines += res.lines;
 
         // save cursor state, we could require to rollback later
         let dest_end_pos = pos;

@@ -232,10 +232,7 @@ pub(crate) struct FaIconRef<'a> {
 pub(crate) fn find_fa_icon(text: &str, from: usize) -> Option<FaIconRef<'_>> {
     let mut search = from;
     while let Some(rest) = text.get(search..) {
-        let start = match rest.find("fa") {
-            Some(rel) => search + rel,
-            None => return None,
-        };
+        let start = search + rest.find("fa")?;
         if let Some(icon) = fa_icon_at(text, start) {
             return Some(icon);
         }
