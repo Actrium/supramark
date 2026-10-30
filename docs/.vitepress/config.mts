@@ -43,6 +43,7 @@ export default defineConfig({
             { text: 'Feature Creation Guide', link: '/guide/CREATE_FEATURE_GUIDE.zh' },
             { text: 'Feature Quality Assurance', link: '/guide/FEATURE_QUALITY_ASSURANCE.zh' },
             { text: 'CI Setup', link: '/guide/CI_SETUP.zh' },
+            { text: 'Crate Release', link: '/guide/CRATE_RELEASE.zh' },
             { text: 'Documentation System', link: '/guide/doc-system.zh' },
           ],
         },

@@ -1,0 +1,195 @@
+name: Crate Release
+
+# Publishes ONE workspace crate to crates.io.
+#
+# Before this workflow, graphviz-release.yml was the only automated publish in
+# the repository, and it ships graphviz-anywhere alone. Every other crate --
+# mermaid-little, supramark-diagram, supramark-markdown and the rest -- was
+# published by hand, so a landed fix stayed in git until someone remembered to
+# run `cargo publish`. #254 and #255 were fixed on main on 2026-10-16 and were
+# still unpublished twelve days later: downstream had the fix and no version to
+# depend on.
+#
+# Trigger: a `<crate>-v<version>` tag, e.g. `mermaid-little-v11.14.0-7`. The tag
+# namespace is deliberately prefixed. graphviz-release.yml owns bare `v*` and
+# `test*` tags, and a bare `v0.1.7` pushed for a library would start that
+# workflow's whole cross-platform build matrix and end in a failed duplicate
+# publish of graphviz-anywhere.
+#
+# Who pushes that tag: crate-auto-tag.yml, on a merge to main that moves a
+# crate's version. It also dispatches this workflow by hand, because a tag
+# pushed with GITHUB_TOKEN does not start a workflow run of its own.
+#
+# What cannot happen here: a publish nobody asked for. The tag is derived from
+# the version line in the manifest, which only changes in a reviewed PR. A
+# crates.io version is immutable, so a wrong publish burns that number forever.
+
+on:
+  push:
+    tags:
+      - '*-v*'
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: 'Crate to release, e.g. mermaid-little. Its manifest version decides the tag.'
+        required: true
+        type: string
+      no_verify:
+        description: 'Pass --no-verify to cargo publish (skip the packaged-crate build)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # One release at a time per crate; never cancel one in flight, because a
+  # cancelled publish can leave the tag pointing at an unreleased version.
+  group: crate-release-${{ github.event.inputs.crate || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish ${{ github.event.inputs.crate || github.ref_name }}
+    # `*-v*` also matches graphviz-release.yml's rehearsal tags
+    # (`test-v0.2.0-rc1`). Those are not crate releases, and GitHub's tag
+    # filter cannot express "except these", so the exclusion lives here.
+    if: github.event_name != 'push' || !startsWith(github.ref_name, 'test')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # On a tag push this is the tag; on a dispatch it is whatever ref was
+          # selected, which crate-auto-tag.yml sets to the tag it just created.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # No `bun install`: scripts/crate-release.ts has no dependencies, which
+      # keeps the release path independent of the npm workspace.
+      - name: Resolve the release
+        id: release
+        # Pass the dispatch input through the environment rather than
+        # interpolating it into the script body.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CRATE: ${{ inputs.crate }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = 'push' ]; then
+            bun scripts/crate-release.ts verify-tag "$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            bun scripts/crate-release.ts tag-for "$DISPATCH_CRATE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Rust toolchain
+        # rust-toolchain.toml pins the exact compiler (1.97.0) and its
+        # components, so the clippy lint set here is the one contributors see.
+        # This action only makes sure rustup is present to read it.
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Format check
+        run: cargo fmt -p "${{ steps.release.outputs.crate }}" -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy -p "${{ steps.release.outputs.crate }}" --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test -p "${{ steps.release.outputs.crate }}"
+
+      # A dependent released from the same push can reach `cargo publish`
+      # before the dependency it pins exists on crates.io. Dispatch order does
+      # not prevent that; waiting here does. A caret requirement that still
+      # resolves to an older published release passes through immediately.
+      - name: Wait for workspace dependencies
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+        run: bun scripts/crate-release.ts wait-deps "$CRATE" --timeout 900
+
+      - name: Check whether crates.io already has this version
+        id: already
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          # A retry after a partial release is a no-op. Ask the index rather
+          # than depending on cargo's duplicate-version error text.
+          if bun scripts/crate-release.ts has-version "$CRATE" "$VERSION"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to crates.io
+        if: steps.already.outputs.present != 'true'
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
+          CRATE: ${{ steps.release.outputs.crate }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NO_VERIFY: ${{ inputs.no_verify }}
+        run: |
+          # Idempotent: a version already on crates.io is a no-op success, so
+          # re-running a release after fixing, say, the GitHub Release step does
+          # not fail on a cosmetic duplicate.
+          set +e
+          args=(publish -p "$CRATE" --token "$CARGO_TOKEN")
+          if [ "$NO_VERIFY" = 'true' ]; then args+=(--no-verify); fi
+          out=$(cargo "${args[@]}" 2>&1)
+          rc=$?
+          echo "$out"
+          if [ $rc -eq 0 ]; then exit 0; fi
+          if echo "$out" | grep -qE "already (exists|uploaded)"; then
+            echo "::notice::crates.io already has $CRATE $VERSION -- skipping publish."
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Ensure the release tag exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRATE: ${{ steps.release.outputs.crate }}
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The tag already exists on the normal path. A manual dispatch of a
+          # crate that has never been released has none yet, so the publish it
+          # just made gets its tag here instead of leaving the version
+          # unreferenced in git history.
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "tag ${TAG} already exists"
+            exit 0
+          fi
+          git tag "${TAG}"
+          if ! git push origin "${TAG}"; then
+            echo "::error::Published ${CRATE} ${VERSION}, but pushing tag ${TAG} failed. Recover with: git tag ${TAG} ${SHA} && git push origin ${TAG}"
+            exit 1
+          fi
+
+      - name: Find the previous release tag
+        id: previous
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # `generate_release_notes` otherwise picks the globally previous tag,
+          # which can belong to another crate.
+          previous=$(git describe --tags --abbrev=0 --match "${CRATE}-v*" "${TAG}^" 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.crate }} ${{ steps.release.outputs.version }}
+          # The generated notes list the PRs since the previous tag, which is
+          # where the fixed issues become readable from the release itself.
+          generate_release_notes: true
+          previous_tag: ${{ steps.previous.outputs.tag }}
+          draft: false
+          prerelease: false

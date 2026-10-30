@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+    # `labeled` re-runs the bookkeeping gate after `release:skip` is added;
+    # without it the red check stays until someone pushes again.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # KNOWN GAP -- needs a repository setting, not a change in this file.
 #
@@ -73,6 +76,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # `crate:check` needs the merge base, which a depth-1 clone cannot
+          # compute once the base branch has moved.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -118,6 +125,38 @@ jobs:
       - name: English-only source (no CJK)
         if: always()
         run: node scripts/check-cjk.mjs
+
+      # Release bookkeeping for the Rust crates. A fix that changes what a crate
+      # packages has to move that crate's version in the same PR, because the
+      # version line is what crate-auto-tag.yml turns into a release. Without
+      # this gate the fix lands and nothing publishes, which is how #254 and
+      # #255 sat fixed-but-unreleased for twelve days.
+      #
+      # It also checks the things that break a publish rather than skip one: an
+      # exact pin left pointing at a version that no longer exists in the tree
+      # (`supramark-diagram` pins `mermaid-little` with `=`), and a Cargo.lock
+      # left behind by the bump.
+      #
+      # In the Lint job for the same reason as the checks above it: Lint is a
+      # required status check on main, so the gate blocks a merge without the
+      # branch ruleset having to be edited. `release:skip` on the PR turns it
+      # off for a change that needs no release.
+      - name: Crate release bookkeeping
+        if: always() && !contains(github.event.pull_request.labels.*.name, 'release:skip')
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            # Use the live base branch, not the payload's base SHA: the latter
+            # can be older than the merge ref after main has moved, and a
+            # two-dot diff against it would count other people's changes.
+            git fetch --no-tags origin "$BASE_REF"
+            bun scripts/crate-release.ts check --base "origin/$BASE_REF"
+          else
+            # A push build has no PR base to diff against; the requirement and
+            # lock consistency checks still apply.
+            bun scripts/crate-release.ts check
+          fi
 
   # Code quality checks and tests
   test:

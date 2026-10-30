@@ -22,6 +22,8 @@
 interface ImportMeta {
   /** Absolute path of the directory containing the current module (Bun). */
   readonly dir: string;
+  /** True when this module is the program's entry point (Bun). */
+  readonly main: boolean;
 }
 
 declare const Bun: {

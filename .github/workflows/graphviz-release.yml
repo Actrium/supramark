@@ -3,8 +3,11 @@ name: Graphviz Release
 on:
   push:
     tags:
-      - 'v*'
-      - 'test*'
+      # `vison-core-v0.1.0` also starts with `v`, and the first publish of a
+      # never-released crate is a hand-pushed tag. Restrict the graphviz matrix
+      # to `v` followed by a digit so a crate tag cannot start it.
+      - 'v[0-9]*'
+      - 'test-v[0-9]*'
   workflow_dispatch:
 
 concurrency:

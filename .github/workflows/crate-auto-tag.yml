@@ -1,0 +1,99 @@
+name: Crate Auto Tag
+
+# Turns a merged version bump into a release.
+#
+# The fix PR carries the bump (`bun run crate:bump <crate>`, gated by the
+# "Crate release bookkeeping" step in ci.yml's Lint job). This workflow is what
+# makes that bump reach crates.io without anyone running a command: on every
+# push to main it asks which publishable crates have a manifest version that is
+# not on crates.io, tags each one and starts crate-release.yml.
+#
+# Why it compares against crates.io instead of the previous commit:
+#
+#   - it is self-healing. The backlog that motivated this pipeline -- #254 and
+#     #255 fixed on main, unpublished for twelve days -- is exactly the state
+#     "manifest version is not on crates.io", so the first bump after this lands
+#     clears it, and a bump that arrives in a later PR than the fix still ships.
+#   - a release that failed halfway (a token expiry, a flaky network, a red
+#     gate) is retried by the next push to main, instead of needing someone to
+#     notice. A tag left behind by the failed attempt is re-dispatched rather
+#     than skipped: crate-release.yml is idempotent, so the retry is safe.
+#
+# Every push to main runs this, not only pushes that touch a manifest: a
+# release can fail long after the bump that triggered it, and the retry must
+# still happen when the next push changes only code.
+#
+# A crate with nothing on crates.io at all is skipped: a first publish claims
+# the name and cannot be undone from a workflow. Release those by dispatching
+# crate-release.yml by hand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Serialize, so two pushes in quick succession cannot both tag the same
+  # version. Never cancel: a cancelled run could leave a tag with no release.
+  group: crate-auto-tag
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag:
+    name: Tag and dispatch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Tags, so an existing release tag is recognised rather than re-pushed.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Find versions that are not on crates.io
+        id: pending
+        run: |
+          rows=$(bun scripts/crate-release.ts pending --json)
+          echo "rows=$rows" >> "$GITHUB_OUTPUT"
+          echo "$rows"
+
+      - name: Tag each one and start its release
+        if: steps.pending.outputs.rows != '[]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROWS: ${{ steps.pending.outputs.rows }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          echo "$ROWS" | jq -c '.[]' | while read -r row; do
+            crate=$(echo "$row" | jq -r '.crate')
+            version=$(echo "$row" | jq -r '.version')
+            tag=$(echo "$row" | jq -r '.tag')
+
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              # The tag survives a failed release, and `pending` only reports a
+              # version that is still absent from crates.io. Re-dispatch the
+              # existing tag instead of skipping it: publish is idempotent, so
+              # this is the retry that makes the self-healing claim true.
+              echo "::notice::${tag} already exists; re-dispatching its release."
+            else
+              git tag "${tag}"
+              git push origin "${tag}"
+            fi
+
+            # A tag pushed with GITHUB_TOKEN does not start a workflow run, so
+            # crate-release.yml is dispatched explicitly -- on the tag, so it
+            # publishes exactly the tagged tree even if main has moved on.
+            gh workflow run crate-release.yml --ref "${tag}" -f crate="${crate}"
+            echo "::notice::Releasing ${crate} ${version} as ${tag}."
+          done
