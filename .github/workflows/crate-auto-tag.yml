@@ -14,8 +14,14 @@ name: Crate Auto Tag
 #     #255 fixed on main, unpublished for twelve days -- is exactly the state
 #     "manifest version is not on crates.io", so the first bump after this lands
 #     clears it, and a bump that arrives in a later PR than the fix still ships.
-#   - a release that failed halfway (a token expiry, a flaky network) is retried
-#     by the next push to main, instead of needing someone to notice.
+#   - a release that failed halfway (a token expiry, a flaky network, a red
+#     gate) is retried by the next push to main, instead of needing someone to
+#     notice. A tag left behind by the failed attempt is re-dispatched rather
+#     than skipped: crate-release.yml is idempotent, so the retry is safe.
+#
+# Every push to main runs this, not only pushes that touch a manifest: a
+# release can fail long after the bump that triggered it, and the retry must
+# still happen when the next push changes only code.
 #
 # A crate with nothing on crates.io at all is skipped: a first publish claims
 # the name and cannot be undone from a workflow. Release those by dispatching
@@ -24,8 +30,6 @@ name: Crate Auto Tag
 on:
   push:
     branches: [main]
-    paths:
-      - 'crates/**/Cargo.toml'
   workflow_dispatch:
 
 concurrency:
@@ -77,12 +81,15 @@ jobs:
             tag=$(echo "$row" | jq -r '.tag')
 
             if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-              echo "::notice::${tag} already exists; its release is already under way."
-              continue
+              # The tag survives a failed release, and `pending` only reports a
+              # version that is still absent from crates.io. Re-dispatch the
+              # existing tag instead of skipping it: publish is idempotent, so
+              # this is the retry that makes the self-healing claim true.
+              echo "::notice::${tag} already exists; re-dispatching its release."
+            else
+              git tag "${tag}"
+              git push origin "${tag}"
             fi
-
-            git tag "${tag}"
-            git push origin "${tag}"
 
             # A tag pushed with GITHUB_TOKEN does not start a workflow run, so
             # crate-release.yml is dispatched explicitly -- on the tag, so it

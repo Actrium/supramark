@@ -2,7 +2,7 @@
 
 本仓库的 Rust crate 走「修复带版本号，合并即发布」的流程。本文说明规则、命令和一次性配置。
 
-`graphviz-anywhere` 不走这条流程：它由 [`graphviz-release.yml`](https://github.com/Actrium/supramark/blob/main/.github/workflows/graphviz-release.yml) 用 `v*` tag 发布，发布前必须先完成跨平台构建矩阵并校验 release 产物。
+`graphviz-anywhere` 不走这条流程：它由 [`graphviz-release.yml`](https://github.com/Actrium/supramark/blob/main/.github/workflows/graphviz-release.yml) 用 `v[0-9]*` tag 发布，发布前必须先完成跨平台构建矩阵并校验 release 产物。
 
 ## 为什么要有这条流程
 
@@ -11,7 +11,7 @@
 现在的链路：
 
 1. **修复 PR 自带版本号**：`bun run crate:bump <crate>` 改版本并传导依赖约束；CI 的 `Crate release bookkeeping`（在 Lint job 里）在漏改时让 PR 变红。
-2. **合并后自动打 tag**：`crate-auto-tag.yml` 查出「manifest 版本不在 crates.io 上」的 crate，逐个打 `<crate>-v<version>` tag 并派发发布流程。
+2. **合并后自动打 tag**：`crate-auto-tag.yml` 在每次 push 到 main 时查出「manifest 版本不在 crates.io 上」的 crate，按依赖顺序逐个打 `<crate>-v<version>` tag 并派发发布流程。tag 已存在但版本仍未发布时，重新派发同一个 tag——失败会自动重试。
 3. **发布单个 crate**：`crate-release.yml` 校验 tag 与 manifest 一致，跑 fmt / clippy / test，然后 `cargo publish`，并建一个 GitHub Release。
 
 crates.io 的版本不可变，错发一个版本号就永久烧掉它。所以触发器只认 manifest 里的版本行——它只会在评审过的 PR 里变化。
@@ -53,6 +53,16 @@ Cargo.lock refreshed
 
 caret 形式的约束（`version = "0.1"`）只要仍能匹配新版本就不动，也不连带发版。`publish = false` 的 wasm / native 包装 crate 只维护约束，没有版本要动。
 
+## 依赖顺序与失败重试
+
+`crate-release.yml` 在 `cargo publish` 之前会跑 `wait-deps`：如果这次发布依赖的新版本还没出现在 crates.io 上，它轮询 index 直到可解析（默认超时 15 分钟）。所以 `mermaid-little` 和 `supramark-diagram` 在同一次 push 里被发布时，后者不会抢在前者上传完成之前失败。caret 约束如果仍能解析到已发布的旧版本，则不等待。
+
+一次发布失败（fmt / clippy / test / token / 网络）不会留下死状态：tag 留在仓库里，但版本不在 crates.io 上，下一次 push 到 main 会重新派发同一个 tag。`cargo publish` 是幂等的，已存在的版本按成功处理。
+
+如果 manifest 的当前版本在 crates.io 上被 yank，则无法重新发布；`pending` 会提示 bump 到一个新版本。
+
+`wait-deps` 遇到两种无法靠等待解决的情况会立即失败，而不是空等 15 分钟：树上版本连自己的约束都满足不了（stale pin，`crate:check` 也会报），或依赖由 `graphviz-release.yml` / 手工发布、本流水线永远不会产出该版本。
+
 ## 命令
 
 ```sh
@@ -62,6 +72,7 @@ bun run crate:bump <crate>      # 改版本 + 传导 pin + 刷新 Cargo.lock
 bun run crate:bump <crate> --set 1.2.3
 bun run crate:check             # 本地跑一遍 CI 的记账检查
 bun run crate:pending           # 哪些 crate 的版本还没上 crates.io
+bun scripts/crate-release.ts wait-deps <crate>   # 发布前等待依赖版本出现在 crates.io（workflow 内部使用）
 bun run crate:selftest          # 脚本自测（`bun run quality` 会跑）
 ```
 
@@ -77,7 +88,7 @@ bun run crate:selftest          # 脚本自测（`bun run quality` 会跑）
 
 ## 手工发布
 
-两种情况需要手工派发 `crate-release.yml`（Actions 页面 → Crate Release → Run workflow，填 crate 名）：
+两种情况需要手工派发 `crate-release.yml`（Actions 页面 → Crate Release → Run workflow，填 crate 名）。**派发时把 ref 选成该 crate 的目标 tag**，否则发布的是所选 ref 的树，而不是 tag 指向的树：
 
 - **从未发布过的 crate**（当前是 `supramark-code-highlight`、`vison-core`）。首次发布会占用 crates.io 上的名字，不可撤销，所以自动流程只跳过并提示。
 - **补救一次失败的发布**。`cargo publish` 的调用是幂等的：已存在的版本按成功处理，所以重跑是安全的。
@@ -89,10 +100,10 @@ bun run crate:selftest          # 脚本自测（`bun run quality` 会跑）
 | tag | 归属 |
 |---|---|
 | `<crate>-v<version>`，如 `mermaid-little-v11.14.0-7` | 本流程 |
-| `v*`，如 `v0.2.6` | `graphviz-release.yml`（graphviz-anywhere） |
-| `test*` | `graphviz-release.yml` 的预演，本流程显式忽略 |
+| `v[0-9]*`，如 `v0.2.6` | `graphviz-release.yml`（graphviz-anywhere） |
+| `test-v[0-9]*` | `graphviz-release.yml` 的预演，本流程显式忽略 |
 
-给库打一个裸 `v0.1.7` 会启动 graphviz 那条跨平台构建矩阵，并以一次重复发布失败收场。所以库的 tag 一律带 crate 名前缀。
+给库打一个裸 `v0.1.7` 会启动 graphviz 那条跨平台构建矩阵，并以一次重复发布失败收场。所以库的 tag 一律带 crate 名前缀。`vison-core-v0.1.0` 虽然以 `v` 开头，但 `v[0-9]*` 不匹配它，因此不会误触 graphviz 矩阵。
 
 ## 一次性配置
 

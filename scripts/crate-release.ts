@@ -34,6 +34,7 @@
  *   pending [--json]            crates whose manifest version is not on crates.io
  *   verify-tag <crate>-v<ver>   assert a release tag matches the manifest
  *   tag-for <crate>             the tag a release of the manifest version takes
+ *   wait-deps <crate> [--timeout S]  block until the workspace deps it needs are on crates.io
  *
  * `--set` is the escape hatch for anything larger than the smallest increment
  * (a minor bump, or rebasing onto a new upstream version). The automatic path
@@ -318,6 +319,11 @@ export function reqAccepts(req: string, version: string): boolean | 'unknown' {
   if (trimmed.startsWith('=')) return trimmed.slice(1).trim() === version;
   const caret = trimmed.startsWith('^') ? trimmed.slice(1).trim() : trimmed;
   if (!/^\d+(\.\d+){0,2}(-[0-9A-Za-z.-]+)?$/.test(caret)) return 'unknown';
+  // Cargo does not let a requirement without a pre-release match a pre-release
+  // version. Applying only the caret bound here would answer `true` for
+  // `0.1` vs `0.1.2-1`, which cargo itself rejects -- and a wrong "yes"
+  // publishes a requirement cargo cannot resolve.
+  if (!caret.includes('-') && version.includes('-')) return 'unknown';
   // Pad a partial requirement (`0.1`) to a comparable floor (`0.1.0`).
   const parts = caret.split('-')[0]!.split('.');
   const pre = caret.includes('-') ? caret.slice(caret.indexOf('-') + 1) : '';
@@ -399,25 +405,43 @@ function indexPath(name: string): string {
 interface Published {
   /** Every non-yanked version, oldest first. Empty means the name is unused. */
   versions: string[];
+  /** Versions yanked on crates.io. A yanked version can never be republished. */
+  yanked: string[];
   /** The crate exists on crates.io, yanked versions included. */
   exists: boolean;
 }
 
+const INDEX_ATTEMPTS = 3;
+const INDEX_RETRY_BASE_MS = 1000;
+
 async function publishedVersions(name: string): Promise<Published> {
   const url = `https://index.crates.io/${indexPath(name)}`;
-  const response = await fetch(url, {
-    headers: { 'user-agent': 'supramark-crate-release (https://github.com/Actrium/supramark)' },
-  });
-  if (response.status === 404) return { versions: [], exists: false };
-  if (!response.ok) throw new Error(`crates.io index returned ${response.status} for ${name}`);
-  const body = await response.text();
-  const versions: string[] = [];
-  for (const line of body.split('\n')) {
-    if (!line.trim()) continue;
-    const entry = JSON.parse(line) as { vers: string; yanked?: boolean };
-    if (!entry.yanked) versions.push(entry.vers);
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= INDEX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { 'user-agent': 'supramark-crate-release (https://github.com/Actrium/supramark)' },
+      });
+      if (response.status === 404) return { versions: [], yanked: [], exists: false };
+      if (!response.ok) throw new Error(`crates.io index returned ${response.status} for ${name}`);
+      const body = await response.text();
+      const versions: string[] = [];
+      const yanked: string[] = [];
+      for (const line of body.split('\n')) {
+        if (!line.trim()) continue;
+        const entry = JSON.parse(line) as { vers: string; yanked?: boolean };
+        if (entry.yanked) yanked.push(entry.vers);
+        else versions.push(entry.vers);
+      }
+      return { versions, yanked, exists: true };
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < INDEX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, INDEX_RETRY_BASE_MS * 2 ** (attempt - 1)));
+      }
+    }
   }
-  return { versions, exists: true };
+  throw lastError ?? new Error(`crates.io index request failed for ${name}`);
 }
 
 // ── Git ─────────────────────────────────────────────────────────────────────
@@ -631,8 +655,32 @@ function nextCommand(ws: Workspace, name: string, set: string | null): void {
   console.log(set ?? nextVersion(crate.version));
 }
 
+/**
+ * Order release candidates so a dependency is tagged and dispatched before
+ * anything that depends on it. Dispatch order is not a completion guarantee
+ * (`crate-release.yml` waits on the index before publishing), but it keeps the
+ * common case from racing.
+ */
+function pendingOrder(ws: Workspace, crates: Crate[]): Crate[] {
+  const pending = new Set(crates.map(crate => crate.name));
+  const ordered: Crate[] = [];
+  const visited = new Set<string>();
+  const visit = (crate: Crate): void => {
+    if (visited.has(crate.name)) return;
+    visited.add(crate.name);
+    for (const edge of crate.deps) {
+      const dependency = ws.byName.get(edge.crate);
+      if (dependency && pending.has(dependency.name)) visit(dependency);
+    }
+    ordered.push(crate);
+  };
+  for (const crate of crates) visit(crate);
+  return ordered;
+}
+
 async function pendingCommand(ws: Workspace, asJson: boolean): Promise<void> {
   const rows: Array<{ crate: string; version: string; tag: string }> = [];
+  const candidates: Crate[] = [];
   for (const crate of publishable(ws)) {
     const published = await publishedVersions(crate.name);
     if (!published.exists) {
@@ -642,6 +690,17 @@ async function pendingCommand(ws: Workspace, asJson: boolean): Promise<void> {
       continue;
     }
     if (published.versions.includes(crate.version)) continue;
+    if (published.yanked.includes(crate.version)) {
+      // crates.io never lets a yanked version be republished, so retrying is
+      // impossible: the manifest has to move to a new version.
+      console.error(
+        `note: ${crate.name} ${crate.version} is yanked on crates.io; bump the manifest to publish again`
+      );
+      continue;
+    }
+    candidates.push(crate);
+  }
+  for (const crate of pendingOrder(ws, candidates)) {
     rows.push({ crate: crate.name, version: crate.version, tag: `${crate.name}-v${crate.version}` });
   }
   if (asJson) console.log(JSON.stringify(rows));
@@ -688,6 +747,90 @@ function tagForCommand(ws: Workspace, name: string): void {
   const crate = releaseTarget(ws, name);
   console.error(`${crate.name} ${crate.version} per ${crate.manifest}`);
   printReleaseId(crate);
+}
+
+const WAIT_POLL_MS = 10_000;
+
+/**
+ * Block until every workspace dependency this release needs is resolvable on
+ * crates.io.
+ *
+ * `cargo publish` resolves intra-workspace dependencies against the registry,
+ * not the path, so a dependent released from the same push as its dependency
+ * can reach `publish` before the dependency exists. `crate-auto-tag.yml` orders
+ * dispatches by dependencies, but dispatch order is not a completion order --
+ * this is the part that actually waits.
+ *
+ * The test is whether cargo can resolve the requirement against the index
+ * *now*: if an already-published version satisfies it, there is nothing to
+ * wait for. An exact pin to the in-tree version is the case that does have to
+ * wait, because the published manifest will name that exact version.
+ */
+async function waitDepsCommand(ws: Workspace, name: string, timeoutSeconds: number): Promise<void> {
+  const crate = releaseTarget(ws, name);
+  const waits: Array<{ name: string; version: string; req: string }> = [];
+
+  for (const edge of crate.deps) {
+    if (edge.req === '') continue;
+    const dependency = ws.byName.get(edge.crate);
+    if (!dependency) continue;
+
+    const published = await publishedVersions(dependency.name);
+    const satisfiable = published.versions.some(version => reqAccepts(edge.req, version) === true);
+    if (satisfiable) continue;
+
+    const treeAccepts = reqAccepts(edge.req, dependency.version);
+    if (treeAccepts === false) {
+      // A stale requirement that neither a published version nor the in-tree
+      // version satisfies. Waiting cannot fix it; the bookkeeping gate
+      // (`crate:check`) reports the same inconsistency.
+      throw new Error(
+        `${crate.name} requires ${dependency.name} "${edge.req}", but the tree has ` +
+          `${dependency.version} and crates.io has nothing that satisfies it`
+      );
+    }
+    if (!dependency.publish || EXCLUDED[dependency.name]) {
+      // A version this pipeline will never publish: waiting would only burn
+      // the timeout. It has to be published by hand (graphviz-release.yml or a
+      // manual dispatch) before this crate can ship.
+      throw new Error(
+        `${crate.name} requires ${dependency.name} ${dependency.version} ` +
+          `(requirement "${edge.req}"), but that crate is not published by this pipeline`
+      );
+    }
+    waits.push({ name: dependency.name, version: dependency.version, req: edge.req });
+  }
+
+  if (waits.length === 0) {
+    console.log(`${crate.name}: no workspace dependency needs to be published first`);
+    return;
+  }
+
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  for (const dependency of waits) {
+    for (;;) {
+      // A transient index failure must not end the whole wait window;
+      // publishedVersions already retries, and the deadline below still
+      // bounds this loop.
+      let published: Published | null = null;
+      try {
+        published = await publishedVersions(dependency.name);
+      } catch {
+        published = null;
+      }
+      if (published?.versions.includes(dependency.version)) {
+        console.log(`${dependency.name} ${dependency.version} is on crates.io`);
+        break;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `${crate.name} requires ${dependency.name} ${dependency.version} ` +
+            `(requirement "${dependency.req}"), but it is not on crates.io after ${timeoutSeconds}s`
+        );
+      }
+      await new Promise(resolve => setTimeout(resolve, WAIT_POLL_MS));
+    }
+  }
 }
 
 /**
@@ -822,11 +965,19 @@ function has(args: string[], name: string): boolean {
   return true;
 }
 
+function positiveInt(value: string | null, fallback: number, name: string): number {
+  if (value === null) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
+  return parsed;
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const command = args.shift() ?? 'check';
   const set = flag(args, '--set');
   const base = flag(args, '--base');
+  const timeout = flag(args, '--timeout');
   const asJson = has(args, '--json');
   const offline = has(args, '--offline');
   const ws = loadWorkspace();
@@ -849,6 +1000,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case 'tag-for':
       tagForCommand(ws, args[0] ?? '');
+      return 0;
+    case 'wait-deps':
+      await waitDepsCommand(ws, args[0] ?? '', positiveInt(timeout, 900, '--timeout'));
       return 0;
     case 'check':
       return await checkCommand(ws, base, offline);

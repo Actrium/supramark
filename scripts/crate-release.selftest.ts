@@ -83,6 +83,16 @@ test('reqAccepts reports a requirement it does not model', () => {
   assert.equal(reqAccepts('', '1.0.0'), 'unknown');
 });
 
+test('reqAccepts refuses a pre-release that a plain caret cannot match', () => {
+  // Cargo does not let `0.1` resolve `0.1.2-1`. Answering `true` here would
+  // publish a requirement cargo itself rejects.
+  assert.equal(reqAccepts('0.1', '0.1.2-1'), 'unknown');
+  assert.equal(reqAccepts('0.1.2', '0.1.2-1'), 'unknown');
+  // A requirement that names a pre-release still compares normally.
+  assert.equal(reqAccepts('1.2026.2-4', '1.2026.2-5'), true);
+  assert.equal(reqAccepts('=11.14.0-6', '11.14.0-7'), false);
+});
+
 test('parseTag splits a release tag, and rejects a bare version tag', () => {
   assert.deepEqual(parseTag('mermaid-little-v11.14.0-7'), { crate: 'mermaid-little', version: '11.14.0-7' });
   assert.deepEqual(parseTag('supramark-diagram-v0.1.7'), { crate: 'supramark-diagram', version: '0.1.7' });

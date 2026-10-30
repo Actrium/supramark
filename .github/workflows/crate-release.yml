@@ -74,11 +74,17 @@ jobs:
       # keeps the release path independent of the npm workspace.
       - name: Resolve the release
         id: release
+        # Pass the dispatch input through the environment rather than
+        # interpolating it into the script body.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CRATE: ${{ inputs.crate }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.event_name }}" = 'push' ]; then
-            bun scripts/crate-release.ts verify-tag "${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = 'push' ]; then
+            bun scripts/crate-release.ts verify-tag "$REF_NAME" >> "$GITHUB_OUTPUT"
           else
-            bun scripts/crate-release.ts tag-for "${{ inputs.crate }}" >> "$GITHUB_OUTPUT"
+            bun scripts/crate-release.ts tag-for "$DISPATCH_CRATE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Rust toolchain
@@ -95,6 +101,15 @@ jobs:
 
       - name: Tests
         run: cargo test -p "${{ steps.release.outputs.crate }}"
+
+      # A dependent released from the same push can reach `cargo publish`
+      # before the dependency it pins exists on crates.io. Dispatch order does
+      # not prevent that; waiting here does. A caret requirement that still
+      # resolves to an older published release passes through immediately.
+      - name: Wait for workspace dependencies
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+        run: bun scripts/crate-release.ts wait-deps "$CRATE" --timeout 900
 
       - name: Publish to crates.io
         env:
