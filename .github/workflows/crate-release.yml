@@ -111,7 +111,20 @@ jobs:
           CRATE: ${{ steps.release.outputs.crate }}
         run: bun scripts/crate-release.ts wait-deps "$CRATE" --timeout 900
 
+      - name: Check whether crates.io already has this version
+        id: already
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          # A retry after a partial release is a no-op. Ask the index rather
+          # than depending on cargo's duplicate-version error text.
+          if bun scripts/crate-release.ts has-version "$CRATE" "$VERSION"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to crates.io
+        if: steps.already.outputs.present != 'true'
         env:
           CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
           CRATE: ${{ steps.release.outputs.crate }}
@@ -156,6 +169,19 @@ jobs:
             exit 1
           fi
 
+      - name: Find the previous release tag
+        id: previous
+        env:
+          CRATE: ${{ steps.release.outputs.crate }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # `generate_release_notes` otherwise picks the globally previous tag,
+          # which can belong to another crate.
+          previous=$(git describe --tags --abbrev=0 --match "${CRATE}-v*" "${TAG}^" 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            echo "tag=$previous" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -164,5 +190,6 @@ jobs:
           # The generated notes list the PRs since the previous tag, which is
           # where the fixed issues become readable from the release itself.
           generate_release_notes: true
+          previous_tag: ${{ steps.previous.outputs.tag }}
           draft: false
           prerelease: false

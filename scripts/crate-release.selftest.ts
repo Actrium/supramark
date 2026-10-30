@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { compareVersions, nextVersion, parseTag, reqAccepts } from './crate-release.ts';
+import { compareVersions, nextVersion, parseTag, planWaitDeps, reqAccepts } from './crate-release.ts';
 
 let failures = 0;
 
@@ -98,6 +98,42 @@ test('parseTag splits a release tag, and rejects a bare version tag', () => {
   assert.deepEqual(parseTag('supramark-diagram-v0.1.7'), { crate: 'supramark-diagram', version: '0.1.7' });
   // `v0.2.7` belongs to graphviz-release.yml; this pipeline must not claim it.
   assert.throws(() => parseTag('v0.2.7'), /<crate>-v<version>/);
+});
+
+test('planWaitDeps waits only when the index cannot resolve the requirement', () => {
+  const lookupWith = (published: Record<string, string[]>) => (name: string) => ({
+    versions: published[name] ?? [],
+  });
+  const dep = (over: Partial<{ version: string; req: string; publish: boolean; excluded: boolean }>) => ({
+    name: 'dep',
+    version: '1.0.0',
+    req: '=1.0.0',
+    publish: true,
+    excluded: false,
+    ...over,
+  });
+
+  // Exact pin to the in-tree version: it has to appear before this can publish.
+  assert.deepEqual(planWaitDeps({ crate: 'top', deps: [dep({})] }, lookupWith({})), {
+    waits: [{ name: 'dep', version: '1.0.0', req: '=1.0.0' }],
+  });
+
+  // A caret an older published release already satisfies: nothing to wait for.
+  assert.deepEqual(
+    planWaitDeps(
+      { crate: 'top', deps: [dep({ version: '1.2.0', req: '1.0' })] },
+      lookupWith({ dep: ['1.0.5'] })
+    ),
+    { waits: [] }
+  );
+
+  // A stale pin: fail fast instead of burning the timeout.
+  const stale = planWaitDeps({ crate: 'top', deps: [dep({ version: '2.0.0', req: '=1.0.0' })] }, lookupWith({}));
+  assert.ok('error' in stale && /nothing that satisfies/.test(stale.error));
+
+  // A dependency this pipeline never publishes: fail fast.
+  const excluded = planWaitDeps({ crate: 'top', deps: [dep({ excluded: true })] }, lookupWith({}));
+  assert.ok('error' in excluded && /not published by this pipeline/.test(excluded.error));
 });
 
 // ── Bump propagation, against a throwaway workspace ─────────────────────────

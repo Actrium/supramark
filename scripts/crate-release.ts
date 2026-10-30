@@ -35,6 +35,7 @@
  *   verify-tag <crate>-v<ver>   assert a release tag matches the manifest
  *   tag-for <crate>             the tag a release of the manifest version takes
  *   wait-deps <crate> [--timeout S]  block until the workspace deps it needs are on crates.io
+ *   has-version <crate> <version>    exit 0 when crates.io already has that version
  *
  * `--set` is the escape hatch for anything larger than the smallest increment
  * (a minor bump, or rebasing onto a new upstream version). The automatic path
@@ -450,6 +451,22 @@ function git(args: string[]): string {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf-8' }).trimEnd();
 }
 
+/**
+ * The commit this branch forked from `base`. Comparing against the base's
+ * current head instead would count other people's changes on main as part of
+ * this PR -- and a re-run after the base moved would compare an old payload
+ * SHA against a rebuilt merge ref.
+ */
+function mergeBase(ref: string): string {
+  try {
+    return git(['merge-base', ref, 'HEAD']);
+  } catch {
+    throw new Error(
+      `cannot find a merge base between ${ref} and HEAD; fetch more history and retry`
+    );
+  }
+}
+
 function changedFiles(base: string): string[] {
   return git(['diff', '--name-only', base, 'HEAD']).split('\n').filter(Boolean);
 }
@@ -752,6 +769,17 @@ function tagForCommand(ws: Workspace, name: string): void {
   printReleaseId(crate);
 }
 
+/**
+ * Exit 0 when crates.io already has this exact version. `crate-release.yml`
+ * uses it to skip a publish that a previous attempt already completed, instead
+ * of depending on cargo's duplicate-version error text.
+ */
+async function hasVersionCommand(name: string, version: string): Promise<number> {
+  if (!name || !version) throw new Error('has-version needs <crate> <version>');
+  const published = await publishedVersions(name);
+  return published.versions.includes(version) ? 0 : 1;
+}
+
 const WAIT_POLL_MS = 10_000;
 
 /**
@@ -769,48 +797,104 @@ const WAIT_POLL_MS = 10_000;
  * wait for. An exact pin to the in-tree version is the case that does have to
  * wait, because the published manifest will name that exact version.
  */
-async function waitDepsCommand(ws: Workspace, name: string, timeoutSeconds: number): Promise<void> {
-  const crate = releaseTarget(ws, name);
-  const waits: Array<{ name: string; version: string; req: string }> = [];
+export interface WaitDependency {
+  name: string;
+  version: string;
+  req: string;
+}
 
-  for (const edge of crate.deps) {
-    if (edge.req === '') continue;
-    const dependency = ws.byName.get(edge.crate);
-    if (!dependency) continue;
+export interface WaitInput {
+  crate: string;
+  deps: Array<WaitDependency & { publish: boolean; excluded: boolean }>;
+}
 
-    const published = await publishedVersions(dependency.name);
-    const satisfiable = published.versions.some(version => reqAccepts(edge.req, version) === true);
+export type WaitPlan = { waits: WaitDependency[] } | { error: string };
+
+/**
+ * Decide which dependencies a release has to wait for.
+ *
+ * The test is whether cargo can resolve the requirement against the index
+ * *now*: if an already-published version satisfies it, there is nothing to
+ * wait for. An exact pin to the in-tree version is the case that has to wait,
+ * because the published manifest will name that exact version.
+ *
+ * Pure apart from the injected lookup, so the self-test can exercise all four
+ * branches without a network.
+ */
+export function planWaitDeps(
+  input: WaitInput,
+  lookup: (name: string) => { versions: string[] }
+): WaitPlan {
+  const waits: WaitDependency[] = [];
+  for (const dep of input.deps) {
+    if (dep.req === '') continue;
+    const published = lookup(dep.name);
+    const satisfiable = published.versions.some(version => reqAccepts(dep.req, version) === true);
     if (satisfiable) continue;
 
-    const treeAccepts = reqAccepts(edge.req, dependency.version);
+    const treeAccepts = reqAccepts(dep.req, dep.version);
     if (treeAccepts === false) {
       // A stale requirement that neither a published version nor the in-tree
       // version satisfies. Waiting cannot fix it; the bookkeeping gate
       // (`crate:check`) reports the same inconsistency.
-      throw new Error(
-        `${crate.name} requires ${dependency.name} "${edge.req}", but the tree has ` +
-          `${dependency.version} and crates.io has nothing that satisfies it`
-      );
+      return {
+        error:
+          `${input.crate} requires ${dep.name} "${dep.req}", but the tree has ` +
+          `${dep.version} and crates.io has nothing that satisfies it`,
+      };
     }
-    if (!dependency.publish || EXCLUDED[dependency.name]) {
+    if (!dep.publish || dep.excluded) {
       // A version this pipeline will never publish: waiting would only burn
       // the timeout. It has to be published by hand (graphviz-release.yml or a
       // manual dispatch) before this crate can ship.
-      throw new Error(
-        `${crate.name} requires ${dependency.name} ${dependency.version} ` +
-          `(requirement "${edge.req}"), but that crate is not published by this pipeline`
-      );
+      return {
+        error:
+          `${input.crate} requires ${dep.name} ${dep.version} ` +
+          `(requirement "${dep.req}"), but that crate is not published by this pipeline`,
+      };
     }
-    waits.push({ name: dependency.name, version: dependency.version, req: edge.req });
+    waits.push({ name: dep.name, version: dep.version, req: dep.req });
+  }
+  return { waits };
+}
+
+async function waitDepsCommand(ws: Workspace, name: string, timeoutSeconds: number): Promise<void> {
+  const crate = releaseTarget(ws, name);
+  const deps = crate.deps.flatMap(edge => {
+    const dependency = ws.byName.get(edge.crate);
+    if (!dependency) return [];
+    return [
+      {
+        name: dependency.name,
+        version: dependency.version,
+        req: edge.req,
+        publish: dependency.publish,
+        excluded: Boolean(EXCLUDED[dependency.name]),
+      },
+    ];
+  });
+
+  // One index read per dependency, then a pure decision over the result.
+  const publishedByName = new Map<string, Published>();
+  for (const dep of deps) {
+    if (dep.req === '') continue;
+    if (!publishedByName.has(dep.name)) {
+      publishedByName.set(dep.name, await publishedVersions(dep.name));
+    }
   }
 
-  if (waits.length === 0) {
+  const plan = planWaitDeps({ crate: crate.name, deps }, dep => {
+    return publishedByName.get(dep) ?? { versions: [], yanked: [], exists: false };
+  });
+  if ('error' in plan) throw new Error(plan.error);
+
+  if (plan.waits.length === 0) {
     console.log(`${crate.name}: no workspace dependency needs to be published first`);
     return;
   }
 
   const deadline = Date.now() + timeoutSeconds * 1000;
-  for (const dependency of waits) {
+  for (const dependency of plan.waits) {
     for (;;) {
       // A transient index failure must not end the whole wait window;
       // publishedVersions already retries, and the deadline below still
@@ -894,7 +978,8 @@ async function checkCommand(ws: Workspace, base: string | null, offline: boolean
   }
 
   if (base) {
-    const files = changedFiles(base);
+    const forkPoint = mergeBase(base);
+    const files = changedFiles(forkPoint);
     const touched = new Map<string, string[]>();
     for (const file of files) {
       const crate = owningCrate(ws, file);
@@ -907,7 +992,7 @@ async function checkCommand(ws: Workspace, base: string | null, offline: boolean
 
     for (const [name, changed] of touched) {
       const crate = ws.byName.get(name)!;
-      const baseVersion = versionAt(base, crate.manifest);
+      const baseVersion = versionAt(forkPoint, crate.manifest);
       if (baseVersion === null) continue; // new crate in this PR; its first publish is manual
       if (baseVersion === crate.version) {
         problems.push(
@@ -1014,6 +1099,8 @@ async function main(argv: string[]): Promise<number> {
     case 'wait-deps':
       await waitDepsCommand(ws, args[0] ?? '', positiveInt(timeout, 900, '--timeout'));
       return 0;
+    case 'has-version':
+      return await hasVersionCommand(args[0] ?? '', args[1] ?? '');
     case 'check':
       return await checkCommand(ws, base, offline);
     default:
