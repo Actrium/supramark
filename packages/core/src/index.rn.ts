@@ -29,6 +29,11 @@ export * from './diagram-feature.js';
 // on both web and RN)
 export * from './container-extension.js';
 
+// Code-block action icons and fence helpers — re-exported from the RN entry too
+// so a host resolves the same surface under the metro mapping.
+export * from './code-action-icons.js';
+export * from './code-block.js';
+
 // Syntax family runtime hooks (for use by Features)
 export {
   type ContainerProcessorContext,

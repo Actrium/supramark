@@ -1,3 +1,6 @@
+// cjk-allow-file: the host action labels below are Chinese on purpose — they
+// assert that a host can localize the icon-only buttons, which is the one string
+// the library deliberately leaves to the host instead of guessing a language.
 import React from 'react';
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
@@ -5,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { SupramarkRootNode } from '@supramark/core';
 import { Supramark } from '../src/Supramark';
+import type { SupramarkCodeActionLabels } from '../src/Supramark';
 
 type TestAct = (callback: () => void | Promise<void>) => Promise<void>;
 const act = (React as typeof React & { act: TestAct }).act;
@@ -42,6 +46,8 @@ function createContainer(): TestContainer {
 interface RenderOpts {
   onCopyCode?: (code: string, node: { type: 'code' }) => void | Promise<void>;
   copyButton?: boolean;
+  codeBlockChrome?: boolean;
+  codeActionLabels?: SupramarkCodeActionLabels;
   theme?: 'tailwind' | 'minimal';
 }
 
@@ -64,9 +70,25 @@ async function renderCode(
   return container;
 }
 
-function findButton(container: TestContainer): HTMLButtonElement | null {
-  const buttons = container.getElementsByTagName('button');
-  return buttons.length > 0 ? (buttons[0] as unknown as HTMLButtonElement) : null;
+// Lookups walk the tree by tag name on purpose: happy-dom's `querySelector` is
+// unusable under `bun test` (its SelectorParser reaches for a `window.SyntaxError`
+// the test global does not provide, and throws on every selector, valid or not).
+/** Every action button in the container, in document order. */
+function findActions(container: TestContainer): HTMLButtonElement[] {
+  return Array.from(container.getElementsByTagName('button')) as unknown as HTMLButtonElement[];
+}
+
+/** The action button carrying an accessible name. */
+function findAction(container: TestContainer, label: string): HTMLButtonElement | null {
+  return findActions(container).find(button => button.getAttribute('aria-label') === label) ?? null;
+}
+
+/** The element marked as the icon for an action: 'copy' | 'fullscreen'. */
+function findIcon(container: TestContainer, id: string): Element | null {
+  const elements = Array.from(container.getElementsByTagName('*')) as unknown as Element[];
+  return (
+    elements.find(element => element.getAttribute('data-supramark-code-action') === id) ?? null
+  );
 }
 
 async function click(button: HTMLButtonElement): Promise<void> {
@@ -75,52 +97,71 @@ async function click(button: HTMLButtonElement): Promise<void> {
   });
 }
 
-describe('code block copy button (web)', () => {
-  test('renders a copy button by default and keeps the language class', async () => {
+describe('code block actions (web)', () => {
+  test('renders the copy button by default and keeps the language class', async () => {
     const container = await renderCode('const x = 1\n', 'ts');
-    const button = findButton(container);
+    const button = findAction(container, 'Copy code');
     expect(button).not.toBeNull();
-    expect(button?.textContent).toContain('Copy');
     expect(container.innerHTML).toContain('language-ts');
+    // The button is icon-only: the accessible name carries what text used to.
+    expect(findIcon(container, 'copy')).not.toBeNull();
   });
 
   test('shows the language label in a header row beside the button', async () => {
     const container = await renderCode('const x = 1\n', 'ts');
-    // The header carries the language text and the button as siblings, so the
-    // button never overlays a code line.
+    // The header carries the language text and the action row as siblings, so
+    // the button never overlays a code line.
     expect(container.innerHTML).toContain('>ts<');
-    const button = findButton(container)!;
-    const header = button.parentElement;
+    const button = findAction(container, 'Copy code')!;
+    // button → actions row → header; the extra level is what keeps the buttons
+    // clear of the language label.
+    const header = button.parentElement?.parentElement;
+    expect(header?.tagName).toBe('DIV');
     expect(header?.textContent).toContain('ts');
-    expect(header?.textContent).toContain('Copy');
   });
 
   test('marks the header and language label as non-selectable', async () => {
     const container = await renderCode('const x = 1\n', 'ts');
-    // A select-all on the block must not sweep the language label or button
-    // text into the clipboard. The default (empty classNames) path uses inline
-    // user-select: none on the header, the language label, and the button.
+    // A select-all on the block must not sweep the language label or the action
+    // buttons into the clipboard. The default (empty classNames) path uses
+    // inline user-select: none on the header, the language label, and the buttons.
     expect(container.innerHTML).toMatch(/user-select: none/);
   });
 
-  test('omits the button when copyButton is false', async () => {
+  test('omits the copy button when copyButton is false, keeping the header', async () => {
     const container = await renderCode('const x = 1\n', 'ts', { copyButton: false });
-    expect(findButton(container)).toBeNull();
+    expect(findActions(container)).toHaveLength(0);
+    expect(container.innerHTML).toContain('>ts<');
     expect(container.innerHTML).toContain('const x = 1');
   });
 
-  test('clicking the button writes the code via navigator.clipboard and shows Copied', async () => {
+  test('drops the entire card when codeBlockChrome is false', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', { codeBlockChrome: false });
+    const rootElement = container.firstElementChild as unknown as HTMLElement;
+    const pres = container.getElementsByTagName('pre');
+    expect(pres.length).toBe(1);
+    expect(pres[0].getAttribute('style')).toBeNull();
+    expect(pres[0].getAttribute('class')).toBeNull();
+    expect(rootElement.innerHTML).toBe('<pre><code class="language-ts">const x = 1\n</code></pre>');
+    expect(findActions(container)).toHaveLength(0);
+  });
+
+  test('clicking the button writes the code via navigator.clipboard and swaps the icon', async () => {
     writeText.mockClear();
     const container = await renderCode('const x = 1\n', 'ts');
-    const button = findButton(container)!;
+    const button = findAction(container, 'Copy code')!;
+    expect(findIcon(container, 'copy')).not.toBeNull();
+
     await click(button);
+
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0][0]).toBe('const x = 1\n');
-    expect(button.textContent).toContain('Copied');
-    expect(button.getAttribute('aria-label')).toBe('Copied code');
+    // The button has one state only: the icon and the accessible name stay put.
+    expect(findIcon(container, 'copy')).not.toBeNull();
+    expect(findAction(container, 'Copy code')).not.toBeNull();
   });
 
-  test('waits for the clipboard write before reporting success', async () => {
+  test('does not schedule a timer after the clipboard write resolves', async () => {
     let resolveWrite: (() => void) | undefined;
     writeText.mockImplementationOnce(
       () =>
@@ -129,88 +170,44 @@ describe('code block copy button (web)', () => {
         })
     );
     const container = await renderCode('const x = 1\n', 'ts');
-    const button = findButton(container)!;
-
+    const button = findAction(container, 'Copy code')!;
     await click(button);
-    expect(button.textContent).toBe('Copy');
-    expect(button.getAttribute('aria-label')).toBe('Copy code');
-
-    await act(async () => resolveWrite?.());
-    expect(button.textContent).toBe('Copied');
-    expect(button.getAttribute('aria-label')).toBe('Copied code');
-  });
-
-  test('does not schedule feedback after an in-flight copy unmounts', async () => {
-    let resolveWrite: (() => void) | undefined;
-    writeText.mockImplementationOnce(
-      () =>
-        new Promise<void>(resolve => {
-          resolveWrite = resolve;
-        })
-    );
-    const container = await renderCode('const x = 1\n', 'ts');
-    await click(findButton(container)!);
     await act(async () => root?.unmount());
     root = null;
 
-    // Resolving after cleanup must not create the 1.5-second label timer.
+    // Nothing tracks the promise's settlement any more, so resolving after
+    // cleanup must not touch a timer.
     const originalSetTimeout = globalThis.setTimeout;
-    const feedbackTimer = mock(() => 0 as unknown as ReturnType<typeof setTimeout>);
-    globalThis.setTimeout = feedbackTimer as unknown as typeof setTimeout;
+    const timer = mock(() => 0 as unknown as ReturnType<typeof setTimeout>);
+    globalThis.setTimeout = timer as unknown as typeof setTimeout;
     try {
       resolveWrite?.();
       await Promise.resolve();
       await Promise.resolve();
-      expect(feedbackTimer).not.toHaveBeenCalled();
+      expect(timer).not.toHaveBeenCalled();
     } finally {
       globalThis.setTimeout = originalSetTimeout;
     }
-  });
-
-  test('still resets Copied after the host replaces onCopyCode', async () => {
-    const firstHandler = mock(() => undefined);
-    const container = await renderCode('const x = 1\n', 'ts', { onCopyCode: firstHandler });
-    const button = findButton(container)!;
-    await click(button);
-    expect(button.textContent).toBe('Copied');
-
-    const ast = {
-      type: 'root',
-      ast_version: 2,
-      diagnostics: [],
-      children: [{ type: 'code', value: 'const x = 1\n', lang: 'ts' }],
-    } as SupramarkRootNode;
-    const replacementHandler = mock(() => undefined);
-    await act(async () => {
-      root?.render(<Supramark markdown="" ast={ast} onCopyCode={replacementHandler} />);
-    });
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 1600));
-    });
-
-    expect(findButton(container)?.textContent).toBe('Copy');
-    expect(findButton(container)?.getAttribute('aria-label')).toBe('Copy code');
   });
 
   test('onCopyCode overrides the default clipboard call', async () => {
     writeText.mockClear();
     const onCopyCode = mock(() => undefined);
     const container = await renderCode('const x = 1\n', 'ts', { onCopyCode });
-    const button = findButton(container)!;
-    await click(button);
+    await click(findAction(container, 'Copy code')!);
     expect(onCopyCode).toHaveBeenCalledTimes(1);
     expect(onCopyCode.mock.calls[0][0]).toBe('const x = 1\n');
     expect(writeText).not.toHaveBeenCalled();
-    expect(button.textContent).toContain('Copied');
+    expect(findIcon(container, 'copy')).not.toBeNull();
   });
 
-  test('omits the button when the code block has no language (indented / language-less fence)', async () => {
+  test('omits the action buttons when the code block has no language (indented / language-less fence)', async () => {
     const container = await renderCode('foo\n', undefined);
-    expect(findButton(container)).toBeNull();
+    expect(findActions(container)).toHaveLength(0);
     expect(container.innerHTML).toContain('foo');
   });
 
-  test('a rejected writeText leaves the label as Copy (no fake success, no unhandledRejection)', async () => {
+  test('a rejected writeText keeps the copy icon (no fake success, no unhandledRejection)', async () => {
     const rejections: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       rejections.push(reason);
@@ -219,15 +216,15 @@ describe('code block copy button (web)', () => {
     try {
       writeText.mockImplementationOnce(() => Promise.reject(new Error('denied')));
       const container = await renderCode('const x = 1\n', 'ts');
-      const button = findButton(container);
+      const button = findAction(container, 'Copy code');
       if (!button) {
         throw new Error('copy button not rendered');
       }
       await click(button);
       // Flush the rejected promise so the catch path settles before asserting.
       await act(async () => {});
-      expect(button.textContent).toBe('Copy');
-      expect(button.getAttribute('aria-label')).toBe('Copy code');
+      expect(findIcon(container, 'copy')).not.toBeNull();
+      expect(findAction(container, 'Copy code')).not.toBeNull();
       await new Promise(resolve => setTimeout(resolve, 10));
       expect(rejections).toHaveLength(0);
     } finally {
@@ -235,7 +232,7 @@ describe('code block copy button (web)', () => {
     }
   });
 
-  test('a rejected onCopyCode leaves the label as Copy and raises no unhandledRejection', async () => {
+  test('a rejected onCopyCode keeps the copy icon and raises no unhandledRejection', async () => {
     const rejections: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       rejections.push(reason);
@@ -244,35 +241,68 @@ describe('code block copy button (web)', () => {
     try {
       const onCopyCode = () => Promise.reject(new Error('host denied'));
       const container = await renderCode('const x = 1\n', 'ts', { onCopyCode });
-      const button = findButton(container);
+      const button = findAction(container, 'Copy code');
       if (!button) {
         throw new Error('copy button not rendered');
       }
       await click(button);
       await act(async () => {});
-      expect(button.textContent).toBe('Copy');
-      expect(button.getAttribute('aria-label')).toBe('Copy code');
+      expect(findIcon(container, 'copy')).not.toBeNull();
       await new Promise(resolve => setTimeout(resolve, 10));
       expect(rejections).toHaveLength(0);
     } finally {
       process.removeListener('unhandledRejection', onUnhandled);
     }
   });
+});
 
-  test('copyButton false with a fenced language yields one bare pre without style', async () => {
-    const container = await renderCode('const x = 1\n', 'ts', { copyButton: false });
-    const rootElement = container.firstElementChild as unknown as HTMLElement;
-    const pres = container.getElementsByTagName('pre');
-    expect(pres.length).toBe(1);
-    expect(pres[0].getAttribute('style')).toBeNull();
-    expect(pres[0].getAttribute('class')).toBeNull();
-    expect(rootElement.innerHTML).toBe('<pre><code class="language-ts">const x = 1\n</code></pre>');
-    expect(findButton(container)).toBeNull();
+// The fullscreen action is React Native only: a mobile code block is the one
+// that needs to escape a narrow column. Web must not grow the button back.
+describe('code block actions: no fullscreen action on web', () => {
+  test('renders exactly one action button, the copy one', async () => {
+    const container = await renderCode('const x = 1\n', 'ts');
+    expect(findActions(container)).toHaveLength(1);
+    expect(findAction(container, 'Open code fullscreen')).toBeNull();
+    expect(findIcon(container, 'fullscreen')).toBeNull();
+    // No prop on web can bring it back — the renderer keeps no handler for it.
+    expect(container.innerHTML).not.toContain('fullscreen');
   });
 
-  test('tailwind theme keeps the standalone chrome on the bare pre (copyButton false)', async () => {
+  test('gives the icon-only button a native hover tooltip and an accessible name', async () => {
+    const container = await renderCode('const x = 1\n', 'ts');
+    // The icon shows no words, so `title` is the only pointer affordance and
+    // `aria-label` the only programmatic name.
+    const button = findAction(container, 'Copy code')!;
+    expect(button.getAttribute('title')).toBe('Copy code');
+    expect(button.getAttribute('aria-label')).toBe('Copy code');
+  });
+
+  test('hides the decorative icons from assistive technology', async () => {
+    const container = await renderCode('const x = 1\n', 'ts');
+    const icon = findIcon(container, 'copy')!;
+    // The button owns the name; an announced unlabelled graphic would double it.
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.getAttribute('viewBox')).toBe('0 0 24 24');
+    // currentColor lets the theme tint the glyph through the button colour.
+    const path = icon.firstElementChild!;
+    expect(path.getAttribute('stroke')).toBe('currentColor');
+  });
+});
+
+describe('code block action labels (web)', () => {
+  test('uses the host labels for the tooltip and the accessible name', async () => {
     const container = await renderCode('const x = 1\n', 'ts', {
-      copyButton: false,
+      codeActionLabels: { copy: '复制代码' },
+    });
+    expect(findAction(container, '复制代码')?.getAttribute('title')).toBe('复制代码');
+    expect(findAction(container, '复制代码')?.getAttribute('aria-label')).toBe('复制代码');
+  });
+});
+
+describe('code block chrome (web)', () => {
+  test('tailwind theme keeps the standalone chrome on the bare pre (chrome off)', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', {
+      codeBlockChrome: false,
       theme: 'tailwind',
     });
     const pre = container.getElementsByTagName('pre')[0] as unknown as HTMLElement;
@@ -296,20 +326,28 @@ describe('code block copy button (web)', () => {
     expect(wrapper?.getElementsByTagName('button')).toHaveLength(0);
   });
 
+  test('tailwind theme styles the action row and buttons', async () => {
+    const container = await renderCode('const x = 1\n', 'ts', { theme: 'tailwind' });
+    const button = findAction(container, 'Copy code')!;
+    expect(button.className).toContain('inline-flex');
+    const actions = button.parentElement as unknown as HTMLElement;
+    expect(actions.className).toBe('flex items-center gap-1.5');
+  });
+
   test('minimal theme wires every code-block hook without inline fallback styles', async () => {
     const container = await renderCode('const x = 1\n', 'ts', { theme: 'minimal' });
     const pre = container.getElementsByTagName('pre')[0] as unknown as HTMLElement;
     const wrapper = pre.parentElement as unknown as HTMLElement;
     const header = wrapper.firstElementChild as unknown as HTMLElement;
-    const button = findButton(container)!;
+    const button = findAction(container, 'Copy code')!;
 
     expect(wrapper.className).toBe('sm-code-block-container');
     expect(header.className).toBe('sm-code-block-header');
     expect((header.firstElementChild as unknown as HTMLElement).className).toBe(
       'sm-code-block-lang'
     );
-    expect(button.className).toBe('sm-code-btn');
-    expect((button.firstElementChild as unknown as HTMLElement).className).toBe('sm-code-btn-text');
+    expect((header.lastElementChild as unknown as HTMLElement).className).toBe('sm-code-actions');
+    expect(button.className).toBe('sm-code-action');
     expect(pre.className).toBe('sm-code-block-body');
     expect(wrapper.getAttribute('style')).toBeNull();
     expect(header.getAttribute('style')).toBeNull();
@@ -317,8 +355,8 @@ describe('code block copy button (web)', () => {
     expect(pre.getAttribute('style')).toBeNull();
   });
 
-  // Pins the default (copyButton on) DOM shape: the conformance harness runs
-  // with copyButton={false}, so without this test the DOM the library emits by
+  // Pins the default (chrome on) DOM shape: the conformance harness runs with
+  // codeBlockChrome={false}, so without this test the DOM the library emits by
   // default would be unmeasured.
   test('default DOM shape: every code block gets the card; only a language gets the header', async () => {
     const withLang = await renderCode('const x = 1\n', 'ts');
@@ -331,7 +369,7 @@ describe('code block copy button (web)', () => {
     const cardStyle = card.getAttribute('style') ?? '';
     expect(cardStyle).toContain('border-radius: 4px');
     expect(cardStyle).toContain('overflow: hidden');
-    // Header: language label + exactly one button.
+    // Header: language label + exactly one button (copy; no fullscreen handler).
     const header = card.firstElementChild as unknown as HTMLElement;
     expect(header.tagName).toBe('DIV');
     expect(header.textContent).toContain('ts');
@@ -362,8 +400,25 @@ describe('code block copy button (web)', () => {
 
     expect(html).toContain('background-color:var(--sm-code-bg, #f5f5f5)');
     expect(html).toContain('color:var(--sm-code-lang-color, rgba(0, 0, 0, 0.55))');
-    expect(html).toContain('background-color:var(--sm-code-btn-bg, rgba(0, 0, 0, 0.5))');
+    expect(html).toContain('color:var(--sm-code-action-color, rgba(0, 0, 0, 0.55))');
+    // Web has no header divider, and the button carries no resting background —
+    // a bare <button> would otherwise paint the UA's `buttonface`.
+    expect(html).not.toContain('border-bottom');
+    expect(html).toContain('background:none');
     expect(html).toContain('<button type="button"');
+  });
+
+  test('starts with no resting background (the hover tint is not applied yet)', async () => {
+    // The hover tint itself is not asserted here: React synthesises
+    // onPointerEnter/onPointerLeave from pointerover/pointerout, and that
+    // synthesis does not fire under happy-dom (tried mouse and pointer events),
+    // so the hovered state cannot be driven from this harness. The resting
+    // state — the part that used to be wrong (a bare <button> paints the UA's
+    // `buttonface`) — is covered above and in the server-output test.
+    const container = await renderCode('const x = 1\n', 'ts');
+    const button = findAction(container, 'Copy code')!;
+    expect(button.getAttribute('style')).toContain('background: none');
+    expect(button.getAttribute('style')).not.toContain('hover-bg');
   });
 
   test('hides the button but keeps the header when no clipboard API and no onCopyCode exist', async () => {
@@ -373,7 +428,7 @@ describe('code block copy button (web)', () => {
     try {
       const container = await renderCode('const x = 1\n', 'ts');
       // An inert button is worse than none: the effect hides it post-mount.
-      expect(findButton(container)).toBeNull();
+      expect(findActions(container)).toHaveLength(0);
       expect(container.innerHTML).toContain('>ts<');
     } finally {
       nav.clipboard = originalClipboard;
@@ -386,7 +441,7 @@ describe('code block copy button (web)', () => {
     nav.clipboard = {};
     try {
       const container = await renderCode('const x = 1\n', 'ts');
-      expect(findButton(container)).toBeNull();
+      expect(findActions(container)).toHaveLength(0);
       expect(container.innerHTML).toContain('>ts<');
     } finally {
       nav.clipboard = originalClipboard;
