@@ -135,7 +135,7 @@ let svg = plantuml_little::convert(puml_source)?;
 
 ## 前置条件
 
-- Rust 1.82+
+- Rust 1.88+
 - [`graphviz-anywhere`](https://github.com/Actrium/graphviz-anywhere) 预编译原生库（CI 自动拉取；本地将 `GRAPHVIZ_ANYWHERE_DIR` 指向解压后的 release tarball）
 - 启用 wasm 测试后端（`PLANTUML_LITTLE_TEST_BACKEND=wasm`）时：Node 22+，并执行 `cd tests/support && npm install`
 - 本地重新生成 reference SVG 时：JDK 21+、DejaVu Sans 字体（Linux 上 `apt install fonts-dejavu-core`）、以及一份 `plantuml-1.2026.2.jar`——或直接使用 `regenerate-refs.yml` 工作流在 `ubuntu-latest` 上一键搞定
