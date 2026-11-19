@@ -7,10 +7,10 @@ import {
 } from 'react-native';
 import type { SelectionPoint } from '../model';
 import type { Point } from './hitTest';
-import { createMouseSelection } from './mouse';
+import { createMouseSelection, type PointerPosition } from './mouse';
 import type { SelectionStore } from './state';
 
-export type ContactEvent = { nativeEvent: { pageX: number; pageY: number; timestamp?: number } };
+export type ContactEvent = { nativeEvent: PointerPosition };
 type Contacts = {
   onTouchStart(event: ContactEvent): void;
   onTouchMove(event: ContactEvent): void;
@@ -41,28 +41,32 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
   }, [mouse, active]);
   useLayoutEffect(() => cancel, [enabled, revision, cancel]);
 
-  function down(id: string | number, button: number, locate: () => Point | null) {
-    if (!enabled || button !== 0) return;
+  function down(
+    id: string | number,
+    contact: PointerPosition & { button?: number },
+    locate: () => Point | null
+  ) {
+    if (!enabled || contact.button !== 0) return;
     cancel();
     options.cancelTouch();
     setMouseUI(true);
     const point = locate();
-    mouse.down(id, point && startAt(point));
+    mouse.down(id, point && startAt(point), contact);
   }
   function update(
     id: string | number,
+    contact: PointerPosition,
     locate: () => Point | null,
-    released: boolean,
-    timestamp?: number
+    released: boolean
   ) {
     if (!enabled || !mouse.owns(id)) return;
     const localPoint = locate();
     const point = localPoint && pointAt(localPoint);
     if (released) {
-      mouse.up(id, point, timestamp);
+      mouse.up(id, point, contact);
       active(false);
     } else {
-      mouse.move(id, point);
+      mouse.move(id, point, contact);
       active(store.getSnapshot().phase === 'selecting');
     }
   }
@@ -70,33 +74,23 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
   const suppressLinkPress = useCallback(
     (event: GestureResponderEvent) => {
       if (Platform.OS !== 'macos' || !enabled || !event?.nativeEvent) return false;
-      const { identifier, timestamp, button } =
-        event.nativeEvent as GestureResponderEvent['nativeEvent'] & { button?: number };
-      if (button !== 0) return false;
-      const point = mouse.owns(identifier) ? macLocal(event) : null;
-      return mouse.suppressesPress(identifier, point && pointAt(point), timestamp);
+      const contact = event.nativeEvent as GestureResponderEvent['nativeEvent'] & {
+        button?: number;
+      };
+      return contact.button === 0 && mouse.suppressesPress(contact.identifier, contact);
     },
-    [enabled, mouse, macLocal, pointAt]
+    [enabled, mouse]
   );
 
   let handlers: ViewProps | undefined;
   if (Platform.OS === 'macos') {
-    const button = (event: GestureResponderEvent) =>
-      (event.nativeEvent as GestureResponderEvent['nativeEvent'] & { button?: number }).button;
     handlers = {
-      onTouchStart: event => {
-        const pressed = button(event);
-        if (pressed !== undefined)
-          down(event.nativeEvent.identifier, pressed, () => macLocal(event));
-      },
-      onTouchMove: event => update(event.nativeEvent.identifier, () => macLocal(event), false),
+      onTouchStart: event =>
+        down(event.nativeEvent.identifier, event.nativeEvent, () => macLocal(event)),
+      onTouchMove: event =>
+        update(event.nativeEvent.identifier, event.nativeEvent, () => macLocal(event), false),
       onTouchEnd: event =>
-        update(
-          event.nativeEvent.identifier,
-          () => macLocal(event),
-          true,
-          event.nativeEvent.timestamp
-        ),
+        update(event.nativeEvent.identifier, event.nativeEvent, () => macLocal(event), true),
       onTouchCancel: event => {
         if (mouse.owns(event.nativeEvent.identifier)) cancel();
       },
@@ -107,7 +101,7 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
     const mouseEvent = (e: PointerEvent) => e.nativeEvent.pointerType === 'mouse';
     handlers = {
       onPointerDown: e => {
-        if (mouseEvent(e)) down(e.nativeEvent.pointerId, e.nativeEvent.button, () => local(e));
+        if (mouseEvent(e)) down(e.nativeEvent.pointerId, e.nativeEvent, () => local(e));
         else if (!mouse.tracking()) {
           setMouseUI(false);
           touch.onTouchStart(e);
@@ -116,11 +110,11 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
       onPointerMove: e => {
         if (mouseEvent(e)) {
           if ((e.nativeEvent.buttons & 1) !== 0)
-            update(e.nativeEvent.pointerId, () => local(e), false);
+            update(e.nativeEvent.pointerId, e.nativeEvent, () => local(e), false);
         } else if (!mouse.tracking()) touch.onTouchMove(e);
       },
       onPointerUp: e => {
-        if (mouseEvent(e)) update(e.nativeEvent.pointerId, () => local(e), true);
+        if (mouseEvent(e)) update(e.nativeEvent.pointerId, e.nativeEvent, () => local(e), true);
         else if (!mouse.tracking()) touch.onTouchEnd(e);
       },
       onPointerCancel: e => {
