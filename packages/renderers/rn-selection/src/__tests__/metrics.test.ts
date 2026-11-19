@@ -18,6 +18,21 @@ const wrapped = (): SegmentTextMetrics =>
   ]);
 
 describe('buildTextMetrics', () => {
+  test('native text edges survive line conversion and never place a caret inside an emoji', () => {
+    const [line] = buildTextMetrics([
+      {
+        text: 'i😀W',
+        x: 0,
+        y: 0,
+        width: 46,
+        height: 16,
+        charXs: [0, 4, 4, 24, 46],
+      },
+    ]).lines;
+    expect(xForOffset(line, 1)).toBe(4);
+    expect(offsetAtLineX(line, 10)).toBe(1);
+    expect(offsetAtLineX(line, 19)).toBe(3);
+  });
   test('accumulates offsets across lines', () => {
     const metrics = wrapped();
     expect(metrics.textLength).toBe(11);
@@ -177,4 +192,35 @@ describe('rectsForRange', () => {
     // Offsets 0..3 cover 'ab' plus the newline: the rect runs to the line end.
     expect(rectsForRange(explicit, 0, 3)).toEqual([{ x: 0, y: 0, w: 20, h: 20 }]);
   });
+});
+
+test('RTL gutters, glyph hits and highlights follow the measured visual direction', () => {
+  const metrics = buildTextMetrics([
+    { text: 'אבג', x: 8, y: 0, width: 30, height: 18, charXs: [38, 26, 16, 8] },
+  ]);
+  const line = metrics.lines[0];
+  expect([0, 10, 24, 50].map(x => offsetAtLineX(line, x))).toEqual([3, 3, 1, 0]);
+  expect([0, 12, 27, 50].map(x => offsetInsideLineX(line, x))).toEqual([2, 2, 0, 0]);
+  expect(rectsForRange(metrics, 3, 1)).toEqual([{ x: 8, y: 0, w: 18, h: 18 }]);
+});
+
+test('mixed bidi text preserves both edges of each run and disjoint highlight rectangles', () => {
+  const metrics = buildTextMetrics([
+    {
+      text: 'aאבz',
+      x: 0,
+      y: 0,
+      width: 40,
+      height: 18,
+      charXs: [0, 30, 20, 30, 40],
+      charEndXs: [10, 20, 10, 40],
+    },
+  ]);
+  const line = metrics.lines[0];
+  expect([2, 12, 22, 32].map(x => offsetInsideLineX(line, x))).toEqual([0, 2, 1, 3]);
+  expect([9, 11, 29, 31].map(x => offsetAtLineX(line, x))).toEqual([1, 3, 1, 3]);
+  expect(rectsForRange(metrics, 0, 2)).toEqual([
+    { x: 0, y: 0, w: 10, h: 18 },
+    { x: 20, y: 0, w: 10, h: 18 },
+  ]);
 });

@@ -1,0 +1,23 @@
+{
+  "name": "supramark-selection-windows",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "react-native start",
+    "windows": "react-native run-windows",
+    "bundle": "react-native bundle --platform windows --entry-file index.js --dev false --bundle-output windows/index.windows.bundle",
+    "postinstall": "patch-package --error-on-fail"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-native": "0.84.1",
+    "react-native-windows": "0.84.2"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "20.0.0",
+    "@react-native/babel-preset": "0.84.1",
+    "@react-native/metro-config": "0.84.1",
+    "patch-package": "8.0.1"
+  }
+}

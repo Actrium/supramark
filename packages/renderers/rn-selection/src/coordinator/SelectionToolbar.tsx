@@ -179,6 +179,7 @@ export function SelectionToolbarView({
       // Toolbar presses belong to actions, not the host's background dismissal handler.
       onTouchStart={event => event.stopPropagation()}
       onTouchEnd={event => event.stopPropagation()}
+      onPointerDown={event => event.stopPropagation()}
       style={{
         position: 'absolute',
         left: placement?.x ?? 0,

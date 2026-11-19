@@ -3,7 +3,7 @@ import React from 'react';
 import { create, act, type ReactTestRenderer } from 'react-test-renderer';
 import type { SupramarkNode, SupramarkRootNode } from '@supramark/core';
 
-import './support/mock-react-native';
+import { openUrlMock } from './support/mock-react-native';
 import './support/mock-renderer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -240,4 +240,186 @@ describe('real Markdown: per-class selection semantics', () => {
     const r = await renderMarkdown('hello world');
     expect(r.root.findAllByType(SelectionRoot)).toHaveLength(1);
   });
+});
+for (const os of ['macos', 'windows']) {
+  it(`${os} serializes a drag through rendered Markdown across two paragraphs`, async () => {
+    const { Platform } = await import('react-native');
+    const previous = Platform.OS;
+    const payloads: string[] = [];
+    const handle: { current: { getSelectedText(): string | null } | null } = { current: null };
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      Object.assign(Platform, { OS: os });
+      const markdown = 'ii**WW**\n\nhello';
+      const ast = await parseMarkdown(markdown);
+      await act(async () => {
+        renderer = create(
+          <Supramark
+            ast={ast}
+            markdown={markdown}
+            selection={{
+              toolbarItems: [{ id: 'inspect', title: 'Show selection', format: 'plainText' }],
+              onHandleReady: ready => {
+                handle.current = ready;
+              },
+              onAction: request => payloads.push(request.text),
+            }}
+          />,
+          {
+            createNodeMock: () => ({
+              measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 0),
+            }),
+          }
+        );
+      });
+      const root = renderer!.root.findByType(SelectionRoot).findAllByType('View')[0];
+      act(() => {
+        root.props.onLayout({ nativeEvent: { layout: { width: 200, height: 100 } } });
+        renderer!.root.findAllByType(SelectableBlock).forEach((block, i) => {
+          block.findAllByType('View')[0].props.onLayout({
+            nativeEvent: { layout: { x: 0, y: i * 30, width: 100, height: 20 } },
+          });
+          const text = block.findAllByType('Text').find(node => node.props.onTextLayout)!;
+          text.props.onTextLayout({ nativeEvent: { target: i + 1, lines: [{
+            text: i ? 'hello' : 'iiWW', x: 0, y: 0, width: 40, height: 20,
+            charXs: i ? [0, 8, 16, 24, 32, 40] : [0, 4, 8, 24, 40],
+          }] } });
+        });
+      });
+      const events = os === 'macos' ? ['onTouchStart', 'onTouchMove', 'onTouchEnd']
+        : ['onPointerDown', 'onPointerMove', 'onPointerUp'];
+      events.forEach((name, i) =>
+        act(() =>
+          root.props[name]({
+            nativeEvent: {
+              pageX: i ? 16 : 4,
+              pageY: i ? 38 : 8,
+              identifier: 1,
+              target: 9,
+              locationX: i ? 16 : 4,
+              locationY: i ? 38 : 8,
+              pointerId: 1,
+              pointerType: 'mouse',
+              button: 0,
+              buttons: i === 2 ? 0 : 1,
+            },
+          })
+        )
+      );
+      const action = renderer!.root.findByType('TouchableOpacity');
+      expect(handle.current?.getSelectedText()).toBe('iWW\nhe');
+      expect(handle.current?.getSelectedText()).toBe('iWW\nhe');
+      act(() => action.props.onPress());
+      expect(payloads).toEqual(['iWW\nhe']);
+      expect(handle.current?.getSelectedText()).toBeNull();
+    } finally {
+      if (renderer) act(() => renderer?.unmount());
+      Object.assign(Platform, { OS: previous });
+    }
+  });
+}
+
+type ReadableSelection = { getSelectedText(): string | null };
+const zeroOriginView = () => ({
+  measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 0),
+});
+
+async function renderSelectableLink(
+  handle: { current: ReadableSelection | null },
+  line: { text: string; width: number; charXs?: number[]; charEndXs?: number[] } = { text: 'hello', width: 50 }
+) {
+  const markdown = `[${line.text}](https://example.com)`;
+  const ast = await parseMarkdown(markdown);
+  let renderer!: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <Supramark ast={ast} markdown={markdown} selection={{ onHandleReady: ready => { handle.current = ready; } }} />,
+      { createNodeMock: zeroOriginView }
+    );
+  });
+  const block = renderer.root.findByType(SelectableBlock);
+  const layout = { x: 0, y: 0, width: line.width, height: 20 };
+  act(() => {
+    block.findAllByType('View')[0].props.onLayout({ nativeEvent: { layout } });
+    const text = block.findAllByType('Text').find(n => n.props.onTextLayout)!;
+    text.props.onTextLayout({ nativeEvent: { target: 9, lines: [{ ...layout, ...line }] } });
+  });
+  return renderer;
+}
+
+function linkGesture(renderer: ReactTestRenderer, start = 0) {
+  const root = renderer.root.findByType(SelectionRoot).findAllByType('View')[0];
+  const link = renderer.root.findByType(SelectableBlock).findAllByType('Text').find(n => n.props.onPress)!;
+  let timestamp = 0;
+  const event = (x: number) => ({
+    nativeEvent: { target: 9, identifier: 1, pageX: x, pageY: 36, locationX: x, locationY: 8, button: 0, timestamp: ++timestamp },
+  });
+  return (moves: number[], end: number, pressFirst: boolean) => {
+    act(() => root.props.onTouchStart(event(start)));
+    for (const x of moves) act(() => root.props.onTouchMove(event(x)));
+    const release = event(end);
+    act(() => {
+      if (pressFirst) link.props.onPress(release);
+      root.props.onTouchEnd(release);
+      if (!pressFirst) link.props.onPress(release);
+    });
+  };
+}
+
+it('macOS opens a link on click but suppresses the press associated with a text drag', async () => {
+  const { Platform } = await import('react-native');
+  const previous = Platform.OS;
+  Object.assign(Platform, { OS: 'macos' });
+  const handle: { current: ReadableSelection | null } = { current: null };
+  let renderer: ReactTestRenderer | undefined;
+  openUrlMock.mockClear();
+  try {
+    renderer = await renderSelectableLink(handle);
+    const gesture = linkGesture(renderer);
+    gesture([], 0, true);
+    expect(openUrlMock).toHaveBeenCalledTimes(1);
+    gesture([20], 30, true);
+    expect(handle.current?.getSelectedText()).toBe('hel');
+    gesture([30, 0], 0, false);
+    gesture([], 30, true);
+    expect(openUrlMock).toHaveBeenCalledTimes(1);
+    gesture([], 0, true);
+    expect(openUrlMock).toHaveBeenCalledTimes(2);
+  } finally {
+    if (renderer) act(() => renderer?.unmount());
+    Object.assign(Platform, { OS: previous });
+  }
+});
+
+it('macOS suppresses a link drag between visually distant carets with the same bidi offset', async () => {
+  const { Platform } = await import('react-native');
+  const previous = Platform.OS;
+  Object.assign(Platform, { OS: 'macos' });
+  const handle: { current: ReadableSelection | null } = { current: null };
+  let renderer: ReactTestRenderer | undefined;
+  openUrlMock.mockClear();
+  try {
+    // The trailing edge of 'a' and the leading edge of the RTL run both have logical offset 1.
+    renderer = await renderSelectableLink(handle, {
+      text: 'aאבz', width: 100, charXs: [0, 90, 50, 90, 100], charEndXs: [10, 50, 10, 100],
+    });
+    const gesture = linkGesture(renderer, 9);
+    for (const pressFirst of [true, false]) {
+      gesture([89], 89, pressFirst);
+      expect(handle.current?.getSelectedText()).toBeNull();
+      expect(openUrlMock).toHaveBeenCalledTimes(0);
+      gesture([], 89, pressFirst);
+      gesture([89], 9, pressFirst);
+      expect(openUrlMock).toHaveBeenCalledTimes(0);
+    }
+    // Two points apart crosses the visual run boundary, but is within click tolerance.
+    gesture([11], 11, true);
+    expect(handle.current?.getSelectedText()).toBe('אב');
+    expect(openUrlMock).toHaveBeenCalledTimes(1);
+    gesture([], 9, false);
+    expect(openUrlMock).toHaveBeenCalledTimes(2);
+  } finally {
+    if (renderer) act(() => renderer?.unmount());
+    Object.assign(Platform, { OS: previous });
+  }
 });

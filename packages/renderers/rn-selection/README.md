@@ -204,21 +204,33 @@ turned on or off.
 
 ### Text precision depends on metrics
 
-`SelectableBlock` publishes the line table React Native reports through
-`onTextLayout`: one entry per laid-out line, with its own text and box. Position
-_within_ a line is then interpolated across the line's advance width — exact for
-monospaced text, and off by up to about half a character in proportional text.
-That is accurate enough to place a highlight edge and a drag handle, and the
-metrics contract carries a `charXs` slot for a provider that reports exact
-per-character positions; filling it from the platform text engines is tracked as
-follow-up work.
+`SelectableBlock` publishes the line table from React Native's `onTextLayout`.
+With line boxes alone, the coordinator interpolates positions within each line.
+The macOS TextKit provider and the Windows demo's DirectWrite provider also
+supply caret positions. The same measurements drive hit testing and highlighting.
 
 A block that has not been measured yet (or is not text at all) highlights as a
 whole rectangle and long-presses as a whole block, rather than not at all.
 
 ## Platform Requirements
 
-- **React Native >= 0.72**, Paper or Fabric, iOS and Android alike. There is no
+Desktop hosts opt in through the renderer's existing `selection` prop. Press the primary
+mouse button on text and drag across lines or paragraphs. Release keeps the selected range.
+Touch devices retain long press and drag handles.
+
+For a desktop Copy command, keep the handle from `selection.onHandleReady` and
+call `handle.getSelectedText()`. It returns the current plain text, or `null`
+when empty, and preserves the highlight. The host writes the result to its
+clipboard. When the user presses outside a document, call its
+`handle.clearSelection()` on mouse down. With several documents, track the
+active handle per window using `onSelectionChange` and release it on unmount.
+
+- **macOS Fabric** uses the native mouse events delivered through RN macOS's touch stream.
+  Link the CocoaPod `SupramarkSelectionMetrics` from `native/macos` for TextKit caret geometry.
+- **Windows Fabric** requires pointer events with button information and native text layout
+  events. The [standalone Windows demo](../../../examples/react-native-windows/README.md)
+  includes the RNW 0.84.2 DirectWrite adapter and a runnable project.
+- **iOS and Android, React Native >= 0.72**, Paper or Fabric. There is no
   native module, no pod, no codegen spec and no autolinking step: the package is
   plain TypeScript against public React Native APIs.
 - `Intl.Segmenter` is used when present, and falls back to the in-package UAX #29

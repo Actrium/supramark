@@ -1,3 +1,11 @@
+import {
+  hitVisualCluster,
+  visualClusters,
+  visualRangeRects,
+  type VisualCluster,
+} from './bidiMetrics';
+import { graphemeClusterStarts } from './graphemeBreak';
+
 /**
  * Text metrics contract — the only thing the selection layer needs from a
  * rendered text block.
@@ -63,6 +71,8 @@ export interface TextLineMetrics {
    * then.
    */
   charXs?: readonly number[];
+  caretOffsets?: readonly number[];
+  visualClusters?: readonly VisualCluster[];
 }
 
 /** The line table for one text segment. */
@@ -83,6 +93,9 @@ export interface RawTextLine {
   y: number;
   width: number;
   height: number;
+  charXs?: readonly number[];
+  /** Per-code-unit trailing edges when a bidi boundary has two caret positions. */
+  charEndXs?: readonly number[];
 }
 
 export const EMPTY_TEXT_METRICS: SegmentTextMetrics = { lines: [], textLength: 0 };
@@ -117,10 +130,29 @@ export function buildTextMetrics(rawLines: readonly RawTextLine[]): SegmentTextM
   for (const raw of rawLines) {
     const text = raw.text ?? '';
     const end = start + text.length;
+    const visibleLength = text.length - terminatorLength(text);
+    const xs = raw.charXs;
+    const ends = raw.charEndXs;
+    const hasEnds = ends && ends.length >= visibleLength && ends.every(Number.isFinite);
+    const ascending = xs?.every((x, i) => i === 0 || x >= xs[i - 1]);
+    const measured =
+      xs &&
+      xs.length >= visibleLength + 1 &&
+      xs.every(Number.isFinite) &&
+      (hasEnds || ascending || xs.every((x, i) => i === 0 || x <= xs[i - 1]));
+    const caretOffsets = measured
+      ? [...graphemeClusterStarts(text.slice(0, visibleLength)), visibleLength]
+      : undefined;
+    const visual =
+      xs && caretOffsets && (hasEnds || !ascending)
+        ? visualClusters(caretOffsets, xs, hasEnds ? ends : undefined)
+        : undefined;
     lines.push({
       start,
       end,
-      visibleEnd: end - terminatorLength(text),
+      visibleEnd: start + visibleLength,
+      ...(measured && { charXs: xs, caretOffsets }),
+      ...(visual?.length && { visualClusters: visual }),
       x: raw.x,
       y: raw.y,
       w: raw.width,
@@ -160,10 +192,19 @@ export function xForOffset(line: TextLineMetrics, offset: number): number {
 export function offsetAtLineX(line: TextLineMetrics, x: number): number {
   const span = line.visibleEnd - line.start;
   if (span <= 0) return line.start;
+  if (line.visualClusters) return line.start + hitVisualCluster(line.visualClusters, x, true);
   if (x <= line.x) return line.start;
   if (x >= line.x + line.w) return line.visibleEnd;
 
   const charXs = line.charXs;
+  if (charXs && line.caretOffsets) {
+    let previous = 0;
+    for (const offset of line.caretOffsets) {
+      if (x <= (charXs[previous] + charXs[offset]) / 2) return line.start + previous;
+      previous = offset;
+    }
+    return line.visibleEnd;
+  }
   if (charXs && charXs.length > span) {
     // Linear scan: a line holds tens of characters, so a binary search would
     // trade readability for nothing measurable.
@@ -188,6 +229,7 @@ export function offsetAtLineX(line: TextLineMetrics, x: number): number {
 export function offsetInsideLineX(line: TextLineMetrics, x: number): number {
   const span = line.visibleEnd - line.start;
   if (span <= 0) return line.start;
+  if (line.visualClusters) return line.start + hitVisualCluster(line.visualClusters, x, false);
   if (x <= line.x) return line.start;
   if (x >= line.x + line.w) return line.visibleEnd - 1;
 
@@ -237,11 +279,7 @@ export function offsetAtLocalPoint(metrics: SegmentTextMetrics, x: number, y: nu
  * reads as "the newline is not selected" rather than as one continuous
  * selection.
  */
-export function rectsForRange(
-  metrics: SegmentTextMetrics,
-  from: number,
-  to: number
-): LocalRect[] {
+export function rectsForRange(metrics: SegmentTextMetrics, from: number, to: number): LocalRect[] {
   const start = Math.min(from, to);
   const end = Math.max(from, to);
   const rects: LocalRect[] = [];
@@ -252,6 +290,18 @@ export function rectsForRange(
     const lineEnd = Math.min(end, line.end);
     if (lineEnd <= lineStart) continue;
 
+    if (line.visualClusters) {
+      rects.push(
+        ...visualRangeRects(
+          line.visualClusters,
+          lineStart - line.start,
+          lineEnd - line.start,
+          line.y,
+          line.h
+        )
+      );
+      continue;
+    }
     const x0 = xForOffset(line, lineStart);
     // The selection runs past this line's visible text: fill to the line end.
     const continues = end > line.visibleEnd;

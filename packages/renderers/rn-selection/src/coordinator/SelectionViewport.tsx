@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useId, useRef } from 'react';
 import {
+  Platform,
   View,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -189,9 +190,25 @@ export const SelectionViewport: React.FC<SelectionViewportProps> = ({ children, 
         ref={viewportRef}
         collapsable={false}
         onLayout={onLayout}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchFinish}
-        onTouchCancel={onTouchFinish}
+        {...(Platform.OS === 'windows'
+          ? {
+              onPointerDown: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchStart();
+              },
+              onPointerUp: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchFinish();
+              },
+              onPointerCancel: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchFinish();
+              },
+            }
+          : Platform.OS === 'macos'
+            ? {}
+            : {
+                onTouchStart,
+                onTouchEnd: onTouchFinish,
+                onTouchCancel: onTouchFinish,
+              })}
         style={[{ overflow: 'hidden' }, style]}
       >
         {child as React.ComponentProps<typeof View>['children']}

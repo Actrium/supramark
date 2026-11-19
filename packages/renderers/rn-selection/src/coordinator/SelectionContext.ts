@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import type { GestureResponderEvent } from 'react-native';
 import type { SegmentTextMetrics } from '../metrics';
 import type { SelectionNodeId } from '../model';
 import type { ContentOffset, LayoutRect, RegisteredBlock, SelectionRegistry } from './registry';
@@ -24,6 +25,8 @@ export interface SelectionContextValue {
   // context and pass it straight to a JSX prop.
   registry: SelectionRegistry;
   store: SelectionStore;
+  /** Link activation and mouse-up may be dispatched in either order. */
+  suppressLinkPress?: (event: GestureResponderEvent) => boolean;
   /** Register a block; the returned disposer unregisters it. Call from useEffect. */
   registerBlock: (block: RegisteredBlock) => () => void;
   updateLayout: (nodeId: SelectionNodeId, rect: LayoutRect) => void;
@@ -64,6 +67,9 @@ export interface SelectionContextValue {
 }
 
 export const SelectionContext = createContext<SelectionContextValue | null>(null);
+
+/** Whether desktop text blocks advertise mouse selection to the window. */
+export const SelectionMouseEnabledContext = createContext(true);
 
 /** Nearest nested scroll viewport inherited by SelectableBlock registrations. */
 export const SelectionViewportContext = createContext<string | undefined>(undefined);

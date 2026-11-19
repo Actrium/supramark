@@ -120,6 +120,8 @@ export interface SupramarkSelectionHandle {
   trySelectParagraphAt(pageX: number, pageY: number): Promise<boolean>;
   /** Clear the current selection (an outside entry, e.g. a background tap). */
   clearSelection(): void;
+  /** Read the current plain text without changing the selection. Null when there is none. */
+  getSelectedText(): string | null;
   /**
    * This root's live RN page-space box, measured on demand for a host that must
    * pick ONE root among several before asking it to select. Null when it
