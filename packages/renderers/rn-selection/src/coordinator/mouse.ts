@@ -7,10 +7,17 @@ function samePoint(a: SelectionPoint, b: SelectionPoint): boolean {
 
 /** The down position remains the anchor, including when the drag reverses direction. */
 export function createMouseSelection(store: SelectionStore) {
-  let press: { id: string | number; anchor: SelectionPoint; focus: SelectionPoint } | null = null;
+  let press: {
+    id: string | number;
+    anchor: SelectionPoint;
+    focus: SelectionPoint;
+    dragged: boolean;
+  } | null = null;
+  let dragRelease: { id: string | number; timestamp: number } | null = null;
   function move(id: string | number, point: SelectionPoint | null) {
     if (!press || press.id !== id || !point || samePoint(press.focus, point)) return;
     if (!store.getSnapshot().range) store.beginAt(press.anchor);
+    press.dragged = true;
     press.focus = point;
     store.extendTo(point);
   }
@@ -23,14 +30,21 @@ export function createMouseSelection(store: SelectionStore) {
   return {
     tracking: () => press !== null,
     owns: (id: string | number) => press?.id === id,
+    suppressesPress(id: string | number, point: SelectionPoint | null, timestamp: number) {
+      if (press?.id === id)
+        return press.dragged || (point !== null && !samePoint(press.anchor, point));
+      return dragRelease?.id === id && dragRelease.timestamp === timestamp;
+    },
     down(id: string | number, anchor: SelectionPoint | null) {
       if (store.getSnapshot().range) store.clear();
-      press = anchor ? { id, anchor, focus: anchor } : null;
+      dragRelease = null;
+      press = anchor ? { id, anchor, focus: anchor, dragged: false } : null;
     },
     move,
-    up(id: string | number, point: SelectionPoint | null) {
+    up(id: string | number, point: SelectionPoint | null, timestamp?: number) {
       if (press?.id !== id) return;
       move(id, point);
+      dragRelease = press.dragged && timestamp !== undefined ? { id, timestamp } : null;
       cancel();
     },
     cancel,

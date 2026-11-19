@@ -32,6 +32,7 @@ import {
 } from './SelectionContext';
 import { createSelectionGesture, DEFAULT_LONG_PRESS_MS, type SelectionGesture } from './gesture';
 import { useDesktopSelection, type ContactEvent } from './useDesktopSelection';
+import { macMousePoint } from './desktopPoint';
 import { computeHandles, hitTestHandle, type HandleEdge } from './handles';
 import {
   blocksBounds,
@@ -643,6 +644,11 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     [cancelGesture, clearTimer, registry, store, wordAt]
   );
 
+  const macLocal = useCallback(
+    (event: GestureResponderEvent) => macMousePoint(event, rootRef.current),
+    []
+  );
+
   const touchHandlers = {
     onTouchStart,
     onTouchMove: onResponderMove,
@@ -653,6 +659,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     handlers: desktopHandlers,
     mouseUI,
     cancel: cancelMouse,
+    suppressLinkPress,
   } = useDesktopSelection(
     {
       store,
@@ -661,6 +668,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       active: publishGestureActivity,
       cancelTouch: onResponderTerminate,
       pointAt,
+      macLocal,
       local: event => {
         const root = rootRef.current as NativeViewHandle | null;
         const origin = root?.getBoundingClientRect?.() ?? root?.unstable_getBoundingClientRect?.();
@@ -977,6 +985,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
     () => ({
       registry,
       store,
+      suppressLinkPress,
       registerBlock: block => {
         // Capture what was actually stored and hand it back on unregister, so
         // a stale instance's cleanup cannot delete a live registration that
@@ -1012,6 +1021,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       registry,
       store,
       runToolbarItem,
+      suppressLinkPress,
       measureLayout,
       refreshLayouts,
       measureViewportLayout,

@@ -40,6 +40,7 @@ import {
   SUPRAMARK_ADMONITION_KINDS,
   BUILT_IN_DIAGRAM_ENGINES,
 } from '@supramark/core';
+import { SelectionLink } from './SelectionLink';
 import { DiagramNode } from './DiagramNode';
 import { MathBlock } from './MathBlock';
 import { MathInline } from './MathInline';
@@ -2003,13 +2004,7 @@ function renderInlineNode({
     case 'link': {
       const linkNode = node;
       return (
-        <Text
-          key={key}
-          style={styles.link}
-          onPress={() => {
-            Linking.openURL(linkNode.url).catch(err => console.error('Failed to open URL:', err));
-          }}
-        >
+        <SelectionLink key={key} style={styles.link} href={linkNode.url}>
           {renderInlineNodes({
             nodes: linkNode.children,
             styles,
@@ -2017,7 +2012,7 @@ function renderInlineNode({
             config,
             linkUrl: linkNode.url,
           })}
-        </Text>
+        </SelectionLink>
       );
     }
     case 'image': {
@@ -2138,15 +2133,9 @@ function renderInlineNode({
         );
       }
       return (
-        <Text
-          key={key}
-          style={styles.link}
-          onPress={() => {
-            Linking.openURL(href).catch(err => console.error('Failed to open URL:', err));
-          }}
-        >
+        <SelectionLink key={key} style={styles.link} href={href}>
           {display}
-        </Text>
+        </SelectionLink>
       );
     }
     case 'raw': {
