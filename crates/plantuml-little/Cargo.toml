@@ -133,6 +133,7 @@ url = "2"
 # Use the pure-Rust miniz_oxide backend so the library links on wasm32
 # (the zlib C backend requires a cross-compiled libz which isn't available
 # on wasm32-unknown-unknown). Native builds get identical byte output.
+# ZIP's deflate-flate2 feature also uses this backend to decompress archive entries.
 flate2 = { version = "1", features = ["rust_backend"], default-features = false }
 serde_json = "1"
 # Enabled only under semantic-serde: derives Serialize for model types for semantic AST serialization.

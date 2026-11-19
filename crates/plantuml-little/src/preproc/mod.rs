@@ -2914,6 +2914,8 @@ fn strip_directive_prefix<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
+    mod archive_paths;
+
     use super::*;
     use std::fs;
     use std::io::{Read, Write};
@@ -2922,7 +2924,7 @@ mod tests {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use zip::write::SimpleFileOptions;
-    use zip::ZipWriter;
+    use zip::{CompressionMethod, ZipWriter};
 
     fn make_temp_dir(label: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -2937,11 +2939,10 @@ mod tests {
         dir
     }
 
-    fn write_zip(path: &Path, entries: &[(&str, &str)]) {
+    fn write_zip(path: &Path, method: CompressionMethod, entries: &[(&str, &str)]) {
         let file = fs::File::create(path).expect("create zip");
         let mut zip = ZipWriter::new(file);
-        let options =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default().compression_method(method);
 
         for (name, content) in entries {
             zip.start_file(*name, options).expect("start zip entry");
@@ -3160,10 +3161,14 @@ mod tests {
     }
 
     #[test]
-    fn test_import_archive_adds_include_search_path() {
+    fn test_import_archive_adds_stored_entries_to_include_search_path() {
         let dir = make_temp_dir("import-basic");
         let archive = dir.join("lib.zip");
-        write_zip(&archive, &[("folder/entry.puml", "component Imported")]);
+        write_zip(
+            &archive,
+            CompressionMethod::Stored,
+            &[("folder/entry.puml", "component Imported")],
+        );
 
         let src = "@startuml\n!import lib.zip\n!include folder/entry.puml\n@enduml";
         let out = preprocess_with_base_dir(src, &dir).unwrap();
@@ -3176,6 +3181,7 @@ mod tests {
         let archive = dir.join("lib.zip");
         write_zip(
             &archive,
+            CompressionMethod::Deflated,
             &[
                 ("pkg/main.puml", "!include nested.puml\ncomponent Main"),
                 ("pkg/nested.puml", "component Nested"),
@@ -3194,6 +3200,7 @@ mod tests {
         let archive = dir.join("lib.zip");
         write_zip(
             &archive,
+            CompressionMethod::Deflated,
             &[("folder/entry.puml", "component RemoteImported")],
         );
         let bytes = fs::read(&archive).unwrap();
