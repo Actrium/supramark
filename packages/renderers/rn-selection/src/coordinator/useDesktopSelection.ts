@@ -21,11 +21,11 @@ interface Options {
   store: SelectionStore;
   enabled: boolean;
   revision: unknown;
-  startAt(point: Point): SelectionPoint | null;
-  pointAt(point: Point): SelectionPoint | null;
-  local(event: ContactEvent): Point;
-  active(value: boolean): void;
-  cancelTouch(): void;
+  startAt(this: void, point: Point): SelectionPoint | null;
+  pointAt(this: void, point: Point): SelectionPoint | null;
+  local(this: void, event: ContactEvent): Point;
+  active(this: void, value: boolean): void;
+  cancelTouch(this: void): void;
 }
 
 export function useDesktopSelection(options: Options, touch: Contacts) {
