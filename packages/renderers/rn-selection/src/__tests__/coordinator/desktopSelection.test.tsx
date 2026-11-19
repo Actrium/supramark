@@ -7,8 +7,16 @@ import type { SelectionRootHandle } from '../../coordinator/SelectionRoot';
 import { buildTextMetrics } from '../../metrics';
 
 const platform = { OS: 'android' };
+let scroll = 0;
+const measureTarget = (
+  tag: number,
+  callback: (x: number, y: number, w: number, h: number) => void
+) => {
+  if (tag === 42) callback(92, 135 - scroll, 100, 80);
+};
 mock.module('react-native', () => ({
   Platform: platform,
+  UIManager: { measureInWindow: measureTarget },
   View: 'View',
   Text: 'Text',
   TouchableOpacity: 'TouchableOpacity',
@@ -30,6 +38,7 @@ let tree: ReactTestRenderer;
 afterEach(() => {
   act(() => tree?.unmount());
   platform.OS = 'android';
+  scroll = 0;
 });
 
 const firstLine = { x: 0, y: 0, width: 40, height: 20 };
@@ -38,7 +47,7 @@ const metrics = [
   buildTextMetrics([{ ...firstLine, text: 'hello' }, { ...firstLine, y: 20, text: 'WORLD' }]),
 ];
 
-function mountDesktop(os: string) {
+function mountDesktop(os: string, documentUnits = units, lineMetrics = metrics) {
   platform.OS = os;
   let store!: SelectionStore;
   const handle = React.createRef<SelectionRootHandle>();
@@ -46,13 +55,13 @@ function mountDesktop(os: string) {
     const ctx = useSelectionContext();
     useEffect(() => {
       store = ctx.store;
-      const disposers = units.map(({ nodeId, unitId }, i) =>
+      const disposers = documentUnits.map(({ nodeId, unitId }, i) =>
         ctx.registerBlock({
           kind: 'text',
           nodeId,
           unitIds: [unitId],
-          rect: { x: 12, y: i * 30, w: 100, h: metrics[i].lines.length * 20 },
-          metrics: metrics[i],
+          rect: { x: 12, y: i * 30, w: 100, h: lineMetrics[i].lines.length * 20 },
+          metrics: lineMetrics[i],
         })
       );
       return () => disposers.forEach(dispose => dispose());
@@ -61,10 +70,16 @@ function mountDesktop(os: string) {
   }
   act(() => {
     tree = create(
-      <SelectionRoot units={units} toolbar={false} handleRef={handle}>
+      <SelectionRoot units={documentUnits} toolbar={false} handleRef={handle}>
         <Blocks />
       </SelectionRoot>,
-      { createNodeMock: () => ({ getBoundingClientRect: () => ({ x: 80, y: 130 }) }) }
+      {
+        createNodeMock: () => ({
+          getBoundingClientRect: () => ({ x: 80, y: 130 - scroll }),
+          measureInWindow: (callback: (x: number, y: number, w: number, h: number) => void) =>
+            callback(80, 130 - scroll, 150, 80),
+        }),
+      }
     );
   });
   return { handle, store };
@@ -75,12 +90,23 @@ function input(phase: 'Start' | 'Move' | 'End', x: number, y: number, button = 0
     ? 'onTouch' + phase
     : { Start: 'onPointerDown', Move: 'onPointerMove', End: 'onPointerUp' }[phase];
   const root = tree.root.findAllByType('View')[0];
-  act(() => root.props[handler]({
-    nativeEvent: {
-      pageX: 80 + 12 + x, pageY: 130 + y, button, buttons,
-      identifier: 2, pointerId: 2, pointerType: 'mouse',
-    },
-  }));
+  act(() =>
+    root.props[handler]({
+      nativeEvent: {
+        pageX: 92 + x,
+        pageY: 130 + y - scroll + (platform.OS === 'macos' ? 28 : 0),
+        button,
+        buttons,
+        target: 77,
+        locationX: x,
+        locationY: y - 5,
+        changedTouches: [{ identifier: 2, target: 42, locationX: x, locationY: y - 5 }],
+        identifier: 2,
+        pointerId: 2,
+        pointerType: 'mouse',
+      },
+    })
+  );
 }
 
 for (const os of ['macos', 'windows']) {
@@ -128,3 +154,40 @@ for (const os of ['macos', 'windows']) {
     expect(store.getSnapshot().range).toBeNull();
   });
 }
+
+test('macOS uses the physical target on every phase in a titled, scrolling window', () => {
+  const { handle } = mountDesktop('macos');
+  input('Start', 6, 6);
+  scroll = 24;
+  input('Move', 16, 36);
+  expect(handle.current!.getSelectedText()).toBe('iiWhe');
+  scroll = 42;
+  input('End', 16, 56);
+  expect(handle.current!.getSelectedText()).toBe('iiWhelloWO');
+});
+
+test('macOS copies RTL and mixed-direction ranges in logical order from either visual gutter', () => {
+  const document = ['אבג', 'aאבz'].map(text => ({
+    kind: 'text' as const,
+    unitId: text,
+    nodeId: text,
+    text,
+    node: { type: 'text' as const, value: text },
+  }));
+  const lines = [
+    buildTextMetrics([{ ...firstLine, width: 30, text: 'אבג', charXs: [30, 20, 10, 0] }]),
+    buildTextMetrics([
+      { ...firstLine, text: 'aאבz', charXs: [0, 30, 20, 30, 40], charEndXs: [10, 20, 10, 40] },
+    ]),
+  ];
+  const { handle } = mountDesktop('macos', document, lines);
+  input('Start', -6, 6);
+  input('End', 20, 6);
+  expect(handle.current!.getSelectedText()).toBe('בג');
+  input('Start', 50, 6);
+  input('End', 10, 6);
+  expect(handle.current!.getSelectedText()).toBe('אב');
+  input('Start', -6, 36);
+  input('End', 20, 36);
+  expect(handle.current!.getSelectedText()).toBe('aא');
+});

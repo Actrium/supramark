@@ -26,6 +26,12 @@ mock.module('react-native', () => ({
   // shape (`panHandlers`) since tests never drive touches.
   PanResponder: { create: () => ({ panHandlers: {} }) },
   Dimensions: { get: () => ({ width: 375, height: 812 }) },
+  UIManager: {
+    measureInWindow: (
+      _tag: number,
+      callback: (x: number, y: number, w: number, h: number) => void
+    ) => callback(0, 0, 100, 80),
+  },
   Linking: { openURL: openUrlMock },
   StyleSheet: {
     create: (s: unknown) => s,

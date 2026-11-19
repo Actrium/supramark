@@ -1,5 +1,5 @@
 import type { SelectionPoint, SelectionRange } from '../model';
-import { offsetAtLocalPoint, offsetInsideLineX, lineAtY } from '../metrics';
+import { offsetAtLineX, offsetInsideLineX, lineAtY } from '../metrics';
 import type { SelectionUnitIndex } from '../resolve';
 import { buildSegmentSpans, segmentOffsetToPoint } from '../native/segmentAdapter';
 import { visibleBlockRect, type LayoutRect, type RegisteredBlock } from './registry';
@@ -221,12 +221,28 @@ export function localizePoint(
   const rect = block.rect as LayoutRect;
   if (block.metrics && block.metrics.lines.length > 0) {
     const origin = block.contentOffset ?? { x: 0, y: 0 };
-    const offset = offsetAtLocalPoint(
-      block.metrics,
-      p.x - rect.x - origin.x,
-      p.y - rect.y - origin.y
-    );
-    return segmentOffsetToPoint(buildSegmentSpans(block, index), offset);
+    const x = p.x - rect.x - origin.x;
+    const line = lineAtY(block.metrics, p.y - rect.y - origin.y)!;
+    const offset = offsetAtLineX(line, x);
+    const spans = buildSegmentSpans(block, index);
+    const caret = segmentOffsetToPoint(spans, offset);
+    const at = caret.unitId === undefined ? undefined : index.byUnitId.get(caret.unitId);
+    if (
+      at !== undefined &&
+      index.entries[at].unit.kind === 'atom' &&
+      offsetInsideLineX(line, x) < offset
+    ) {
+      // A trailing text caret shares its numeric offset with the following attachment.
+      const previous = spans.find(span => span.end === offset && span.start < offset);
+      if (previous && index.entries[index.byUnitId.get(previous.unitId)!].unit.kind === 'text') {
+        return {
+          nodeId: previous.nodeId,
+          unitId: previous.unitId,
+          offset: previous.end - previous.start,
+        };
+      }
+    }
+    return caret;
   }
   const after =
     p.y > rect.y + rect.h / 2 || (verticalGap(p, rect) === 0 && p.x > rect.x + rect.w / 2);
