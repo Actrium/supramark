@@ -37,8 +37,12 @@ mock.module('react-native', () => ({
 // react-native-svg is a native module under bun's test runtime; register its
 // mock here for the same reason and so DiagramNode / SupramarkCache tests do
 // not each redefine it (a per-file surface would clobber this one process-wide).
+// Svg / Path are what the code-block action icons are built from — a surface
+// that omits them makes every action button render as `undefined`.
 mock.module('react-native-svg', () => ({
   SvgXml: 'SvgXml',
+  Svg: 'Svg',
+  Path: 'Path',
 }));
 
 // `svgAst.tsx` takes the XML parser and `SvgAst` from `react-native-svg`'s own

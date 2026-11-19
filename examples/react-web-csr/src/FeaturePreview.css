@@ -230,23 +230,37 @@
   overflow-x: auto;
 }
 
-.feature-preview-render .sm-code-btn {
-  background-color: #586069;
-  color: #ffffff;
+.feature-preview-render .sm-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.feature-preview-render .sm-code-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.5rem;
+  /* No resting background: the icon sits on the card like the language label. */
+  background: none;
+  color: #586069;
   border: none;
   border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
   cursor: pointer;
   user-select: none;
 }
 
-.feature-preview-render .sm-code-btn:hover {
-  background-color: #444d56;
+.feature-preview-render .sm-code-action:hover {
+  background-color: rgba(0, 0, 0, 0.06);
 }
 
-.feature-preview-render .sm-code-btn-text {
-  user-select: none;
+.feature-preview-render[data-preview-theme='dark'] .sm-code-action {
+  color: #d0d7de;
+}
+
+.feature-preview-render[data-preview-theme='dark'] .sm-code-action:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .feature-preview-render[data-preview-theme='dark'] .sm-code-block-container {

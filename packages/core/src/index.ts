@@ -38,6 +38,11 @@ export {
 // Container extension spec (manifest + params parsing)
 export * from './container-extension.js';
 
+// Code-block action icons and fence helpers, shared by both renderers so the
+// two platforms cannot drift on the artwork or on what a host receives.
+export * from './code-action-icons.js';
+export * from './code-block.js';
+
 // The unified ContainerFeature interface (lean version)
 export {
   type ContainerFeature,

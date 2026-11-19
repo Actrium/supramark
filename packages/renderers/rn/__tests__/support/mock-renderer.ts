@@ -13,8 +13,13 @@ export const engineState = {
   pendingResolve: null as null | ((result: DiagramRenderResult) => void),
 };
 
+// Keep this surface identical to the one in mock-react-native.ts: both register
+// process-wide, so whichever loads last wins and a mismatch would drop exports
+// the other file's tests depend on (Svg / Path back the code-block icons).
 mock.module('react-native-svg', () => ({
   SvgXml: 'SvgXml',
+  Svg: 'Svg',
+  Path: 'Path',
 }));
 
 mock.module('@supramark/engines/rn', () => ({

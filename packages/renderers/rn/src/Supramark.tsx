@@ -15,6 +15,8 @@ import type {
   SupramarkNode,
   SupramarkImageNode,
   SupramarkHeadingNode,
+  SupramarkCodeBlockContent,
+  SupramarkCodeActionLabels,
   SupramarkCodeNode,
   SupramarkMathBlockNode,
   SupramarkDiagramNode,
@@ -47,7 +49,11 @@ import { type SupramarkStyles, mergeStyles, darkThemeStyles } from './styles';
 import { ErrorBoundary, type ErrorInfo, ErrorDisplay } from './ErrorBoundary';
 import { SourceStateContext } from './SourceStateContext';
 import { VideoPressContext, type SupramarkVideoPressHandler } from './videoPressContext';
-import { CodeBlock, CodeCopyContext } from './CodeBlock';
+import { CodeBlock, CodeActionsContext } from './CodeBlock';
+
+// The label type belongs to the public props surface, so a host can type the
+// object it passes to `codeActionLabels` without importing an internal module.
+export type { SupramarkCodeActionLabels };
 import { resolveDevelopmentMode } from './devMode';
 import {
   getRendererCache,
@@ -359,10 +365,44 @@ export interface SupramarkProps {
    */
   onCopyCode?: (code: string, node: SupramarkCodeNode) => void | Promise<void>;
   /**
-   * Whether to show the code-block copy button (requires onCopyCode;
-   * default: enabled).
+   * Fullscreen handler for code blocks with a language info string. When
+   * provided, the header renders a fullscreen button that hands the block to
+   * the host, which owns the presentation entirely (modal, route, panel).
+   *
+   * `content.fenced` is the whole block as Markdown, fences included: the
+   * author's own text when the source is available, a canonical fence
+   * otherwise. A host can re-render it with `<Supramark markdown={...} />` or
+   * send it on unchanged. `content.code` is the bare code, and `content.node`
+   * carries the AST node with its source positions — read that node, never
+   * mutate it: it is the live node of a snapshot shared across renders.
+   *
+   * Without this handler no fullscreen button is shown; like the copy button it
+   * also requires a language, because language-less fences and indented code
+   * have no distinct AST flag and therefore no header to hold a button.
+   */
+  onFullscreenCode?: (content: SupramarkCodeBlockContent) => void;
+  /**
+   * Whether to show the copy button (requires onCopyCode; default: enabled).
    */
   copyButton?: boolean;
+  /**
+   * Whether to show the fullscreen button (requires onFullscreenCode;
+   * default: enabled).
+   */
+  fullscreenButton?: boolean;
+  /**
+   * Master switch for the code-block chrome (default: enabled). False renders
+   * the bare code view — no card, no header, no buttons — whatever the other
+   * switches say. This is the switch the conformance harness uses to measure
+   * the plain code block.
+   */
+  codeBlockChrome?: boolean;
+  /**
+   * Overrides for the action labels. The buttons are icon-only, so these are
+   * what a screen reader announces; the library ships English defaults and
+   * never guesses a host's language.
+   */
+  codeActionLabels?: SupramarkCodeActionLabels;
 
   /**
    * Callback invoked when the user taps an HTML Page card.
@@ -435,7 +475,11 @@ export const Supramark: React.FC<SupramarkProps> = ({
   codeHighlightTheme,
   selection,
   onCopyCode,
+  onFullscreenCode,
   copyButton,
+  fullscreenButton,
+  codeBlockChrome,
+  codeActionLabels,
 }) => {
   // Global options.cache provides the least-specific cache default.
   const documentCachePolicy = useMemo(() => resolveDocumentCachePolicy(config), [config]);
@@ -730,9 +774,29 @@ export const Supramark: React.FC<SupramarkProps> = ({
   }, [selectionReady, selectionHandle]);
 
   // Keep the provider identity stable for memoized code-block consumers.
-  const codeCopyContextValue = useMemo(
-    () => ({ onCopyCode, copyButton }),
-    [onCopyCode, copyButton]
+  const codeActionsContextValue = useMemo(
+    () => ({
+      onCopyCode,
+      onFullscreenCode,
+      codeBlockChrome,
+      copyButton,
+      fullscreenButton,
+      labels: codeActionLabels,
+      // The fence slice needs the exact text the AST was parsed from. A host
+      // rendering a pre-parsed AST without markdown gets the canonical rebuild
+      // instead; `fencedCodeFromSource` rejects a slice that does not match the
+      // node, so a markdown/ast mismatch degrades rather than misleads.
+      source: markdown || undefined,
+    }),
+    [
+      onCopyCode,
+      onFullscreenCode,
+      codeBlockChrome,
+      copyButton,
+      fullscreenButton,
+      codeActionLabels,
+      markdown,
+    ]
   );
 
   // Parse-error fallback: show the error info or the raw markdown
@@ -771,7 +835,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
   return (
     <ErrorBoundary onError={onError} fallback={errorFallback}>
       <VideoPressContext.Provider value={onVideoPress}>
-        <CodeCopyContext.Provider value={codeCopyContextValue}>
+        <CodeActionsContext.Provider value={codeActionsContextValue}>
           <SelectionPlanContext.Provider value={selectionPlan}>
             <SourceStateContext.Provider value={parsedDocument.sourceState}>
               <ImagePressContext.Provider value={onImagePress}>
@@ -806,7 +870,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
               </ImagePressContext.Provider>
             </SourceStateContext.Provider>
           </SelectionPlanContext.Provider>
-        </CodeCopyContext.Provider>
+        </CodeActionsContext.Provider>
       </VideoPressContext.Provider>
     </ErrorBoundary>
   );
