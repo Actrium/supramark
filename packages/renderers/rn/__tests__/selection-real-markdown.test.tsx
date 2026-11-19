@@ -324,8 +324,11 @@ const zeroOriginView = () => ({
   measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 0),
 });
 
-async function renderSelectableLink(handle: { current: ReadableSelection | null }) {
-  const markdown = '[hello](https://example.com)';
+async function renderSelectableLink(
+  handle: { current: ReadableSelection | null },
+  line: { text: string; width: number; charXs?: number[]; charEndXs?: number[] } = { text: 'hello', width: 50 }
+) {
+  const markdown = `[${line.text}](https://example.com)`;
   const ast = await parseMarkdown(markdown);
   let renderer!: ReactTestRenderer;
   await act(async () => {
@@ -335,16 +338,16 @@ async function renderSelectableLink(handle: { current: ReadableSelection | null 
     );
   });
   const block = renderer.root.findByType(SelectableBlock);
-  const layout = { x: 0, y: 0, width: 50, height: 20 };
+  const layout = { x: 0, y: 0, width: line.width, height: 20 };
   act(() => {
     block.findAllByType('View')[0].props.onLayout({ nativeEvent: { layout } });
     const text = block.findAllByType('Text').find(n => n.props.onTextLayout)!;
-    text.props.onTextLayout({ nativeEvent: { target: 9, lines: [{ text: 'hello', ...layout }] } });
+    text.props.onTextLayout({ nativeEvent: { target: 9, lines: [{ ...layout, ...line }] } });
   });
   return renderer;
 }
 
-function linkGesture(renderer: ReactTestRenderer) {
+function linkGesture(renderer: ReactTestRenderer, start = 0) {
   const root = renderer.root.findByType(SelectionRoot).findAllByType('View')[0];
   const link = renderer.root.findByType(SelectableBlock).findAllByType('Text').find(n => n.props.onPress)!;
   let timestamp = 0;
@@ -352,7 +355,7 @@ function linkGesture(renderer: ReactTestRenderer) {
     nativeEvent: { target: 9, identifier: 1, pageX: x, pageY: 36, locationX: x, locationY: 8, button: 0, timestamp: ++timestamp },
   });
   return (moves: number[], end: number, pressFirst: boolean) => {
-    act(() => root.props.onTouchStart(event(0)));
+    act(() => root.props.onTouchStart(event(start)));
     for (const x of moves) act(() => root.props.onTouchMove(event(x)));
     const release = event(end);
     act(() => {
@@ -381,6 +384,39 @@ it('macOS opens a link on click but suppresses the press associated with a text 
     gesture([], 30, true);
     expect(openUrlMock).toHaveBeenCalledTimes(1);
     gesture([], 0, true);
+    expect(openUrlMock).toHaveBeenCalledTimes(2);
+  } finally {
+    if (renderer) act(() => renderer?.unmount());
+    Object.assign(Platform, { OS: previous });
+  }
+});
+
+it('macOS suppresses a link drag between visually distant carets with the same bidi offset', async () => {
+  const { Platform } = await import('react-native');
+  const previous = Platform.OS;
+  Object.assign(Platform, { OS: 'macos' });
+  const handle: { current: ReadableSelection | null } = { current: null };
+  let renderer: ReactTestRenderer | undefined;
+  openUrlMock.mockClear();
+  try {
+    // The trailing edge of 'a' and the leading edge of the RTL run both have logical offset 1.
+    renderer = await renderSelectableLink(handle, {
+      text: 'aאבz', width: 100, charXs: [0, 90, 50, 90, 100], charEndXs: [10, 50, 10, 100],
+    });
+    const gesture = linkGesture(renderer, 9);
+    for (const pressFirst of [true, false]) {
+      gesture([89], 89, pressFirst);
+      expect(handle.current?.getSelectedText()).toBeNull();
+      expect(openUrlMock).toHaveBeenCalledTimes(0);
+      gesture([], 89, pressFirst);
+      gesture([89], 9, pressFirst);
+      expect(openUrlMock).toHaveBeenCalledTimes(0);
+    }
+    // Two points apart crosses the visual run boundary, but is within click tolerance.
+    gesture([11], 11, true);
+    expect(handle.current?.getSelectedText()).toBe('אב');
+    expect(openUrlMock).toHaveBeenCalledTimes(1);
+    gesture([], 9, false);
     expect(openUrlMock).toHaveBeenCalledTimes(2);
   } finally {
     if (renderer) act(() => renderer?.unmount());
