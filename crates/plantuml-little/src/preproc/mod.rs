@@ -2921,7 +2921,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use zip::write::FileOptions;
+    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
 
     fn make_temp_dir(label: &str) -> PathBuf {
@@ -2940,7 +2940,8 @@ mod tests {
     fn write_zip(path: &Path, entries: &[(&str, &str)]) {
         let file = fs::File::create(path).expect("create zip");
         let mut zip = ZipWriter::new(file);
-        let options = FileOptions::default();
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         for (name, content) in entries {
             zip.start_file(*name, options).expect("start zip entry");

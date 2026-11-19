@@ -2,7 +2,7 @@
 name = "supramark-plantuml-native"
 version = "1.2026.2-4"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 # Inherit the upstream multi-licence disjunction. Downstream consumers
 # pick the option compatible with their distribution; supramark's own
 # build artefacts ship under Apache-2.0 (see UPSTREAM.md).

@@ -230,7 +230,7 @@ pub(super) fn extract_archive_to_temp(archive_path: &Path) -> Result<PathBuf> {
 
     for idx in 0..archive.len() {
         let mut entry = archive.by_index(idx).map_err(io::Error::other)?;
-        let Some(enclosed) = entry.enclosed_name().map(Path::to_path_buf) else {
+        let Some(enclosed) = entry.enclosed_name() else {
             continue;
         };
         let out_path = temp_root.join(enclosed);

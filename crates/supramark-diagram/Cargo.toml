@@ -1,8 +1,8 @@
 [package]
 name = "supramark-diagram"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 license = "Apache-2.0"
 homepage = "https://github.com/Actrium/supramark"
 repository = "https://github.com/Actrium/supramark"
@@ -13,7 +13,7 @@ description = "Facade assembling the four engines: default_registry() yields a u
 supramark-diagram-core = { path = "../supramark-diagram-core", version = "0.1.1" }
 d2-little = { path = "../d2-little", version = "=0.7.1-1" }
 mermaid-little = { path = "../mermaid-little", version = "=11.14.0-6", features = ["metrics-ttf-parser", "semantic-serde"] }
-plantuml-little = { path = "../plantuml-little", version = "1.2026.2-4", default-features = false, features = ["metrics-ttf-parser", "semantic-serde"] }
+plantuml-little = { path = "../plantuml-little", version = "1.2026.2-5", default-features = false, features = ["metrics-ttf-parser", "semantic-serde"] }
 serde_json = "1"
 
 # The graphviz Rust adapter is exported only on native targets (wasm goes through the JS bridge, not wired up at this stage).

@@ -4,9 +4,9 @@
 
 [package]
 name = "plantuml-little"
-version = "1.2026.2-4"
+version = "1.2026.2-5"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 license = "GPL-3.0-or-later OR LGPL-3.0-or-later OR Apache-2.0 OR EPL-2.0 OR MIT"
 authors = ["kookyleo <kookyleo@gmail.com>"]
 description = "Lightweight .puml to .svg converter — byte-exact SVG parity with Java PlantUML"
@@ -127,7 +127,7 @@ regex = "1"
 # (c) g++ linkage so libstdc++ vtables resolve on Ubuntu/Debian.
 graphviz-anywhere = "0.2"
 libc = "0.2"
-zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.7.3", default-features = false, features = ["deflate-flate2"] }
 ureq = { version = "3", optional = true }
 url = "2"
 # Use the pure-Rust miniz_oxide backend so the library links on wasm32
