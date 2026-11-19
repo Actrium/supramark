@@ -16,7 +16,7 @@ export function withInlineObjectMetrics(
     span => index.entries[index.byUnitId.get(span.unitId)!].unit.kind === 'atom'
   );
   // Plain paragraphs keep their original line provider and avoid allocating character tables.
-  if (atoms.length === 0) return metrics;
+  if (atoms.length === 0 || metrics.lines.every(line => line.charXs)) return metrics;
   // Wait for actual attachment layout before publishing geometry for either side.
   if (atoms.some(atom => !objects.has(atom.unitId))) return undefined;
   return {

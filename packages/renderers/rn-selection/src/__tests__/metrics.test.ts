@@ -18,6 +18,21 @@ const wrapped = (): SegmentTextMetrics =>
   ]);
 
 describe('buildTextMetrics', () => {
+  test('native text edges survive line conversion and never place a caret inside an emoji', () => {
+    const [line] = buildTextMetrics([
+      {
+        text: 'i😀W',
+        x: 0,
+        y: 0,
+        width: 46,
+        height: 16,
+        charXs: [0, 4, 4, 24, 46],
+      },
+    ]).lines;
+    expect(xForOffset(line, 1)).toBe(4);
+    expect(offsetAtLineX(line, 10)).toBe(1);
+    expect(offsetAtLineX(line, 19)).toBe(3);
+  });
   test('accumulates offsets across lines', () => {
     const metrics = wrapped();
     expect(metrics.textLength).toBe(11);

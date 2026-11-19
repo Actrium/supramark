@@ -65,6 +65,9 @@ export interface SelectionContextValue {
 
 export const SelectionContext = createContext<SelectionContextValue | null>(null);
 
+/** Whether desktop text blocks advertise mouse selection to the window. */
+export const SelectionMouseEnabledContext = createContext(true);
+
 /** Nearest nested scroll viewport inherited by SelectableBlock registrations. */
 export const SelectionViewportContext = createContext<string | undefined>(undefined);
 

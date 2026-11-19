@@ -106,6 +106,12 @@ function renderBlock(
 }
 
 describe('SelectableBlock rendering', () => {
+  for (const os of ['macos', 'windows']) {
+    test(`${os} requests the text cursor on the text view`, () => {
+      mockPlatform.OS = os;
+      expect(renderBlock().root.findByType('Text').props.style).toContainEqual({ cursor: 'text' });
+    });
+  }
   test('attachment and Text layout can arrive in either order without losing right-side geometry', async () => {
     // Native callback ordering differs between Android and iOS.
     const { SelectableInlineObject } = await import('../../coordinator/SelectableInlineObject');

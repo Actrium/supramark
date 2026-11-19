@@ -15,12 +15,16 @@ import { buildTextMetrics, type SegmentTextMetrics } from '../metrics';
 import type { SelectionNodeId } from '../model';
 import type { SelectionUnitIndex } from '../resolve';
 import type { ContentOffset, LayoutRect } from './registry';
-import { SelectionViewportContext } from './SelectionContext';
+import { SelectionMouseEnabledContext, SelectionViewportContext } from './SelectionContext';
 import { InlineObjectLayoutContext } from './SelectableInlineObject';
 import { withInlineObjectMetrics } from './inlineMetrics';
+import { useNativeLineMetrics } from './useNativeLineMetrics';
 import { useSelectionContext } from './useDocumentSelection';
 
 declare const __DEV__: boolean | undefined;
+
+// Desktop Fabric supports the CSS text cursor. Core RN's mobile typings omit it.
+const textCursor: TextStyle = { cursor: 'text' as TextStyle['cursor'] };
 
 /**
  * Concatenated string content of a React subtree. Only literal string/number
@@ -100,6 +104,9 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   containerStyle,
 }) => {
   const ctx = useSelectionContext();
+  const mouseEnabled = useContext(SelectionMouseEnabledContext);
+  const desktop = Platform.OS === 'macos' || Platform.OS === 'windows';
+  const nativeId = React.useId();
   const viewportId = useContext(SelectionViewportContext);
   const blockRef = useRef<View | null>(null);
   const layoutRef = useRef<LayoutRect | null>(null);
@@ -222,8 +229,8 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
     ctx.setContentOffset(nodeId, offset);
   };
 
-  const onTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) => {
-    const metrics = buildTextMetrics(e.nativeEvent.lines);
+  const publishLines = useNativeLineMetrics(lines => {
+    const metrics = buildTextMetrics(lines);
     const expected = sumUnitTextLength(ctx.registry.index, unitIdsRef.current);
     if (expected !== undefined && metrics.textLength !== expected) {
       // The platform laid out different text than the model holds — a marker, a
@@ -245,7 +252,9 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
     }
     rawMetricsRef.current = metrics;
     publishMetrics();
-  };
+  });
+  const onTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) =>
+    publishLines(e.nativeEvent.target, e.nativeEvent.lines);
 
   // Android can hand a nested ScrollView the native responder before the
   // bubbling root timer fires, so Text supplies a local fallback there. iOS
@@ -263,7 +272,8 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
     <InlineObjectLayoutContext.Provider value={onObjectLayout}>
       <View ref={blockRef} collapsable={false} style={containerStyle} onLayout={onBlockLayout}>
         <Text
-          style={style}
+          nativeID={Platform.OS === 'windows' ? `supramark-selection-${nativeId}` : undefined}
+          style={desktop && mouseEnabled ? [style, textCursor] : style}
           onLayout={onTextBoxLayout}
           onTextLayout={onTextLayout}
           onLongPress={onNestedLongPress}
