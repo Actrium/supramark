@@ -16,6 +16,7 @@ import {
 import { lineAtY, offsetInsideLineX } from '../metrics';
 import type { SelectionNodeId, SelectionRange, SelectionUnit } from '../model';
 import { orderSelectionRange } from '../resolve';
+import { serializeSelectionUnits } from '../serialize';
 import {
   buildSegmentSpans,
   segmentSelectionToRange,
@@ -25,15 +26,18 @@ import { buildCopyRequest, type SelectionCopyRequest } from './actions';
 import { wordBoundsAt } from '../words';
 import {
   SelectionContext,
+  SelectionMouseEnabledContext,
   SelectionGestureActivityContext,
   type SelectionContextValue,
 } from './SelectionContext';
 import { createSelectionGesture, DEFAULT_LONG_PRESS_MS, type SelectionGesture } from './gesture';
+import { useDesktopSelection, type ContactEvent } from './useDesktopSelection';
 import { computeHandles, hitTestHandle, type HandleEdge } from './handles';
 import {
   blocksBounds,
   containingBlock,
   nearestBlockWithin,
+  mouseSelectionStart,
   paragraphRangeAt,
   resolvePointToSelection,
   resolvePointToSelectionInViewport,
@@ -50,6 +54,8 @@ import { DEFAULT_TOOLBAR_ITEMS, type Size, type SelectionToolbarItem } from './t
 import { useSelectionContext, useSelectionSnapshot } from './useDocumentSelection';
 
 type NativeViewHandle = {
+  getBoundingClientRect?: () => Point;
+  unstable_getBoundingClientRect?: () => Point;
   measure?: (
     callback: (
       x: number,
@@ -72,9 +78,8 @@ interface LayoutTarget {
   fallback: LayoutRect;
 }
 
-function eventTime(e: GestureResponderEvent): number {
-  const timestamp = (e.nativeEvent as GestureResponderEvent['nativeEvent'] & { timestamp?: number })
-    .timestamp;
+function eventTime(e: ContactEvent): number {
+  const timestamp = e.nativeEvent.timestamp;
   return Number.isFinite(timestamp) ? Number(timestamp) : Date.now();
 }
 
@@ -150,6 +155,8 @@ export interface SelectionRootHandle {
   trySelectParagraphAt(pageX: number, pageY: number): Promise<boolean>;
   /** Clear the current selection (an outside entry, e.g. a background tap). */
   clearSelection(): void;
+  /** Read the current plain text without changing the selection. */
+  getSelectedText(): string | null;
   /**
    * This root's live RN page-space box, measured on demand (never cached), for a
    * host that must pick ONE root among several before asking it to select —
@@ -500,7 +507,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   }, []);
 
   const toRootSpace = useCallback(
-    (e: GestureResponderEvent): Point => {
+    (e: ContactEvent): Point => {
       const { pageX, pageY } = e.nativeEvent;
       return pointFromPage({ x: pageX, y: pageY });
     },
@@ -508,7 +515,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   );
 
   const onTouchStart = useCallback(
-    (e: GestureResponderEvent) => {
+    (e: ContactEvent) => {
       if (!gestureEnabled) return;
       refreshRootOrigin();
       if (gesture.isActive() || gesture.isPending()) return;
@@ -556,7 +563,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   const onResponderGrant = onTouchStart;
 
   const onResponderMove = useCallback(
-    (e: GestureResponderEvent) => {
+    (e: ContactEvent) => {
       if (!gestureEnabled) return;
       refreshRootOrigin();
       const point = toRootSpace(e);
@@ -567,7 +574,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
   );
 
   const onResponderRelease = useCallback(
-    (e: GestureResponderEvent) => {
+    (e: ContactEvent) => {
       if (!gestureEnabled) return;
       refreshRootOrigin();
       clearTimer();
@@ -634,6 +641,43 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       store.commit();
     },
     [cancelGesture, clearTimer, registry, store, wordAt]
+  );
+
+  const touchHandlers = {
+    onTouchStart,
+    onTouchMove: onResponderMove,
+    onTouchEnd: onResponderRelease,
+    onTouchCancel,
+  };
+  const {
+    handlers: desktopHandlers,
+    mouseUI,
+    cancel: cancelMouse,
+  } = useDesktopSelection(
+    {
+      store,
+      enabled: gestureEnabled,
+      revision: units,
+      active: publishGestureActivity,
+      cancelTouch: onResponderTerminate,
+      pointAt,
+      local: event => {
+        const root = rootRef.current as NativeViewHandle | null;
+        const origin = root?.getBoundingClientRect?.() ?? root?.unstable_getBoundingClientRect?.();
+        if (origin) {
+          return pointFromPage({ x: event.nativeEvent.pageX, y: event.nativeEvent.pageY }, origin);
+        }
+        refreshRootOrigin();
+        return toRootSpace(event);
+      },
+      startAt: point => {
+        const start = mouseSelectionStart(registry.getBlocks(), point, registry.index);
+        if (!start) return null;
+        gestureViewportIdRef.current = start.viewportId;
+        return start.anchor;
+      },
+    },
+    touchHandlers
   );
 
   // A new unit stream is a new content revision. The stored range points into a
@@ -709,6 +753,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
           clearTimer();
           pendingTouchCancelledRef.current = false;
           cancelGesture();
+          cancelMouse();
           store.beginAt(range.anchor);
           store.extendTo(range.focus);
           store.commit();
@@ -736,12 +781,18 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
           });
         });
       },
+      getSelectedText() {
+        if (!mountedRef.current || !interactionEnabledRef.current) return null;
+        const text = serializeSelectionUnits(store.getSnapshot().units, 'plainText');
+        return typeof text === 'string' && text.length > 0 ? text : null;
+      },
       clearSelection() {
         // Clearing selection also cancels requests whose native measurement is still pending.
         hostRequestGenerationRef.current += 1;
         clearTimer();
         pendingTouchCancelledRef.current = false;
         cancelGesture();
+        cancelMouse();
         store.clear();
       },
       async measurePageRect(): Promise<{ x: number; y: number; w: number; h: number } | null> {
@@ -757,7 +808,7 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
         });
       },
     }),
-    [registry, store, clearTimer, cancelGesture]
+    [registry, store, clearTimer, cancelGesture, cancelMouse]
   );
 
   const onHandleGrant = useCallback(
@@ -975,20 +1026,15 @@ export const SelectionRoot: React.FC<SelectionRootProps> = ({
       ref={rootRef}
       collapsable={false}
       onLayout={onLayout}
-      onTouchStart={onTouchStart}
-      onTouchMove={onResponderMove}
-      onTouchEnd={onResponderRelease}
-      onTouchCancel={onTouchCancel}
-      // Observe a pending press through bubbling touch events. PanResponder
-      // claims only after the long press becomes a selection, leaving an inner
-      // ScrollView / FlatList free to own ordinary swipes from the first frame.
-      {...rootPanResponder.panHandlers}
+      {...(desktopHandlers ?? { ...touchHandlers, ...rootPanResponder.panHandlers })}
     >
       <SelectionGestureActivityContext.Provider value={gestureActive}>
         <SelectionContext.Provider value={ctx}>
-          {children}
+          <SelectionMouseEnabledContext.Provider value={gestureEnabled}>
+            {children}
+          </SelectionMouseEnabledContext.Provider>
           {interactionEnabled && overlay !== false && <SelectionOverlay />}
-          {interactionEnabled && handles !== false && (
+          {interactionEnabled && !mouseUI && handles !== false && (
             <SelectionHandles
               onHandleGrant={onHandleGrant}
               onHandleMove={onHandleMove}

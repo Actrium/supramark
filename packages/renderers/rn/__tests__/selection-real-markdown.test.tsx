@@ -241,3 +241,53 @@ describe('real Markdown: per-class selection semantics', () => {
     expect(r.root.findAllByType(SelectionRoot)).toHaveLength(1);
   });
 });
+for (const os of ['macos', 'windows']) {
+  it(`${os} serializes a drag through rendered Markdown across two paragraphs`, async () => {
+    const { Platform } = await import('react-native');
+    const previous = Platform.OS;
+    const payloads: string[] = [];
+    const handle: { current: { getSelectedText(): string | null } | null } = { current: null };
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      Object.assign(Platform, { OS: os });
+      const markdown = 'ii**WW**\n\nhello';
+      const ast = await parseMarkdown(markdown);
+      await act(async () => {
+        renderer = create(<Supramark ast={ast} markdown={markdown} selection={{
+          toolbarItems: [{ id: 'inspect', title: 'Show selection', format: 'plainText' }],
+          onHandleReady: ready => { handle.current = ready; },
+          onAction: request => payloads.push(request.text),
+        }} />);
+      });
+      const root = renderer!.root.findByType(SelectionRoot).findAllByType('View')[0];
+      act(() => {
+        root.props.onLayout({ nativeEvent: { layout: { width: 200, height: 100 } } });
+        renderer!.root.findAllByType(SelectableBlock).forEach((block, i) => {
+          block.findAllByType('View')[0].props.onLayout({
+            nativeEvent: { layout: { x: 0, y: i * 30, width: 100, height: 20 } },
+          });
+          const text = block.findAllByType('Text').find(node => node.props.onTextLayout)!;
+          text.props.onTextLayout({ nativeEvent: { target: i + 1, lines: [{
+            text: i ? 'hello' : 'iiWW', x: 0, y: 0, width: 40, height: 20,
+            charXs: i ? [0, 8, 16, 24, 32, 40] : [0, 4, 8, 24, 40],
+          }] } });
+        });
+      });
+      const events = os === 'macos' ? ['onTouchStart', 'onTouchMove', 'onTouchEnd']
+        : ['onPointerDown', 'onPointerMove', 'onPointerUp'];
+      events.forEach((name, i) => act(() => root.props[name]({ nativeEvent: {
+        pageX: i ? 16 : 4, pageY: i ? 38 : 8, identifier: 1,
+        pointerId: 1, pointerType: 'mouse', button: 0, buttons: i === 2 ? 0 : 1,
+      } })));
+      const action = renderer!.root.findByType('TouchableOpacity');
+      expect(handle.current?.getSelectedText()).toBe('iWW\nhe');
+      expect(handle.current?.getSelectedText()).toBe('iWW\nhe');
+      act(() => action.props.onPress());
+      expect(payloads).toEqual(['iWW\nhe']);
+      expect(handle.current?.getSelectedText()).toBeNull();
+    } finally {
+      if (renderer) act(() => renderer?.unmount());
+      Object.assign(Platform, { OS: previous });
+    }
+  });
+}

@@ -627,6 +627,7 @@ export const Supramark: React.FC<SupramarkProps> = ({
       trySelectParagraphAt: (pageX, pageY) =>
         selectionRootRef.current?.trySelectParagraphAt(pageX, pageY) ?? Promise.resolve(false),
       clearSelection: () => selectionRootRef.current?.clearSelection(),
+      getSelectedText: () => selectionRootRef.current?.getSelectedText() ?? null,
       measurePageRect: () => selectionRootRef.current?.measurePageRect() ?? Promise.resolve(null),
     }),
     []
