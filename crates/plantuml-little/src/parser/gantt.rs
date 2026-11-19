@@ -32,6 +32,11 @@ pub fn parse_gantt_diagram(source: &str) -> Result<GanttDiagram> {
         Regex::new(r"^[Pp]roject\s+starts\s+the\s+(\d{4}[-/]\d{2}[-/]\d{2})$").expect("regex");
     // [A]->[B] dependency
     let re_dependency = Regex::new(r"^\[([^\]]+)\]\s*->\s*\[([^\]]+)\]$").expect("regex");
+    // Leading task reference for `starts` clauses
+    let re_task_name = Regex::new(r"^\[([^\]]+)\]").expect("regex");
+    // `after [Y]'s end` / `after [Y] end` — the accepted starts-argument form
+    let re_starts_after =
+        Regex::new(r"^after\s+\[([^\]]+)\]'?s?\s+end$").expect("regex");
     // [Task] is colored in Color or Color/Color
     let re_colored = Regex::new(r"^\[([^\]]+)\]\s+is\s+colored\s+in\s+(.+)$").expect("regex");
     // scale N
@@ -119,6 +124,32 @@ pub fn parse_gantt_diagram(source: &str) -> Result<GanttDiagram> {
             debug!("line {line_num}: dependency {from} -> {to}");
             dependencies.push(GanttDependency { from, to });
             continue;
+        }
+
+        // [Task] starts after [Other]'s end — the one `starts` form jar v1.2026.3
+        // accepts (probe after.svg); rendered as a dependency edge. Other `starts`
+        // forms are rejected upstream by the official sentence set (probes s2/s3/abs
+        // -> error page), so reject here too instead of silently ignoring.
+        if trimmed.contains(" starts ") {
+            if let Some(caps) = re_task_name.captures(trimmed) {
+                let task_ref = caps[1].to_string();
+                let rest = &trimmed[caps[0].len()..].trim();
+                if let Some(clause) = rest.strip_prefix("starts") {
+                    let clause = clause.trim();
+                    if let Some(dc) = re_starts_after.captures(clause) {
+                        let from = dc[1].to_string();
+                        debug!("line {line_num}: {task_ref} starts after {from}");
+                        dependencies.push(GanttDependency { from, to: task_ref });
+                        continue;
+                    }
+                    // jar renders its error page for rejected starts clauses
+                    // (probes s2/s3/abs); route through the same page path.
+                    return Err(crate::Error::JavaErrorPage {
+                        line: line_num,
+                        message: format!("cannot parse {clause} in starts clause"),
+                    });
+                }
+            }
         }
 
         // Colored task: [Task] is colored in Color/Color
@@ -347,6 +378,25 @@ mod tests {
 
     fn parse(source: &str) -> GanttDiagram {
         parse_gantt_diagram(source).expect("parse failed")
+    }
+
+    // Task-4 (v1.2026.3 alignment): jar rejects `[X] starts <bare>` forms
+    // (probes: temp/jar-probe/s2|s3|abs — error page), while `starts after
+    // [Y]'s end` is accepted and rendered as a dependency (probe: after.svg).
+    #[test]
+    fn starts_bare_forms_are_rejected_like_jar() {
+        for bad in ["[TaskB] starts at D2", "[TaskB] starts D2", "[TaskB] starts 2026-01-02"] {
+            let src = format!("@startgantt\n[TaskA] lasts 2 days\n{}\n@endgantt", bad);
+            assert!(parse_gantt_diagram(&src).is_err(), "should reject: {bad}");
+        }
+    }
+
+    #[test]
+    fn starts_after_maps_to_dependency_edge() {
+        let gd = parse(
+            "@startgantt\n[TaskA] lasts 2 days\n[TaskB] lasts 1 days\n[TaskB] starts after [TaskA]'s end\n@endgantt",
+        );
+        assert!(gd.dependencies.iter().any(|d| d.from == "TaskA" && d.to == "TaskB"));
     }
 
     // 1. Basic task parsing
