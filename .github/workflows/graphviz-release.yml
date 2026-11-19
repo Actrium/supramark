@@ -246,7 +246,7 @@ jobs:
           path: crates/graphviz-anywhere/packages/rust/prebuilt/
 
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -320,7 +320,7 @@ jobs:
           path: crates/graphviz-anywhere/packages/rust/prebuilt/
 
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
