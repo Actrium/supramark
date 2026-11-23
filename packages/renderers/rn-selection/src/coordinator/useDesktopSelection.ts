@@ -34,10 +34,9 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
   const mouse = useMemo(() => createMouseSelection(store), [store]);
   const [mouseUI, setMouseUI] = useState(Platform.OS === 'macos');
   const cancel = useCallback(() => {
-    if (mouse.tracking()) {
-      mouse.cancel();
-      active(false);
-    }
+    const tracking = mouse.tracking();
+    mouse.cancel();
+    if (tracking) active(false);
   }, [mouse, active]);
   useLayoutEffect(() => cancel, [enabled, revision, cancel]);
 
@@ -73,11 +72,21 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
 
   const suppressLinkPress = useCallback(
     (event: GestureResponderEvent) => {
-      if (Platform.OS !== 'macos' || !enabled || !event?.nativeEvent) return false;
+      if (!enabled || !event?.nativeEvent) return false;
       const contact = event.nativeEvent as GestureResponderEvent['nativeEvent'] & {
         button?: number;
       };
-      return contact.button === 0 && mouse.suppressesPress(contact.identifier, contact);
+      // RNW's responder touch identifier is also its Fabric pointerId. Keyboard
+      // and accessibility activations carry no touch contact.
+      if (
+        contact.identifier == null ||
+        !Number.isFinite(contact.pageX) ||
+        !Number.isFinite(contact.pageY)
+      )
+        return false;
+      if (Platform.OS === 'macos' && contact.button !== 0) return false;
+      if (Platform.OS !== 'macos' && Platform.OS !== 'windows') return false;
+      return mouse.suppressesPress(contact.identifier, contact);
     },
     [enabled, mouse]
   );
@@ -103,6 +112,7 @@ export function useDesktopSelection(options: Options, touch: Contacts) {
       onPointerDown: e => {
         if (mouseEvent(e)) down(e.nativeEvent.pointerId, e.nativeEvent, () => local(e));
         else if (!mouse.tracking()) {
+          mouse.cancel();
           setMouseUI(false);
           touch.onTouchStart(e);
         }

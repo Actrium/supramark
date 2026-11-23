@@ -67,6 +67,21 @@ test('click tolerance uses the full two-dimensional displacement, even without a
   mouse.move(1, null, { pageX: 13, pageY: 23 });
   expect(store.getSnapshot().range).toBeNull();
   mouse.up(1, first, { ...position, timestamp: 30 });
-  expect(mouse.suppressesPress(1, { ...position, timestamp: 30 })).toBe(true);
+  expect(mouse.suppressesPress(1, { ...position, timestamp: 31 })).toBe(true);
   expect(mouse.suppressesPress(1, { ...position, timestamp: 31 })).toBe(false);
+});
+
+test('release suppression belongs to one press and expires on cancellation or the next down', () => {
+  const { mouse } = setup();
+  const far = { pageX: position.pageX + 20, pageY: position.pageY };
+  mouse.down(1, first, position);
+  expect(mouse.suppressesPress(1, far)).toBe(true);
+  mouse.up(1, second, far);
+  expect(mouse.suppressesPress(1, far)).toBe(false);
+  for (const reset of [() => mouse.cancel(), () => mouse.down(1, first, position)]) {
+    mouse.down(1, first, position);
+    mouse.up(1, second, far);
+    reset();
+    expect(mouse.suppressesPress(1, position)).toBe(false);
+  }
 });

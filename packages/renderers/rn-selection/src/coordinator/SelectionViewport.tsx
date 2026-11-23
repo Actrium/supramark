@@ -184,6 +184,8 @@ export const SelectionViewport: React.FC<SelectionViewportProps> = ({ children, 
     scrollEventThrottle: children.props.scrollEventThrottle ?? 16,
   });
 
+  // On macOS the root owns mouse selection and publishes gestureActive to
+  // pause this scroller. Wheel offsets still arrive through the child's onScroll.
   return (
     <SelectionViewportContext.Provider value={viewportId}>
       <View

@@ -347,49 +347,87 @@ async function renderSelectableLink(
   return renderer;
 }
 
-function linkGesture(renderer: ReactTestRenderer, start = 0) {
+function linkGesture(renderer: ReactTestRenderer, start = 0, windows = false) {
   const root = renderer.root.findByType(SelectionRoot).findAllByType('View')[0];
-  const link = renderer.root.findByType(SelectableBlock).findAllByType('Text').find(n => n.props.onPress)!;
+  const link = renderer.root
+    .findByType(SelectableBlock)
+    .findAllByType('Text')
+    .find(n => n.props.onPress)!;
   let timestamp = 0;
   const event = (x: number) => ({
-    nativeEvent: { target: 9, identifier: 1, pageX: x, pageY: 36, locationX: x, locationY: 8, button: 0, timestamp: ++timestamp },
+    nativeEvent: {
+      target: 9,
+      identifier: 1,
+      pageX: x,
+      pageY: 36,
+      locationX: x,
+      locationY: 8,
+      button: 0,
+      timestamp: ++timestamp,
+    },
   });
   return (moves: number[], end: number, pressFirst: boolean) => {
-    act(() => root.props.onTouchStart(event(start)));
-    for (const x of moves) act(() => root.props.onTouchMove(event(x)));
+    const dispatch = (phase: 'Start' | 'Move' | 'End', x: number) => {
+      const e = event(x);
+      if (!windows) return root.props['onTouch' + phase](e);
+      const handler = { Start: 'onPointerDown', Move: 'onPointerMove', End: 'onPointerUp' }[phase];
+      root.props[handler]({
+        nativeEvent: {
+          ...e.nativeEvent,
+          pageY: 8,
+          pointerType: 'mouse',
+          pointerId: 1,
+          buttons: phase === 'End' ? 0 : 1,
+        },
+      });
+    };
+    act(() => dispatch('Start', start));
+    for (const x of moves) act(() => dispatch('Move', x));
     const release = event(end);
+    if (windows) Object.assign(release.nativeEvent, { button: undefined, pageY: 8 });
     act(() => {
       if (pressFirst) link.props.onPress(release);
-      root.props.onTouchEnd(release);
+      dispatch('End', end);
       if (!pressFirst) link.props.onPress(release);
     });
   };
 }
 
-it('macOS opens a link on click but suppresses the press associated with a text drag', async () => {
-  const { Platform } = await import('react-native');
-  const previous = Platform.OS;
-  Object.assign(Platform, { OS: 'macos' });
-  const handle: { current: ReadableSelection | null } = { current: null };
-  let renderer: ReactTestRenderer | undefined;
-  openUrlMock.mockClear();
-  try {
-    renderer = await renderSelectableLink(handle);
-    const gesture = linkGesture(renderer);
-    gesture([], 0, true);
-    expect(openUrlMock).toHaveBeenCalledTimes(1);
-    gesture([20], 30, true);
-    expect(handle.current?.getSelectedText()).toBe('hel');
-    gesture([30, 0], 0, false);
-    gesture([], 30, true);
-    expect(openUrlMock).toHaveBeenCalledTimes(1);
-    gesture([], 0, true);
-    expect(openUrlMock).toHaveBeenCalledTimes(2);
-  } finally {
-    if (renderer) act(() => renderer?.unmount());
-    Object.assign(Platform, { OS: previous });
-  }
-});
+for (const os of ['windows', 'macos']) {
+  it(
+    os + ' opens a link on click but suppresses the press associated with a text drag',
+    async () => {
+      const { Platform } = await import('react-native');
+      const previous = Platform.OS;
+      Object.assign(Platform, { OS: os });
+      const handle: { current: ReadableSelection | null } = { current: null };
+      let renderer: ReactTestRenderer | undefined;
+      openUrlMock.mockClear();
+      try {
+        renderer = await renderSelectableLink(handle);
+        const gesture = linkGesture(renderer, 0, os === 'windows');
+        gesture([], 0, true);
+        expect(openUrlMock).toHaveBeenCalledTimes(1);
+        gesture([20], 30, true);
+        expect(handle.current?.getSelectedText()).toBe('hel');
+        gesture([30, 0], 0, false);
+        gesture([], 30, true);
+        expect(openUrlMock).toHaveBeenCalledTimes(1);
+        const link = renderer.root
+          .findByType(SelectableBlock)
+          .findAllByType('Text')
+          .find(n => n.props.onPress)!;
+        act(() => link.props.onPress({ nativeEvent: { code: 'Enter' } }));
+        expect(openUrlMock).toHaveBeenCalledTimes(2);
+        gesture([], 0, true);
+        expect(openUrlMock).toHaveBeenCalledTimes(3);
+      } finally {
+        if (renderer) act(() => renderer?.unmount());
+        Object.assign(Platform, { OS: previous });
+      }
+    }
+  );
+}
 
 it('macOS suppresses a link drag between visually distant carets with the same bidi offset', async () => {
   const { Platform } = await import('react-native');

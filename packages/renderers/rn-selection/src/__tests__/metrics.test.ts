@@ -224,3 +224,32 @@ test('mixed bidi text preserves both edges of each run and disjoint highlight re
     { x: 20, y: 0, w: 10, h: 18 },
   ]);
 });
+
+test('bidi continuation paints only the trailing margin across a wrap or newline', () => {
+  for (const newline of ['', '\n']) {
+    const metrics = buildTextMetrics([
+      { text: 'אבג' + newline, x: 0, y: 0, width: 60, height: 10, charXs: [50, 40, 30, 20] },
+      { text: 'x', x: 0, y: 10, width: 10, height: 10 },
+    ]);
+    expect(rectsForRange(metrics, 1, 3)).toEqual([{ x: 20, y: 0, w: 20, h: 10 }]);
+    expect(rectsForRange(metrics, 1, 4)[0]).toEqual({ x: 0, y: 0, w: 40, h: 10 });
+  }
+  const mixed = buildTextMetrics([
+    {
+      text: 'aאב',
+      x: 0,
+      y: 0,
+      width: 60,
+      height: 10,
+      charXs: [0, 30, 20, 10],
+      charEndXs: [10, 20, 10],
+      rtl: false,
+    },
+    { text: 'z', x: 0, y: 10, width: 10, height: 10 },
+  ]);
+  expect(rectsForRange(mixed, 2, 4)).toEqual([
+    { x: 10, y: 0, w: 10, h: 10 },
+    { x: 30, y: 0, w: 30, h: 10 },
+    { x: 0, y: 10, w: 10, h: 10 },
+  ]);
+});

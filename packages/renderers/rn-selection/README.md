@@ -208,6 +208,9 @@ turned on or off.
 With line boxes alone, the coordinator interpolates positions within each line.
 The macOS TextKit provider and the Windows demo's DirectWrite provider also
 supply caret positions. The same measurements drive hit testing and highlighting.
+On macOS, native caret positions are accepted when the line text and content-local
+line boxes agree with RN's layout. A mismatch keeps the RN line boxes and emits
+one development warning per mounted block.
 
 A block that has not been measured yet (or is not text at all) highlights as a
 whole rectangle and long-presses as a whole block, rather than not at all.

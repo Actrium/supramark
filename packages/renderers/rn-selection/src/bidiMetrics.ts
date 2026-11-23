@@ -42,17 +42,24 @@ export function visualRangeRects(
   start: number,
   end: number,
   y: number,
-  h: number
+  h: number,
+  continuation?: { x: number; rtl: boolean }
 ): LocalRect[] {
   const rects: LocalRect[] = [];
-  for (const box of clusters) {
-    if (box.end <= start || box.start >= end) continue;
+  function append(left: number, right: number) {
+    if (right <= left) return;
     const previous = rects[rects.length - 1];
-    if (previous && box.left <= previous.x + previous.w + 0.001) {
-      previous.w = Math.max(previous.w, box.right - previous.x);
+    if (previous && left <= previous.x + previous.w + 0.001) {
+      previous.w = Math.max(previous.w, right - previous.x);
     } else {
-      rects.push({ x: box.left, y, w: box.right - box.left, h });
+      rects.push({ x: left, y, w: right - left, h });
     }
   }
+  if (continuation?.rtl) append(continuation.x, clusters[0].left);
+  for (const box of clusters) {
+    if (box.end > start && box.start < end) append(box.left, box.right);
+  }
+  if (continuation && !continuation.rtl)
+    append(clusters[clusters.length - 1].right, continuation.x);
   return rects;
 }

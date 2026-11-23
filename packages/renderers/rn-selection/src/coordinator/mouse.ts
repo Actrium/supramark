@@ -13,6 +13,7 @@ interface MousePress {
   focus: SelectionPoint;
   origin: PointerPosition;
   dragged: boolean;
+  pressConsumed: boolean;
 }
 
 const CLICK_TOLERANCE_POINTS = 4; // React Native window coordinates are in logical points.
@@ -30,7 +31,7 @@ function samePoint(a: SelectionPoint, b: SelectionPoint): boolean {
 /** The down position remains the anchor, including when the drag reverses direction. */
 export function createMouseSelection(store: SelectionStore) {
   let press: MousePress | null = null;
-  let dragRelease: { id: string | number; timestamp: number } | null = null;
+  let releasedDrag: string | number | null = null;
   function move(id: string | number, point: SelectionPoint | null, position: PointerPosition) {
     if (!press || press.id !== id) return;
     // Two visually distant bidi carets can share one logical text offset.
@@ -41,6 +42,7 @@ export function createMouseSelection(store: SelectionStore) {
     store.extendTo(point);
   }
   function cancel() {
+    releasedDrag = null;
     if (!press) return;
     press = null;
     if (store.getSnapshot().units.length) store.commit();
@@ -50,27 +52,34 @@ export function createMouseSelection(store: SelectionStore) {
     tracking: () => press !== null,
     owns: (id: string | number) => press?.id === id,
     suppressesPress(id: string | number, position: PointerPosition) {
-      if (press && press.id === id)
-        return press.dragged || outsideClickTolerance(press.origin, position);
-      return (
-        dragRelease !== null &&
-        dragRelease.id === id &&
-        dragRelease.timestamp === position.timestamp
-      );
+      if (press && press.id === id) {
+        if (
+          press.pressConsumed ||
+          !(press.dragged || outsideClickTolerance(press.origin, position))
+        )
+          return false;
+        press.pressConsumed = true;
+        return true;
+      }
+      if (releasedDrag !== id) return false;
+      releasedDrag = null;
+      return true;
     },
     down(id: string | number, anchor: SelectionPoint | null, position: PointerPosition) {
       if (store.getSnapshot().range) store.clear();
-      dragRelease = null;
+      releasedDrag = null;
       const origin = { pageX: position.pageX, pageY: position.pageY };
-      press = anchor ? { id, anchor, focus: anchor, origin, dragged: false } : null;
+      press = anchor
+        ? { id, anchor, focus: anchor, origin, dragged: false, pressConsumed: false }
+        : null;
     },
     move,
     up(id: string | number, point: SelectionPoint | null, position: PointerPosition) {
       if (press?.id !== id) return;
       move(id, point, position);
-      const { timestamp } = position;
-      dragRelease = press.dragged && timestamp !== undefined ? { id, timestamp } : null;
+      const suppressRelease = press.dragged && !press.pressConsumed;
       cancel();
+      if (suppressRelease) releasedDrag = id;
     },
     cancel,
   };

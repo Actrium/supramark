@@ -24,6 +24,8 @@ mock.module('react-native', () => ({
   StyleSheet: { absoluteFill: {}, create: (styles: unknown) => styles },
 }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { SelectionViewport } = await import('../../coordinator/SelectionViewport');
+const { SelectionViewportContext } = await import('../../coordinator/SelectionContext');
 const { SelectionRoot } = await import('../../coordinator/SelectionRoot');
 const { useSelectionContext } = await import('../../coordinator/useDocumentSelection');
 
@@ -47,17 +49,19 @@ const metrics = [
   buildTextMetrics([{ ...firstLine, text: 'hello' }, { ...firstLine, y: 20, text: 'WORLD' }]),
 ];
 
-function mountDesktop(os: string, documentUnits = units, lineMetrics = metrics) {
+function mountDesktop(os: string, documentUnits = units, lineMetrics = metrics, nested = false) {
   platform.OS = os;
   let store!: SelectionStore;
   const handle = React.createRef<SelectionRootHandle>();
   function Blocks() {
     const ctx = useSelectionContext();
+    const viewportId = React.useContext(SelectionViewportContext);
     useEffect(() => {
       store = ctx.store;
       const disposers = documentUnits.map(({ nodeId, unitId }, i) =>
         ctx.registerBlock({
           kind: 'text',
+          viewportId,
           nodeId,
           unitIds: [unitId],
           rect: { x: 12, y: i * 30, w: 100, h: lineMetrics[i].lines.length * 20 },
@@ -65,13 +69,19 @@ function mountDesktop(os: string, documentUnits = units, lineMetrics = metrics) 
         })
       );
       return () => disposers.forEach(dispose => dispose());
-    }, [ctx]);
+    }, [ctx, viewportId]);
     return null;
   }
   act(() => {
     tree = create(
       <SelectionRoot units={documentUnits} toolbar={false} handleRef={handle}>
-        <Blocks />
+        {nested ? (
+          <SelectionViewport>
+            {React.createElement('ScrollView', null, <Blocks />)}
+          </SelectionViewport>
+        ) : (
+          <Blocks />
+        )}
       </SelectionRoot>,
       {
         createNodeMock: () => ({
@@ -190,4 +200,24 @@ test('macOS copies RTL and mixed-direction ranges in logical order from either v
   input('Start', -6, 36);
   input('End', 20, 36);
   expect(handle.current!.getSelectedText()).toBe('aא');
+});
+
+test('macOS nested viewport follows the root drag and re-enables wheel scrolling on release', () => {
+  const { handle } = mountDesktop('macos', units, metrics, true);
+  const viewport = tree.root.findByType(SelectionViewport).findAllByType('View')[0];
+  act(() =>
+    viewport.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 150, height: 80 } } })
+  );
+  const scroller = tree.root.findByType('ScrollView');
+  expect(scroller.props.scrollEnabled).toBe(true);
+  input('Start', 0, 6);
+  input('Move', 9, 6);
+  expect(scroller.props.scrollEnabled).toBe(false);
+  input('End', 9, 6);
+  expect(handle.current!.getSelectedText()).toBe('iii');
+  expect(scroller.props.scrollEnabled).toBe(true);
+  act(() => scroller.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 30 } } }));
+  input('Start', 0, 6);
+  input('End', 16, 6);
+  expect(handle.current!.getSelectedText()).toBe('he');
 });

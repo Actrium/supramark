@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { NativeModules } from 'react-native';
 import type { RawTextLine } from '../metrics';
+import { matchesTextLayout, type TextKitLine } from './matchesTextLayout';
 
 interface MetricsModule {
-  measure(target: number): Promise<RawTextLine[] | null>;
+  measure(target: number): Promise<TextKitLine[] | null>;
 }
 
 export function useNativeLineMetrics(publish: (lines: readonly RawTextLine[]) => void) {
   const generation = useRef(0);
+  const warned = useRef(false);
   useEffect(
     () => () => {
       generation.current += 1;
@@ -21,8 +23,15 @@ export function useNativeLineMetrics(publish: (lines: readonly RawTextLine[]) =>
     if (!metrics) return;
     void metrics.measure(target).then(
       measured => {
-        if (request !== generation.current || measured?.length !== lines.length) return;
-        if (measured.every((line, i) => line.text === lines[i].text)) publish(measured);
+        if (request !== generation.current || !measured) return;
+        if (matchesTextLayout(measured, lines)) {
+          publish(measured);
+        } else if (typeof __DEV__ !== 'undefined' && __DEV__ && !warned.current) {
+          warned.current = true;
+          console.warn(
+            '[supramark] TextKit and onTextLayout disagree; using React Native line geometry.'
+          );
+        }
       },
       (error: unknown) => {
         if (request === generation.current)

@@ -64,18 +64,33 @@ NSArray *SupramarkMeasureLines(NSTextStorage *storage, CGRect frame) {
   layout.usesFontLeading = NO;
   NSTextContainer *container = [[NSTextContainer alloc] initWithSize:frame.size];
   container.lineFragmentPadding = 0;
+  // SelectableBlock renders unlimited Text without font fitting, matching
+  // RCTTextLayoutManager's maximumNumberOfLines == 0 configuration.
   container.lineBreakMode = NSLineBreakByClipping;
   [layout addTextContainer:container];
   [storage addLayoutManager:layout];
   NSMutableArray *lines = [NSMutableArray new];
+  __block NSUInteger paragraphEnd = 0;
+  __block BOOL paragraphRTL = NO;
   [layout enumerateLineFragmentsForGlyphRange:[layout glyphRangeForTextContainer:container]
       usingBlock:^(NSRect fragment, NSRect used, NSTextContainer *, NSRange glyphs, BOOL *) {
     NSRange chars = [layout characterRangeForGlyphRange:glyphs actualGlyphRange:nullptr];
     if (!chars.length) return;
     NSArray *edges = caretPositions(layout, chars, NSOffsetRect(fragment, frame.origin.x, 0),
                                    NSOffsetRect(used, frame.origin.x, 0));
+    if (chars.location >= paragraphEnd) {
+      NSRange paragraph = [storage.string paragraphRangeForRange:NSMakeRange(chars.location, 0)];
+      paragraphEnd = NSMaxRange(paragraph);
+      NSParagraphStyle *style = [storage attribute:NSParagraphStyleAttributeName atIndex:chars.location effectiveRange:nullptr];
+      // The primary insertion point at the start of the paragraph is on its
+      // leading visual edge, even when the first run has the opposite direction.
+      paragraphRTL = style && style.baseWritingDirection != NSWritingDirectionNatural
+          ? style.baseWritingDirection == NSWritingDirectionRightToLeft
+          : [edges.firstObject doubleValue] > NSMidX(used) + frame.origin.x;
+    }
     NSMutableDictionary *line = [@{@"text": [storage.string substringWithRange:chars], @"charXs": edges,
         @"x": @(NSMinX(used) + frame.origin.x), @"y": @(NSMinY(used) + frame.origin.y),
+        @"layoutX": @(NSMinX(used)), @"layoutY": @(NSMinY(used)), @"rtl": @(paragraphRTL),
         @"width": @(NSWidth(used)), @"height": @(NSHeight(used))} mutableCopy];
     addBidiEdges(line, layout, container, glyphs, chars, frame.origin.x);
     [lines addObject:line];

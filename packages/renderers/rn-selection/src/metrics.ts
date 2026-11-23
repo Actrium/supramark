@@ -73,6 +73,7 @@ export interface TextLineMetrics {
   charXs?: readonly number[];
   caretOffsets?: readonly number[];
   visualClusters?: readonly VisualCluster[];
+  rtl?: boolean;
 }
 
 /** The line table for one text segment. */
@@ -96,6 +97,8 @@ export interface RawTextLine {
   charXs?: readonly number[];
   /** Per-code-unit trailing edges when a bidi boundary has two caret positions. */
   charEndXs?: readonly number[];
+  /** Base paragraph direction for the visual edge of a continued line. */
+  rtl?: boolean;
 }
 
 export const EMPTY_TEXT_METRICS: SegmentTextMetrics = { lines: [], textLength: 0 };
@@ -144,7 +147,7 @@ export function buildTextMetrics(rawLines: readonly RawTextLine[]): SegmentTextM
       ? [...graphemeClusterStarts(text.slice(0, visibleLength)), visibleLength]
       : undefined;
     const visual =
-      xs && caretOffsets && (hasEnds || !ascending)
+      xs && caretOffsets && (hasEnds || !ascending || raw.rtl)
         ? visualClusters(caretOffsets, xs, hasEnds ? ends : undefined)
         : undefined;
     lines.push({
@@ -152,7 +155,10 @@ export function buildTextMetrics(rawLines: readonly RawTextLine[]): SegmentTextM
       end,
       visibleEnd: start + visibleLength,
       ...(measured && { charXs: xs, caretOffsets }),
-      ...(visual?.length && { visualClusters: visual }),
+      ...(visual?.length && {
+        visualClusters: visual,
+        rtl: raw.rtl ?? xs![0] > xs![visibleLength],
+      }),
       x: raw.x,
       y: raw.y,
       w: raw.width,
@@ -297,7 +303,10 @@ export function rectsForRange(metrics: SegmentTextMetrics, from: number, to: num
           lineStart - line.start,
           lineEnd - line.start,
           line.y,
-          line.h
+          line.h,
+          end > line.visibleEnd
+            ? { x: line.rtl ? line.x : line.x + line.w, rtl: line.rtl === true }
+            : undefined
         )
       );
       continue;
