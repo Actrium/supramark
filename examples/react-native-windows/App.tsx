@@ -9,14 +9,22 @@ import type { SupramarkRootNode } from '@supramark/core';
 const first = 'Drag across these words in either direction. Compare narrow iii and wide WWW.';
 const second =
   'Continue into the next paragraph: caf\u00e9, \u4e2d\u6587 and \u{1f600}. Resize the window to check wrapping.';
-const markdown = first + '\n\n**' + second + '**';
+const linkText = 'Supramark on GitHub';
+const linkUrl = 'https://github.com/Actrium/supramark';
+const markdown = `${first} [${linkText}](${linkUrl})\n\n**${second}**`;
 // Use the renderer's parsed-AST entry point so this demo can run without a native parser DLL.
 const ast: SupramarkRootNode = {
   type: 'root',
   ast_version: 2,
   diagnostics: [],
   children: [
-    { type: 'paragraph', children: [{ type: 'text', value: first }] },
+    {
+      type: 'paragraph',
+      children: [
+        { type: 'text', value: first + ' ' },
+        { type: 'link', url: linkUrl, children: [{ type: 'text', value: linkText }] },
+      ],
+    },
     {
       type: 'paragraph',
       children: [{ type: 'strong', children: [{ type: 'text', value: second }] }],
