@@ -1,5 +1,5 @@
 import type { SelectionPoint, SelectionRange } from '../model';
-import { offsetAtLocalPoint, offsetInsideLineX, lineAtY } from '../metrics';
+import { offsetAtLineX, offsetInsideLineX, lineAtY } from '../metrics';
 import type { SelectionUnitIndex } from '../resolve';
 import { buildSegmentSpans, segmentOffsetToPoint } from '../native/segmentAdapter';
 import { visibleBlockRect, type LayoutRect, type RegisteredBlock } from './registry';
@@ -151,6 +151,26 @@ export function containingBlock(
   return null;
 }
 
+/** A mouse press can start in either margin of a visible text line. */
+export function mouseSelectionStart(
+  blocks: readonly RegisteredBlock[],
+  point: Point,
+  index: SelectionUnitIndex
+) {
+  const block = chooseBlock(blocks, point);
+  if (!block?.rect || !block.metrics || verticalGap(point, block.rect) > 0) return null;
+  if (block.clipRect && !pointInRect(point, block.clipRect)) return null;
+
+  const y = point.y - block.rect.y - (block.contentOffset?.y ?? 0);
+  const line = lineAtY(block.metrics, y);
+  if (!line || y < line.y || y >= line.y + line.h) return null;
+  if (!paragraphRangeAt(block, point, index)) return null;
+
+  // localizePoint clamps x to this visual line's first or last visible caret.
+  const anchor = localizePoint(block, point, index);
+  return anchor && { anchor, viewportId: block.viewportId ?? null };
+}
+
 /**
  * The point just before a block's first unit, or null when the block renders no
  * units at all (a registration whose `updateUnits` has not landed yet). Callers
@@ -201,12 +221,28 @@ export function localizePoint(
   const rect = block.rect as LayoutRect;
   if (block.metrics && block.metrics.lines.length > 0) {
     const origin = block.contentOffset ?? { x: 0, y: 0 };
-    const offset = offsetAtLocalPoint(
-      block.metrics,
-      p.x - rect.x - origin.x,
-      p.y - rect.y - origin.y
-    );
-    return segmentOffsetToPoint(buildSegmentSpans(block, index), offset);
+    const x = p.x - rect.x - origin.x;
+    const line = lineAtY(block.metrics, p.y - rect.y - origin.y)!;
+    const offset = offsetAtLineX(line, x);
+    const spans = buildSegmentSpans(block, index);
+    const caret = segmentOffsetToPoint(spans, offset);
+    const at = caret.unitId === undefined ? undefined : index.byUnitId.get(caret.unitId);
+    if (
+      at !== undefined &&
+      index.entries[at].unit.kind === 'atom' &&
+      offsetInsideLineX(line, x) < offset
+    ) {
+      // A trailing text caret shares its numeric offset with the following attachment.
+      const previous = spans.find(span => span.end === offset && span.start < offset);
+      if (previous && index.entries[index.byUnitId.get(previous.unitId)!].unit.kind === 'text') {
+        return {
+          nodeId: previous.nodeId,
+          unitId: previous.unitId,
+          offset: previous.end - previous.start,
+        };
+      }
+    }
+    return caret;
   }
   const after =
     p.y > rect.y + rect.h / 2 || (verticalGap(p, rect) === 0 && p.x > rect.x + rect.w / 2);

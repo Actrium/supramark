@@ -1,0 +1,92 @@
+diff --git a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/ParagraphComponentView.cpp b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/ParagraphComponentView.cpp
+--- a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/ParagraphComponentView.cpp
++++ b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/ParagraphComponentView.cpp
+@@ -26,1 +26,44 @@
++static bool needsSelectionMetrics(const facebook::react::ParagraphProps &props) {
++  return props.onTextLayout && props.nativeId.rfind("supramark-selection-", 0) == 0;
++}
++
++// Geometry of the same DirectWrite layout used to draw the paragraph, in DIPs.
++static folly::dynamic selectionLines(
++    IDWriteTextLayout &layout,
++    std::wstring_view text,
++    facebook::react::EdgeInsets const &insets) {
++  UINT32 count = 0;
++  DWRITE_TEXT_METRICS metrics{};
++  winrt::check_hresult(layout.GetMetrics(&metrics));
++  count = metrics.lineCount;
++  std::vector<DWRITE_LINE_METRICS> lines(count);
++  winrt::check_hresult(layout.GetLineMetrics(lines.data(), count, &count));
++  auto result = folly::dynamic::array();
++  UINT32 start = 0;
++  float top = metrics.top + insets.top;
++  for (const auto &line : lines) {
++    auto edges = folly::dynamic::array();
++    const UINT32 visible = line.length - line.newlineLength;
++    float left = 0;
++    float right = 0;
++    for (UINT32 i = 0; i <= visible; ++i) {
++      // At a soft wrap, use the trailing edge of this line's last cluster.
++      const bool trailing = i == visible && i > 0;
++      float x = 0;
++      float y = 0;
++      DWRITE_HIT_TEST_METRICS hit{};
++      winrt::check_hresult(layout.HitTestTextPosition(start + i - (trailing ? 1 : 0), trailing, &x, &y, &hit));
++      x += insets.left;
++      left = i == 0 ? x : std::min(left, x);
++      right = i == 0 ? x : std::max(right, x);
++      edges.push_back(x);
++    }
++    result.push_back(folly::dynamic::object("text", winrt::to_string(text.substr(start, line.length)))
++        ("x", left)("y", top)("width", right - left)("height", line.height)("charXs", std::move(edges)));
++    start += line.length;
++    top += line.height;
++  }
++  return result;
++}
++
+ // Automatically restores the original DPI of a render target
+@@ -90,2 +133,3 @@
+-  if (oldViewProps.textAttributes.alignment != newViewProps.textAttributes.alignment) {
++  if (needsSelectionMetrics(oldViewProps) != needsSelectionMetrics(newViewProps) ||
++      oldViewProps.textAttributes.alignment != newViewProps.textAttributes.alignment) {
+     updateTextAlignment(newViewProps.textAttributes.alignment);
+@@ -133,2 +177,3 @@
+-  if (layoutMetrics.pointScaleFactor != oldLayoutMetrics.pointScaleFactor) {
++  if (layoutMetrics.pointScaleFactor != oldLayoutMetrics.pointScaleFactor ||
++      (needsSelectionMetrics(paragraphProps()) && layoutMetrics.getContentFrame() != oldLayoutMetrics.getContentFrame())) {
+     m_textLayout = nullptr;
+@@ -346,1 +391,10 @@
++    if (m_eventEmitter && needsSelectionMetrics(paragraphProps())) {
++      auto lines = folly::dynamic::array();
++      if (m_textLayout) {
++        const auto text = facebook::react::WindowsTextLayoutManager::GetTransformedText(m_attributedStringBox);
++        lines = selectionLines(*m_textLayout.get(), std::wstring_view{text}, m_layoutMetrics.contentInsets);
++      }
++      m_eventEmitter->dispatchEvent("textLayout", folly::dynamic::object("lines", std::move(lines)));
++    }
++
+     requireNewBrush = true;
+diff --git a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/CompositionContextHelper.cpp b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/CompositionContextHelper.cpp
+--- a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/CompositionContextHelper.cpp
++++ b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/CompositionContextHelper.cpp
+@@ -1796,7 +1796,7 @@
+     auto innerBrush = TTypeRedirects::CompositionContextHelper::InnerBrush(brush);
+     if (brush) {
+       _themeProperties.InsertVector4(
+-          L"Foreground", ColorAsVector4(innerBrush.as<TTypeRedirects::CompositionColorBrush>().Color()));
++          L"Foreground", ColorAsVector4(innerBrush.template as<typename TTypeRedirects::CompositionColorBrush>().Color()));
+     } else {
+       _themeProperties.InsertVector4(L"Foreground", ColorAsVector4({0, 0, 0, 0}));
+     }
+diff --git a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/Modal/WindowsModalHostViewComponentView.cpp b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/Modal/WindowsModalHostViewComponentView.cpp
+--- a/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/Modal/WindowsModalHostViewComponentView.cpp
++++ b/node_modules/react-native-windows/Microsoft.ReactNative/Fabric/Composition/Modal/WindowsModalHostViewComponentView.cpp
+@@ -79,5 +79,5 @@
+     portalComponentView.Mounted(
+-        [](const auto & /*sender*/, const auto &view) { view.UserData().as<ModalHostView>()->OnMounted(view); });
++        [](const auto & /*sender*/, const auto &view) { view.UserData().template as<ModalHostView>()->OnMounted(view); });
+     portalComponentView.Unmounted(
+-        [](const auto & /*sender*/, const auto &view) { view.UserData().as<ModalHostView>()->OnUnmounted(view); });
++        [](const auto & /*sender*/, const auto &view) { view.UserData().template as<ModalHostView>()->OnUnmounted(view); });
+   }

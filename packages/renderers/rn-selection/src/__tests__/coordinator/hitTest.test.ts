@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { SupramarkTextNode } from '@supramark/core';
 import type { SelectionTextUnit, SelectionUnit } from '../../model';
 import { buildTextMetrics } from '../../metrics';
-import { buildUnitIndex } from '../../resolve';
+import { buildUnitIndex, resolveSelectionRange } from '../../resolve';
 import type { LayoutRect, RegisteredBlock } from '../../coordinator/registry';
 import {
   blocksBounds,
   chooseBlock,
   containingBlock,
   localizePoint,
+  mouseSelectionStart,
   nearestBlockWithin,
   pointInRect,
   resolvePointToSelection,
@@ -281,4 +282,25 @@ describe('blocksBounds and nearestBlockWithin', () => {
     // Vertical gap larger than the distance.
     expect(nearestBlockWithin(blocks(), { x: 50, y: 100 }, 12)).toBeNull();
   });
+});
+
+test('mouse carets on either text edge of an inline attachment belong to the hit text', () => {
+  const atom = { kind: 'atom', unitId: 'img', nodeId: 'img', node: NODE } as SelectionUnit;
+  const units = [tUnit('left', 'p', 'abc'), atom, tUnit('right', 'p', 'def')];
+  const index = buildUnitIndex(units);
+  const block: RegisteredBlock = {
+    nodeId: 'p',
+    kind: 'text',
+    unitIds: units.map(u => u.unitId),
+    rect: { x: 0, y: 0, w: 70, h: 20 },
+    metrics: buildTextMetrics([{ text: 'abc\ufffcdef', x: 0, y: 0, width: 70, height: 20 }]),
+  };
+  const start = (x: number) => mouseSelectionStart([block], { x, y: 10 }, index)?.anchor;
+  expect(start(28)).toEqual({ nodeId: 'p', unitId: 'left', offset: 3 });
+  expect(localizePoint(block, { x: 28, y: 10 }, index)).toEqual(start(28)!);
+  const range = { anchor: start(28)!, focus: start(20)! };
+  expect(resolveSelectionRange(units, range).map(unit => unit.text)).toEqual(['c']);
+  expect(start(32)).toBeUndefined();
+  expect(start(38)).toBeUndefined();
+  expect(start(42)).toEqual({ nodeId: 'p', unitId: 'right', offset: 0 });
 });

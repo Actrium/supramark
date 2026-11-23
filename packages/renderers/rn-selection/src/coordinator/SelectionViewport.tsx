@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useId, useRef } from 'react';
 import {
+  Platform,
   View,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -183,15 +184,33 @@ export const SelectionViewport: React.FC<SelectionViewportProps> = ({ children, 
     scrollEventThrottle: children.props.scrollEventThrottle ?? 16,
   });
 
+  // On macOS the root owns mouse selection and publishes gestureActive to
+  // pause this scroller. Wheel offsets still arrive through the child's onScroll.
   return (
     <SelectionViewportContext.Provider value={viewportId}>
       <View
         ref={viewportRef}
         collapsable={false}
         onLayout={onLayout}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchFinish}
-        onTouchCancel={onTouchFinish}
+        {...(Platform.OS === 'windows'
+          ? {
+              onPointerDown: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchStart();
+              },
+              onPointerUp: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchFinish();
+              },
+              onPointerCancel: event => {
+                if (event.nativeEvent.pointerType !== 'mouse') onTouchFinish();
+              },
+            }
+          : Platform.OS === 'macos'
+            ? {}
+            : {
+                onTouchStart,
+                onTouchEnd: onTouchFinish,
+                onTouchCancel: onTouchFinish,
+              })}
         style={[{ overflow: 'hidden' }, style]}
       >
         {child as React.ComponentProps<typeof View>['children']}
