@@ -32,10 +32,12 @@ export interface SupramarkStyles {
   codeBlockLang?: TextStyle;
   /** Code body inside the headered container (chrome lives on the container). */
   codeBlockBody?: ViewStyle;
-  /** Copy button in the header (shown only when onCopyCode is provided). */
-  codeButton?: ViewStyle;
-  /** Label text inside the copy button. */
-  codeButtonText?: TextStyle;
+  /** Row holding the action buttons at the right of the header. */
+  codeActions?: ViewStyle;
+  /** A single action button (copy / fullscreen), sized as a touch target. */
+  codeAction?: ViewStyle;
+  /** Icon inside an action button: `color` tints it, `fontSize` sets its edge length. */
+  codeActionIcon?: TextStyle;
 
   // Lists
   list?: ViewStyle;
@@ -162,6 +164,10 @@ export const defaultStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 8,
     paddingVertical: 4,
+    // Separates the language/action row from the code itself; the container
+    // already owns the outer chrome, so this is only the internal divider.
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
   codeBlockLang: {
     fontSize: 12,
@@ -171,15 +177,26 @@ export const defaultStyles = StyleSheet.create({
   codeBlockBody: {
     padding: 8,
   },
-  codeButton: {
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  codeActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    // Wide enough that the buttons' hit slop (3px a side) cannot overlap.
+    gap: 6,
   },
-  codeButtonText: {
-    color: '#ffffff',
-    fontSize: 12,
+  codeAction: {
+    borderRadius: 4,
+    // An icon-only button has no text to give it width, so the touch target is
+    // set here; header padding (8/4) keeps it clear of the code body. No
+    // background: the icons sit directly on the code card, like the language
+    // label beside them.
+    minWidth: 28,
+    minHeight: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codeActionIcon: {
+    color: 'rgba(0, 0, 0, 0.55)',
+    fontSize: 18,
   },
   list: {
     gap: 4,
@@ -497,8 +514,11 @@ export const darkThemeStyles: SupramarkStyles = {
   codeBlockLang: {
     color: 'rgba(255, 255, 255, 0.6)',
   },
-  codeButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  codeBlockHeader: {
+    borderBottomColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  codeActionIcon: {
+    color: '#ffffff',
   },
   inlineCode: {
     backgroundColor: '#2d2d2d',
