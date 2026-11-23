@@ -1,0 +1,138 @@
+name: Supramark npm Release
+
+on:
+  push:
+    tags:
+      - 'npm/v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supramark-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Build and pack npm packages
+    runs-on: macos-15
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Verify main release tag
+        if: github.event_name == 'push'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          version="$(node -p 'require("./package.json").version')"
+          release_tag="npm/v$version"
+          if [[ "$GITHUB_REF_NAME" != "$release_tag" ]]; then
+            candidate="${GITHUB_REF_NAME#"$release_tag"-rc.}"
+            [[ "$GITHUB_REF_NAME" == "$release_tag-rc.$candidate" && "$candidate" =~ ^[1-9][0-9]*$ ]]
+            echo "SUPRAMARK_NPM_RC=$candidate" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare native and Wasm toolchains
+        run: |
+          brew install bison flex
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin wasm32-unknown-unknown
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: mymindstorm/setup-emsdk@v13
+        with:
+          version: latest
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the npm package inputs
+        run: |
+          bun run native:macos:build
+          bash crates/graphviz-anywhere/scripts/build-wasm.sh
+          bun run --cwd crates/graphviz-anywhere/packages/web build
+          bun run build:wasm
+
+      - name: Pack and verify the release
+        run: |
+          bun scripts/npm-release.ts pack "${RUNNER_TEMP}/supramark-npm"
+          bun scripts/npm-release.ts verify "${RUNNER_TEMP}/supramark-npm"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supramark-npm
+          path: ${{ runner.temp }}/supramark-npm
+          if-no-files-found: error
+
+  publish:
+    name: Publish @goaskaway packages
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/npm/v') && github.repository == 'GoAskAway/supramark'
+    needs: pack
+    runs-on: ubuntu-latest
+    concurrency:
+      group: goaskaway-supramark-npm-publish
+      queue: max
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: supramark-npm
+          path: packages
+
+      - name: Publish verified tarballs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          jq -er 'if length == 0 then error("Empty release") else .[] | [.name, .version, .filename] | @tsv end' packages.json > publish-list.tsv
+          : > unpublished-list.tsv
+          while IFS=$'\t' read -r name version filename; do
+            if lookup="$(npm view "$name@$version" dist.integrity --json --loglevel=silent 2>&1)"; then
+              local_integrity="sha512-$(openssl dgst -sha512 -binary "./$filename" | openssl base64 -A)"
+              if ! registry_integrity="$(jq -er 'strings' <<< "$lookup")" || [[ "$registry_integrity" != "$local_integrity" ]]; then
+                printf '%s already exists with a different or missing integrity checksum. Use a new version or the original tarball.\n' "$name@$version" >&2
+                exit 1
+              fi
+              echo "$name@$version already published with matching integrity"
+            elif jq -e '.error.code == "E404"' <<< "$lookup" >/dev/null; then
+              printf '%s\t%s\t%s\n' "$name" "$version" "$filename" >> unpublished-list.tsv
+            else
+              printf '%s\n' "$lookup" >&2
+              exit 1
+            fi
+          done < publish-list.tsv
+
+          while IFS=$'\t' read -r name version filename; do
+            tag=latest
+            if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+              tag=rc
+            elif [[ "$version" == *-* ]]; then
+              tag=next
+            fi
+            npm publish "./$filename" --access public --provenance --tag "$tag"
+          done < unpublished-list.tsv
