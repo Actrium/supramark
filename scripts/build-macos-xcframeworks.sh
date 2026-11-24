@@ -30,6 +30,15 @@ APPLE_NATIVE_MODULES=(
 
 cd "${REPO_ROOT}"
 
+verify_universal_binary() {
+  local architectures
+  architectures="$(lipo -archs "$1")"
+  if [[ " ${architectures} " != *" arm64 "* || " ${architectures} " != *" x86_64 "* ]]; then
+    echo "missing macOS architecture in $1: ${architectures}" >&2
+    exit 1
+  fi
+}
+
 # Fail before the expensive Graphviz build when either Rust desktop standard
 # library is unavailable; callers can install the exact missing target shown.
 for required_target in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -49,8 +58,8 @@ if [[ ! -f "${GRAPHVIZ_MACOS_LIB_DIR}/libgraphviz_api.a" || \
 else
   echo "==> [macOS] Reusing Graphviz universal archive"
 fi
-lipo "${GRAPHVIZ_MACOS_LIB_DIR}/libgraphviz_api.a" -verify_arch arm64 x86_64
-lipo "${GRAPHVIZ_MACOS_LIB_DIR}/libgraphviz_api.dylib" -verify_arch arm64 x86_64
+verify_universal_binary "${GRAPHVIZ_MACOS_LIB_DIR}/libgraphviz_api.a"
+verify_universal_binary "${GRAPHVIZ_MACOS_LIB_DIR}/libgraphviz_api.dylib"
 
 # Both desktop Rust targets share the same source and Graphviz archive; Cargo
 # still has to compile once per architecture before lipo can merge the result.
@@ -91,8 +100,8 @@ for module in "${APPLE_NATIVE_MODULES[@]}"; do
   # libraries must use @rpath so they remain loadable from a consumer app.
   install_name_tool -id "@rpath/${dylib_name}" "${MACOS_TARGET_DIR}/${dylib_name}"
 
-  lipo "${MACOS_TARGET_DIR}/${static_lib_name}" -verify_arch arm64 x86_64
-  lipo "${MACOS_TARGET_DIR}/${dylib_name}" -verify_arch arm64 x86_64
+  verify_universal_binary "${MACOS_TARGET_DIR}/${static_lib_name}"
+  verify_universal_binary "${MACOS_TARGET_DIR}/${dylib_name}"
 
   ios_device_lib="${REPO_ROOT}/target/aarch64-apple-ios/release/${static_lib_name}"
   ios_sim_lib="${REPO_ROOT}/target/ios-sim-universal/release/${static_lib_name}"

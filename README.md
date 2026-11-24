@@ -124,6 +124,30 @@ Long term:
 - [ ] full Web and Node support, so `@supramark/core` and the plugin system are reusable in a browser or under SSR;
 - [ ] fuller documentation and best practices.
 
+## npm release
+
+The **Supramark npm Release** workflow packages the React Native renderer,
+Markdown parser and their dependencies for the `@goaskaway` organization.
+The native packages ship arm64 and x86_64 macOS dylibs. Consumers use
+`@goaskaway/supramark-rn`, `@goaskaway/supramark-core/rn` and
+`@goaskaway/supramark-markdown-native-rn`.
+
+- Run `bun scripts/npm-release.ts plan` to list the package names and versions.
+- Run the workflow manually to build and test the tarballs without publishing.
+- To publish a release candidate, tag the same upstream commit as
+  `npm/v<root-version>-rc.<number>`. The workflow assigns candidate versions
+  to the packages and their internal dependencies and publishes them with
+  npm's `rc` dist-tag. To preview locally, set `SUPRAMARK_NPM_RC` to the
+  candidate number when running the `plan` or `pack` command.
+  npm may also assign a package's first published version to `latest`.
+- To release from upstream, bump the affected package versions and the root
+  release version, then tag the corresponding commit on `main` as
+  `npm/v<root-version>`. Pushing that tag to `GoAskAway/supramark` starts the
+  npm publish job after the tarballs pass verification.
+- Configure an npm trusted publisher for this workflow once each package
+  exists. For a first publish, the workflow can use the repository's
+  `NPM_TOKEN` secret with publishing access to the `@goaskaway` scope.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
