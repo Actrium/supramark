@@ -40,20 +40,10 @@ mock.module('react-native', () => ({
   },
 }));
 
-// react-native-svg is a native module under bun's test runtime; register its
-// mock here for the same reason and so DiagramNode / SupramarkCache tests do
-// not each redefine it (a per-file surface would clobber this one process-wide).
+// Share the react-native-svg mock across the renderer tests. The nested AST
+// matches a diagram label so the decoder visits nested text nodes.
 mock.module('react-native-svg', () => ({
   SvgXml: 'SvgXml',
-}));
-
-// `svgAst.tsx` takes the XML parser and `SvgAst` from `react-native-svg`'s own
-// XML module (the public entry re-exports `SvgXml` but not `parse`). That module
-// pulls in react-native's Flow sources, so register a minimal stand-in. The AST
-// is nested like a real label (`<svg><text><tspan>text</tspan></text></svg>`)
-// so the decoder's recursive walk is exercised, and `__parse_error__` throws to
-// stand in for a document the parser rejects.
-mock.module('react-native-svg/lib/commonjs/xml', () => ({
   SvgAst: 'SvgAst',
   parse: (xml: string, middleware?: (ast: unknown) => unknown) => {
     if (xml === '__parse_error__') throw new Error('bad xml');

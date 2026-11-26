@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
-import type { SvgProps } from 'react-native-svg';
-import { SvgAst, parse, type XmlAST } from 'react-native-svg/lib/commonjs/xml';
+import { SvgAst, parse, type SvgProps } from 'react-native-svg';
+
+type XmlAST = Parameters<NonNullable<Parameters<typeof parse>[1]>>[0];
 
 /**
  * Text references the SVG emitters produce. `react-native-svg`'s XML parser
@@ -50,10 +51,7 @@ export interface SvgXmlDecodedProps extends SvgProps {
  * `SvgXml` with text references decoded, for the label text the engines
  * escape (`i&lt;n` must paint as `i<n`, not as the raw reference).
  *
- * `parse` and `SvgAst` come from `react-native-svg`'s own XML module rather
- * than its public entry, which re-exports `SvgXml` but not the parser it is
- * built on. A document the parser rejects drops this one diagram instead of
- * reaching the renderer's ErrorBoundary, matching `SvgXml`'s fallback scope.
+ * Parse failures use the diagram's fallback, matching `SvgXml`'s error handling.
  */
 export function SvgXmlDecoded({ xml, onError, fallback, ...override }: SvgXmlDecodedProps) {
   const { ast, error } = useMemo(() => {
