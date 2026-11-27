@@ -30,7 +30,7 @@ mock.module('react-native', () => ({
       },
     }),
   },
-  StyleSheet: { absoluteFill: {}, create: (s: unknown) => s },
+  StyleSheet: { absoluteFill: {}, create: (s: unknown) => s, flatten: (s: unknown) => s },
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -106,12 +106,22 @@ function renderBlock(
 }
 
 describe('SelectableBlock streaming layout', () => {
-  function streamBlock(initial: string) {
-    const ctx = makeContext([textUnit('p1#0', initial)]);
+  function streamBlock(
+    initial: string,
+    options: {
+      style?: React.ComponentProps<typeof SelectableBlock>['style'];
+      units?: (text: string) => SelectionUnitLike[];
+      content?: (text: string) => React.ReactNode;
+    } = {}
+  ) {
+    const { style, units = text => [textUnit('p1#0', text)], content = text => text } = options;
+    const initialUnits = units(initial);
+    const ctx = makeContext(initialUnits);
+    const unitIds = initialUnits.map(unit => unit.unitId);
     const block = (text: string) => (
       <SelectionContext.Provider value={ctx}>
-        <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
-          {text}
+        <SelectableBlock nodeId="p1" unitIds={unitIds} style={style}>
+          {content(text)}
         </SelectableBlock>
       </SelectionContext.Provider>
     );
@@ -121,18 +131,19 @@ describe('SelectableBlock streaming layout', () => {
     const renderText = (text: string) => act(() => renderer!.update(block(text)));
     const sendLayout = (text: string) =>
       act(() => {
-        renderer!.root.findByType('Text').props.onTextLayout({
+        renderer!.root.findAllByType('Text')[0].props.onTextLayout({
           nativeEvent: { lines: [{ text, x: 0, y: 0, width: 500, height: 20 }] },
         });
       });
-    const commitUnits = (text: string) =>
-      act(() => ctx.registry.setUnits([textUnit('p1#0', text)]));
+    const commitUnits = (text: string) => act(() => ctx.registry.setUnits(units(text)));
     return { ctx, renderText, sendLayout, commitUnits };
   }
 
   test('reuses a single native layout delivered before the streaming units', async () => {
     const { mouseSelectionStart } = await import('../../coordinator/hitTest');
+    // cjk-allow: Reproduce the issue with the same UTF-16 lengths as the reported paragraph.
     const before = '字'.repeat(155);
+    // cjk-allow: The streamed suffix is literal test data.
     const after = before + '新文字';
     const { ctx, renderText, sendLayout, commitUnits } = streamBlock(before);
     ctx.registry.updateLayout('p1', { x: 0, y: 0, w: 500, h: 20 });
@@ -151,6 +162,90 @@ describe('SelectableBlock streaming layout', () => {
     );
     expect(start?.anchor.offset).toBeGreaterThan(0);
     expect(start?.anchor.offset).toBeLessThan(158);
+  });
+
+  test('keeps offsets for same-length native text transforms during streaming', () => {
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock('hello', {
+      style: { textTransform: 'uppercase' },
+    });
+    sendLayout('HELLO');
+    expect(ctx.registry.getBlock('p1')?.metrics?.textLength).toBe(5);
+
+    renderText('worlds');
+    sendLayout('WORLDS');
+    sendLayout('HELLO');
+    commitUnits('worlds');
+    expect(ctx.registry.getBlock('p1')?.metrics?.textLength).toBe(6);
+  });
+
+  test('does not accept a case change outside the transformed text', () => {
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock('hello world', {
+      content: text => (
+        <>
+          {text.slice(0, 6)}
+          {React.createElement(
+            'Text' as React.ElementType,
+            { style: { textTransform: 'uppercase' } },
+            text.slice(6)
+          )}
+        </>
+      ),
+    });
+    sendLayout('hello WORLD');
+    expect(ctx.registry.getBlock('p1')?.metrics?.textLength).toBe(11);
+
+    renderText('Hello world');
+    sendLayout('Hello WORLD');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBeUndefined();
+
+    commitUnits('Hello world');
+    const metrics = ctx.registry.getBlock('p1')?.metrics;
+    expect(metrics?.textLength).toBe(11);
+    sendLayout('hello WORLD');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBe(metrics);
+  });
+
+  test('keeps an early layout for a streamed paragraph with an inline attachment', async () => {
+    const { SelectableInlineObject } = await import('../../coordinator/SelectableInlineObject');
+    const InlineMath = () => <SelectableInlineObject unitId="math">{'x'}</SelectableInlineObject>;
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock('old ', {
+      units: text => [
+        textUnit('left', text),
+        {
+          kind: 'atom',
+          nodeId: 'math',
+          unitId: 'math',
+          label: 'math',
+          node: { type: 'math_inline', value: 'x' },
+          payload: {},
+        },
+        textUnit('right', ' right'),
+      ],
+      content: text => (
+        <>
+          {text}
+          <InlineMath />
+          {' right'}
+        </>
+      ),
+    });
+    const attachment = renderer!.root
+      .findAllByType('View')
+      .find(view => view.props.style?.flexDirection === 'row')!;
+    act(() =>
+      attachment.props.onLayout({
+        nativeEvent: { layout: { x: 50, y: 0, width: 80, height: 20 } },
+      })
+    );
+
+    renderText('new text ');
+    sendLayout('new text 0 right');
+    sendLayout('old 0 right');
+    commitUnits('new text ');
+    const metrics = ctx.registry.getBlock('p1')?.metrics;
+    expect(metrics?.textLength).toBe(16);
+    sendLayout('old 0 right');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBe(metrics);
   });
 
   test('a stale layout for different text of the same length cannot replace current metrics', () => {

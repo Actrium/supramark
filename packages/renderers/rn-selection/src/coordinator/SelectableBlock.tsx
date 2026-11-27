@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useRef, useCallback } from 'react';
 import {
   Platform,
+  StyleSheet,
   Text,
   View,
   type GestureResponderEvent,
@@ -16,7 +17,7 @@ import type { SelectionNodeId } from '../model';
 import type { SelectionUnitIndex } from '../resolve';
 import type { ContentOffset, LayoutRect } from './registry';
 import { SelectionMouseEnabledContext, SelectionViewportContext } from './SelectionContext';
-import { InlineObjectLayoutContext } from './SelectableInlineObject';
+import { InlineObjectLayoutContext, SelectableInlineObject } from './SelectableInlineObject';
 import { withInlineObjectMetrics } from './inlineMetrics';
 import { useNativeLineMetrics } from './useNativeLineMetrics';
 import { useSelectionContext } from './useDocumentSelection';
@@ -62,12 +63,86 @@ function sumUnitTextLength(
   return total;
 }
 
+/** Native case changes are safe only when each character keeps its UTF-16 offsets. */
+function matchesTextCase(source: string, native: string): boolean {
+  if (source.length !== native.length) return false;
+  const nativeChars = Array.from(native);
+  return Array.from(source).every((char, i) => {
+    const measured = nativeChars[i];
+    return (
+      measured?.length === char.length &&
+      (measured === char ||
+        measured.toLocaleUpperCase() === char.toLocaleUpperCase() ||
+        measured.toLocaleLowerCase() === char.toLocaleLowerCase())
+    );
+  });
+}
+
+function matchesStyledText(
+  source: string,
+  native: string,
+  transform: TextStyle['textTransform']
+): boolean {
+  if (source === native) return true;
+  if (!transform || transform === 'none' || !matchesTextCase(source, native)) return false;
+  if (transform === 'uppercase') {
+    return native === source.toUpperCase() || native === source.toLocaleUpperCase();
+  }
+  if (transform === 'lowercase') {
+    return native === source.toLowerCase() || native === source.toLocaleLowerCase();
+  }
+  // Native capitalization differs by platform and locale.
+  return true;
+}
+
+interface RenderedText {
+  children: React.ReactNode;
+  style: StyleProp<TextStyle>;
+}
+
+function matchesRenderedLayout(
+  { children, style }: RenderedText,
+  text: string,
+  indexedText?: string
+): boolean {
+  let offset = 0;
+  function match(node: React.ReactNode, transform: TextStyle['textTransform']): boolean {
+    if (typeof node === 'string' || typeof node === 'number') {
+      const source = String(node);
+      const start = offset;
+      offset += source.length;
+      return (
+        (indexedText === undefined || indexedText.startsWith(source, start)) &&
+        matchesStyledText(source, text.slice(start, offset), transform)
+      );
+    }
+    if (Array.isArray(node)) return node.every(child => match(child, transform));
+    if (!React.isValidElement(node)) return true;
+    if (node.type === SelectableInlineObject) {
+      if (indexedText === undefined) offset += 1;
+      return true;
+    }
+    const props = node.props as { style?: StyleProp<TextStyle>; children?: React.ReactNode };
+    return match(props.children, StyleSheet.flatten(props.style)?.textTransform ?? transform);
+  }
+
+  return match(children, StyleSheet.flatten(style)?.textTransform) && offset === text.length;
+}
+
+interface NativeLayout {
+  text: string;
+  metrics: SegmentTextMetrics;
+}
+
 function matchesUnitText(
   index: SelectionUnitIndex,
   unitIds: readonly SelectionNodeId[],
-  text: string
+  text: string,
+  rendered?: RenderedText
 ): boolean {
   let offset = 0;
+  let sourceText = '';
+  let nativeText = '';
   for (const unitId of unitIds) {
     const at = index.byUnitId.get(unitId);
     if (at === undefined) return false;
@@ -76,11 +151,19 @@ function matchesUnitText(
       // Native platforms use different one-character attachment placeholders.
       offset += 1;
     } else if (unit.kind === 'text' || unit.kind === 'break') {
-      if (!text.startsWith(unit.text, offset)) return false;
-      offset += unit.text.length;
+      const end = offset + unit.text.length;
+      if (rendered) {
+        sourceText += unit.text;
+        nativeText += text.slice(offset, end);
+      } else if (!text.startsWith(unit.text, offset)) {
+        return false;
+      }
+      offset = end;
     }
   }
-  return offset === text.length;
+  return (
+    offset === text.length && (!rendered || matchesRenderedLayout(rendered, nativeText, sourceText))
+  );
 }
 
 export interface SelectableBlockProps {
@@ -134,28 +217,42 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   const metricsRef = useRef<SegmentTextMetrics | null>(null);
   // Native attachment frames and the raw line table can arrive in either order.
   const objectLayoutsRef = useRef(new Map<string, LayoutRect>());
-  const nativeLayoutRef = useRef<{ text: string; metrics: SegmentTextMetrics } | null>(null);
+  const nativeLayoutRef = useRef<NativeLayout | null>(null);
+  const pendingLayoutsRef = useRef(new Map<string, NativeLayout>());
   const contentOffsetRef = useRef<ContentOffset | null>(null);
 
   // Latest unitIds, read by the mount effect so its initial registration is not
   // frozen to the first render's value.
   const unitIdsRef = useRef(unitIds);
   unitIdsRef.current = unitIds;
-  const childrenRef = useRef(children);
-  childrenRef.current = children;
+  const renderedRef = useRef({ children, style });
+  renderedRef.current = { children, style };
 
+  const matchesLayout = useCallback(
+    (text: string) => {
+      const index = ctx.registry.index;
+      const ids = unitIdsRef.current;
+      return (
+        matchesUnitText(index, ids, text) || matchesUnitText(index, ids, text, renderedRef.current)
+      );
+    },
+    [ctx]
+  );
   const publishMetrics = useCallback(() => {
     const layout = nativeLayoutRef.current;
-    const index = ctx.registry.index;
-    const ids = unitIdsRef.current;
     const metrics =
-      layout && matchesUnitText(index, ids, layout.text)
-        ? withInlineObjectMetrics(layout.metrics, ids, index, objectLayoutsRef.current)
+      layout && matchesLayout(layout.text)
+        ? withInlineObjectMetrics(
+            layout.metrics,
+            unitIdsRef.current,
+            ctx.registry.index,
+            objectLayoutsRef.current
+          )
         : undefined;
     if (metricsRef.current === (metrics ?? null)) return;
     metricsRef.current = metrics ?? null;
     ctx.setMetrics(nodeId, metrics);
-  }, [ctx, nodeId]);
+  }, [ctx, nodeId, matchesLayout]);
   // Keep this callback stable so measuring an attachment does not restart native layout.
   const onObjectLayout = useCallback(
     (id: string, rect: LayoutRect) => {
@@ -199,8 +296,22 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, nodeId, unitIdsKey, publishMetrics]);
 
-  // The native event can arrive once before the root commits its new unit index.
-  useEffect(() => ctx.registry.subscribeToUnitIndex(publishMetrics), [ctx, publishMetrics]);
+  useEffect(
+    () =>
+      ctx.registry.subscribeToUnitIndex(() => {
+        const pending = pendingLayoutsRef.current;
+        const current = nativeLayoutRef.current;
+        if (!current || !matchesLayout(current.text)) {
+          for (const candidate of pending.values()) {
+            if (matchesLayout(candidate.text)) nativeLayoutRef.current = candidate;
+          }
+        }
+        // Unmatched layouts belong to the interval before this index update.
+        pending.clear();
+        publishMetrics();
+      }),
+    [ctx, matchesLayout, publishMetrics]
+  );
 
   // Dev-only guard for the props invariant: summed unit text length must equal
   // the string content this block renders. Runs after every content change, so
@@ -258,17 +369,29 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   const publishLines = useNativeLineMetrics(lines => {
     const text = lines.map(line => line.text).join('');
     const previous = nativeLayoutRef.current;
+    const rendered = renderedRef.current;
+    const matchesRender = (layoutText: string) =>
+      matchesRenderedLayout(rendered, layoutText) ||
+      matchesUnitText(ctx.registry.index, unitIdsRef.current, layoutText, rendered);
     // Keep a measurement of the current text when a different revision arrives late.
     if (
       previous &&
       previous.text !== text &&
-      previous.text === flattenRenderedText(childrenRef.current)
+      matchesRender(previous.text) &&
+      !matchesRender(text)
     ) {
       return;
     }
 
     const metrics = buildTextMetrics(lines);
-    nativeLayoutRef.current = { text, metrics };
+    const layout = { text, metrics };
+    // Keep a layout that arrived before the index, even if an old layout follows it.
+    if (!matchesLayout(text)) {
+      const pending = pendingLayoutsRef.current;
+      pending.delete(text);
+      pending.set(text, layout);
+    }
+    nativeLayoutRef.current = layout;
     publishMetrics();
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       const expected = sumUnitTextLength(ctx.registry.index, unitIdsRef.current);
