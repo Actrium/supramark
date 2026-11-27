@@ -14,11 +14,11 @@ on:
       supramark_url:
         description: "Supramark playground URL"
         required: false
-        default: "https://actrium.github.io/supramark/playground/"
+        default: "https://goaskaway.github.io/supramark/playground/"
       issue_repo:
         description: "Repository to receive generated issues"
         required: false
-        default: "Actrium/supramark"
+        default: "GoAskAway/supramark"
       submit_github_issues:
         description: "Create GitHub issues for failed cases: 1 or 0"
         required: false
@@ -66,12 +66,12 @@ jobs:
         env:
           CASE_IDS: ${{ github.event.inputs.case_ids || 'all' }}
           SOURCE_DOCS: ${{ github.event.inputs.source_docs || 'cases/official-diagram-rendering-cases.md' }}
-          SUPRAMARK_URL: ${{ github.event.inputs.supramark_url || 'https://actrium.github.io/supramark/playground/' }}
+          SUPRAMARK_URL: ${{ github.event.inputs.supramark_url || 'https://goaskaway.github.io/supramark/playground/' }}
           SUBMIT_GITHUB_ISSUES: ${{ github.event.inputs.submit_github_issues || '0' }}
           SUBMIT_REVIEW_ISSUES: ${{ github.event.inputs.submit_review_issues || '0' }}
           FAIL_ON_FAILURES: "1"
           GH_TOKEN: ${{ secrets.GH_ISSUES_TOKEN || github.token }}
-          ISSUE_REPO: ${{ github.event.inputs.issue_repo || 'Actrium/supramark' }}
+          ISSUE_REPO: ${{ github.event.inputs.issue_repo || 'GoAskAway/supramark' }}
           ISSUE_LABELS: "bug,automated-visual-regression"
           PLAYWRIGHT_HEADLESS: ${{ github.event.inputs.playwright_headless || '1' }}
           PLAYWRIGHT_VIEWPORT: ${{ github.event.inputs.playwright_viewport || '1920x1080' }}

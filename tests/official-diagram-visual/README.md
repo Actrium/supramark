@@ -43,8 +43,8 @@ Run it manually from GitHub Actions with:
 
 - `case_ids`: `all`
 - `source_docs`: `cases/official-diagram-rendering-cases.md`
-- `supramark_url`: `https://actrium.github.io/supramark/playground/`
-- `issue_repo`: `Actrium/supramark`
+- `supramark_url`: `https://goaskaway.github.io/supramark/playground/`
+- `issue_repo`: `GoAskAway/supramark`
 - `submit_github_issues`: `0`
 - `playwright_headless`: `1`
 - `playwright_viewport`: `1280x900`

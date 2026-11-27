@@ -97,7 +97,7 @@ export default defineConfig({
         },
       ],
     },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/Actrium/supramark' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/GoAskAway/supramark' }],
     outline: { label: 'On this page', level: [2, 3] },
     docFooter: { prev: 'Previous page', next: 'Next page' },
   },

@@ -54,7 +54,7 @@ const selectedIds = caseIdsEnv.toLowerCase() === 'all'
       .map(s => s.trim())
       .filter(Boolean);
 const caseLimit = Number(process.env.CASE_LIMIT || 0);
-const targetBaseUrl = process.env.SUPRAMARK_URL || 'https://actrium.github.io/supramark/playground/';
+const targetBaseUrl = process.env.SUPRAMARK_URL || 'https://goaskaway.github.io/supramark/playground/';
 const chromePath = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const visualPassThreshold = parseRatioEnv('VISUAL_PASS_THRESHOLD', 0.16);
 const visualFailThreshold = parseRatioEnv('VISUAL_FAIL_THRESHOLD', 0.30);
@@ -1314,7 +1314,7 @@ async function handleIssues(reports) {
   const results = [];
   const submit = process.env.SUBMIT_GITHUB_ISSUES === '1';
   const submitReviewIssues = process.env.SUBMIT_REVIEW_ISSUES === '1';
-  const repo = process.env.ISSUE_REPO || process.env.GITHUB_REPOSITORY || 'Actrium/supramark';
+  const repo = process.env.ISSUE_REPO || process.env.GITHUB_REPOSITORY || 'GoAskAway/supramark';
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
   const labels = (process.env.ISSUE_LABELS || 'bug,automated-visual-regression')
     .split(',')
