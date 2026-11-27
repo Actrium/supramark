@@ -116,7 +116,7 @@ function matchesRenderedLayout(
         matchesStyledText(source, text.slice(start, offset), transform)
       );
     }
-    if (Array.isArray(node)) return node.every(child => match(child, transform));
+    if (Array.isArray(node)) return node.every((child: React.ReactNode) => match(child, transform));
     if (!React.isValidElement(node)) return true;
     if (node.type === SelectableInlineObject) {
       if (indexedText === undefined) offset += 1;
