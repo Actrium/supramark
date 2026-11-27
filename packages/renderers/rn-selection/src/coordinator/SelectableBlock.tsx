@@ -62,6 +62,27 @@ function sumUnitTextLength(
   return total;
 }
 
+function matchesUnitText(
+  index: SelectionUnitIndex,
+  unitIds: readonly SelectionNodeId[],
+  text: string
+): boolean {
+  let offset = 0;
+  for (const unitId of unitIds) {
+    const at = index.byUnitId.get(unitId);
+    if (at === undefined) return false;
+    const { unit } = index.entries[at];
+    if (unit.kind === 'atom') {
+      // Native platforms use different one-character attachment placeholders.
+      offset += 1;
+    } else if (unit.kind === 'text' || unit.kind === 'break') {
+      if (!text.startsWith(unit.text, offset)) return false;
+      offset += unit.text.length;
+    }
+  }
+  return offset === text.length;
+}
+
 export interface SelectableBlockProps {
   nodeId: SelectionNodeId;
   /**
@@ -113,24 +134,25 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   const metricsRef = useRef<SegmentTextMetrics | null>(null);
   // Native attachment frames and the raw line table can arrive in either order.
   const objectLayoutsRef = useRef(new Map<string, LayoutRect>());
-  const rawMetricsRef = useRef<SegmentTextMetrics | null>(null);
+  const nativeLayoutRef = useRef<{ text: string; metrics: SegmentTextMetrics } | null>(null);
   const contentOffsetRef = useRef<ContentOffset | null>(null);
 
   // Latest unitIds, read by the mount effect so its initial registration is not
   // frozen to the first render's value.
   const unitIdsRef = useRef(unitIds);
   unitIdsRef.current = unitIds;
+  const childrenRef = useRef(children);
+  childrenRef.current = children;
 
-  // Recompute when either the text engine or an attachment finishes layout.
   const publishMetrics = useCallback(() => {
-    const raw = rawMetricsRef.current;
-    if (raw === null) return;
-    const metrics = withInlineObjectMetrics(
-      raw,
-      unitIdsRef.current,
-      ctx.registry.index,
-      objectLayoutsRef.current
-    );
+    const layout = nativeLayoutRef.current;
+    const index = ctx.registry.index;
+    const ids = unitIdsRef.current;
+    const metrics =
+      layout && matchesUnitText(index, ids, layout.text)
+        ? withInlineObjectMetrics(layout.metrics, ids, index, objectLayoutsRef.current)
+        : undefined;
+    if (metricsRef.current === (metrics ?? null)) return;
     metricsRef.current = metrics ?? null;
     ctx.setMetrics(nodeId, metrics);
   }, [ctx, nodeId]);
@@ -173,8 +195,12 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   const unitIdsKey = unitIds.join(' ');
   useEffect(() => {
     ctx.updateUnits(nodeId, [...unitIdsRef.current]);
+    publishMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, nodeId, unitIdsKey]);
+  }, [ctx, nodeId, unitIdsKey, publishMetrics]);
+
+  // The native event can arrive once before the root commits its new unit index.
+  useEffect(() => ctx.registry.subscribeToUnitIndex(publishMetrics), [ctx, publishMetrics]);
 
   // Dev-only guard for the props invariant: summed unit text length must equal
   // the string content this block renders. Runs after every content change, so
@@ -230,28 +256,30 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
   };
 
   const publishLines = useNativeLineMetrics(lines => {
+    const text = lines.map(line => line.text).join('');
+    const previous = nativeLayoutRef.current;
+    // Keep a measurement of the current text when a different revision arrives late.
+    if (
+      previous &&
+      previous.text !== text &&
+      previous.text === flattenRenderedText(childrenRef.current)
+    ) {
+      return;
+    }
+
     const metrics = buildTextMetrics(lines);
-    const expected = sumUnitTextLength(ctx.registry.index, unitIdsRef.current);
-    if (expected !== undefined && metrics.textLength !== expected) {
-      // The platform laid out different text than the model holds — a marker, a
-      // collapsed whitespace run, a fallback label. Every offset past the
-      // divergence would resolve wrongly, so drop the table: the block degrades
-      // to whole-rect hit testing and copying keeps using the units' text,
-      // never a wrong index. Dev names the node so the divergence is locatable.
-      rawMetricsRef.current = null;
-      metricsRef.current = null;
-      ctx.setMetrics(nodeId, undefined);
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    nativeLayoutRef.current = { text, metrics };
+    publishMetrics();
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      const expected = sumUnitTextLength(ctx.registry.index, unitIdsRef.current);
+      if (expected !== undefined && metrics.textLength !== expected) {
         console.warn(
           `[supramark] SelectableBlock "${nodeId}": the text engine laid out ` +
             `${metrics.textLength} UTF-16 units but the selection units hold ${expected}. ` +
             'Hit testing falls back to the whole block until the rendered text matches the units.'
         );
       }
-      return;
     }
-    rawMetricsRef.current = metrics;
-    publishMetrics();
   });
   const onTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) =>
     publishLines(e.nativeEvent.target, e.nativeEvent.lines);

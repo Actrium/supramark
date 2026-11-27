@@ -105,6 +105,72 @@ function renderBlock(
   return r;
 }
 
+describe('SelectableBlock streaming layout', () => {
+  function streamBlock(initial: string) {
+    const ctx = makeContext([textUnit('p1#0', initial)]);
+    const block = (text: string) => (
+      <SelectionContext.Provider value={ctx}>
+        <SelectableBlock nodeId="p1" unitIds={['p1#0']}>
+          {text}
+        </SelectableBlock>
+      </SelectionContext.Provider>
+    );
+    act(() => {
+      renderer = create(block(initial));
+    });
+    const renderText = (text: string) => act(() => renderer!.update(block(text)));
+    const sendLayout = (text: string) =>
+      act(() => {
+        renderer!.root.findByType('Text').props.onTextLayout({
+          nativeEvent: { lines: [{ text, x: 0, y: 0, width: 500, height: 20 }] },
+        });
+      });
+    const commitUnits = (text: string) =>
+      act(() => ctx.registry.setUnits([textUnit('p1#0', text)]));
+    return { ctx, renderText, sendLayout, commitUnits };
+  }
+
+  test('reuses a single native layout delivered before the streaming units', async () => {
+    const { mouseSelectionStart } = await import('../../coordinator/hitTest');
+    const before = '字'.repeat(155);
+    const after = before + '新文字';
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock(before);
+    ctx.registry.updateLayout('p1', { x: 0, y: 0, w: 500, h: 20 });
+
+    renderText(after);
+    sendLayout(after);
+    sendLayout(before);
+    expect(ctx.registry.getBlock('p1')?.metrics).toBeUndefined();
+    commitUnits(after);
+
+    expect(ctx.registry.getBlock('p1')?.metrics?.textLength).toBe(158);
+    const start = mouseSelectionStart(
+      ctx.registry.getBlocks(),
+      { x: 250, y: 10 },
+      ctx.registry.index
+    );
+    expect(start?.anchor.offset).toBeGreaterThan(0);
+    expect(start?.anchor.offset).toBeLessThan(158);
+  });
+
+  test('a stale layout for different text of the same length cannot replace current metrics', () => {
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock('hello');
+    sendLayout('hello');
+
+    renderText('world');
+    commitUnits('world');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBeUndefined();
+    sendLayout('hello');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBeUndefined();
+
+    sendLayout('world');
+    const metrics = ctx.registry.getBlock('p1')?.metrics;
+    expect(metrics?.textLength).toBe(5);
+    sendLayout('hello');
+    expect(ctx.registry.getBlock('p1')?.metrics).toBe(metrics);
+  });
+});
+
 describe('SelectableBlock rendering', () => {
   for (const os of ['macos', 'windows']) {
     test(`${os} requests the text cursor on the text view`, () => {

@@ -98,6 +98,7 @@ export class SelectionRegistry {
   private blocks = new Map<SelectionNodeId, RegisteredBlock>();
   private viewports = new Map<string, RegisteredViewport>();
   private listeners = new Set<(change: RegistryChange, nodeId: SelectionNodeId) => void>();
+  private readonly unitIndexListeners = new Set<() => void>();
   private orderCache: RegisteredBlock[] | null = null;
   private unitToNode: Map<SelectionNodeId, SelectionNodeId> | null = null;
   private _version = 0;
@@ -152,6 +153,7 @@ export class SelectionRegistry {
       }
     }
     if (dropped) this.unitToNode = null;
+    for (const listener of this.unitIndexListeners) listener();
   }
 
   /**
@@ -349,6 +351,13 @@ export class SelectionRegistry {
     );
     this.orderCache = sorted;
     return sorted;
+  }
+
+  subscribeToUnitIndex(listener: () => void): () => void {
+    this.unitIndexListeners.add(listener);
+    return () => {
+      this.unitIndexListeners.delete(listener);
+    };
   }
 
   subscribe(listener: (change: RegistryChange, nodeId: SelectionNodeId) => void): () => void {
