@@ -166,6 +166,21 @@ function matchesUnitText(
   );
 }
 
+function hasSameUnitGeometry(
+  previous: SelectionUnitIndex,
+  next: SelectionUnitIndex,
+  unitIds: readonly SelectionNodeId[]
+): boolean {
+  return unitIds.every(id => {
+    const previousAt = previous.byUnitId.get(id);
+    const nextAt = next.byUnitId.get(id);
+    if (previousAt === undefined || nextAt === undefined) return false;
+    const before = previous.entries[previousAt];
+    const after = next.entries[nextAt];
+    return before.unit.kind === after.unit.kind && before.textLength === after.textLength;
+  });
+}
+
 export interface SelectableBlockProps {
   nodeId: SelectionNodeId;
   /**
@@ -296,22 +311,29 @@ export const SelectableBlock: React.FC<SelectableBlockProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, nodeId, unitIdsKey, publishMetrics]);
 
-  useEffect(
-    () =>
-      ctx.registry.subscribeToUnitIndex(() => {
-        const pending = pendingLayoutsRef.current;
-        const current = nativeLayoutRef.current;
-        if (!current || !matchesLayout(current.text)) {
-          for (const candidate of pending.values()) {
-            if (matchesLayout(candidate.text)) nativeLayoutRef.current = candidate;
-          }
+  useEffect(() => {
+    let previousIndex = ctx.registry.index;
+    return ctx.registry.subscribeToUnitIndex(() => {
+      const index = ctx.registry.index;
+      const pending = pendingLayoutsRef.current;
+      const current = nativeLayoutRef.current;
+      const currentMatches = current !== null && matchesLayout(current.text);
+      if (!currentMatches) {
+        for (const candidate of pending.values()) {
+          if (matchesLayout(candidate.text)) nativeLayoutRef.current = candidate;
         }
-        // Unmatched layouts belong to the interval before this index update.
-        pending.clear();
-        publishMetrics();
-      }),
-    [ctx, matchesLayout, publishMetrics]
-  );
+      }
+      // Unmatched layouts belong to the interval before this index update.
+      pending.clear();
+      // The existing line table and attachment measurements still apply when the spans match.
+      const reuseMetrics =
+        currentMatches &&
+        metricsRef.current !== null &&
+        hasSameUnitGeometry(previousIndex, index, unitIdsRef.current);
+      previousIndex = index;
+      if (!reuseMetrics) publishMetrics();
+    });
+  }, [ctx, matchesLayout, publishMetrics]);
 
   // Dev-only guard for the props invariant: summed unit text length must equal
   // the string content this block renders. Runs after every content change, so

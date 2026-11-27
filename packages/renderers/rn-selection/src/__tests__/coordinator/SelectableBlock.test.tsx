@@ -106,6 +106,15 @@ function renderBlock(
 }
 
 describe('SelectableBlock streaming layout', () => {
+  const mathUnit: SelectionUnitLike = {
+    kind: 'atom',
+    nodeId: 'math',
+    unitId: 'math',
+    label: 'math',
+    node: { type: 'math_inline', value: 'x' },
+    payload: {},
+  };
+
   function streamBlock(
     initial: string,
     options: {
@@ -209,18 +218,7 @@ describe('SelectableBlock streaming layout', () => {
     const { SelectableInlineObject } = await import('../../coordinator/SelectableInlineObject');
     const InlineMath = () => <SelectableInlineObject unitId="math">{'x'}</SelectableInlineObject>;
     const { ctx, renderText, sendLayout, commitUnits } = streamBlock('old ', {
-      units: text => [
-        textUnit('left', text),
-        {
-          kind: 'atom',
-          nodeId: 'math',
-          unitId: 'math',
-          label: 'math',
-          node: { type: 'math_inline', value: 'x' },
-          payload: {},
-        },
-        textUnit('right', ' right'),
-      ],
+      units: text => [textUnit('left', text), mathUnit, textUnit('right', ' right')],
       content: text => (
         <>
           {text}
@@ -246,6 +244,56 @@ describe('SelectableBlock streaming layout', () => {
     expect(metrics?.textLength).toBe(16);
     sendLayout('old 0 right');
     expect(ctx.registry.getBlock('p1')?.metrics).toBe(metrics);
+  });
+
+  test('reuses inline attachment metrics until its unit offsets change', async () => {
+    const { SelectableInlineObject } = await import('../../coordinator/SelectableInlineObject');
+    const right = (left: string) => (left === 'a' ? '0b' : 'b');
+    const units = (left: string): SelectionUnitLike[] => [
+      textUnit('left', left),
+      mathUnit,
+      textUnit('right', right(left)),
+    ];
+    const { ctx, renderText, sendLayout, commitUnits } = streamBlock('a', {
+      units,
+      content: left => (
+        <>
+          {left}
+          <SelectableInlineObject unitId="math">{'x'}</SelectableInlineObject>
+          {right(left)}
+        </>
+      ),
+    });
+    const attachment = renderer!.root
+      .findAllByType('View')
+      .find(view => view.props.style?.flexDirection === 'row')!;
+    act(() =>
+      attachment.props.onLayout({
+        nativeEvent: { layout: { x: 50, y: 0, width: 80, height: 20 } },
+      })
+    );
+
+    sendLayout('a00b');
+    const initial = ctx.registry.getBlock('p1')?.metrics;
+    expect(initial?.lines[0].charXs?.[1]).toBe(50);
+
+    const listener = mock(() => {});
+    const unsubscribe = ctx.registry.subscribe(listener);
+    try {
+      act(() => ctx.registry.setUnits([...units('a'), textUnit('other', 'new paragraph')]));
+      expect(ctx.registry.getBlock('p1')?.metrics).toBe(initial);
+      expect(listener).not.toHaveBeenCalled();
+
+      // The native line text is unchanged, but the attachment now occupies the second zero.
+      renderText('a0');
+      commitUnits('a0');
+      const updated = ctx.registry.getBlock('p1')?.metrics;
+      expect(updated?.lines[0].charXs?.[1]).toBe(25);
+      expect(updated?.lines[0].charXs?.[2]).toBe(50);
+      expect(listener).toHaveBeenCalledWith('metrics', 'p1');
+    } finally {
+      unsubscribe();
+    }
   });
 
   test('a stale layout for different text of the same length cannot replace current metrics', () => {
