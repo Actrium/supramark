@@ -33,3 +33,12 @@
 # subdiagram theme, sprite svg2GroupsWithStyle) are all #[ignore]'d in
 # code; listing them here was vestigial and made the bidirectional check
 # report them as "unexpectedly passing".
+#
+# 2026-10-15: INTENTIONAL divergence, not a regression. Java v1.2026.3
+# changed @startproject from the "not supported" page to a real Gantt-v2
+# render (verified against tools/plantuml-1.2026.3.jar, see probe
+# temp/jar-probe/project.svg). plantuml-little adopts the new behavior by
+# routing Project through the gantt pipeline; the v1.2026.2 baseline still
+# pins the old error page. Remove this entry together with the baseline
+# regeneration whenever the reference set is refreshed.
+reference_fixtures_project_basic_puml
